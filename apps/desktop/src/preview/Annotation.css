@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--cadsense-font-sans);
+  --font-mono: var(--cadsense-font-mono);
+  --color-background: var(--cadsense-background);
+  --color-foreground: var(--cadsense-foreground);
+  --color-popover: var(--cadsense-popover);
+  --color-popover-foreground: var(--cadsense-popover-foreground);
+  --color-primary: var(--cadsense-primary);
+  --color-primary-foreground: var(--cadsense-primary-foreground);
+  --color-muted: var(--cadsense-muted);
+  --color-muted-foreground: var(--cadsense-muted-foreground);
+  --color-accent: var(--cadsense-accent);
+  --color-accent-foreground: var(--cadsense-accent-foreground);
+  --color-border: var(--cadsense-border);
+  --color-input: var(--cadsense-input);
+  --color-ring: var(--cadsense-ring);
+  --radius-sm: calc(var(--cadsense-radius) - 4px);
+  --radius-md: calc(var(--cadsense-radius) - 2px);
+  --radius-lg: var(--cadsense-radius);
+  --radius-xl: calc(var(--cadsense-radius) + 4px);
+  --radius-2xl: calc(var(--cadsense-radius) + 8px);
+}
+
+:host {
+  --cadsense-font-sans:
+    "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  --cadsense-font-mono:
+    "SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --cadsense-radius: 0.625rem;
+  --cadsense-background: white;
+  --cadsense-foreground: oklch(0.269 0 0);
+  --cadsense-popover: white;
+  --cadsense-popover-foreground: oklch(0.269 0 0);
+  --cadsense-primary: oklch(0.488 0.217 264);
+  --cadsense-primary-foreground: white;
+  --cadsense-muted: rgb(0 0 0 / 4%);
+  --cadsense-muted-foreground: oklch(0.556 0 0);
+  --cadsense-accent: rgb(0 0 0 / 4%);
+  --cadsense-accent-foreground: oklch(0.269 0 0);
+  --cadsense-border: rgb(0 0 0 / 8%);
+  --cadsense-input: rgb(0 0 0 / 10%);
+  --cadsense-ring: oklch(0.488 0.217 264);
+  color: var(--cadsense-foreground);
+  font-family: var(--cadsense-font-sans);
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--cadsense-border);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--cadsense-ring) 72%, transparent);
+  outline-offset: 1px;
+}

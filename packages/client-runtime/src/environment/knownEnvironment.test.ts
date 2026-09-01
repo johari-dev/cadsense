@@ -1,0 +1,66 @@
+import { EnvironmentId, ProjectId, ThreadId } from "@cadsense/contracts";
+import { describe, expect, it } from "vite-plus/test";
+
+import { createKnownEnvironment } from "./knownEnvironment.ts";
+import {
+  parseScopedProjectKey,
+  parseScopedThreadKey,
+  scopedProjectKey,
+  scopedRefKey,
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "./scoped.ts";
+
+describe("known environment bootstrap helpers", () => {
+  it("creates the local environment from explicit server base URLs", () => {
+    expect(
+      createKnownEnvironment({
+        label: "Local environment",
+        target: {
+          httpBaseUrl: "http://localhost:3773",
+          wsBaseUrl: "ws://localhost:3773",
+        },
+      }),
+    ).toEqual({
+      id: "ws:Local environment",
+      label: "Local environment",
+      source: "window-origin",
+      target: {
+        httpBaseUrl: "http://localhost:3773",
+        wsBaseUrl: "ws://localhost:3773",
+      },
+    });
+  });
+});
+
+describe("scoped refs", () => {
+  const environmentId = EnvironmentId.make("environment-test");
+  const projectRef = scopeProjectRef(environmentId, ProjectId.make("project-1"));
+  const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread-1"));
+
+  it("builds stable scoped project and thread keys", () => {
+    expect(scopedRefKey(projectRef)).toBe("environment-test:project-1");
+    expect(scopedRefKey(threadRef)).toBe("environment-test:thread-1");
+    expect(scopedProjectKey(projectRef)).toBe("environment-test:project-1");
+    expect(scopedThreadKey(threadRef)).toBe("environment-test:thread-1");
+  });
+
+  it("returns typed scoped refs", () => {
+    expect(projectRef).toEqual({
+      environmentId,
+      projectId: ProjectId.make("project-1"),
+    });
+    expect(threadRef).toEqual({
+      environmentId,
+      threadId: ThreadId.make("thread-1"),
+    });
+  });
+
+  it("parses scoped project and thread keys back into refs", () => {
+    expect(parseScopedProjectKey("environment-test:project-1")).toEqual(projectRef);
+    expect(parseScopedThreadKey("environment-test:thread-1")).toEqual(threadRef);
+    expect(parseScopedProjectKey("bad-key")).toBeNull();
+    expect(parseScopedThreadKey("bad-key")).toBeNull();
+  });
+});

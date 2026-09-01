@@ -1,0 +1,90 @@
+import { DEFAULT_CLIENT_SETTINGS } from "@cadsense/contracts";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+function createLocalStorageStub(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key) => store.get(key) ?? null,
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    clear: () => {
+      store.clear();
+    },
+    key: (index) => [...store.keys()][index] ?? null,
+    get length() {
+      return store.size;
+    },
+  };
+}
+
+function getTestWindow(): Window & typeof globalThis {
+  const localStorage = createLocalStorageStub();
+  const testWindow = {
+    localStorage,
+  } as Window & typeof globalThis;
+  vi.stubGlobal("window", testWindow);
+  vi.stubGlobal("localStorage", localStorage);
+  return testWindow;
+}
+
+afterEach(() => {
+  vi.resetModules();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("clientPersistenceStorage", () => {
+  it("persists client settings in browser storage", async () => {
+    getTestWindow();
+    const { readBrowserClientSettings, writeBrowserClientSettings } =
+      await import("./clientPersistenceStorage");
+    const settings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+    };
+
+    writeBrowserClientSettings(settings);
+
+    expect(readBrowserClientSettings()).toEqual(settings);
+  });
+
+  it("reports structured decode failures while preserving the fallback", async () => {
+    const testWindow = getTestWindow();
+    testWindow.localStorage.setItem("cadsense:client-settings:v1", "not-json");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { readBrowserClientSettings } = await import("./clientPersistenceStorage");
+
+    expect(readBrowserClientSettings()).toBeNull();
+    expect(consoleError).toHaveBeenCalledWith(
+      "Could not read persisted client settings.",
+      expect.objectContaining({
+        _tag: "LocalStorageOperationError",
+        operation: "decode",
+        storageKey: "cadsense:client-settings:v1",
+        cause: expect.anything(),
+      }),
+    );
+  });
+
+  it("defaults word wrap on and discards an obsolete wrapping preference", async () => {
+    const testWindow = getTestWindow();
+    testWindow.localStorage.setItem(
+      "cadsense:client-settings:v1",
+      JSON.stringify({
+        chatWordWrap: false,
+      }),
+    );
+    const { readBrowserClientSettings } = await import("./clientPersistenceStorage");
+    const settings = readBrowserClientSettings();
+
+    expect(settings).toEqual(
+      expect.objectContaining({
+        wordWrap: true,
+      }),
+    );
+    expect(settings).not.toHaveProperty("chatWordWrap");
+  });
+});

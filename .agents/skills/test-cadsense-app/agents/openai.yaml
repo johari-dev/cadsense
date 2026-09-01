@@ -1,0 +1,4 @@
+interface:
+  display_name: "cadsense App Testing"
+  short_description: "Launch and retain isolated cadsense test environments"
+  default_prompt: "Use $test-cadsense-app to launch an isolated cadsense environment and iteratively test it in the browser while preserving state."

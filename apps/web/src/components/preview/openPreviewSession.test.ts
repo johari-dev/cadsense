@@ -1,0 +1,88 @@
+import {
+  FILL_PREVIEW_VIEWPORT,
+  type PreviewOpenInput,
+  type PreviewSessionSnapshot,
+  type ScopedThreadRef,
+} from "@cadsense/contracts";
+import * as Cause from "effect/Cause";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+import { readThreadPreviewState, resetPreviewStateForTests } from "~/previewStateStore";
+
+import { openPreviewSession } from "./openPreviewSession";
+
+const threadRef = {
+  environmentId: "local" as ScopedThreadRef["environmentId"],
+  threadId: "thread-1" as ScopedThreadRef["threadId"],
+};
+
+const snapshot: PreviewSessionSnapshot = {
+  threadId: threadRef.threadId,
+  tabId: "tab-1",
+  navStatus: {
+    _tag: "Loading",
+    url: "https://cadsense.app/",
+    title: "",
+  },
+  canGoBack: false,
+  canGoForward: false,
+  updatedAt: "2026-06-11T23:00:00.000Z",
+};
+
+beforeEach(resetPreviewStateForTests);
+
+describe("openPreviewSession", () => {
+  it("creates an idle tab without recording a recently visited URL", async () => {
+    const idleSnapshot: PreviewSessionSnapshot = {
+      ...snapshot,
+      tabId: "tab-blank",
+      navStatus: { _tag: "Idle" },
+    };
+    const open = vi.fn(async (_input: PreviewOpenInput) => AsyncResult.success(idleSnapshot));
+
+    await openPreviewSession({
+      openPreview: ({ input }) => open(input),
+      threadRef,
+    });
+
+    expect(open).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      viewport: FILL_PREVIEW_VIEWPORT,
+    });
+    expect(readThreadPreviewState(threadRef).snapshot).toEqual(idleSnapshot);
+    expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([]);
+  });
+
+  it("applies the RPC response without waiting for a preview event", async () => {
+    const open = vi.fn(async (_input: PreviewOpenInput) => AsyncResult.success(snapshot));
+
+    await openPreviewSession({
+      openPreview: ({ input }) => open(input),
+      threadRef,
+      url: "cadsense.app",
+    });
+
+    expect(open).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      url: "cadsense.app",
+      viewport: FILL_PREVIEW_VIEWPORT,
+    });
+    expect(readThreadPreviewState(threadRef).snapshot).toEqual(snapshot);
+    expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual(["https://cadsense.app/"]);
+  });
+
+  it("returns failures without mutating preview state", async () => {
+    const failure = new Error("preview unavailable");
+
+    const result = await openPreviewSession({
+      openPreview: async () => AsyncResult.failure(Cause.fail(failure)),
+      threadRef,
+      url: "cadsense.app",
+    });
+
+    expect(result._tag).toBe("Failure");
+    expect(readThreadPreviewState(threadRef).snapshot).toBeNull();
+    expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([]);
+  });
+});

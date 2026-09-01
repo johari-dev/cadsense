@@ -1,0 +1,30 @@
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+
+import * as EnvironmentAuthorization from "../authorization/service.ts";
+import * as PlatformConnectionSource from "../platform/source.ts";
+import * as RpcSession from "../rpc/session.ts";
+import * as ConnectionDriver from "./driver.ts";
+import * as EnvironmentRegistry from "./registry.ts";
+import * as ConnectionResolver from "./resolver.ts";
+
+const resolverLayer = ConnectionResolver.layer.pipe(Layer.provide(EnvironmentAuthorization.layer));
+const driverLayer = ConnectionDriver.layer.pipe(
+  Layer.provide(Layer.mergeAll(resolverLayer, RpcSession.layer)),
+);
+const registryLayer = EnvironmentRegistry.layer.pipe(Layer.provide(driverLayer));
+
+const connectionStartupLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+    const platformSource = yield* PlatformConnectionSource.PlatformConnectionSource;
+    yield* registry.start;
+    yield* platformSource.registrations.pipe(
+      Stream.runForEach(registry.reconcilePlatform),
+      Effect.forkScoped,
+    );
+  }).pipe(Effect.withSpan("clientRuntime.connection.application.start")),
+);
+
+export const layer = connectionStartupLayer.pipe(Layer.provideMerge(registryLayer));

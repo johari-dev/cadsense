@@ -1,0 +1,21 @@
+import type { AuthClientPresentationMetadata, AuthEnvironmentScope } from "@cadsense/contracts";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
+
+import type { ConnectionAttemptError } from "../connection/model.ts";
+
+export class ClientPresentation extends Context.Service<
+  ClientPresentation,
+  {
+    readonly metadata: AuthClientPresentationMetadata;
+    readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+  }
+>()("@cadsense/client-runtime/platform/capabilities/ClientPresentation") {}
+
+export class PrimaryEnvironmentAuth extends Context.Service<
+  PrimaryEnvironmentAuth,
+  {
+    readonly bearerToken: Effect.Effect<Option.Option<string>, ConnectionAttemptError>;
+  }
+>()("@cadsense/client-runtime/platform/capabilities/PrimaryEnvironmentAuth") {}

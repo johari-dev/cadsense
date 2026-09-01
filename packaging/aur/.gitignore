@@ -1,0 +1,9 @@
+src/
+pkg/
+*.AppImage
+*.pkg.tar.zst
+.SRCINFO
+cadsense-bin-*.png
+cadsense-bin-*-LICENSE
+cadsense-nightly-bin-*.png
+cadsense-nightly-bin-*-LICENSE

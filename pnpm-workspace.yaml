@@ -1,0 +1,98 @@
+packages:
+  - apps/*
+  - oxlint-plugin-cadsense
+  - packages/*
+  - scripts
+
+# Successor to onlyBuiltDependencies/ignoredBuiltDependencies (pnpm 11).
+# true = allowed to run build scripts; false mirrors the pnpm 10 behavior
+# where anything outside onlyBuiltDependencies was silently not built.
+allowBuilds:
+  bufferutil: false
+  core-js: false
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  msgpackr-extract: true
+  msw: false
+  sharp: true
+  utf-8-validate: false
+  workerd: false
+
+catalog:
+  "@effect/atom-react": 4.0.0-beta.103
+  "@effect/openapi-generator": 4.0.0-beta.103
+  "@effect/platform-bun": 4.0.0-beta.103
+  "@effect/platform-node": 4.0.0-beta.103
+  "@effect/platform-node-shared": 4.0.0-beta.103
+  "@effect/sql-sqlite-bun": 4.0.0-beta.103
+  "@effect/tsgo": 0.13.2
+  "@effect/vitest": 4.0.0-beta.103
+  "@legendapp/list": 3.3.5
+  "@types/node": 24.12.4
+  "@typescript/native-preview": 7.0.0-dev.20260604.1
+  effect: 4.0.0-beta.103
+  typescript: ~6.0.3
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.2
+  vite-plus: 0.2.2
+  yaml: ^2.9.0
+
+minimumReleaseAgeExclude:
+  - "@effect/atom-react@4.0.0-beta.103"
+  - "@effect/openapi-generator@4.0.0-beta.103"
+  - "@effect/platform-bun@4.0.0-beta.103"
+  - "@effect/platform-node-shared@4.0.0-beta.103"
+  - "@effect/platform-node@4.0.0-beta.103"
+  - "@effect/sql-sqlite-bun@4.0.0-beta.103"
+  - "@effect/vitest@4.0.0-beta.103"
+  - effect@4.0.0-beta.103
+  - "@legendapp/list@3.3.5"
+
+overrides:
+  # The SDK always receives the user's Claude executable, so its bundled binaries are unused.
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-arm64": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-x64": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-arm64": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64-musl": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-arm64": "-"
+  "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-x64": "-"
+  "@effect/atom-react": "catalog:"
+  "@effect/platform-bun": "catalog:"
+  "@effect/platform-node": "catalog:"
+  "@effect/platform-node-shared": "catalog:"
+  "@effect/sql-sqlite-bun": "catalog:"
+  "@effect/vitest": "catalog:"
+  "@effect/vitest>vitest": "-"
+  "@types/node": "catalog:"
+  effect: "catalog:"
+  vite: "catalog:"
+  yaml: "catalog:"
+
+packageExtensions:
+  "@effect/vitest@*":
+    dependencies:
+      vite-plus: "catalog:"
+    peerDependenciesMeta:
+      vitest:
+        optional: true
+  vite-plus@*:
+    dependencies:
+      vite: "catalog:"
+
+patchedDependencies:
+  "@effect/vitest@4.0.0-beta.103": patches/@effect__vitest@4.0.0-beta.103.patch
+  "@ff-labs/fff-node@0.9.4": patches/@ff-labs__fff-node@0.9.4.patch
+  effect@4.0.0-beta.103: patches/effect@4.0.0-beta.103.patch
+
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"
+
+supportedArchitectures:
+  cpu: [current, x64]
+  libc: [current, glibc]
+  os: [current, linux]

@@ -1,0 +1,73 @@
+import "vite-plus/test/config";
+import { defineConfig, mergeConfig } from "vite-plus";
+
+import baseConfig from "../../vite.config.ts";
+import packageJson from "./package.json" with { type: "json" };
+
+// The bundle used to inline only workspace packages, leaving every third-party
+// runtime dep external. External deps must exist on the real filesystem (the WSL
+// backend runs plain `wsl.exe -- node`, which cannot read inside an asar), so the
+// desktop build unpacked `**\/node_modules\/**` wholesale: 13,875 loose files to
+// support 20 native binaries. NSIS install time tracks file count, not bytes.
+//
+// Inverted here — bundle everything except the packages that genuinely cannot be
+// inlined. See scripts/lib/server-bundle-externals.ts for what earns an exemption.
+import {
+  isExternalServerDependency,
+  shouldBundleServerDependency,
+} from "../../scripts/lib/server-bundle-externals.ts";
+
+export { shouldBundleServerDependency };
+
+const serverBuildChannel = packageJson.version.includes("-nightly.") ? "nightly" : "latest";
+
+export default mergeConfig(
+  baseConfig,
+  defineConfig({
+    run: {
+      tasks: {
+        build: {
+          command: "node scripts/build.ts build",
+          dependsOn: ["@cadsense/web#build"],
+          cache: false,
+        },
+        "build:desktop-dev": {
+          command: "vp pack",
+          cache: false,
+        },
+      },
+    },
+    pack: {
+      entry: ["src/bin.ts"],
+      outDir: "dist",
+      sourcemap: true,
+      clean: true,
+      deps: {
+        // Both halves are required. `alwaysBundle` forces the JS dependencies in
+        // (declared deps are external by default, which is what this change is
+        // undoing). `neverBundle` forces the native packages out: returning
+        // false from `alwaysBundle` only means "no opinion", so a transitive
+        // dependency would still be bundled — which silently inlined
+        // msgpackr-extract and its loader, losing native acceleration.
+        alwaysBundle: shouldBundleServerDependency,
+        neverBundle: (id: string) => isExternalServerDependency(id),
+        onlyBundle: false,
+      },
+      banner: {
+        js: "#!/usr/bin/env node\n",
+      },
+      define: {
+        __CADSENSE_BUILD_CHANNEL__: JSON.stringify(serverBuildChannel),
+      },
+    },
+    test: {
+      // The server suite exercises sqlite, temporary directories, and orchestration
+      // runtimes heavily. Running files in parallel introduces load-sensitive flakes.
+      fileParallelism: false,
+      // Server integration tests exercise sqlite and orchestration together.
+      // Under package-wide runs they can exceed the default budget on loaded CI hosts.
+      hookTimeout: 120_000,
+      testTimeout: 120_000,
+    },
+  }),
+);

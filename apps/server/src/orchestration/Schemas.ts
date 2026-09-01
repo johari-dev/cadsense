@@ -1,0 +1,51 @@
+import {
+  ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
+  ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
+  ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
+  ThreadCreatedPayload as ContractsThreadCreatedPayloadSchema,
+  ThreadArchivedPayload as ContractsThreadArchivedPayloadSchema,
+  ThreadMetaUpdatedPayload as ContractsThreadMetaUpdatedPayloadSchema,
+  ThreadRuntimeModeSetPayload as ContractsThreadRuntimeModeSetPayloadSchema,
+  ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
+  ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
+  ThreadUnarchivedPayload as ContractsThreadUnarchivedPayloadSchema,
+  ThreadPinnedPayload as ContractsThreadPinnedPayloadSchema,
+  ThreadUnpinnedPayload as ContractsThreadUnpinnedPayloadSchema,
+  ThreadPinReorderedPayload as ContractsThreadPinReorderedPayloadSchema,
+  ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
+  ThreadProposedPlanUpsertedPayload as ContractsThreadProposedPlanUpsertedPayloadSchema,
+  ThreadSessionSetPayload as ContractsThreadSessionSetPayloadSchema,
+  ThreadActivityAppendedPayload as ContractsThreadActivityAppendedPayloadSchema,
+  ThreadTurnStartRequestedPayload as ContractsThreadTurnStartRequestedPayloadSchema,
+  ThreadTurnInterruptRequestedPayload as ContractsThreadTurnInterruptRequestedPayloadSchema,
+  ThreadApprovalResponseRequestedPayload as ContractsThreadApprovalResponseRequestedPayloadSchema,
+  ThreadSessionStopRequestedPayload as ContractsThreadSessionStopRequestedPayloadSchema,
+} from "@cadsense/contracts";
+
+// Server-internal alias surface, backed by contract schemas as the source of truth.
+export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema;
+export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema;
+export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
+
+export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;
+export const ThreadArchivedPayload = ContractsThreadArchivedPayloadSchema;
+export const ThreadMetaUpdatedPayload = ContractsThreadMetaUpdatedPayloadSchema;
+export const ThreadRuntimeModeSetPayload = ContractsThreadRuntimeModeSetPayloadSchema;
+export const ThreadInteractionModeSetPayload = ContractsThreadInteractionModeSetPayloadSchema;
+export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema;
+export const ThreadUnarchivedPayload = ContractsThreadUnarchivedPayloadSchema;
+export const ThreadPinnedPayload = ContractsThreadPinnedPayloadSchema;
+export const ThreadUnpinnedPayload = ContractsThreadUnpinnedPayloadSchema;
+export const ThreadPinReorderedPayload = ContractsThreadPinReorderedPayloadSchema;
+
+export const MessageSentPayloadSchema = ContractsThreadMessageSentPayloadSchema;
+export const ThreadProposedPlanUpsertedPayload = ContractsThreadProposedPlanUpsertedPayloadSchema;
+export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
+export const ThreadActivityAppendedPayload = ContractsThreadActivityAppendedPayloadSchema;
+
+export const ThreadTurnStartRequestedPayload = ContractsThreadTurnStartRequestedPayloadSchema;
+export const ThreadTurnInterruptRequestedPayload =
+  ContractsThreadTurnInterruptRequestedPayloadSchema;
+export const ThreadApprovalResponseRequestedPayload =
+  ContractsThreadApprovalResponseRequestedPayloadSchema;
+export const ThreadSessionStopRequestedPayload = ContractsThreadSessionStopRequestedPayloadSchema;

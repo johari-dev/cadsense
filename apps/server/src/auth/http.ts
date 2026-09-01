@@ -1,0 +1,177 @@
+import {
+  type AuthEnvironmentScope,
+  EnvironmentAuthInvalidError,
+  EnvironmentHttpApi,
+  EnvironmentInternalError,
+  type EnvironmentInternalErrorReason,
+  EnvironmentRequestInvalidError,
+  type EnvironmentRequestInvalidReason,
+  EnvironmentResourceNotFoundError,
+  type EnvironmentResourceNotFoundReason,
+  EnvironmentScopeRequiredError,
+  EnvironmentAuthenticatedAuth,
+  EnvironmentAuthenticatedPrincipal,
+} from "@cadsense/contracts";
+import { causeErrorTag } from "@cadsense/shared/observability";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { HttpServerRequest } from "effect/unstable/http";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+
+import * as EnvironmentAuth from "./EnvironmentAuth.ts";
+
+export const currentEnvironmentTraceId = Effect.currentParentSpan.pipe(
+  Effect.map((span) => span.traceId),
+  Effect.orElseSucceed(() => "unavailable"),
+);
+
+export function annotateEnvironmentRequest(endpoint: string) {
+  return Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    const traceId = yield* currentEnvironmentTraceId;
+
+    yield* Effect.addFinalizer((exit) =>
+      exit._tag === "Failure"
+        ? Effect.logWarning("environment api request failed", {
+            endpoint,
+            traceId,
+            errorTag: causeErrorTag(exit.cause),
+            cause: exit.cause,
+          })
+        : Effect.void,
+    );
+    yield* Effect.annotateLogsScoped({ "environment.endpoint": endpoint, traceId });
+    yield* Effect.annotateCurrentSpan({
+      "environment.endpoint": endpoint,
+      "http.request.method": request.method,
+      "url.path": url._tag === "Some" ? url.value.pathname : "unknown",
+    });
+  });
+}
+
+export function failEnvironmentAuthInvalid(reason: "missing_credential" | "invalid_credential") {
+  return currentEnvironmentTraceId.pipe(
+    Effect.flatMap((traceId) =>
+      Effect.fail(new EnvironmentAuthInvalidError({ code: "auth_invalid", reason, traceId })),
+    ),
+  );
+}
+
+export function failEnvironmentInvalidRequest(reason: EnvironmentRequestInvalidReason) {
+  return currentEnvironmentTraceId.pipe(
+    Effect.flatMap((traceId) =>
+      Effect.fail(new EnvironmentRequestInvalidError({ code: "invalid_request", reason, traceId })),
+    ),
+  );
+}
+
+export function failEnvironmentScopeRequired(requiredScope: AuthEnvironmentScope) {
+  return currentEnvironmentTraceId.pipe(
+    Effect.flatMap((traceId) =>
+      Effect.fail(
+        new EnvironmentScopeRequiredError({
+          code: "insufficient_scope",
+          requiredScope,
+          traceId,
+        }),
+      ),
+    ),
+  );
+}
+
+export function failEnvironmentNotFound(reason: EnvironmentResourceNotFoundReason) {
+  return currentEnvironmentTraceId.pipe(
+    Effect.flatMap((traceId) =>
+      Effect.fail(new EnvironmentResourceNotFoundError({ code: "not_found", reason, traceId })),
+    ),
+  );
+}
+
+export function failEnvironmentInternal(reason: EnvironmentInternalErrorReason, error?: unknown) {
+  return Effect.gen(function* () {
+    const traceId = yield* currentEnvironmentTraceId;
+    if (error !== undefined) {
+      yield* Effect.logError("environment api operation failed", { reason, traceId, cause: error });
+    }
+    return yield* new EnvironmentInternalError({ code: "internal_error", reason, traceId });
+  });
+}
+
+export const requireEnvironmentScope = Effect.fn("environment.auth.requireScope")(function* (
+  scope: AuthEnvironmentScope,
+) {
+  const session = yield* EnvironmentAuthenticatedPrincipal;
+  if (!session.scopes.has(scope)) {
+    return yield* failEnvironmentScopeRequired(scope);
+  }
+  return session;
+});
+
+export const environmentAuthenticatedAuthLayer = Layer.effect(
+  EnvironmentAuthenticatedAuth,
+  Effect.gen(function* () {
+    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    return (httpEffect) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const session = yield* serverAuth
+          .authenticateHttpRequest(request)
+          .pipe(
+            Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+              failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+            ),
+          );
+        return yield* httpEffect.pipe(
+          Effect.provideService(EnvironmentAuthenticatedPrincipal, {
+            ...session,
+            scopes: new Set(session.scopes),
+          }),
+        );
+      });
+  }),
+);
+
+export const authHttpApiLayer = HttpApiBuilder.group(
+  EnvironmentHttpApi,
+  "auth",
+  Effect.fnUntraced(function* (handlers) {
+    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+
+    return handlers
+      .handle(
+        "session",
+        Effect.fn("environment.auth.session")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          return yield* serverAuth.getSessionState(request);
+        }),
+      )
+      .handle(
+        "token",
+        Effect.fn("environment.auth.token")(
+          function* (args) {
+            yield* annotateEnvironmentRequest(args.endpoint.name);
+            return yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+              args.payload.subject_token,
+            );
+          },
+          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+            failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+          ),
+        ),
+      )
+      .handle(
+        "webSocketTicket",
+        Effect.fn("environment.auth.webSocketTicket")(
+          function* (args) {
+            yield* annotateEnvironmentRequest(args.endpoint.name);
+            return yield* serverAuth.issueWebSocketTicket();
+          },
+          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+            failEnvironmentInternal("websocket_ticket_issuance_failed", error),
+          ),
+        ),
+      );
+  }),
+);
