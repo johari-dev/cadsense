@@ -8,7 +8,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@cadsense/contracts";
-import { createModelCapabilities, normalizeModelSlug } from "@cadsense/shared/model";
+import { createModelCapabilities, resolveSelectableModel } from "@cadsense/shared/model";
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -75,9 +75,9 @@ export function getProviderModelCapabilities(
   model: string | null | undefined,
   provider: ProviderDriverKind,
 ): ModelCapabilities {
-  const slug = normalizeModelSlug(model, provider);
-  const caps =
-    models.find((candidate) => candidate.slug === slug)?.capabilities ?? EMPTY_CAPABILITIES;
+  const slug = resolveSelectableModel(provider, model, models);
+  const selectedModel = models.find((candidate) => candidate.slug === slug);
+  const caps = selectedModel?.capabilities ?? EMPTY_CAPABILITIES;
   return withoutPlanAgentOption(caps);
 }
 
