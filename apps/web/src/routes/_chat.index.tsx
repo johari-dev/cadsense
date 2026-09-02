@@ -4,6 +4,7 @@ import { PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
+import { OnshapeProjectPrototype } from "../components/onshape-prototype/OnshapeProjectPrototype";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -15,6 +16,12 @@ import {
 } from "../state/entities";
 
 function ChatIndexRouteView() {
+  if (
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).get("prototype") === "onshape"
+  ) {
+    return <OnshapeProjectPrototype />;
+  }
   return <IndexDraftLanding />;
 }
 
