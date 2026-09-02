@@ -1,5 +1,9 @@
 import type { ServerProviderSkill } from "@cadsense/contracts";
-import { formatProviderSkillDisplayName } from "@cadsense/client-runtime/providerSkills";
+import {
+  dedupeProviderSkillsByName,
+  formatProviderSkillDisplayName,
+  isProviderSkillUserInvocable,
+} from "@cadsense/client-runtime/providerSkills";
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
@@ -70,7 +74,7 @@ export function searchProviderSkills(
   query: string,
   limit = Number.POSITIVE_INFINITY,
 ): ServerProviderSkill[] {
-  const enabledSkills = skills.filter((skill) => skill.enabled);
+  const enabledSkills = dedupeProviderSkillsByName(skills.filter(isProviderSkillUserInvocable));
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
 
   if (!normalizedQuery) {
