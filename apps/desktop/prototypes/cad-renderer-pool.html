@@ -1,0 +1,1359 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CAD renderer pool prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #0d0f12;
+        color: #f4f5f7;
+        --panel: #15181d;
+        --panel-2: #1b1f25;
+        --border: #2a3038;
+        --muted: #929aa6;
+        --accent: #21c4b8;
+        --danger: #ff7b72;
+        --warning: #e8b84a;
+        --success: #64d488;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0d0f12;
+      }
+      button,
+      select {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      .page {
+        width: min(1480px, 100%);
+        margin: 0 auto;
+        padding: 32px;
+      }
+      .eyebrow {
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 10px 0 8px;
+        font-size: clamp(28px, 4vw, 46px);
+        line-height: 1.05;
+        letter-spacing: -0.04em;
+      }
+      .intro {
+        max-width: 900px;
+        margin: 0;
+        color: #b6bdc7;
+        font-size: 15px;
+        line-height: 1.65;
+      }
+      .callout {
+        margin-top: 20px;
+        max-width: 1000px;
+        padding: 14px 16px;
+        border: 1px solid #245b58;
+        border-radius: 12px;
+        background: #10201f;
+        color: #b9e9e5;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-top: 26px;
+        border-bottom: 1px solid var(--border);
+      }
+      .tab {
+        border: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        padding: 10px 12px;
+      }
+      .tab[aria-selected="true"] {
+        border-color: var(--accent);
+        color: white;
+      }
+      .tab-panel {
+        display: none;
+        padding-top: 22px;
+      }
+      .tab-panel.active {
+        display: block;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.75fr);
+        gap: 18px;
+      }
+      .stack {
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+      .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 52px;
+        padding: 12px 15px;
+        border-bottom: 1px solid var(--border);
+      }
+      .card-title {
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .card-note {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .card-body {
+        padding: 15px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .button {
+        min-height: 34px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #20252c;
+        color: #eef0f3;
+        padding: 7px 11px;
+        font-size: 12px;
+      }
+      .button:hover {
+        background: #293039;
+      }
+      .button.primary {
+        border-color: #2b7771;
+        background: #123a37;
+        color: #d7fffb;
+      }
+      .button.danger {
+        border-color: #6f3633;
+        color: #ffc1bc;
+      }
+      .button.ghost {
+        background: transparent;
+      }
+      .field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      select {
+        min-height: 34px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #20252c;
+        color: white;
+        padding: 6px 28px 6px 9px;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .metric {
+        min-height: 78px;
+        padding: 11px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111419;
+      }
+      .metric-label {
+        color: var(--muted);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric-value {
+        margin-top: 9px;
+        font-size: 19px;
+        font-weight: 680;
+        font-variant-numeric: tabular-nums;
+      }
+      .metric-detail {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .state-section + .state-section {
+        margin-top: 14px;
+      }
+      .section-label {
+        margin-bottom: 7px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .state-list {
+        display: grid;
+        gap: 6px;
+      }
+      .state-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.35fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 38px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #111419;
+        font-size: 12px;
+      }
+      .state-row strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .state-row code {
+        color: #b8c3d2;
+        font-size: 11px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px 7px;
+        color: #b7bec8;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+      .pill.ready {
+        border-color: #286743;
+        color: #9ce6b5;
+      }
+      .pill.busy {
+        border-color: #71571f;
+        color: #f5cf75;
+      }
+      .pill.cold {
+        color: #89919c;
+      }
+      .pill.dropped {
+        border-color: #6f3633;
+        color: #ffaaa3;
+      }
+
+      .log {
+        max-height: 260px;
+        overflow: auto;
+        display: grid;
+        gap: 6px;
+      }
+      .log-row {
+        display: grid;
+        grid-template-columns: 58px 1fr;
+        gap: 9px;
+        color: #b8c0ca;
+        font:
+          11px/1.45 ui-monospace,
+          SFMono-Regular,
+          Consolas,
+          monospace;
+      }
+      .log-row time {
+        color: #69727e;
+      }
+
+      .walkthrough-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .walkthrough-copy {
+        color: #b6bdc7;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      .steps {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .step {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #111419;
+      }
+      .step-index {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .step.current {
+        border-color: #2b7771;
+        background: #10201f;
+      }
+      .step.done {
+        opacity: 0.55;
+      }
+      .step-copy {
+        font-size: 12px;
+      }
+
+      .benchmark-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+        gap: 18px;
+      }
+      .canvas-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .canvas-card {
+        position: relative;
+        min-height: 158px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #080a0d;
+      }
+      .canvas-card canvas {
+        display: block;
+        width: 100%;
+        height: 158px;
+      }
+      .canvas-label {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        z-index: 2;
+        border: 1px solid #ffffff1f;
+        border-radius: 999px;
+        background: #080a0dcc;
+        padding: 4px 7px;
+        color: #d9dde3;
+        font-size: 10px;
+      }
+      .results {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      .results th,
+      .results td {
+        padding: 8px 7px;
+        border-bottom: 1px solid var(--border);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .results th:first-child,
+      .results td:first-child {
+        text-align: left;
+      }
+      .results th {
+        color: var(--muted);
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .results tr:last-child td {
+        border-bottom: 0;
+      }
+      .status {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .status.running {
+        color: var(--warning);
+      }
+      .status.ready {
+        color: var(--success);
+      }
+      .hardware {
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #aeb7c2;
+        font:
+          11px/1.55 ui-monospace,
+          SFMono-Regular,
+          Consolas,
+          monospace;
+      }
+
+      @media (max-width: 1050px) {
+        .grid,
+        .benchmark-grid {
+          grid-template-columns: 1fr;
+        }
+        .metrics {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 680px) {
+        .page {
+          padding: 20px;
+        }
+        .metrics,
+        .canvas-grid {
+          grid-template-columns: 1fr;
+        }
+        .state-row {
+          grid-template-columns: 1fr auto;
+        }
+        .state-row code {
+          grid-column: 1 / -1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="eyebrow">Throwaway runtime prototype · issue #9</div>
+      <h1>How many CAD renderers should stay alive?</h1>
+      <p class="intro">
+        This demo tests the renderer-pool model behind independent agent CAD sessions. Semantic
+        viewer state must survive without owning a canvas; renderer-dependent captures are bounded,
+        ordered per agent, and may be restored after suspension. The question is whether one or more
+        invisible workers materially improve capture latency without making memory, GPU work, and
+        desktop responsiveness scale with agent count.
+      </p>
+      <div class="callout">
+        Hypothesis under test: reserve one renderer for the visible CAD panel, start with one
+        background worker, render only on commands or captures, release GPU geometry after a short
+        warm idle, and grow to a second background worker only when measured capture latency stays
+        inside budget and the device is not under pressure.
+      </div>
+
+      <nav class="tabs" aria-label="Prototype areas">
+        <button class="tab" aria-selected="true" data-tab="model">Pool model</button>
+        <button class="tab" aria-selected="false" data-tab="benchmark">WebGL benchmark</button>
+      </nav>
+
+      <section class="tab-panel active" data-panel="model">
+        <div class="grid">
+          <div class="stack">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Current state</div>
+                  <div class="card-note">
+                    Full semantic and materialized state after every action
+                  </div>
+                </div>
+                <span class="pill" id="clock-pill">t + 0s</span>
+              </div>
+              <div class="card-body" id="state-view"></div>
+            </section>
+
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Free play</div>
+                  <div class="card-note">Poke the scheduler in any order</div>
+                </div>
+                <label class="field">
+                  Background workers
+                  <select id="worker-count">
+                    <option value="1" selected>1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                  </select>
+                </label>
+              </div>
+              <div class="card-body">
+                <div class="controls">
+                  <button class="button primary" data-action="capture" data-session="primary">
+                    Capture · primary
+                  </button>
+                  <button class="button primary" data-action="capture" data-session="subagent-a">
+                    Capture · subagent A
+                  </button>
+                  <button class="button primary" data-action="capture" data-session="subagent-b">
+                    Capture · subagent B
+                  </button>
+                  <button class="button" data-action="update" data-session="primary">
+                    Move primary camera
+                  </button>
+                  <button class="button" data-action="update" data-session="subagent-a">
+                    Hide part · subagent A
+                  </button>
+                  <button class="button" data-action="complete">Complete next worker</button>
+                  <button class="button" data-action="advance" data-ms="5000">Advance 5s</button>
+                  <button class="button" data-action="advance" data-ms="15000">Advance 15s</button>
+                  <button class="button danger" data-action="pressure">
+                    Simulate memory pressure
+                  </button>
+                  <button class="button ghost" data-action="focus">Switch visible thread</button>
+                  <button class="button ghost" data-action="reset">Reset</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Guided awkward cases</div>
+                  <div class="card-note">Each walkthrough resets to a known state</div>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="walkthrough-tabs" id="walkthrough-tabs"></div>
+                <div class="walkthrough-copy" id="walkthrough-copy"></div>
+                <div class="steps" id="walkthrough-steps"></div>
+              </div>
+            </section>
+          </div>
+
+          <div class="stack">
+            <section class="card">
+              <div class="card-header">
+                <div class="card-title">Policy being exercised</div>
+              </div>
+              <div class="card-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Visible renderers</div>
+                    <div class="metric-value">1 max</div>
+                    <div class="metric-detail">Reserved, never borrowed</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Warm idle</div>
+                    <div class="metric-value">15s</div>
+                    <div class="metric-detail">Then release GPU binding</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Ordering</div>
+                    <div class="metric-value">Per session</div>
+                    <div class="metric-detail">Cross-session work may overlap</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Pressure</div>
+                    <div class="metric-value">Evict now</div>
+                    <div class="metric-detail">Semantic state survives</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-header">
+                <div class="card-title">Scheduler log</div>
+                <div class="card-note">Newest first</div>
+              </div>
+              <div class="card-body"><div class="log" id="event-log"></div></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="benchmark">
+        <div class="benchmark-grid">
+          <div class="stack">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Controlled workload</div>
+                  <div class="card-note">Raw WebGL2, event-driven; no continuous repaint</div>
+                </div>
+              </div>
+              <div class="card-body stack">
+                <label class="field"
+                  >Scene profile
+                  <select id="profile-select">
+                    <option value="light">Light · 120k triangles · 8 MiB</option>
+                    <option value="standard" selected>Standard · 450k triangles · 32 MiB</option>
+                    <option value="heavy">Heavy · 900k triangles · 64 MiB</option>
+                  </select>
+                </label>
+                <div class="controls">
+                  <button class="button primary" id="run-sweep">Run 1–3 renderer sweep</button>
+                  <button class="button" id="render-once">Render current slots once</button>
+                  <button class="button danger" id="release-contexts">Release every context</button>
+                  <button class="button ghost" id="copy-results">Copy result JSON</button>
+                </div>
+                <div class="status" id="benchmark-status">No experiment run yet.</div>
+                <div class="hardware" id="hardware-view"></div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-header"><div class="card-title">Interpretation guardrails</div></div>
+              <div class="card-body walkthrough-copy">
+                The benchmark intentionally separates three costs: cold context plus GPU allocation,
+                one event-driven render, and a full-frame readback that approximates screenshot
+                capture. It does not claim that compressed CAD bytes equal GPU bytes. Repeat the
+                sweep with representative downloaded assemblies before raising a release limit.
+              </div>
+            </section>
+          </div>
+
+          <div class="stack">
+            <section class="card">
+              <div class="card-header">
+                <div class="card-title">Live renderer slots</div>
+                <div class="card-note">Internal size 960 × 720</div>
+              </div>
+              <div class="card-body"><div class="canvas-grid" id="canvas-grid"></div></div>
+            </section>
+
+            <section class="card">
+              <div class="card-header">
+                <div class="card-title">Sweep results</div>
+                <div class="card-note">Lower is better; medians across three samples</div>
+              </div>
+              <div class="card-body" style="overflow-x: auto">
+                <table class="results">
+                  <thead>
+                    <tr>
+                      <th>Slots</th>
+                      <th>Cold setup</th>
+                      <th>Render wave</th>
+                      <th>Capture wave</th>
+                      <th>Worst capture</th>
+                      <th>JS heap Δ</th>
+                      <th>Contexts lost</th>
+                    </tr>
+                  </thead>
+                  <tbody id="results-body">
+                    <tr>
+                      <td colspan="7" style="text-align: center; color: var(--muted)">
+                        Run the sweep to collect evidence.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      // Pure model: no DOM, timers, WebGL, or browser state.
+      window.RendererPoolModel = (() => {
+        const WARM_IDLE_MS = 15_000;
+
+        function makeSessions() {
+          return {
+            primary: { label: "Primary agent", revision: 4, latestCapture: 3 },
+            "subagent-a": { label: "Subagent A", revision: 2, latestCapture: null },
+            "subagent-b": { label: "Subagent B", revision: 6, latestCapture: 5 },
+          };
+        }
+
+        function makeSlots(count) {
+          return Array.from({ length: count }, (_, index) => ({
+            id: `worker-${index + 1}`,
+            status: "cold",
+            sessionId: null,
+            job: null,
+            idleSince: null,
+          }));
+        }
+
+        function initial(workerCount = 1) {
+          return {
+            now: 0,
+            nextJob: 1,
+            focusedThread: "assembly-review",
+            panel: { status: "ready", sessionId: "user:assembly-review" },
+            sessions: makeSessions(),
+            queue: [],
+            slots: makeSlots(workerCount),
+            droppedCompletions: 0,
+            log: [
+              {
+                at: 0,
+                message: `Pool ready with ${workerCount} background worker${workerCount === 1 ? "" : "s"}.`,
+              },
+            ],
+          };
+        }
+
+        function addLog(state, message) {
+          return { ...state, log: [{ at: state.now, message }, ...state.log].slice(0, 80) };
+        }
+
+        function dispatch(state) {
+          let next = state;
+          const slots = state.slots.map((slot) => ({ ...slot }));
+          const queue = [...state.queue];
+          const runningSessions = new Set(
+            slots.filter((slot) => slot.job).map((slot) => slot.job.sessionId),
+          );
+          for (const slot of slots) {
+            if (slot.job) continue;
+            const queueIndex = queue.findIndex((job) => !runningSessions.has(job.sessionId));
+            if (queueIndex < 0) continue;
+            const [job] = queue.splice(queueIndex, 1);
+            slot.status = "busy";
+            slot.sessionId = job.sessionId;
+            slot.job = job;
+            slot.idleSince = null;
+            runningSessions.add(job.sessionId);
+            next = addLog(
+              next,
+              `${slot.id} materialized ${job.sessionId} at revision ${job.revision}.`,
+            );
+          }
+          return { ...next, slots, queue };
+        }
+
+        function reducer(state, action) {
+          if (action.type === "reset") return initial(action.workerCount ?? state.slots.length);
+          if (action.type === "set-worker-count") {
+            return initial(action.count);
+          }
+          if (action.type === "focus") {
+            const focusedThread =
+              state.focusedThread === "assembly-review" ? "clearance-check" : "assembly-review";
+            return addLog(
+              {
+                ...state,
+                focusedThread,
+                panel: { status: "ready", sessionId: `user:${focusedThread}` },
+              },
+              `Visible panel snapped to ${focusedThread}; background slots were untouched.`,
+            );
+          }
+          if (action.type === "update") {
+            const session = state.sessions[action.sessionId];
+            const sessions = {
+              ...state.sessions,
+              [action.sessionId]: { ...session, revision: session.revision + 1 },
+            };
+            return addLog(
+              { ...state, sessions },
+              `${session.label} changed semantic view state to revision ${session.revision + 1}; no renderer was needed.`,
+            );
+          }
+          if (action.type === "capture") {
+            const session = state.sessions[action.sessionId];
+            const job = {
+              id: `capture-${state.nextJob}`,
+              sessionId: action.sessionId,
+              revision: session.revision,
+            };
+            return dispatch(
+              addLog(
+                { ...state, nextJob: state.nextJob + 1, queue: [...state.queue, job] },
+                `${session.label} requested capture at revision ${session.revision}.`,
+              ),
+            );
+          }
+          if (action.type === "complete") {
+            const slotIndex = state.slots.findIndex((slot) => slot.job);
+            if (slotIndex < 0) return addLog(state, "No renderer job is running.");
+            const slots = state.slots.map((slot) => ({ ...slot }));
+            const slot = slots[slotIndex];
+            const job = slot.job;
+            const session = state.sessions[job.sessionId];
+            const accepted = session.revision === job.revision;
+            const sessions = accepted
+              ? { ...state.sessions, [job.sessionId]: { ...session, latestCapture: job.revision } }
+              : state.sessions;
+            slot.status = "warm";
+            slot.job = null;
+            slot.idleSince = state.now;
+            let next = {
+              ...state,
+              slots,
+              sessions,
+              droppedCompletions: state.droppedCompletions + (accepted ? 0 : 1),
+            };
+            next = addLog(
+              next,
+              accepted
+                ? `${slot.id} committed capture revision ${job.revision} for ${job.sessionId}.`
+                : `${slot.id} dropped stale capture revision ${job.revision}; ${job.sessionId} is now revision ${session.revision}.`,
+            );
+            return dispatch(next);
+          }
+          if (action.type === "advance") {
+            const now = state.now + action.ms;
+            const slots = state.slots.map((slot) => {
+              if (
+                slot.status !== "warm" ||
+                slot.idleSince === null ||
+                now - slot.idleSince < WARM_IDLE_MS
+              )
+                return { ...slot };
+              return { ...slot, status: "cold", sessionId: null, idleSince: null };
+            });
+            const evicted = slots.filter(
+              (slot, index) => state.slots[index].status === "warm" && slot.status === "cold",
+            ).length;
+            return addLog(
+              { ...state, now, slots },
+              evicted
+                ? `Released ${evicted} warm GPU binding after ${WARM_IDLE_MS / 1000}s idle; semantic sessions remain.`
+                : `Advanced time by ${action.ms / 1000}s.`,
+            );
+          }
+          if (action.type === "pressure") {
+            const slots = state.slots.map((slot) =>
+              slot.job
+                ? { ...slot }
+                : { ...slot, status: "cold", sessionId: null, idleSince: null },
+            );
+            return addLog(
+              { ...state, slots },
+              "Memory pressure released every idle GPU binding immediately; queued and semantic state remain.",
+            );
+          }
+          return state;
+        }
+
+        return { initial, reducer };
+      })();
+    </script>
+
+    <script>
+      const Model = window.RendererPoolModel;
+      let workerCount = 1;
+      let state = Model.initial(workerCount);
+
+      const walkthroughs = [
+        {
+          id: "burst",
+          title: "Three agents capture",
+          copy: "Three private sessions request captures together. Watch the queue remain bounded and each session preserve command order.",
+          steps: [
+            ["Capture from the primary agent", { type: "capture", sessionId: "primary" }],
+            ["Capture from subagent A", { type: "capture", sessionId: "subagent-a" }],
+            ["Capture from subagent B", { type: "capture", sessionId: "subagent-b" }],
+            ["Finish the first capture", { type: "complete" }],
+            ["Finish the second capture", { type: "complete" }],
+            ["Finish the final capture", { type: "complete" }],
+          ],
+        },
+        {
+          id: "stale",
+          title: "Stale completion",
+          copy: "A capture starts, then the same agent changes its view before the old frame returns. The old result must not overwrite the newer semantic revision.",
+          steps: [
+            ["Start the primary capture", { type: "capture", sessionId: "primary" }],
+            ["Move the primary camera", { type: "update", sessionId: "primary" }],
+            ["Return the old capture", { type: "complete" }],
+            ["Capture the current revision", { type: "capture", sessionId: "primary" }],
+            ["Return the current capture", { type: "complete" }],
+          ],
+        },
+        {
+          id: "pressure",
+          title: "Suspend and restore",
+          copy: "A completed worker stays warm briefly, is evicted under pressure, then rematerializes from semantic state for the next capture.",
+          steps: [
+            ["Capture from subagent A", { type: "capture", sessionId: "subagent-a" }],
+            ["Finish and leave the worker warm", { type: "complete" }],
+            ["Trigger memory pressure", { type: "pressure" }],
+            ["Request another capture", { type: "capture", sessionId: "subagent-a" }],
+            ["Finish after cold restoration", { type: "complete" }],
+          ],
+        },
+        {
+          id: "focus",
+          title: "Switch threads mid-run",
+          copy: "The visible panel is reserved for the focused Thread. Switching it must snap immediately without stealing or rebinding a background worker.",
+          steps: [
+            ["Start a background capture", { type: "capture", sessionId: "subagent-b" }],
+            ["Switch the visible Thread", { type: "focus" }],
+            ["Finish the background capture", { type: "complete" }],
+          ],
+        },
+      ];
+      let selectedWalkthrough = walkthroughs[0].id;
+      let walkthroughStep = 0;
+
+      function escapeHtml(value) {
+        return String(value).replace(
+          /[&<>"]/g,
+          (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character],
+        );
+      }
+
+      function dispatch(action) {
+        state = Model.reducer(state, action);
+        renderModel();
+      }
+
+      function renderModel() {
+        document.getElementById("clock-pill").textContent = `t + ${Math.round(state.now / 1000)}s`;
+        const sessionRows = Object.entries(state.sessions)
+          .map(
+            ([id, session]) => `
+          <div class="state-row">
+            <strong>${escapeHtml(session.label)}</strong>
+            <code>${escapeHtml(id)} · revision ${session.revision} · capture ${session.latestCapture ?? "none"}</code>
+            <span class="pill ready">semantic</span>
+          </div>`,
+          )
+          .join("");
+        const slotRows = state.slots
+          .map(
+            (slot) => `
+          <div class="state-row">
+            <strong>${escapeHtml(slot.id)}</strong>
+            <code>${slot.job ? `${escapeHtml(slot.job.id)} · ${escapeHtml(slot.job.sessionId)} · r${slot.job.revision}` : slot.sessionId ? `warm · ${escapeHtml(slot.sessionId)}` : "unbound"}</code>
+            <span class="pill ${slot.status}">${escapeHtml(slot.status)}</span>
+          </div>`,
+          )
+          .join("");
+        const queueRows = state.queue.length
+          ? state.queue
+              .map(
+                (job) =>
+                  `<div class="state-row"><strong>${escapeHtml(job.id)}</strong><code>${escapeHtml(job.sessionId)} · expected r${job.revision}</code><span class="pill">queued</span></div>`,
+              )
+              .join("")
+          : `<div class="state-row"><strong>Queue empty</strong><code>No renderer-dependent work is waiting.</code><span class="pill ready">clear</span></div>`;
+        document.getElementById("state-view").innerHTML = `
+          <div class="state-section"><div class="section-label">Visible panel</div><div class="state-list"><div class="state-row"><strong>${escapeHtml(state.focusedThread)}</strong><code>${escapeHtml(state.panel.sessionId)} · reserved interactive renderer</code><span class="pill ready">${escapeHtml(state.panel.status)}</span></div></div></div>
+          <div class="state-section"><div class="section-label">Private viewer sessions · no canvas ownership</div><div class="state-list">${sessionRows}</div></div>
+          <div class="state-section"><div class="section-label">Background renderer slots</div><div class="state-list">${slotRows}</div></div>
+          <div class="state-section"><div class="section-label">Capture queue · ${state.droppedCompletions} stale dropped</div><div class="state-list">${queueRows}</div></div>`;
+        document.getElementById("event-log").innerHTML = state.log
+          .map(
+            (entry) =>
+              `<div class="log-row"><time>+${(entry.at / 1000).toFixed(0)}s</time><div>${escapeHtml(entry.message)}</div></div>`,
+          )
+          .join("");
+      }
+
+      function beginWalkthrough(id) {
+        selectedWalkthrough = id;
+        walkthroughStep = 0;
+        state = Model.initial(workerCount);
+        renderModel();
+        renderWalkthrough();
+      }
+
+      function renderWalkthrough() {
+        const current = walkthroughs.find((walkthrough) => walkthrough.id === selectedWalkthrough);
+        document.getElementById("walkthrough-tabs").innerHTML = walkthroughs
+          .map(
+            (walkthrough) =>
+              `<button class="button ${walkthrough.id === selectedWalkthrough ? "primary" : "ghost"}" data-walkthrough="${walkthrough.id}">${escapeHtml(walkthrough.title)}</button>`,
+          )
+          .join("");
+        document.getElementById("walkthrough-copy").textContent = current.copy;
+        document.getElementById("walkthrough-steps").innerHTML = current.steps
+          .map(
+            ([label], index) => `
+          <div class="step ${index < walkthroughStep ? "done" : index === walkthroughStep ? "current" : ""}">
+            <div class="step-index">${index + 1}</div><div class="step-copy">${escapeHtml(label)}</div>
+            <button class="button ${index === walkthroughStep ? "primary" : ""}" data-step="${index}" ${index !== walkthroughStep ? "disabled" : ""}>Run step</button>
+          </div>`,
+          )
+          .join("");
+        document
+          .querySelectorAll("[data-walkthrough]")
+          .forEach((button) =>
+            button.addEventListener("click", () => beginWalkthrough(button.dataset.walkthrough)),
+          );
+        document.querySelectorAll("[data-step]").forEach((button) =>
+          button.addEventListener("click", () => {
+            const index = Number(button.dataset.step);
+            if (index !== walkthroughStep) return;
+            dispatch(current.steps[index][1]);
+            walkthroughStep += 1;
+            renderWalkthrough();
+          }),
+        );
+      }
+
+      document.querySelectorAll("[data-action]").forEach((button) =>
+        button.addEventListener("click", () => {
+          const action = button.dataset.action;
+          if (action === "capture")
+            dispatch({ type: "capture", sessionId: button.dataset.session });
+          if (action === "update") dispatch({ type: "update", sessionId: button.dataset.session });
+          if (action === "complete") dispatch({ type: "complete" });
+          if (action === "advance") dispatch({ type: "advance", ms: Number(button.dataset.ms) });
+          if (action === "pressure") dispatch({ type: "pressure" });
+          if (action === "focus") dispatch({ type: "focus" });
+          if (action === "reset") dispatch({ type: "reset", workerCount });
+        }),
+      );
+      document.getElementById("worker-count").addEventListener("change", (event) => {
+        workerCount = Number(event.currentTarget.value);
+        dispatch({ type: "set-worker-count", count: workerCount });
+        walkthroughStep = 0;
+        renderWalkthrough();
+      });
+
+      document.querySelectorAll("[data-tab]").forEach((button) =>
+        button.addEventListener("click", () => {
+          document
+            .querySelectorAll("[data-tab]")
+            .forEach((candidate) =>
+              candidate.setAttribute("aria-selected", String(candidate === button)),
+            );
+          document
+            .querySelectorAll("[data-panel]")
+            .forEach((panel) =>
+              panel.classList.toggle("active", panel.dataset.panel === button.dataset.tab),
+            );
+        }),
+      );
+
+      const PROFILES = {
+        light: { triangles: 120_000, drawCalls: 80, gpuBytes: 8 * 1024 * 1024 },
+        standard: { triangles: 450_000, drawCalls: 240, gpuBytes: 32 * 1024 * 1024 },
+        heavy: { triangles: 900_000, drawCalls: 480, gpuBytes: 64 * 1024 * 1024 },
+      };
+      const WIDTH = 960;
+      const HEIGHT = 720;
+      let liveRenderers = [];
+      let benchmarkResults = [];
+      let contextLosses = 0;
+      const plannedContextLosses = new WeakSet();
+
+      function median(values) {
+        const sorted = [...values].sort((a, b) => a - b);
+        return sorted[Math.floor(sorted.length / 2)] ?? 0;
+      }
+
+      function formatMs(value) {
+        return `${value.toFixed(value >= 100 ? 0 : 1)} ms`;
+      }
+      function formatBytes(value) {
+        if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
+        const mib = value / (1024 * 1024);
+        return `${mib >= 10 ? mib.toFixed(0) : mib.toFixed(1)} MiB`;
+      }
+
+      function compileShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+          throw new Error(gl.getShaderInfoLog(shader) || "Shader compile failed");
+        return shader;
+      }
+
+      function createRenderer(profile, index) {
+        const card = document.createElement("div");
+        card.className = "canvas-card";
+        const label = document.createElement("div");
+        label.className = "canvas-label";
+        label.textContent = `renderer ${index + 1}`;
+        const canvas = document.createElement("canvas");
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+        card.append(label, canvas);
+        document.getElementById("canvas-grid").append(card);
+        const startedAt = performance.now();
+        const gl = canvas.getContext("webgl2", {
+          alpha: false,
+          antialias: false,
+          depth: true,
+          powerPreference: "high-performance",
+          preserveDrawingBuffer: true,
+          desynchronized: true,
+        });
+        if (!gl) throw new Error("WebGL2 is unavailable.");
+        canvas.addEventListener("webglcontextlost", (event) => {
+          event.preventDefault();
+          if (!plannedContextLosses.has(canvas)) contextLosses += 1;
+        });
+        const vertex = compileShader(
+          gl,
+          gl.VERTEX_SHADER,
+          `#version 300 es
+          precision highp float;
+          out vec3 tint;
+          void main() {
+            int instance = gl_InstanceID;
+            int cellX = instance % 900;
+            int cellY = (instance / 900) % 500;
+            float x = (float(cellX) / 449.5) - 1.0;
+            float y = (float(cellY) / 249.5) - 1.0;
+            float phase = float(instance % 19) / 19.0;
+            vec2 corner = gl_VertexID == 0 ? vec2(-0.0015, -0.0015) : (gl_VertexID == 1 ? vec2(0.0015, -0.0015) : vec2(0.0, 0.0018));
+            gl_Position = vec4(vec2(x, y) + corner, phase * 0.8, 1.0);
+            tint = vec3(0.1 + phase * 0.2, 0.55 + phase * 0.25, 0.6 + phase * 0.25);
+          }`,
+        );
+        const fragment = compileShader(
+          gl,
+          gl.FRAGMENT_SHADER,
+          `#version 300 es
+          precision mediump float;
+          in vec3 tint;
+          out vec4 outColor;
+          void main() { outColor = vec4(tint, 1.0); }`,
+        );
+        const program = gl.createProgram();
+        gl.attachShader(program, vertex);
+        gl.attachShader(program, fragment);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+          throw new Error(gl.getProgramInfoLog(program) || "Program link failed");
+        gl.deleteShader(vertex);
+        gl.deleteShader(fragment);
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const buffers = [];
+        let remaining = profile.gpuBytes;
+        while (remaining > 0) {
+          const size = Math.min(remaining, 16 * 1024 * 1024);
+          const buffer = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+          gl.bufferData(gl.ARRAY_BUFFER, size, gl.STATIC_DRAW);
+          gl.bufferSubData(
+            gl.ARRAY_BUFFER,
+            Math.max(0, size - 4),
+            new Uint8Array([index + 1, 2, 3, 4]),
+          );
+          buffers.push(buffer);
+          remaining -= size;
+        }
+        gl.useProgram(program);
+        gl.enable(gl.DEPTH_TEST);
+        gl.viewport(0, 0, WIDTH, HEIGHT);
+        gl.clearColor(0.035, 0.045, 0.055, 1);
+        gl.finish();
+        const setupMs = performance.now() - startedAt;
+        const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+        return {
+          card,
+          canvas,
+          gl,
+          program,
+          vao,
+          buffers,
+          profile,
+          setupMs,
+          vendor: debugInfo
+            ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+            : gl.getParameter(gl.VENDOR),
+          renderer: debugInfo
+            ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+            : gl.getParameter(gl.RENDERER),
+        };
+      }
+
+      function renderRenderer(renderer, capture) {
+        const { gl, profile } = renderer;
+        const startedAt = performance.now();
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        const trianglesPerCall = Math.ceil(profile.triangles / profile.drawCalls);
+        for (let index = 0; index < profile.drawCalls; index += 1) {
+          const remaining = profile.triangles - index * trianglesPerCall;
+          if (remaining <= 0) break;
+          gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, Math.min(trianglesPerCall, remaining));
+        }
+        gl.finish();
+        const renderMs = performance.now() - startedAt;
+        let captureMs = 0;
+        if (capture) {
+          const captureStartedAt = performance.now();
+          const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+          gl.readPixels(0, 0, WIDTH, HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          gl.finish();
+          captureMs = performance.now() - captureStartedAt;
+        }
+        return { renderMs, captureMs };
+      }
+
+      function releaseRenderer(renderer) {
+        const { gl } = renderer;
+        for (const buffer of renderer.buffers) gl.deleteBuffer(buffer);
+        gl.deleteVertexArray(renderer.vao);
+        gl.deleteProgram(renderer.program);
+        plannedContextLosses.add(renderer.canvas);
+        gl.getExtension("WEBGL_lose_context")?.loseContext();
+        renderer.card.remove();
+      }
+
+      function releaseAllRenderers() {
+        for (const renderer of liveRenderers) releaseRenderer(renderer);
+        liveRenderers = [];
+      }
+
+      function readHeap() {
+        return performance.memory?.usedJSHeapSize ?? null;
+      }
+
+      function renderBenchmarkResults() {
+        const body = document.getElementById("results-body");
+        if (benchmarkResults.length === 0) {
+          body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted)">Run the sweep to collect evidence.</td></tr>`;
+          return;
+        }
+        body.innerHTML = benchmarkResults
+          .map(
+            (row) =>
+              `<tr><td>${row.slots}</td><td>${formatMs(row.coldSetupMs)}</td><td>${formatMs(row.renderWaveMs)}</td><td>${formatMs(row.captureWaveMs)}</td><td>${formatMs(row.worstCaptureMs)}</td><td>${formatBytes(row.heapDeltaBytes)}</td><td>${row.contextLosses}</td></tr>`,
+          )
+          .join("");
+      }
+
+      async function runSweep() {
+        const profileName = document.getElementById("profile-select").value;
+        const profile = PROFILES[profileName];
+        const status = document.getElementById("benchmark-status");
+        document.getElementById("run-sweep").disabled = true;
+        status.className = "status running";
+        benchmarkResults = [];
+        renderBenchmarkResults();
+        try {
+          for (let slots = 1; slots <= 3; slots += 1) {
+            status.textContent = `Measuring ${slots} renderer${slots === 1 ? "" : "s"}…`;
+            releaseAllRenderers();
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            const heapBefore = readHeap();
+            const setupSamples = [];
+            liveRenderers = Array.from({ length: slots }, (_, index) => {
+              const renderer = createRenderer(profile, index);
+              setupSamples.push(renderer.setupMs);
+              return renderer;
+            });
+            const renderSamples = [];
+            const captureSamples = [];
+            for (let sample = 0; sample < 3; sample += 1) {
+              let waveStartedAt = performance.now();
+              for (const renderer of liveRenderers) renderRenderer(renderer, false);
+              renderSamples.push(performance.now() - waveStartedAt);
+              waveStartedAt = performance.now();
+              let worstCapture = 0;
+              for (const renderer of liveRenderers) {
+                const result = renderRenderer(renderer, true);
+                worstCapture = Math.max(worstCapture, result.renderMs + result.captureMs);
+              }
+              captureSamples.push({ wave: performance.now() - waveStartedAt, worst: worstCapture });
+              await new Promise((resolve) => setTimeout(resolve, 30));
+            }
+            const heapAfter = readHeap();
+            benchmarkResults.push({
+              slots,
+              profile: profileName,
+              trianglesPerSlot: profile.triangles,
+              drawCallsPerSlot: profile.drawCalls,
+              gpuBytesPerSlot: profile.gpuBytes,
+              coldSetupMs: setupSamples.reduce((total, value) => total + value, 0),
+              renderWaveMs: median(renderSamples),
+              captureWaveMs: median(captureSamples.map((sample) => sample.wave)),
+              worstCaptureMs: median(captureSamples.map((sample) => sample.worst)),
+              heapDeltaBytes:
+                heapBefore === null || heapAfter === null
+                  ? null
+                  : Math.max(0, heapAfter - heapBefore),
+              contextLosses,
+              vendor: liveRenderers[0]?.vendor ?? "unknown",
+              renderer: liveRenderers[0]?.renderer ?? "unknown",
+              userAgent: navigator.userAgent,
+            });
+            renderBenchmarkResults();
+          }
+          const renderer = liveRenderers[0];
+          document.getElementById("hardware-view").textContent = renderer
+            ? `Vendor: ${renderer.vendor}\nRenderer: ${renderer.renderer}\nUA: ${navigator.userAgent}`
+            : "No renderer available.";
+          status.className = "status ready";
+          status.textContent =
+            "Sweep complete. Contexts remain warm so system-level memory can be sampled; release them when finished.";
+          document.title = "CAD renderer pool prototype · results ready";
+          window.__CAD_RENDERER_POOL_RESULTS__ = benchmarkResults;
+          document.documentElement.dataset.benchmark = "ready";
+        } catch (error) {
+          status.className = "status";
+          status.textContent = error instanceof Error ? error.message : String(error);
+          document.documentElement.dataset.benchmark = "failed";
+        } finally {
+          document.getElementById("run-sweep").disabled = false;
+        }
+      }
+
+      document.getElementById("run-sweep").addEventListener("click", runSweep);
+      document.getElementById("render-once").addEventListener("click", () => {
+        if (liveRenderers.length === 0) {
+          document.getElementById("benchmark-status").textContent = "Run the sweep first.";
+          return;
+        }
+        const startedAt = performance.now();
+        for (const renderer of liveRenderers) renderRenderer(renderer, false);
+        document.getElementById("benchmark-status").textContent =
+          `Rendered ${liveRenderers.length} warm slot${liveRenderers.length === 1 ? "" : "s"} in ${formatMs(performance.now() - startedAt)}.`;
+      });
+      document.getElementById("release-contexts").addEventListener("click", () => {
+        releaseAllRenderers();
+        document.getElementById("benchmark-status").textContent =
+          "Every WebGL context and synthetic GPU allocation was released.";
+      });
+      document.getElementById("copy-results").addEventListener("click", async () => {
+        await navigator.clipboard.writeText(
+          JSON.stringify(
+            { collectedAt: new Date().toISOString(), results: benchmarkResults },
+            null,
+            2,
+          ),
+        );
+        document.getElementById("benchmark-status").textContent = "Result JSON copied.";
+      });
+
+      renderModel();
+      renderWalkthrough();
+      renderBenchmarkResults();
+      if (new URLSearchParams(location.search).get("autorun") === "1") {
+        document.querySelector('[data-tab="benchmark"]').click();
+        requestAnimationFrame(() => runSweep());
+      }
+    </script>
+  </body>
+</html>
