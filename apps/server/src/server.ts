@@ -68,6 +68,7 @@ import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@cadsense/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
+import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // cadsense's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -220,6 +221,11 @@ const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(
 
 const AuthLayerLive = EnvironmentAuth.layer;
 
+const OnshapeConnectionsLayerLive = OnshapeConnections.layerLive.pipe(
+  Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+);
+
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
@@ -256,6 +262,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(OnshapeConnectionsLayerLive),
   Layer.provideMerge(ProcessRunner.layer),
 );
 

@@ -13,6 +13,7 @@ export * from "./keybindings.ts";
 export * from "./server.ts";
 export * from "./settings.ts";
 export * from "./orchestration.ts";
+export * from "./onshape.ts";
 export * from "./cadsenseProjectFile.ts";
 export * from "./fileManager.ts";
 export * from "./project.ts";

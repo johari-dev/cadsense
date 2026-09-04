@@ -35,6 +35,16 @@ import {
   OrchestrationGetWorkflowScriptError,
 } from "./orchestration.ts";
 import {
+  OnshapeConnectionCreateInput,
+  OnshapeConnectionError,
+  OnshapeConnectionListResult,
+  OnshapeConnectionRemoveInput,
+  OnshapeConnectionRemoveResult,
+  OnshapeConnectionRenameInput,
+  OnshapeConnectionReplaceCredentialsInput,
+  OnshapeConnectionSummary,
+} from "./onshape.ts";
+import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -127,6 +137,13 @@ export const WS_METHODS = {
 
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
+
+  // Onshape connection methods
+  onshapeConnectionsList: "onshape.connections.list",
+  onshapeConnectionsCreate: "onshape.connections.create",
+  onshapeConnectionsRename: "onshape.connections.rename",
+  onshapeConnectionsReplaceCredentials: "onshape.connections.replaceCredentials",
+  onshapeConnectionsRemove: "onshape.connections.remove",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -346,6 +363,39 @@ export const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFee
   error: Schema.Union([ProviderUploadFeedbackError, EnvironmentAuthorizationError]),
 });
 
+export const WsOnshapeConnectionsListRpc = Rpc.make(WS_METHODS.onshapeConnectionsList, {
+  payload: Schema.Struct({}),
+  success: OnshapeConnectionListResult,
+  error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
+});
+
+export const WsOnshapeConnectionsCreateRpc = Rpc.make(WS_METHODS.onshapeConnectionsCreate, {
+  payload: OnshapeConnectionCreateInput,
+  success: OnshapeConnectionSummary,
+  error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
+});
+
+export const WsOnshapeConnectionsRenameRpc = Rpc.make(WS_METHODS.onshapeConnectionsRename, {
+  payload: OnshapeConnectionRenameInput,
+  success: OnshapeConnectionSummary,
+  error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
+});
+
+export const WsOnshapeConnectionsReplaceCredentialsRpc = Rpc.make(
+  WS_METHODS.onshapeConnectionsReplaceCredentials,
+  {
+    payload: OnshapeConnectionReplaceCredentialsInput,
+    success: OnshapeConnectionSummary,
+    error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsOnshapeConnectionsRemoveRpc = Rpc.make(WS_METHODS.onshapeConnectionsRemove, {
+  payload: OnshapeConnectionRemoveInput,
+  success: OnshapeConnectionRemoveResult,
+  error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
+});
+
 export const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
@@ -528,6 +578,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,
   WsProviderUploadFeedbackRpc,
+  WsOnshapeConnectionsListRpc,
+  WsOnshapeConnectionsCreateRpc,
+  WsOnshapeConnectionsRenameRpc,
+  WsOnshapeConnectionsReplaceCredentialsRpc,
+  WsOnshapeConnectionsRemoveRpc,
   WsPreviewOpenRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,
