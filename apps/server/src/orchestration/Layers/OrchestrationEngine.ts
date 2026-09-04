@@ -66,6 +66,9 @@ function commandToAggregateRef(command: OrchestrationCommand): {
 } {
   switch (command.type) {
     case "project.create":
+    case "project.onshape.create":
+    case "project.onshape.connection.set":
+    case "project.onshape.workspace.ready":
     case "project.meta.update":
     case "project.delete":
       return {
@@ -361,6 +364,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     get streamDomainEvents(): OrchestrationEngineShape["streamDomainEvents"] {
       return Stream.fromPubSub(eventPubSub);
     },
+    subscribeDomainEvents: PubSub.subscribe(eventPubSub),
     // The command read model's snapshotSequence tracks the latest committed
     // event sequence (updated on the worker fiber). A plain property read is a
     // consistent, committed value — reassignment of `commandReadModel` is

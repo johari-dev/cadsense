@@ -19,6 +19,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { OnshapeConnectionId, OnshapeProjectSource } from "./onshape.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -245,6 +246,8 @@ export const OrchestrationProject = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
+  // Optional for wire compatibility. Absence means a regular filesystem project.
+  onshapeSource: Schema.optionalKey(OnshapeProjectSource),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -400,6 +403,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
+  onshapeSource: Schema.optionalKey(OnshapeProjectSource),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -886,7 +890,37 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+/** Server-only command produced after validating an Onshape URL and reserving a managed path. */
+export const OnshapeProjectCreateCommand = Schema.Struct({
+  type: Schema.Literal("project.onshape.create"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  defaultModelSelection: Schema.NullOr(ModelSelection),
+  onshapeSource: OnshapeProjectSource,
+  createdAt: IsoDateTime,
+});
+
+/** Server-only command produced after validating host compatibility. */
+export const OnshapeProjectSetConnectionCommand = Schema.Struct({
+  type: Schema.Literal("project.onshape.connection.set"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  connectionId: OnshapeConnectionId,
+});
+
+/** Server-only command emitted after the managed workspace reactor succeeds. */
+export const OnshapeProjectWorkspaceReadyCommand = Schema.Struct({
+  type: Schema.Literal("project.onshape.workspace.ready"),
+  commandId: CommandId,
+  projectId: ProjectId,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  OnshapeProjectCreateCommand,
+  OnshapeProjectSetConnectionCommand,
+  OnshapeProjectWorkspaceReadyCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -937,6 +971,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
+  onshapeSource: Schema.optionalKey(OnshapeProjectSource),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -946,6 +981,8 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  onshapeConnectionId: Schema.optional(OnshapeConnectionId),
+  onshapeManagedWorkspaceReady: Schema.optional(Schema.Boolean),
   updatedAt: IsoDateTime,
 });
 

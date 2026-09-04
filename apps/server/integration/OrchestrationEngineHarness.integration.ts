@@ -53,6 +53,7 @@ import {
   type OrchestrationEngineShape,
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
 import { ThreadDeletionReactor } from "../src/orchestration/Services/ThreadDeletionReactor.ts";
+import { OnshapeWorkspaceReactor } from "../src/orchestration/Services/OnshapeWorkspaceReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 
@@ -265,6 +266,12 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(
         Layer.succeed(ThreadDeletionReactor, {
+          start: () => Effect.void,
+          drainThrough: () => Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(OnshapeWorkspaceReactor, {
           start: () => Effect.void,
           drainThrough: () => Effect.void,
         }),

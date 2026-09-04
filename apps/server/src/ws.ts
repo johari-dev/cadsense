@@ -94,6 +94,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
+import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -380,6 +381,7 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
+      const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -843,6 +845,16 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.onshapeConnectionsRemove, onshapeConnections.remove(input), {
             "rpc.aggregate": "onshape-connections",
           }),
+        [WS_METHODS.onshapeProjectsCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.onshapeProjectsCreate, onshapeProjects.create(input), {
+            "rpc.aggregate": "onshape-projects",
+          }),
+        [WS_METHODS.onshapeProjectsSetConnection]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.onshapeProjectsSetConnection,
+            onshapeProjects.setConnection(input),
+            { "rpc.aggregate": "onshape-projects" },
+          ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,

@@ -26,6 +26,7 @@ import {
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
   ClientOrchestrationCommand,
+  ModelSelection,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
   OrchestrationGetSnapshotError,
@@ -43,6 +44,10 @@ import {
   OnshapeConnectionRenameInput,
   OnshapeConnectionReplaceCredentialsInput,
   OnshapeConnectionSummary,
+  OnshapeProjectCreateBaseInput,
+  OnshapeProjectError,
+  OnshapeProjectMutationResult,
+  OnshapeProjectSetConnectionInput,
 } from "./onshape.ts";
 import {
   ProviderUploadFeedbackError,
@@ -144,6 +149,8 @@ export const WS_METHODS = {
   onshapeConnectionsRename: "onshape.connections.rename",
   onshapeConnectionsReplaceCredentials: "onshape.connections.replaceCredentials",
   onshapeConnectionsRemove: "onshape.connections.remove",
+  onshapeProjectsCreate: "onshape.projects.create",
+  onshapeProjectsSetConnection: "onshape.projects.setConnection",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -396,6 +403,21 @@ export const WsOnshapeConnectionsRemoveRpc = Rpc.make(WS_METHODS.onshapeConnecti
   error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
 });
 
+export const WsOnshapeProjectsCreateRpc = Rpc.make(WS_METHODS.onshapeProjectsCreate, {
+  payload: Schema.Struct({
+    ...OnshapeProjectCreateBaseInput.fields,
+    defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  }),
+  success: OnshapeProjectMutationResult,
+  error: Schema.Union([OnshapeProjectError, EnvironmentAuthorizationError]),
+});
+
+export const WsOnshapeProjectsSetConnectionRpc = Rpc.make(WS_METHODS.onshapeProjectsSetConnection, {
+  payload: OnshapeProjectSetConnectionInput,
+  success: OnshapeProjectMutationResult,
+  error: Schema.Union([OnshapeProjectError, EnvironmentAuthorizationError]),
+});
+
 export const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
@@ -583,6 +605,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeConnectionsRenameRpc,
   WsOnshapeConnectionsReplaceCredentialsRpc,
   WsOnshapeConnectionsRemoveRpc,
+  WsOnshapeProjectsCreateRpc,
+  WsOnshapeProjectsSetConnectionRpc,
   WsPreviewOpenRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,

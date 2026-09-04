@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -9,12 +9,34 @@ export const MAX_ONSHAPE_CONNECTION_HOST_LENGTH = 253;
 export const MAX_ONSHAPE_ACCESS_KEY_ID_LENGTH = 256;
 export const MAX_ONSHAPE_SECRET_KEY_LENGTH = 512;
 export const MAX_ONSHAPE_RETRY_AFTER_SECONDS = 86_400;
+export const MAX_ONSHAPE_PROJECT_URL_LENGTH = 4_096;
+export const MAX_ONSHAPE_CONFIGURATION_LENGTH = 4_096;
+
+const ONSHAPE_ENTITY_ID_PATTERN = /^[0-9a-f]{24}$/;
 
 /** Server-generated environment-local UUID for one saved Onshape connection. */
 export const OnshapeConnectionId = TrimmedNonEmptyString.check(
   Schema.isPattern(UUID_V4_PATTERN),
 ).pipe(Schema.brand("OnshapeConnectionId"));
 export type OnshapeConnectionId = typeof OnshapeConnectionId.Type;
+
+export const OnshapeDocumentId = TrimmedNonEmptyString.check(
+  Schema.isPattern(ONSHAPE_ENTITY_ID_PATTERN),
+).pipe(Schema.brand("OnshapeDocumentId"));
+export type OnshapeDocumentId = typeof OnshapeDocumentId.Type;
+
+export const OnshapeWorkspaceId = TrimmedNonEmptyString.check(
+  Schema.isPattern(ONSHAPE_ENTITY_ID_PATTERN),
+).pipe(Schema.brand("OnshapeWorkspaceId"));
+export type OnshapeWorkspaceId = typeof OnshapeWorkspaceId.Type;
+
+export const OnshapeElementId = TrimmedNonEmptyString.check(
+  Schema.isPattern(ONSHAPE_ENTITY_ID_PATTERN),
+).pipe(Schema.brand("OnshapeElementId"));
+export type OnshapeElementId = typeof OnshapeElementId.Type;
+
+export const OnshapeWorkspaceType = Schema.Literals(["w", "v", "m"]);
+export type OnshapeWorkspaceType = typeof OnshapeWorkspaceType.Type;
 
 export const OnshapeConnectionName = TrimmedNonEmptyString.check(
   Schema.isMaxLength(MAX_ONSHAPE_CONNECTION_NAME_LENGTH),
@@ -31,6 +53,59 @@ export const OnshapeConnectionHost = TrimmedNonEmptyString.check(
   Schema.isMaxLength(MAX_ONSHAPE_CONNECTION_HOST_LENGTH),
 );
 export type OnshapeConnectionHost = typeof OnshapeConnectionHost.Type;
+
+/** Non-secret Onshape document binding and managed-workspace state for a project. */
+export const OnshapeProjectSource = Schema.Struct({
+  connectionId: OnshapeConnectionId,
+  host: OnshapeConnectionHost,
+  documentId: OnshapeDocumentId,
+  workspaceType: OnshapeWorkspaceType,
+  workspaceId: OnshapeWorkspaceId,
+  elementId: Schema.optionalKey(OnshapeElementId),
+  // Configuration strings are opaque and case-sensitive. Do not trim or normalize them.
+  configuration: Schema.String.check(Schema.isMaxLength(MAX_ONSHAPE_CONFIGURATION_LENGTH)),
+  // Optional for events written before managed workspace provisioning became reactor-owned.
+  managedWorkspaceReady: Schema.optionalKey(Schema.Boolean),
+});
+export type OnshapeProjectSource = typeof OnshapeProjectSource.Type;
+
+/** Stable identity for duplicate detection; the saved connection is intentionally excluded. */
+export function onshapeProjectSourceIdentity(source: {
+  readonly host: string;
+  readonly documentId: string;
+  readonly workspaceType: OnshapeWorkspaceType;
+  readonly workspaceId: string;
+  readonly elementId?: string;
+  readonly configuration: string;
+}): string {
+  return JSON.stringify([
+    source.host,
+    source.documentId,
+    source.workspaceType,
+    source.workspaceId,
+    source.elementId ?? null,
+    source.configuration,
+  ]);
+}
+
+export const OnshapeProjectCreateBaseInput = Schema.Struct({
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  connectionId: OnshapeConnectionId,
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(MAX_ONSHAPE_PROJECT_URL_LENGTH)),
+});
+export type OnshapeProjectCreateBaseInput = typeof OnshapeProjectCreateBaseInput.Type;
+
+export const OnshapeProjectSetConnectionInput = Schema.Struct({
+  projectId: ProjectId,
+  connectionId: OnshapeConnectionId,
+});
+export type OnshapeProjectSetConnectionInput = typeof OnshapeProjectSetConnectionInput.Type;
+
+export const OnshapeProjectMutationResult = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OnshapeProjectMutationResult = typeof OnshapeProjectMutationResult.Type;
 
 export const OnshapeAccessKeyId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(MAX_ONSHAPE_ACCESS_KEY_ID_LENGTH),
@@ -237,3 +312,63 @@ export const OnshapeConnectionError = Schema.Union([
 export type OnshapeConnectionError = typeof OnshapeConnectionError.Type;
 
 export const isOnshapeConnectionError = Schema.is(OnshapeConnectionError);
+
+export class OnshapeProjectInvalidUrlError extends Schema.TaggedErrorClass<OnshapeProjectInvalidUrlError>()(
+  "OnshapeProjectInvalidUrlError",
+  {},
+) {
+  override get message(): string {
+    return "Enter an Onshape document or element URL.";
+  }
+}
+
+export class OnshapeProjectHostMismatchError extends Schema.TaggedErrorClass<OnshapeProjectHostMismatchError>()(
+  "OnshapeProjectHostMismatchError",
+  {},
+) {
+  override get message(): string {
+    return "This Onshape URL belongs to a different Onshape host.";
+  }
+}
+
+export class OnshapeProjectNotFoundError extends Schema.TaggedErrorClass<OnshapeProjectNotFoundError>()(
+  "OnshapeProjectNotFoundError",
+  { projectId: ProjectId },
+) {
+  override get message(): string {
+    return "The Onshape project was not found.";
+  }
+}
+
+export class OnshapeProjectConflictError extends Schema.TaggedErrorClass<OnshapeProjectConflictError>()(
+  "OnshapeProjectConflictError",
+  {},
+) {
+  override get message(): string {
+    return "That Onshape CAD source is already added as a project.";
+  }
+}
+
+export const OnshapeProjectOperation = Schema.Literals(["create", "set-connection"]);
+export type OnshapeProjectOperation = typeof OnshapeProjectOperation.Type;
+
+export class OnshapeProjectOperationError extends Schema.TaggedErrorClass<OnshapeProjectOperationError>()(
+  "OnshapeProjectOperationError",
+  { operation: OnshapeProjectOperation },
+) {
+  override get message(): string {
+    return "Could not save the Onshape project change.";
+  }
+}
+
+export const OnshapeProjectError = Schema.Union([
+  OnshapeConnectionNotFoundError,
+  OnshapeProjectInvalidUrlError,
+  OnshapeProjectHostMismatchError,
+  OnshapeProjectNotFoundError,
+  OnshapeProjectConflictError,
+  OnshapeProjectOperationError,
+]);
+export type OnshapeProjectError = typeof OnshapeProjectError.Type;
+
+export const isOnshapeProjectError = Schema.is(OnshapeProjectError);

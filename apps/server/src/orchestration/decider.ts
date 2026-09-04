@@ -12,6 +12,8 @@ import type * as PlatformError from "effect/PlatformError";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   listThreadsByProjectId,
+  requireActiveOnshapeProjectSourceAbsent,
+  requireActiveProject,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
   requireProjectAbsent,
@@ -106,7 +108,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   Crypto.Crypto
 > {
   switch (command.type) {
-    case "project.create": {
+    case "project.create":
+    case "project.onshape.create": {
       yield* requireProjectAbsent({
         readModel,
         command,
@@ -118,6 +121,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         workspaceRoot: command.workspaceRoot,
         exceptProjectId: command.projectId,
       });
+      if (command.type === "project.onshape.create") {
+        yield* requireActiveOnshapeProjectSourceAbsent({
+          readModel,
+          command,
+          source: command.onshapeSource,
+        });
+      }
 
       return {
         ...(yield* withEventBase({
@@ -132,6 +142,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           defaultModelSelection: command.defaultModelSelection ?? null,
+          ...(command.type === "project.onshape.create"
+            ? {
+                onshapeSource: {
+                  ...command.onshapeSource,
+                  managedWorkspaceReady: false,
+                },
+              }
+            : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -139,12 +157,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.meta.update": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
       if (command.workspaceRoot !== undefined) {
+        if (project.onshapeSource !== undefined) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Project '${command.projectId}' has a server-managed Onshape workspace.`,
+          });
+        }
         yield* requireActiveProjectWorkspaceRootAbsent({
           readModel,
           command,
@@ -168,6 +192,64 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.defaultModelSelection !== undefined
             ? { defaultModelSelection: command.defaultModelSelection }
             : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.onshape.connection.set": {
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.onshapeSource === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is not an Onshape project.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          onshapeConnectionId: command.connectionId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.onshape.workspace.ready": {
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.onshapeSource === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is not an Onshape project.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          onshapeManagedWorkspaceReady: true,
           updatedAt: occurredAt,
         },
       };
@@ -225,11 +307,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.create": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
+      if (
+        project.onshapeSource !== undefined &&
+        project.onshapeSource.managedWorkspaceReady !== true
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' managed workspace is not ready.`,
+        });
+      }
       yield* requireThreadAbsent({
         readModel,
         command,

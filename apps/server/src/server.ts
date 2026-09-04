@@ -42,6 +42,7 @@ import * as ProcessRunner from "./processRunner.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
+import { OnshapeWorkspaceReactorLive } from "./orchestration/Layers/OnshapeWorkspaceReactor.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
@@ -69,6 +70,8 @@ import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@cadsense/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
+import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import * as ManagedWorkspaceAllocator from "./workspace/ManagedWorkspaceAllocator.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // cadsense's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -171,13 +174,6 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
-const ReactorLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(OrchestrationReactorLive),
-  Layer.provideMerge(ProviderRuntimeIngestionLive),
-  Layer.provideMerge(ProviderCommandReactorLive),
-  Layer.provideMerge(ThreadDeletionReactorLive),
-);
-
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
 );
@@ -231,6 +227,27 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
+const OnshapeWorkspaceReactorLayerLive = OnshapeWorkspaceReactorLive.pipe(
+  Layer.provideMerge(ManagedWorkspaceAllocator.layer),
+  Layer.provideMerge(ProviderRuntimeLayerLive),
+);
+
+const OnshapeLayerLive = OnshapeProjects.layer.pipe(
+  Layer.provideMerge(ManagedWorkspaceAllocator.layer),
+  Layer.provideMerge(OnshapeConnectionsLayerLive),
+  Layer.provideMerge(OnshapeWorkspaceReactorLayerLive),
+);
+
+const AgentRuntimeLayerLive = OnshapeLayerLive.pipe(Layer.provideMerge(ProviderRuntimeLayerLive));
+
+const ReactorLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(OrchestrationReactorLive),
+  Layer.provideMerge(ProviderRuntimeIngestionLive),
+  Layer.provideMerge(ProviderCommandReactorLive),
+  Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(OnshapeWorkspaceReactorLayerLive),
+);
+
 const ProviderInstanceServicesLive = TextGeneration.layer.pipe(
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
 );
@@ -238,7 +255,7 @@ const ProviderInstanceServicesLive = TextGeneration.layer.pipe(
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
-  Layer.provideMerge(ProviderRuntimeLayerLive),
+  Layer.provideMerge(AgentRuntimeLayerLive),
   Layer.provideMerge(PreviewLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
@@ -262,7 +279,6 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
-  Layer.provideMerge(OnshapeConnectionsLayerLive),
   Layer.provideMerge(ProcessRunner.layer),
 );
 

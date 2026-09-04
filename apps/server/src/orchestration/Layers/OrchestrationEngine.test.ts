@@ -179,6 +179,7 @@ describe("OrchestrationEngine", () => {
               threads: [],
               updatedAt: projectionSnapshot.updatedAt,
             }),
+          listPendingOnshapeProjects: () => Effect.succeed([]),
           getArchivedShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: projectionSnapshot.snapshotSequence,

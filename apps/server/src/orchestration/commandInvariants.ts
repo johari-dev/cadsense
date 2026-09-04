@@ -1,10 +1,12 @@
-import type {
-  OrchestrationCommand,
-  OrchestrationProject,
-  OrchestrationReadModel,
-  OrchestrationThread,
-  ProjectId,
-  ThreadId,
+import {
+  onshapeProjectSourceIdentity,
+  type OnshapeProjectSource,
+  type OrchestrationCommand,
+  type OrchestrationProject,
+  type OrchestrationReadModel,
+  type OrchestrationThread,
+  type ProjectId,
+  type ThreadId,
 } from "@cadsense/contracts";
 import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
 import * as Effect from "effect/Effect";
@@ -56,6 +58,23 @@ export function requireProject(input: {
   );
 }
 
+export function requireActiveProject(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+}): Effect.Effect<OrchestrationProject, OrchestrationCommandInvariantError> {
+  return requireProject(input).pipe(
+    Effect.filterOrFail(
+      (project) => project.deletedAt === null,
+      () =>
+        invariantError(
+          input.command.type,
+          `Project '${input.projectId}' is deleted for command '${input.command.type}'.`,
+        ),
+    ),
+  );
+}
+
 export function requireProjectAbsent(input: {
   readonly readModel: OrchestrationReadModel;
   readonly command: OrchestrationCommand;
@@ -92,6 +111,31 @@ export function requireActiveProjectWorkspaceRootAbsent(input: {
     invariantError(
       input.command.type,
       `Active project '${existingProject.id}' already exists for workspace root '${normalizedWorkspaceRoot}'.`,
+    ),
+  );
+}
+
+export function requireActiveOnshapeProjectSourceAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly source: OnshapeProjectSource;
+  readonly exceptProjectId?: ProjectId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const sourceIdentity = onshapeProjectSourceIdentity(input.source);
+  const existingProject = input.readModel.projects.find(
+    (project) =>
+      project.deletedAt === null &&
+      project.onshapeSource !== undefined &&
+      onshapeProjectSourceIdentity(project.onshapeSource) === sourceIdentity &&
+      project.id !== input.exceptProjectId,
+  );
+  if (existingProject === undefined) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Active project '${existingProject.id}' already exists for this Onshape source.`,
     ),
   );
 }

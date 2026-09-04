@@ -67,6 +67,12 @@ export interface ProjectionSnapshotQueryShape {
     ProjectionRepositoryError
   >;
 
+  /** Read only active Onshape projects whose managed workspace is not ready. */
+  readonly listPendingOnshapeProjects: () => Effect.Effect<
+    ReadonlyArray<OrchestrationProjectShell>,
+    ProjectionRepositoryError
+  >;
+
   /**
    * Read archived thread shell summaries for the archive page.
    *

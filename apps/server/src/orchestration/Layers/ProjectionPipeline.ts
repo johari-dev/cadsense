@@ -393,6 +393,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
             defaultModelSelection: event.payload.defaultModelSelection,
+            onshapeSource: event.payload.onshapeSource ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -414,6 +415,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             ...(event.payload.defaultModelSelection !== undefined
               ? { defaultModelSelection: event.payload.defaultModelSelection }
+              : {}),
+            ...((event.payload.onshapeConnectionId !== undefined ||
+              event.payload.onshapeManagedWorkspaceReady !== undefined) &&
+            existingRow.value.onshapeSource !== null
+              ? {
+                  onshapeSource: {
+                    ...existingRow.value.onshapeSource,
+                    ...(event.payload.onshapeConnectionId !== undefined
+                      ? { connectionId: event.payload.onshapeConnectionId }
+                      : {}),
+                    ...(event.payload.onshapeManagedWorkspaceReady !== undefined
+                      ? {
+                          managedWorkspaceReady: event.payload.onshapeManagedWorkspaceReady,
+                        }
+                      : {}),
+                  },
+                }
               : {}),
             updatedAt: event.payload.updatedAt,
           });

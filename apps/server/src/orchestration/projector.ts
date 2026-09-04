@@ -119,6 +119,9 @@ export function projectEvent(
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
+            ...(payload.onshapeSource !== undefined
+              ? { onshapeSource: payload.onshapeSource }
+              : {}),
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -149,6 +152,23 @@ export function projectEvent(
                     : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
+                    : {}),
+                  ...((payload.onshapeConnectionId !== undefined ||
+                    payload.onshapeManagedWorkspaceReady !== undefined) &&
+                  project.onshapeSource !== undefined
+                    ? {
+                        onshapeSource: {
+                          ...project.onshapeSource,
+                          ...(payload.onshapeConnectionId !== undefined
+                            ? { connectionId: payload.onshapeConnectionId }
+                            : {}),
+                          ...(payload.onshapeManagedWorkspaceReady !== undefined
+                            ? {
+                                managedWorkspaceReady: payload.onshapeManagedWorkspaceReady,
+                              }
+                            : {}),
+                        },
+                      }
                     : {}),
                   updatedAt: payload.updatedAt,
                 }

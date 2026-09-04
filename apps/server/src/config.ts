@@ -32,6 +32,7 @@ export interface ServerDerivedPaths {
   readonly settingsPath: string;
   readonly providerStatusCacheDir: string;
   readonly attachmentsDir: string;
+  readonly managedWorkspacesDir: string;
   readonly logsDir: string;
   readonly serverLogPath: string;
   readonly serverTracePath: string;
@@ -100,6 +101,7 @@ export const deriveServerPaths = Effect.fn(function* (
   );
   const dbPath = join(stateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
+  const managedWorkspacesDir = join(stateDir, "managed-workspaces");
   const logsDir = join(stateDir, "logs");
   const providerLogsDir = join(logsDir, "provider");
   const providerStatusCacheDir = join(baseDir, "caches");
@@ -110,6 +112,7 @@ export const deriveServerPaths = Effect.fn(function* (
     settingsPath: join(stateDir, "settings.json"),
     providerStatusCacheDir,
     attachmentsDir,
+    managedWorkspacesDir,
     logsDir,
     serverLogPath: join(logsDir, "server.log"),
     serverTracePath: join(logsDir, "server.trace.ndjson"),
@@ -131,6 +134,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.logsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.managedWorkspacesDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
       fs.makeDirectory(derivedPaths.providerStatusCacheDir, { recursive: true }),
