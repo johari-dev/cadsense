@@ -36,6 +36,7 @@ const connection = OnshapeConnectionSummary.make({
   name: "Onshape",
   host: "https://cad.onshape.com",
   verifiedAt: now,
+  updatedAt: now,
 });
 const source = OnshapeProjectSource.make({
   connectionId,
@@ -71,7 +72,11 @@ const makeHarness = Effect.fn(function* (options?: {
     Layer.succeed(
       OnshapeConnections,
       OnshapeConnections.of({
-        list: () => Effect.succeed({ connections: options?.connections ?? [connection] }),
+        list: () =>
+          Effect.succeed({
+            connections: options?.connections ?? [connection],
+            catalogUpdatedAt: connection.updatedAt,
+          }),
         create: unsupported,
         rename: unsupported,
         replaceCredentials: unsupported,

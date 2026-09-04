@@ -32,6 +32,8 @@ interface HarnessState {
   status: number;
   retryAfter: string | null;
   failTransport: boolean;
+  verificationStarted: Deferred.Deferred<void> | null;
+  verificationRelease: Deferred.Deferred<void> | null;
   failCreateAfterWrite: boolean;
   blockCreateAfterWrite: boolean;
   createWritten: Deferred.Deferred<void> | null;
@@ -50,6 +52,8 @@ const makeHarness = <E, R>(
     status: 200,
     retryAfter: null,
     failTransport: false,
+    verificationStarted: null,
+    verificationRelease: null,
     failCreateAfterWrite: false,
     blockCreateAfterWrite: false,
     createWritten: null,
@@ -118,6 +122,16 @@ const makeHarness = <E, R>(
     OnshapeTransport.OnshapeTransport.of({
       execute: (request) =>
         Effect.sync(() => state.requests.push(request)).pipe(
+          Effect.andThen(
+            state.verificationStarted === null
+              ? Effect.void
+              : Deferred.succeed(state.verificationStarted, undefined),
+          ),
+          Effect.andThen(
+            state.verificationRelease === null
+              ? Effect.void
+              : Deferred.await(state.verificationRelease),
+          ),
           Effect.andThen(
             state.failTransport
               ? Effect.fail(new OnshapeTransport.OnshapeTransportFailure())
@@ -255,6 +269,54 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
       assert.equal(harness.state.requests[0]?.headers.Accept, "application/json");
       assert.equal(harness.state.requests[0]?.headers["Content-Type"], "application/json");
       assert.match(harness.state.requests[0]?.headers.Authorization ?? "", /^On /);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("publishes a strictly newer revision for every saved connection change", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      const renamed = yield* connections.rename({
+        connectionId: saved.connectionId,
+        name: "Renamed CAD",
+      });
+      const replaced = yield* connections.replaceCredentials({
+        connectionId: saved.connectionId,
+        host: "cad.onshape.com",
+        accessKeyId: NEW_ACCESS_KEY,
+        secretKey: NEW_SECRET_KEY,
+      });
+      const listed = yield* connections.list();
+
+      assert.isTrue(saved.updatedAt < renamed.updatedAt);
+      assert.isTrue(renamed.updatedAt < replaced.updatedAt);
+      assert.equal(listed.connections[0]?.updatedAt, replaced.updatedAt);
+      assert.equal(listed.catalogUpdatedAt, replaced.updatedAt);
+      assert.equal(harness.state.requests.length, 2);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("lists a consistent snapshot while connection verification is still pending", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const verificationStarted = yield* Deferred.make<void>();
+      const verificationRelease = yield* Deferred.make<void>();
+      harness.state.verificationStarted = verificationStarted;
+      harness.state.verificationRelease = verificationRelease;
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const before = yield* connections.list();
+      const creating = yield* connections.create(createInput).pipe(Effect.forkChild);
+      yield* Deferred.await(verificationStarted);
+
+      const whileVerifying = yield* connections.list();
+      assert.deepEqual(whileVerifying, before);
+
+      yield* Deferred.succeed(verificationRelease, undefined);
+      const saved = yield* Fiber.join(creating);
+      const after = yield* connections.list();
+      assert.equal(after.connections[0]?.connectionId, saved.connectionId);
+      assert.equal(after.catalogUpdatedAt, saved.updatedAt);
     }).pipe(Effect.provide(harness.layer));
   });
 
@@ -705,11 +767,37 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
       assert.equal(listed.connections.length, 1);
       assert.equal(listed.connections[0]?.connectionId, saved.connectionId);
       assert.equal(listed.connections[0]?.name, createInput.name);
+      assert.equal(listed.catalogUpdatedAt, saved.updatedAt);
       const rawDatabase = new TextDecoder().decode(yield* fileSystem.readFile(dbPath));
       assert.notInclude(rawDatabase, OLD_ACCESS_KEY);
       assert.notInclude(rawDatabase, OLD_SECRET_KEY);
     });
   });
+
+  it.effect("persists an empty catalog's removal revision across restart", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cadsense-onshape-" });
+      const dbPath = path.join(tempDir, "state.sqlite");
+      const persistence = makeSqlitePersistenceLive(dbPath);
+      const first = makeHarness(persistence);
+      const removed = yield* Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        const saved = yield* connections.create(createInput);
+        return yield* connections.remove({ connectionId: saved.connectionId });
+      }).pipe(Effect.provide(first.layer));
+
+      const restarted = makeHarness(persistence, first.state);
+      const listed = yield* Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        return yield* connections.list();
+      }).pipe(Effect.provide(restarted.layer));
+
+      assert.deepEqual(listed.connections, []);
+      assert.equal(listed.catalogUpdatedAt, removed.updatedAt);
+    }),
+  );
 
   it.effect("persists credentials through the real secret store across restart", () =>
     Effect.gen(function* () {
