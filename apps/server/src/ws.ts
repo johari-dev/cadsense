@@ -93,6 +93,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
+import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -378,6 +379,7 @@ const makeWsRpcLayer = (
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
+      const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -819,6 +821,28 @@ const makeWsRpcLayer = (
       });
 
       return WsRpcGroup.of({
+        [WS_METHODS.onshapeConnectionsList]: (_input) =>
+          observeRpcEffect(WS_METHODS.onshapeConnectionsList, onshapeConnections.list(), {
+            "rpc.aggregate": "onshape-connections",
+          }),
+        [WS_METHODS.onshapeConnectionsCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.onshapeConnectionsCreate, onshapeConnections.create(input), {
+            "rpc.aggregate": "onshape-connections",
+          }),
+        [WS_METHODS.onshapeConnectionsRename]: (input) =>
+          observeRpcEffect(WS_METHODS.onshapeConnectionsRename, onshapeConnections.rename(input), {
+            "rpc.aggregate": "onshape-connections",
+          }),
+        [WS_METHODS.onshapeConnectionsReplaceCredentials]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.onshapeConnectionsReplaceCredentials,
+            onshapeConnections.replaceCredentials(input),
+            { "rpc.aggregate": "onshape-connections" },
+          ),
+        [WS_METHODS.onshapeConnectionsRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.onshapeConnectionsRemove, onshapeConnections.remove(input), {
+            "rpc.aggregate": "onshape-connections",
+          }),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
