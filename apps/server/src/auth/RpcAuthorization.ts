@@ -55,6 +55,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.onshapeConnectionsRename]: AuthOrchestrationOperateScope,
   [WS_METHODS.onshapeConnectionsReplaceCredentials]: AuthOrchestrationOperateScope,
   [WS_METHODS.onshapeConnectionsRemove]: AuthOrchestrationOperateScope,
+  [WS_METHODS.onshapeProjectsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.onshapeProjectsSetConnection]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
   [WS_METHODS.previewOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewNavigate]: AuthOrchestrationOperateScope,

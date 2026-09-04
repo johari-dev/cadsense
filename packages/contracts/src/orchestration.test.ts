@@ -12,6 +12,9 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationEvent,
   OrchestrationLatestTurn,
+  OnshapeProjectCreateCommand,
+  OnshapeProjectSetConnectionCommand,
+  OnshapeProjectWorkspaceReadyCommand,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -30,6 +33,13 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
+const decodeOnshapeProjectCreateCommand = Schema.decodeUnknownEffect(OnshapeProjectCreateCommand);
+const decodeOnshapeProjectSetConnectionCommand = Schema.decodeUnknownEffect(
+  OnshapeProjectSetConnectionCommand,
+);
+const decodeOnshapeProjectWorkspaceReadyCommand = Schema.decodeUnknownEffect(
+  OnshapeProjectWorkspaceReadyCommand,
+);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
 const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
@@ -123,6 +133,110 @@ it.effect("decodes historical project.created payloads with a default provider",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.defaultModelSelection?.instanceId, "codex");
+    assert.isUndefined(parsed.onshapeSource);
+  }),
+);
+
+it.effect("decodes non-secret Onshape project source metadata", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeProjectCreatedPayload({
+      projectId: "project-1",
+      title: "Onshape project",
+      workspaceRoot: "/tmp/onshape-project",
+      defaultModelSelection: null,
+      onshapeSource: {
+        connectionId: "00000000-0000-4000-8000-000000000001",
+        host: "https://cad.onshape.com",
+        documentId: "05760c4d8b40fba37db8fa48",
+        workspaceType: "w",
+        workspaceId: "f31b499c519e8471cced93dc",
+        elementId: "b53dde24ab8b46d679af9944",
+        configuration: "Size=Large",
+        accessKeyId: "must-not-cross-the-wire",
+        secretKey: "must-not-cross-the-wire",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.onshapeSource?.connectionId, "00000000-0000-4000-8000-000000000001");
+    assert.strictEqual(parsed.onshapeSource?.documentId, "05760c4d8b40fba37db8fa48");
+    assert.strictEqual(parsed.onshapeSource?.configuration, "Size=Large");
+    assert.notProperty(parsed.onshapeSource ?? {}, "accessKeyId");
+    assert.notProperty(parsed.onshapeSource ?? {}, "secretKey");
+  }),
+);
+
+it.effect("keeps Onshape project creation behind the server-only command boundary", () =>
+  Effect.gen(function* () {
+    const input = {
+      type: "project.onshape.create",
+      commandId: "server:onshape-project-create:00000000-0000-4000-8000-000000000002",
+      projectId: "project-1",
+      title: "Onshape project",
+      workspaceRoot: "/tmp/onshape-project",
+      defaultModelSelection: null,
+      onshapeSource: {
+        connectionId: "00000000-0000-4000-8000-000000000001",
+        host: "https://cad.onshape.com",
+        documentId: "05760c4d8b40fba37db8fa48",
+        workspaceType: "w",
+        workspaceId: "f31b499c519e8471cced93dc",
+        configuration: "",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } as const;
+
+    const internal = yield* decodeOnshapeProjectCreateCommand(input);
+    assert.strictEqual(internal.type, "project.onshape.create");
+    assert.strictEqual((yield* decodeOrchestrationCommand(input)).type, "project.onshape.create");
+    assert.strictEqual(
+      (yield* Effect.exit(decodeClientOrchestrationCommand(input)))._tag,
+      "Failure",
+    );
+  }),
+);
+
+it.effect("keeps Onshape connection rebinding behind the server-only command boundary", () =>
+  Effect.gen(function* () {
+    const input = {
+      type: "project.onshape.connection.set",
+      commandId: "server:onshape-project-set-connection:00000000-0000-4000-8000-000000000002",
+      projectId: "project-1",
+      connectionId: "00000000-0000-4000-8000-000000000001",
+    } as const;
+
+    const internal = yield* decodeOnshapeProjectSetConnectionCommand(input);
+    assert.strictEqual(internal.type, "project.onshape.connection.set");
+    assert.strictEqual(
+      (yield* decodeOrchestrationCommand(input)).type,
+      "project.onshape.connection.set",
+    );
+    assert.strictEqual(
+      (yield* Effect.exit(decodeClientOrchestrationCommand(input)))._tag,
+      "Failure",
+    );
+  }),
+);
+
+it.effect("keeps Onshape workspace readiness behind the server-only command boundary", () =>
+  Effect.gen(function* () {
+    const input = {
+      type: "project.onshape.workspace.ready",
+      commandId: "server:onshape-workspace-ready:event-1",
+      projectId: "project-1",
+    } as const;
+
+    const internal = yield* decodeOnshapeProjectWorkspaceReadyCommand(input);
+    assert.strictEqual(internal.type, "project.onshape.workspace.ready");
+    assert.strictEqual(
+      (yield* decodeOrchestrationCommand(input)).type,
+      "project.onshape.workspace.ready",
+    );
+    assert.strictEqual(
+      (yield* Effect.exit(decodeClientOrchestrationCommand(input)))._tag,
+      "Failure",
+    );
   }),
 );
 

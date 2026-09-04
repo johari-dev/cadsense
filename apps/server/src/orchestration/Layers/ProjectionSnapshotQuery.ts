@@ -19,6 +19,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
   ModelSelection,
+  OnshapeProjectSource,
   ProjectId,
   ThreadId,
 } from "@cadsense/contracts";
@@ -68,6 +69,7 @@ const THREAD_DETAIL_ACTIVITY_LIMIT = 500;
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+    onshapeSource: Schema.NullOr(Schema.fromJsonString(OnshapeProjectSource)),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -279,13 +281,22 @@ function mapSessionRow(
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
 ): OrchestrationProjectShell {
+  const { deletedAt: _deletedAt, ...shell } = mapProjectRow(row);
+  return shell;
+}
+
+function mapProjectRow(
+  row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
+): OrchestrationProject {
   return {
     id: row.projectId,
     title: row.title,
     workspaceRoot: row.workspaceRoot,
     defaultModelSelection: row.defaultModelSelection,
+    ...(row.onshapeSource !== null ? { onshapeSource: row.onshapeSource } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt,
   };
 }
 
@@ -324,10 +335,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
+          onshape_source_json AS "onshapeSource",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
         FROM projection_projects
+        ORDER BY created_at ASC, project_id ASC
+      `,
+  });
+
+  const listPendingOnshapeProjectRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProjectDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          title,
+          workspace_root AS "workspaceRoot",
+          default_model_selection_json AS "defaultModelSelection",
+          onshape_source_json AS "onshapeSource",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_projects
+        WHERE deleted_at IS NULL
+          AND onshape_source_json IS NOT NULL
         ORDER BY created_at ASC, project_id ASC
       `,
   });
@@ -738,6 +771,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
+          onshape_source_json AS "onshapeSource",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -759,6 +793,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
+          onshape_source_json AS "onshapeSource",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1441,15 +1476,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 });
               }
 
-              const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-                id: row.projectId,
-                title: row.title,
-                workspaceRoot: row.workspaceRoot,
-                defaultModelSelection: row.defaultModelSelection,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                deletedAt: row.deletedAt,
-              }));
+              const projects: ReadonlyArray<OrchestrationProject> = projectRows.map(mapProjectRow);
 
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
@@ -1562,15 +1589,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   continue;
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
-                projects.push({
-                  id: row.projectId,
-                  title: row.title,
-                  workspaceRoot: row.workspaceRoot,
-                  defaultModelSelection: row.defaultModelSelection,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                  deletedAt: row.deletedAt,
-                });
+                projects.push(mapProjectRow(row));
               }
               for (let index = 0; index < threadRows.length; index += 1) {
                 const row = threadRows[index];
@@ -2017,20 +2036,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             "ProjectionSnapshotQuery.getActiveProjectByWorkspaceRoot:decodeRow",
           ),
         ),
-        Effect.map(
-          Option.map(
-            (row) =>
-              ({
-                id: row.projectId,
-                title: row.title,
-                workspaceRoot: row.workspaceRoot,
-                defaultModelSelection: row.defaultModelSelection,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                deletedAt: row.deletedAt,
-              }) satisfies OrchestrationProject,
-          ),
-        ),
+        Effect.map(Option.map(mapProjectRow)),
       );
 
   const getProjectShellById: ProjectionSnapshotQueryShape["getProjectShellById"] = (projectId) =>
@@ -2043,6 +2049,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ),
       Effect.map(Option.map(mapProjectShellRow)),
     );
+
+  const listPendingOnshapeProjects: ProjectionSnapshotQueryShape["listPendingOnshapeProjects"] =
+    () =>
+      listPendingOnshapeProjectRows(undefined).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.listPendingOnshapeProjects:query",
+            "ProjectionSnapshotQuery.listPendingOnshapeProjects:decodeRows",
+          ),
+        ),
+        Effect.map((rows) =>
+          rows
+            .filter((row) => row.onshapeSource?.managedWorkspaceReady !== true)
+            .map(mapProjectShellRow),
+        ),
+      );
 
   const getFirstActiveThreadIdByProjectId: ProjectionSnapshotQueryShape["getFirstActiveThreadIdByProjectId"] =
     (projectId) =>
@@ -2428,6 +2450,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getCounts,
     getActiveProjectByWorkspaceRoot,
     getProjectShellById,
+    listPendingOnshapeProjects,
     getFirstActiveThreadIdByProjectId,
     getThreadShellById,
     getThreadDetailById,

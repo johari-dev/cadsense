@@ -5,7 +5,11 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { ModelSelection } from "@cadsense/contracts";
+import {
+  ModelSelection,
+  OnshapeProjectSource,
+  onshapeProjectSourceIdentity,
+} from "@cadsense/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionProjectInput,
@@ -18,6 +22,7 @@ import {
 const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+    onshapeSource: Schema.NullOr(Schema.fromJsonString(OnshapeProjectSource)),
   }),
 );
 type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
@@ -34,6 +39,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           title,
           workspace_root,
           default_model_selection_json,
+          onshape_source_json,
+          onshape_source_key,
           created_at,
           updated_at,
           deleted_at
@@ -43,6 +50,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.title},
           ${row.workspaceRoot},
           ${row.defaultModelSelection !== null ? JSON.stringify(row.defaultModelSelection) : null},
+          ${row.onshapeSource !== null ? JSON.stringify(row.onshapeSource) : null},
+          ${row.onshapeSource !== null ? onshapeProjectSourceIdentity(row.onshapeSource) : null},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.deletedAt}
@@ -52,6 +61,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           title = excluded.title,
           workspace_root = excluded.workspace_root,
           default_model_selection_json = excluded.default_model_selection_json,
+          onshape_source_json = excluded.onshape_source_json,
+          onshape_source_key = excluded.onshape_source_key,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           deleted_at = excluded.deleted_at
@@ -68,6 +79,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
+          onshape_source_json AS "onshapeSource",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -86,6 +98,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
+          onshape_source_json AS "onshapeSource",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"

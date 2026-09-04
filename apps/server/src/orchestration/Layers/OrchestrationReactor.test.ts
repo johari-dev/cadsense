@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
+import { OnshapeWorkspaceReactor } from "../Services/OnshapeWorkspaceReactor.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
@@ -53,6 +54,15 @@ describe("OrchestrationReactor", () => {
             drainThrough: () => Effect.void,
           }),
         ),
+        Layer.provideMerge(
+          Layer.succeed(OnshapeWorkspaceReactor, {
+            start: () => {
+              started.push("onshape-workspace-reactor");
+              return Effect.void;
+            },
+            drainThrough: () => Effect.void,
+          }),
+        ),
       ),
     );
 
@@ -64,6 +74,7 @@ describe("OrchestrationReactor", () => {
       "provider-runtime-ingestion",
       "provider-command-reactor",
       "thread-deletion-reactor",
+      "onshape-workspace-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

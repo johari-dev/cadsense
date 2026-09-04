@@ -1,4 +1,14 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@cadsense/contracts";
+import {
+  OnshapeConnectionId,
+  OnshapeDocumentId,
+  OnshapeElementId,
+  OnshapeProjectSource,
+  OnshapeWorkspaceId,
+  ProjectId,
+  ThreadId,
+  ProviderInstanceId,
+  onshapeProjectSourceIdentity,
+} from "@cadsense/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -33,6 +43,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5.4",
         },
+        onshapeSource: null,
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
         deletedAt: null,
@@ -124,6 +135,50 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-opus-4-6",
       });
+    }),
+  );
+
+  it.effect("round-trips Onshape source metadata and stores its stable identity", () =>
+    Effect.gen(function* () {
+      const projects = yield* ProjectionProjectRepository;
+      const sql = yield* SqlClient.SqlClient;
+      const source = OnshapeProjectSource.make({
+        connectionId: OnshapeConnectionId.make("00000000-0000-4000-8000-000000000001"),
+        host: "https://cad.onshape.com",
+        documentId: OnshapeDocumentId.make("05760c4d8b40fba37db8fa48"),
+        workspaceType: "w",
+        workspaceId: OnshapeWorkspaceId.make("f31b499c519e8471cced93dc"),
+        elementId: OnshapeElementId.make("b53dde24ab8b46d679af9944"),
+        configuration: "Size=Large",
+      });
+
+      yield* projects.upsert({
+        projectId: ProjectId.make("project-onshape-source"),
+        title: "Onshape project",
+        workspaceRoot: "/tmp/project-onshape-source",
+        defaultModelSelection: null,
+        onshapeSource: source,
+        createdAt: "2026-09-04T00:00:00.000Z",
+        updatedAt: "2026-09-04T00:00:00.000Z",
+        deletedAt: null,
+      });
+
+      const rows = yield* sql<{
+        readonly onshapeSource: string | null;
+        readonly onshapeSourceKey: string | null;
+      }>`
+        SELECT
+          onshape_source_json AS "onshapeSource",
+          onshape_source_key AS "onshapeSourceKey"
+        FROM projection_projects
+        WHERE project_id = 'project-onshape-source'
+      `;
+      assert.strictEqual(rows[0]?.onshapeSourceKey, onshapeProjectSourceIdentity(source));
+
+      const persisted = yield* projects.getById({
+        projectId: ProjectId.make("project-onshape-source"),
+      });
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.onshapeSource, source);
     }),
   );
 });

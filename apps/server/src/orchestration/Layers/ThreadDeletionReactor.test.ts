@@ -94,6 +94,7 @@ describe("ThreadDeletionReactor drain", () => {
             Stream.map(() => deletedEvent(2)),
           ),
         ),
+        subscribeDomainEvents: Effect.die("Unused test service method."),
       } as unknown as OrchestrationEngineShape;
       const providerService = {
         stopSession: () =>

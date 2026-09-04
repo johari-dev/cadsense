@@ -17,6 +17,8 @@ import type {
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as PubSub from "effect/PubSub";
+import type * as Scope from "effect/Scope";
 import type * as Stream from "effect/Stream";
 
 import type { OrchestrationDispatchError } from "../Errors.ts";
@@ -63,6 +65,18 @@ export interface OrchestrationEngineShape {
    * This is a hot runtime stream (new events only), not a historical replay.
    */
   readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>;
+
+  /**
+   * Acquire a hot event subscription explicitly.
+   *
+   * Unlike `streamDomainEvents`, acquisition is observable, allowing startup
+   * code to close the snapshot/subscription handoff gap before commands open.
+   */
+  readonly subscribeDomainEvents: Effect.Effect<
+    PubSub.Subscription<OrchestrationEvent>,
+    never,
+    Scope.Scope
+  >;
 
   /**
    * The latest sequence reflected in the engine's authoritative command read
