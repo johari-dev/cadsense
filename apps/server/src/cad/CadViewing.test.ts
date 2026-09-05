@@ -22,6 +22,7 @@ import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEn
 import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { OrchestrationListenerCallbackError } from "../orchestration/Errors.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
@@ -106,7 +107,11 @@ type TestCommand = {
     "commandId"
   >;
 }[OrchestrationCommand["type"]];
-const harness = Effect.fn(function* (multiple = false, advanceDuringCapture = false) {
+const harness = Effect.fn(function* (
+  multiple = false,
+  advanceDuringCapture = false,
+  loseCaptureReceipt = false,
+) {
   const engine = yield* OrchestrationEngineService;
   let sequence = 0;
   const dispatch = (command: TestCommand) =>
@@ -205,6 +210,22 @@ const harness = Effect.fn(function* (multiple = false, advanceDuringCapture = fa
   const renderRequests: CadRenderRequest[] = [];
   const renderedBytes = new Uint8Array([1, 2, 3]);
   const artifacts = yield* makeArtifacts.pipe(
+    Effect.provideService(OrchestrationEngineService, {
+      ...engine,
+      dispatch: (command, options) =>
+        engine.dispatch(command, options).pipe(
+          Effect.flatMap((receipt) =>
+            loseCaptureReceipt && command.type === "thread.cad.capture.record"
+              ? Effect.fail(
+                  new OrchestrationListenerCallbackError({
+                    listener: "domain-event",
+                    detail: "Test receipt failure after commit",
+                  }),
+                )
+              : Effect.succeed(receipt),
+          ),
+        ),
+    }),
     Effect.provideService(
       CadRenderBroker,
       CadRenderBroker.of({
@@ -259,6 +280,43 @@ const harness = Effect.fn(function* (multiple = false, advanceDuringCapture = fa
     snapshots,
   };
 });
+
+it.effect(
+  "retains a committed image when its receipt is uncertain and recovers its final view",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness(false, false, true);
+      const contextId = yield* h.service.resolveContext(threadId);
+      const turnId = TurnId.make("uncertain-capture");
+      yield* h.service.withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            yield* tools.context();
+            yield* tools.updateView({
+              expectedRevision: 0,
+              operations: [{ type: "explode", amount: 0.3 }],
+            });
+            assert.equal(
+              (yield* tools.capture({ expectedRevision: 1 }).pipe(Effect.flip)).reason,
+              "capability-unavailable",
+            );
+          }),
+        turnId,
+      );
+      const candidate = yield* readLatestCadCapture(threadId, turnId);
+      assert.isNotNull(candidate);
+      const fs = yield* FileSystem.FileSystem;
+      assert.deepEqual(
+        yield* fs.readFile(candidate!.record.capture.artifact.path),
+        h.renderedBytes,
+      );
+      const recovered = yield* h.recreatePresentation;
+      assert.isTrue(yield* recovered.settle(threadId));
+      assert.equal((yield* readCadUserView(threadId))?.view.explosion, 0.3);
+      assert.equal(h.pins(), 0);
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 
 it.effect("recovers only the latest durable capture and rejects an obsolete presentation", () =>
   Effect.gen(function* () {
