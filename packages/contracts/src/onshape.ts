@@ -131,11 +131,13 @@ export const OnshapeConnectionSummary = Schema.Struct({
   name: OnshapeConnectionName,
   host: OnshapeConnectionHost,
   verifiedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
 });
 export type OnshapeConnectionSummary = typeof OnshapeConnectionSummary.Type;
 
 export const OnshapeConnectionListResult = Schema.Struct({
   connections: Schema.Array(OnshapeConnectionSummary),
+  catalogUpdatedAt: IsoDateTime,
 });
 export type OnshapeConnectionListResult = typeof OnshapeConnectionListResult.Type;
 
@@ -172,6 +174,7 @@ export type OnshapeConnectionRemoveInput = typeof OnshapeConnectionRemoveInput.T
 
 export const OnshapeConnectionRemoveResult = Schema.Struct({
   connectionId: OnshapeConnectionId,
+  updatedAt: IsoDateTime,
 });
 export type OnshapeConnectionRemoveResult = typeof OnshapeConnectionRemoveResult.Type;
 

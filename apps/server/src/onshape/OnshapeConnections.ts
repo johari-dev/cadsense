@@ -67,6 +67,10 @@ interface CredentialBlobRow {
   readonly credentialRevision: string;
 }
 
+interface ConnectionCatalogRow {
+  readonly updatedAt: string;
+}
+
 export interface OnshapeConnectionsShape {
   readonly list: () => Effect.Effect<OnshapeConnectionListResult, OnshapeConnectionError>;
   readonly create: (
@@ -127,6 +131,17 @@ const parseRetryAfterSeconds = (value: string | null): number | undefined => {
   return Number.isSafeInteger(seconds) && seconds <= 86_400 ? seconds : undefined;
 };
 
+const nextUpdatedAt = Effect.fn("OnshapeConnections.nextUpdatedAt")(function* (
+  previousUpdatedAt: string | null,
+) {
+  const now = yield* DateTime.now;
+  if (previousUpdatedAt === null) return DateTime.formatIso(now);
+  const previous = DateTime.makeUnsafe(previousUpdatedAt);
+  return DateTime.formatIso(
+    DateTime.isLessThan(previous, now) ? now : DateTime.add(previous, { milliseconds: 1 }),
+  );
+});
+
 const decodeSummary = Effect.fn("OnshapeConnections.decodeSummary")(function* (
   row: ConnectionRow,
   operation: OnshapeConnectionPersistenceOperation,
@@ -136,6 +151,7 @@ const decodeSummary = Effect.fn("OnshapeConnections.decodeSummary")(function* (
     name: row.name,
     host: row.host,
     verifiedAt: row.verifiedAt,
+    updatedAt: row.updatedAt,
   }).pipe(Effect.mapError(() => persistenceError(operation)));
 });
 
@@ -196,6 +212,30 @@ export const make = Effect.gen(function* () {
       Effect.mapError(() => persistenceError(operation)),
       Effect.map((rows) => Option.fromNullishOr(rows[0])),
     );
+  });
+
+  const getCatalogUpdatedAt = Effect.fn("OnshapeConnections.getCatalogUpdatedAt")(function* (
+    operation: OnshapeConnectionPersistenceOperation,
+  ) {
+    const rows = yield* sql<ConnectionCatalogRow>`
+      SELECT updated_at AS "updatedAt"
+      FROM onshape_connection_catalog_state
+      WHERE singleton = 1
+    `.pipe(Effect.mapError(() => persistenceError(operation)));
+    const row = rows[0];
+    if (row === undefined) return yield* persistenceError(operation);
+    return row.updatedAt;
+  });
+
+  const setCatalogUpdatedAt = Effect.fn("OnshapeConnections.setCatalogUpdatedAt")(function* (
+    updatedAt: string,
+    operation: OnshapeConnectionPersistenceOperation,
+  ) {
+    yield* sql`
+      UPDATE onshape_connection_catalog_state
+      SET updated_at = ${updatedAt}
+      WHERE singleton = 1
+    `.pipe(Effect.mapError(() => persistenceError(operation)));
   });
 
   const nameExists = Effect.fn("OnshapeConnections.nameExists")(function* (
@@ -385,9 +425,16 @@ export const make = Effect.gen(function* () {
   );
 
   const list: OnshapeConnectionsShape["list"] = Effect.fn("OnshapeConnections.list")(function* () {
-    const rows = yield* queryRows("list");
-    const connections = yield* Effect.forEach(rows, (row) => decodeSummary(row, "list"));
-    return { connections };
+    return yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const rows = yield* queryRows("list");
+          const connections = yield* Effect.forEach(rows, (row) => decodeSummary(row, "list"));
+          const catalogUpdatedAt = yield* getCatalogUpdatedAt("list");
+          return { connections, catalogUpdatedAt };
+        }),
+      )
+      .pipe(Effect.mapError(() => persistenceError("list")));
   });
 
   const create: OnshapeConnectionsShape["create"] = Effect.fn("OnshapeConnections.create")(
@@ -413,6 +460,7 @@ export const make = Effect.gen(function* () {
             Effect.mapError(() => persistenceError("create")),
           );
           const verifiedAt = DateTime.formatIso(yield* DateTime.now);
+          const updatedAt = yield* nextUpdatedAt(yield* getCatalogUpdatedAt("create"));
           const row: ConnectionRow = {
             connectionId,
             name: input.name,
@@ -420,7 +468,7 @@ export const make = Effect.gen(function* () {
             credentialRevision,
             verifiedAt,
             createdAt: verifiedAt,
-            updatedAt: verifiedAt,
+            updatedAt,
           };
           const blob = { connectionId, credentialRevision };
           let committed = false;
@@ -435,6 +483,7 @@ export const make = Effect.gen(function* () {
                 .withTransaction(
                   insertConnection(row, "create").pipe(
                     Effect.andThen(trackCredential(blob, "active", "create")),
+                    Effect.andThen(setCatalogUpdatedAt(updatedAt, "create")),
                   ),
                 )
                 .pipe(
@@ -470,12 +519,16 @@ export const make = Effect.gen(function* () {
           if (yield* nameExists(input.name, "rename", input.connectionId)) {
             return yield* new OnshapeConnectionConflictError();
           }
-          const updatedAt = DateTime.formatIso(yield* DateTime.now);
-          yield* sql`
-            UPDATE onshape_connections
-            SET name = ${input.name}, updated_at = ${updatedAt}
-            WHERE connection_id = ${input.connectionId}
-          `.pipe(Effect.mapError(() => persistenceError("rename")));
+          const updatedAt = yield* nextUpdatedAt(yield* getCatalogUpdatedAt("rename"));
+          yield* sql
+            .withTransaction(
+              sql`
+                UPDATE onshape_connections
+                SET name = ${input.name}, updated_at = ${updatedAt}
+                WHERE connection_id = ${input.connectionId}
+              `.pipe(Effect.andThen(setCatalogUpdatedAt(updatedAt, "rename"))),
+            )
+            .pipe(Effect.mapError(() => persistenceError("rename")));
           return yield* decodeSummary({ ...existing.value, name: input.name, updatedAt }, "rename");
         }),
       );
@@ -503,6 +556,7 @@ export const make = Effect.gen(function* () {
           Effect.mapError(() => persistenceError("replace-credentials")),
         );
         const verifiedAt = DateTime.formatIso(yield* DateTime.now);
+        const updatedAt = yield* nextUpdatedAt(yield* getCatalogUpdatedAt("replace-credentials"));
         const candidate = { connectionId: input.connectionId, credentialRevision };
         const previous = {
           connectionId: input.connectionId,
@@ -529,9 +583,12 @@ export const make = Effect.gen(function* () {
                     sql`
                       UPDATE onshape_connections
                       SET host = ${host}, credential_revision = ${credentialRevision},
-                          verified_at = ${verifiedAt}, updated_at = ${verifiedAt}
+                          verified_at = ${verifiedAt}, updated_at = ${updatedAt}
                       WHERE connection_id = ${input.connectionId}
-                    `.pipe(Effect.mapError(() => persistenceError("replace-credentials"))),
+                    `.pipe(
+                      Effect.andThen(setCatalogUpdatedAt(updatedAt, "replace-credentials")),
+                      Effect.mapError(() => persistenceError("replace-credentials")),
+                    ),
                   ),
                 ),
               )
@@ -560,7 +617,7 @@ export const make = Effect.gen(function* () {
           ),
         );
         return yield* decodeSummary(
-          { ...existing.value, host, credentialRevision, verifiedAt, updatedAt: verifiedAt },
+          { ...existing.value, host, credentialRevision, verifiedAt, updatedAt },
           "replace-credentials",
         );
       }),
@@ -575,6 +632,7 @@ export const make = Effect.gen(function* () {
           if (Option.isNone(existing)) {
             return yield* new OnshapeConnectionNotFoundError({ connectionId: input.connectionId });
           }
+          const updatedAt = yield* nextUpdatedAt(yield* getCatalogUpdatedAt("remove"));
           const active = {
             connectionId: input.connectionId,
             credentialRevision: existing.value.credentialRevision,
@@ -600,6 +658,7 @@ export const make = Effect.gen(function* () {
                     DELETE FROM onshape_connections
                     WHERE connection_id = ${input.connectionId}
                   `),
+                  Effect.andThen(setCatalogUpdatedAt(updatedAt, "remove")),
                 ),
               )
               .pipe(
@@ -623,7 +682,7 @@ export const make = Effect.gen(function* () {
               ),
             { discard: true },
           );
-          return { connectionId: input.connectionId };
+          return { connectionId: input.connectionId, updatedAt };
         }),
       );
     },

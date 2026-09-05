@@ -50,6 +50,7 @@ describe("Onshape connection contracts", () => {
       name: "Competition CAD",
       host: "https://cad.onshape.com",
       verifiedAt: "2026-09-04T00:00:00.000Z",
+      updatedAt: "2026-09-04T00:00:00.000Z",
       accessKeyId: "must-not-cross-the-wire",
       secretKey: "must-not-cross-the-wire",
     });
@@ -58,18 +59,21 @@ describe("Onshape connection contracts", () => {
       name: "Competition CAD",
       host: "https://cad.onshape.com",
       verifiedAt: "2026-09-04T00:00:00.000Z",
+      updatedAt: "2026-09-04T00:00:00.000Z",
     });
     expect(JSON.stringify(summary)).not.toContain("must-not-cross-the-wire");
   });
 
   it("decodes only redacted connection summaries in list results", () => {
     const result = decodeConnectionListResult({
+      catalogUpdatedAt: "2026-09-04T00:00:00.000Z",
       connections: [
         {
           connectionId: "00000000-0000-4000-8000-000000000001",
           name: "Competition CAD",
           host: "https://cad.onshape.com",
           verifiedAt: "2026-09-04T00:00:00.000Z",
+          updatedAt: "2026-09-04T00:00:00.000Z",
           secretKey: "must-not-cross-the-wire",
         },
       ],
@@ -81,8 +85,10 @@ describe("Onshape connection contracts", () => {
         name: "Competition CAD",
         host: "https://cad.onshape.com",
         verifiedAt: "2026-09-04T00:00:00.000Z",
+        updatedAt: "2026-09-04T00:00:00.000Z",
       },
     ]);
+    expect(result.catalogUpdatedAt).toBe("2026-09-04T00:00:00.000Z");
   });
 
   it("rejects oversized connection names, hosts, and credentials", () => {

@@ -63,6 +63,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   { id: "keybindings", title: "Keybindings", to: "/settings/keybindings" },
   { id: "providers", title: "Providers", to: "/settings/providers" },
   {
+    id: "onshape-connections",
+    title: "Onshape connections",
+    to: "/settings/integrations",
+    targetId: "onshape-connections",
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",

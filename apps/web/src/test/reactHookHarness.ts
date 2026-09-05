@@ -1,4 +1,33 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { DependencyList, Dispatch, EffectCallback, SetStateAction } from "react";
+
+interface EffectSlot {
+  readonly _tag: "EffectSlot";
+  readonly dependencies: DependencyList | undefined;
+  readonly cleanup: void | (() => void);
+}
+
+interface ExternalStoreSlot {
+  readonly _tag: "ExternalStoreSlot";
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly getSnapshot: () => unknown;
+  cleanup: () => void;
+  snapshot: unknown;
+}
+
+function isEffectSlot(value: unknown): value is EffectSlot {
+  return (
+    typeof value === "object" && value !== null && "_tag" in value && value._tag === "EffectSlot"
+  );
+}
+
+function isExternalStoreSlot(value: unknown): value is ExternalStoreSlot {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "_tag" in value &&
+    value._tag === "ExternalStoreSlot"
+  );
+}
 
 /**
  * Minimal React hook shim for tests that call components as plain functions
@@ -44,6 +73,10 @@ export function createReactHookHarness() {
       cursor = 0;
     },
     reset() {
+      for (const slot of slots) {
+        if (isEffectSlot(slot)) slot.cleanup?.();
+        if (isExternalStoreSlot(slot)) slot.cleanup();
+      }
       cursor = 0;
       slots = [];
     },
@@ -69,6 +102,25 @@ export function createReactHookHarness() {
       }
       return slots[index] as { current: T };
     },
+    useEffect(effect: EffectCallback, dependencies?: DependencyList): void {
+      const index = nextIndex();
+      const previous = slots[index];
+      const unchanged =
+        isEffectSlot(previous) &&
+        dependencies !== undefined &&
+        previous.dependencies !== undefined &&
+        dependencies.length === previous.dependencies.length &&
+        dependencies.every((dependency, dependencyIndex) =>
+          Object.is(dependency, previous.dependencies?.[dependencyIndex]),
+        );
+      if (unchanged) return;
+      if (isEffectSlot(previous)) previous.cleanup?.();
+      slots[index] = {
+        _tag: "EffectSlot",
+        dependencies,
+        cleanup: effect(),
+      } satisfies EffectSlot;
+    },
     useState<T>(initialValue: T | (() => T)): [T, Dispatch<SetStateAction<T>>] {
       const index = nextIndex();
       if (index >= slots.length) {
@@ -81,6 +133,34 @@ export function createReactHookHarness() {
           typeof nextValue === "function" ? (nextValue as (value: T) => T)(previous) : nextValue;
       };
       return [slots[index] as T, setValue];
+    },
+    useSyncExternalStore<T>(
+      subscribe: (listener: () => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      const index = nextIndex();
+      const previous = slots[index];
+      if (
+        !isExternalStoreSlot(previous) ||
+        previous.subscribe !== subscribe ||
+        previous.getSnapshot !== getSnapshot
+      ) {
+        if (isExternalStoreSlot(previous)) previous.cleanup();
+        const slot: ExternalStoreSlot = {
+          _tag: "ExternalStoreSlot",
+          subscribe,
+          getSnapshot,
+          cleanup: () => undefined,
+          snapshot: getSnapshot(),
+        };
+        slot.cleanup = subscribe(() => {
+          slot.snapshot = getSnapshot();
+        });
+        slots[index] = slot;
+      } else {
+        previous.snapshot = getSnapshot();
+      }
+      return (slots[index] as ExternalStoreSlot).snapshot as T;
     },
   };
 }
