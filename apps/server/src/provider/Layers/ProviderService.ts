@@ -47,7 +47,12 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import {
+  type ProviderAdapterError,
+  ProviderAdapterProcessError,
+  ProviderValidationError,
+} from "../Errors.ts";
+import { ThreadBackgroundLivenessService } from "../../orchestration/ThreadBackgroundLiveness.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
@@ -220,6 +225,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+  const backgroundLiveness = yield* Effect.serviceOption(ThreadBackgroundLivenessService);
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const issueMcpCredential =
     options?.issueMcpCredential ?? McpSessionRegistry.issueActiveMcpCredential;
@@ -358,10 +364,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const subscribedAdapters = yield* Ref.make(
     new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>(),
   );
+  const retiringAdapters = new Map<
+    ProviderAdapterShape<ProviderAdapterError>,
+    ProviderInstanceId
+  >();
 
-  const getAdapterEntries = Ref.get(subscribedAdapters).pipe(
-    Effect.map((map) => Array.from(map.entries())),
-  );
+  const getAdapterEntries = Effect.gen(function* () {
+    const entries = Array.from((yield* Ref.get(subscribedAdapters)).entries());
+    for (const [adapter, instanceId] of retiringAdapters) {
+      if ((yield* adapter.listSessions()).length === 0) retiringAdapters.delete(adapter);
+      else entries.push([instanceId, adapter]);
+    }
+    return entries;
+  });
 
   // Rebuild the map of id → adapter from the registry and fork a new event
   // subscription for every instance that is either brand new or whose adapter
@@ -379,6 +394,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         .pipe(Effect.tapError(Effect.logWarning), Effect.option);
       if (Option.isNone(adapterOption)) continue;
       const adapter = adapterOption.value;
+      retiringAdapters.delete(adapter);
       next.set(id, adapter);
       if (previous.get(id) !== adapter) {
         yield* Stream.runForEach(adapter.streamEvents, (event) =>
@@ -392,6 +408,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ).pipe(Effect.forkScoped);
       }
     }
+    // Settings can replace an adapter before its native children finish exiting.
+    // Keep that adapter reachable for shutdown admission until its registry is empty.
+    for (const [id, adapter] of previous)
+      if (next.get(id) !== adapter) retiringAdapters.set(adapter, id);
     yield* Ref.set(subscribedAdapters, next);
   });
 
@@ -975,6 +995,50 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const stopIdleSession: ProviderServiceMethod<"stopIdleSession"> = Effect.fn("stopIdleSession")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.stopIdleSession",
+        schema: ProviderStopSessionInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.stopIdleSession",
+        allowRecovery: false,
+      });
+      const fail = (detail: string) =>
+        new ProviderAdapterProcessError({
+          provider: routed.adapter.provider,
+          threadId: input.threadId,
+          detail,
+        });
+      const candidates = yield* Effect.forEach(yield* getAdapterEntries, ([, adapter]) =>
+        adapter.hasSession(input.threadId).pipe(Effect.map((found) => (found ? [adapter] : []))),
+      );
+      const targets = candidates.flat();
+      if (targets.length === 0 || targets.some((adapter) => !adapter.stopIdleSession))
+        return yield* fail("Native session shutdown cannot be confirmed.");
+      if (Option.isNone(backgroundLiveness))
+        return yield* fail("Native background activity cannot be checked.");
+      if (backgroundLiveness.value.getThreadBackgroundLiveness(input.threadId) === "working")
+        return yield* fail("Native background work is active.");
+      for (const adapter of targets) {
+        if (!adapter.stopIdleSession)
+          return yield* fail("Native session shutdown cannot be confirmed.");
+        yield* adapter.stopIdleSession(input.threadId);
+      }
+      yield* clearMcpSession(input.threadId);
+      yield* directory.upsert({
+        threadId: input.threadId,
+        provider: routed.adapter.provider,
+        providerInstanceId: routed.instanceId,
+        status: "stopped",
+        runtimePayload: { activeTurnId: null },
+      });
+    },
+  );
+
   const listSessions: ProviderServiceMethod<"listSessions"> = Effect.fn("listSessions")(
     function* () {
       const currentAdapters = yield* getAdapterEntries;
@@ -1021,6 +1085,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const sessions: ProviderSession[] = [];
       for (const session of activeSessions) {
+        // A replaced runtime remains visible while its old native process is still exiting.
+        // Its current thread binding belongs to the replacement, not to this shutdown receipt.
+        if (session.status === "closed") {
+          sessions.push(session);
+          continue;
+        }
         const binding = bindingsByThreadId.get(session.threadId);
         if (!binding) {
           sessions.push(session);
@@ -1176,6 +1246,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopIdleSession,
     listSessions,
     getCapabilities,
     getInstanceInfo,

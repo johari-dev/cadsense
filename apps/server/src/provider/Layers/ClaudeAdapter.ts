@@ -20,8 +20,11 @@ import {
   type ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@cadsense/shared/cliArgs";
+import { makeClaudeProcessExit } from "./ClaudeProcessExit.ts";
 import {
   ApprovalRequestId,
+  MONITOR_TASK_TYPES,
+  INERT_TASK_TYPES,
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
@@ -278,6 +281,8 @@ function rememberPendingTaskModel(
 }
 
 interface ClaudeSessionContext {
+  readonly processExit: ReturnType<typeof makeClaudeProcessExit>;
+  quiescing: boolean;
   session: ProviderSession;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
@@ -331,6 +336,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
 }
 
 export interface ClaudeAdapterLiveOptions {
+  readonly spawnClaudeCodeProcess?: NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>;
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly createQuery?: (input: {
@@ -1732,6 +1738,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }) as ClaudeQueryRuntime);
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
+  const stoppingSessions = new Set<ClaudeSessionContext>();
+  const startingProcesses = new Set<{
+    session: ProviderSession;
+    processExit: ReturnType<typeof makeClaudeProcessExit>;
+  }>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -3676,6 +3687,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
 
     context.stopped = true;
+    stoppingSessions.add(context);
 
     for (const taskId of Array.from(context.liveTaskIds)) {
       if (!context.liveTaskIds.delete(taskId)) {
@@ -3777,7 +3789,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         }),
       );
     }
-    if (context.stopped || context.session.status === "closed") {
+    if (context.stopped || context.quiescing || context.session.status === "closed") {
       return Effect.fail(
         new ProviderAdapterSessionClosedError({
           provider: PROVIDER,
@@ -4287,7 +4299,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? [input.cwd] : []),
         serverConfig.attachmentsDir,
       ];
+      let adopted = false;
+      const processExit = makeClaudeProcessExit(options?.spawnClaudeCodeProcess, () => {
+        if (!adopted) startingProcesses.add(startingProcess);
+      });
+      const startingProcess = {
+        processExit,
+        session: {
+          threadId,
+          provider: PROVIDER,
+          providerInstanceId: boundInstanceId,
+          status: "connecting",
+          runtimeMode: input.runtimeMode,
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          createdAt: startedAt,
+          updatedAt: startedAt,
+        } satisfies ProviderSession,
+      };
       const queryOptions: ClaudeQueryOptions = {
+        spawnClaudeCodeProcess: processExit.spawn,
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
@@ -4389,6 +4419,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
 
       const context: ClaudeSessionContext = {
+        processExit,
+        quiescing: false,
         session,
         promptQueue,
         query: queryRuntime,
@@ -4417,6 +4449,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
+      adopted = true;
+      startingProcesses.delete(startingProcess);
 
       const sessionStartedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -4681,7 +4715,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const stopSession: ClaudeAdapterShape["stopSession"] = Effect.fn("stopSession")(
     function* (threadId) {
-      const context = yield* requireSession(threadId);
+      // A failed confirmed-close attempt still permits the user's ordinary stop retry.
+      const context = sessions.get(threadId) ?? (yield* requireSession(threadId));
       yield* stopSessionInternal(context, {
         emitExitEvent: true,
       });
@@ -4689,12 +4724,81 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   );
 
   const listSessions: ClaudeAdapterShape["listSessions"] = () =>
-    Effect.sync(() => Array.from(sessions.values(), ({ session }) => ({ ...session })));
+    Effect.sync(() => {
+      for (const receipt of startingProcesses)
+        if (receipt.processExit.hasExited()) startingProcesses.delete(receipt);
+      for (const context of stoppingSessions)
+        if (context.processExit.hasExited()) stoppingSessions.delete(context);
+      return [...new Set([...sessions.values(), ...stoppingSessions, ...startingProcesses])].map(
+        ({ session }) => ({
+          ...session,
+        }),
+      );
+    });
+
+  const stopIdleSession = Effect.fn("stopIdleSession")(function* (threadId: ThreadId) {
+    const context = sessions.get(threadId);
+    const pending = [...stoppingSessions].filter(
+      (context) => context.session.threadId === threadId,
+    );
+    const fail = (detail: string) =>
+      new ProviderAdapterProcessError({ provider: PROVIDER, threadId, detail });
+    const starting = [...startingProcesses].filter(
+      (receipt) => receipt.session.threadId === threadId,
+    );
+    if (!context && pending.length === 0 && starting.length === 0)
+      return yield* fail("Claude session shutdown cannot be confirmed.");
+    for (const receipt of starting) {
+      yield* receipt.processExit.awaitExit.pipe(
+        Effect.mapError(() => fail("Claude process exit could not be confirmed.")),
+      );
+      startingProcesses.delete(receipt);
+    }
+    for (const stopped of pending) {
+      yield* stopped.processExit.awaitExit.pipe(
+        Effect.mapError(() => fail("Claude process exit could not be confirmed.")),
+      );
+      stoppingSessions.delete(stopped);
+    }
+    if (!context) return;
+    const working = [...context.liveTaskIds].some((id) => {
+      const type = context.taskAgents.get(id)?.taskType;
+      return type === undefined || (!MONITOR_TASK_TYPES.has(type) && !INERT_TASK_TYPES.has(type));
+    });
+    if (
+      !context.processExit.hasSpawned() ||
+      context.stopped ||
+      context.quiescing ||
+      context.session.status !== "ready" ||
+      context.session.activeTurnId !== undefined ||
+      context.turnState !== undefined ||
+      context.inFlightTools.size > 0 ||
+      working ||
+      context.pendingApprovals.size > 0 ||
+      context.pendingUserInputs.size > 0
+    ) {
+      return yield* fail("The Claude session is not confirmed idle.");
+    }
+    context.quiescing = true;
+    yield* stopSessionInternal(context, { emitExitEvent: true });
+    yield* context.processExit.awaitExit.pipe(
+      Effect.mapError(() => fail("Claude process exit could not be confirmed.")),
+    );
+    stoppingSessions.delete(context);
+  });
 
   const hasSession: ClaudeAdapterShape["hasSession"] = (threadId) =>
     Effect.sync(() => {
+      for (const receipt of startingProcesses)
+        if (receipt.processExit.hasExited()) startingProcesses.delete(receipt);
+      for (const context of stoppingSessions)
+        if (context.processExit.hasExited()) stoppingSessions.delete(context);
       const context = sessions.get(threadId);
-      return context !== undefined && !context.stopped;
+      return (
+        (context !== undefined && !context.stopped) ||
+        [...startingProcesses].some((receipt) => receipt.session.threadId === threadId) ||
+        [...stoppingSessions].some((context) => context.session.threadId === threadId)
+      );
     });
 
   const stopSessions = Effect.fn("stopSessions")(function* (
@@ -4737,6 +4841,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopIdleSession,
     listSessions,
     hasSession,
     stopAll,

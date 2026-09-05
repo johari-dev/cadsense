@@ -23,6 +23,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, vi } from "@effect/vitest";
 
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -150,7 +151,17 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Stream.fromQueue(this.eventQueue);
   }
 
-  close = Effect.promise(() => this.closeImpl());
+  private exited = false;
+  close = Effect.promise(() => this.closeImpl()).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        this.exited = true;
+      }),
+    ),
+  );
+  closeIdleConfirmed = Effect.die("Unsupported test operation: closeIdleConfirmed");
+  processExited = Effect.sync(() => this.exited);
+  awaitProcessExit = Effect.die("Unsupported test operation: awaitProcessExit");
 
   emit(event: ProviderEvent) {
     return Queue.offer(this.eventQueue, event).pipe(Effect.asVoid);
@@ -273,7 +284,11 @@ validationLayer("CodexAdapterLive validation", (it) => {
         runtimeMode: "full-access",
       });
 
-      NodeAssert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+      const input = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      NodeAssert.ok(input);
+      const { onProcessSpawned, ...launchInput } = input;
+      NodeAssert.equal(typeof onProcessSpawned, "function");
+      NodeAssert.deepStrictEqual(launchInput, {
         binaryPath: "codex",
         cwd: process.cwd(),
         launchArgs: "",
@@ -1562,6 +1577,58 @@ scopedLifecycleLayer("CodexAdapterLive scoped lifecycle", (it) => {
     }),
   );
 });
+
+it.effect("keeps a process spawned during failed construction visible until physical exit", () =>
+  Effect.gen(function* () {
+    const exited = yield* Deferred.make<void>();
+    let hasExited = false;
+    const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
+      makeRuntime: (options) =>
+        Effect.gen(function* () {
+          const now = "2026-09-05T00:00:00Z";
+          options.onProcessSpawned?.({
+            session: {
+              threadId: options.threadId,
+              provider: ProviderDriverKind.make("codex"),
+              status: "connecting",
+              runtimeMode: options.runtimeMode,
+              createdAt: now,
+              updatedAt: now,
+            },
+            processExited: Effect.sync(() => hasExited),
+            awaitProcessExit: Deferred.await(exited),
+          });
+          return yield* new CodexErrors.CodexAppServerSpawnError({
+            command: "fake",
+            cause: new Error("Failure after spawn"),
+          });
+        }),
+    });
+    const threadId = asThreadId("failed-after-spawn");
+    NodeAssert.equal(
+      (yield* Effect.exit(adapter.startSession({ threadId, runtimeMode: "full-access" })))._tag,
+      "Failure",
+    );
+    NodeAssert.equal(yield* adapter.hasSession(threadId), true);
+    NodeAssert.equal((yield* adapter.listSessions()).length, 1);
+    const gate = adapter.stopIdleSession;
+    NodeAssert.ok(gate);
+    const shutdown = yield* gate(threadId).pipe(Effect.forkChild);
+    hasExited = true;
+    yield* Deferred.succeed(exited, undefined);
+    yield* Fiber.join(shutdown);
+    NodeAssert.equal((yield* adapter.listSessions()).length, 0);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(
+        ServerConfig.layerTest(process.cwd(), process.cwd()),
+        ServerSettingsService.layerTest(),
+        providerSessionDirectoryTestLayer,
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+  ),
+);
 
 const scopedFailureRuntimeFactory = makeScopedRuntimeFactory({ failConstruction: true });
 const scopedFailureLayer = it.layer(

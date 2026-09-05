@@ -41,6 +41,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   ProviderAdapterRequestError,
+  ProviderAdapterProcessError,
   ProviderAdapterSessionNotFoundError,
   ProviderUnsupportedError,
   ProviderValidationError,
@@ -63,6 +64,7 @@ import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
+import * as ThreadBackgroundLiveness from "../../orchestration/ThreadBackgroundLiveness.ts";
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
 const serverConfigTestLayer = ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
@@ -171,6 +173,16 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     (): Effect.Effect<ReadonlyArray<ProviderSession>> =>
       Effect.sync(() => Array.from(sessions.values())),
   );
+  const stopIdleSession = vi.fn(
+    (threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.fail(
+        new ProviderAdapterProcessError({
+          provider,
+          threadId,
+          detail: "Unsupported test operation: stopIdleSession",
+        }),
+      ),
+  );
 
   const hasSession = vi.fn(
     (threadId: ThreadId): Effect.Effect<boolean> => Effect.succeed(sessions.has(threadId)),
@@ -217,6 +229,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopIdleSession,
     listSessions,
     hasSession,
     readThread,
@@ -252,6 +265,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopIdleSession,
     listSessions,
     hasSession,
     readThread,
@@ -296,6 +310,7 @@ function makeProviderServiceLayer() {
   const layer = it.layer(
     Layer.mergeAll(
       makeProviderServiceLive().pipe(
+        Layer.provideMerge(ThreadBackgroundLiveness.layer),
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
@@ -596,6 +611,67 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
 );
 
 const routing = makeProviderServiceLayer();
+
+const quiescence = makeProviderServiceLayer();
+quiescence.layer("ProviderService confirmed idle shutdown", (it) => {
+  it.effect("does not recover unknown sessions or pretend unsupported shutdown succeeded", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      assert.strictEqual(
+        (yield* Effect.exit(
+          provider.stopIdleSession({ threadId: asThreadId("missing-quiescence") }),
+        ))._tag,
+        "Failure",
+      );
+      const threadId = asThreadId("unsupported-quiescence");
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      assert.strictEqual(
+        (yield* Effect.exit(provider.stopIdleSession({ threadId })))._tag,
+        "Failure",
+      );
+      assert.strictEqual(yield* quiescence.codex.adapter.hasSession(threadId), true);
+    }),
+  );
+  it.effect("rejects working descendants and preserves resume state after confirmed shutdown", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const liveness = yield* ThreadBackgroundLiveness.ThreadBackgroundLivenessService;
+      const threadId = asThreadId("idle-quiescence");
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      const before = yield* directory.getBinding(threadId);
+      quiescence.codex.stopIdleSession.mockClear();
+      quiescence.codex.stopIdleSession.mockImplementation((id) => quiescence.codex.stopSession(id));
+      liveness.recordTaskLiveness({
+        threadId,
+        taskId: "working",
+        taskType: undefined,
+        status: "running",
+        kind: "started",
+      });
+      assert.strictEqual(
+        (yield* Effect.exit(provider.stopIdleSession({ threadId })))._tag,
+        "Failure",
+      );
+      assert.strictEqual(quiescence.codex.stopIdleSession.mock.calls.length, 0);
+      liveness.clearThreadLiveness(threadId);
+      yield* provider.stopIdleSession({ threadId });
+      const after = yield* directory.getBinding(threadId);
+      assert.ok(Option.isSome(before) && Option.isSome(after));
+      assert.deepStrictEqual(after.value.resumeCursor, before.value.resumeCursor);
+      assert.strictEqual(after.value.status, "stopped");
+      assert.strictEqual(yield* quiescence.codex.adapter.hasSession(threadId), false);
+    }),
+  );
+});
 
 it.effect(
   "ProviderServiceLive uploads feedback through the adapter that recovered the session",

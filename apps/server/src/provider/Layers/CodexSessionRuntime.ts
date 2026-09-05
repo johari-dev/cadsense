@@ -153,7 +153,14 @@ type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["servi
 type CodexThreadItem =
   EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number];
 
+export interface CodexProcessReceipt {
+  readonly session: ProviderSession;
+  readonly processExited: Effect.Effect<boolean>;
+  readonly awaitProcessExit: Effect.Effect<void, CodexSessionRuntimeError>;
+}
+
 export interface CodexSessionRuntimeOptions {
+  readonly onProcessSpawned?: (receipt: CodexProcessReceipt) => void;
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly binaryPath: string;
@@ -252,6 +259,9 @@ export interface CodexSessionRuntimeShape {
   ) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly events: Stream.Stream<ProviderEvent, never>;
   readonly close: Effect.Effect<void>;
+  readonly closeIdleConfirmed: Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly processExited: Effect.Effect<boolean>;
+  readonly awaitProcessExit: Effect.Effect<void, CodexSessionRuntimeError>;
 }
 
 export type CodexSessionRuntimeError =
@@ -259,7 +269,17 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
+  | CodexSessionRuntimeQuiescenceError
   | CodexSessionRuntimeThreadIdMissingError;
+
+export class CodexSessionRuntimeQuiescenceError extends Schema.TaggedErrorClass<CodexSessionRuntimeQuiescenceError>()(
+  "CodexSessionRuntimeQuiescenceError",
+  { detail: Schema.String },
+) {
+  override get message() {
+    return this.detail;
+  }
+}
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -1198,6 +1218,7 @@ export const makeCodexSessionRuntime = (
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
+    const quiescingRef = yield* Ref.make(false);
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -1213,6 +1234,7 @@ export const makeCodexSessionRuntime = (
       env,
       extendEnv,
     });
+    const sessionCreatedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
@@ -1234,6 +1256,34 @@ export const makeCodexSessionRuntime = (
         ),
       );
 
+    const initialSession = {
+      provider: PROVIDER,
+      ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
+      status: "connecting",
+      runtimeMode: options.runtimeMode,
+      cwd: options.cwd,
+      ...(options.model ? { model: options.model } : {}),
+      threadId: options.threadId,
+      ...(options.resumeCursor !== undefined ? { resumeCursor: options.resumeCursor } : {}),
+      createdAt: sessionCreatedAt,
+      updatedAt: sessionCreatedAt,
+    } satisfies ProviderSession;
+    const processExited = child.isRunning.pipe(
+      Effect.map((running) => !running),
+      Effect.orElseSucceed(() => false),
+    );
+    const awaitProcessExit = child.exitCode.pipe(
+      Effect.asVoid,
+      Effect.timeout("10 seconds"),
+      Effect.mapError(
+        () =>
+          new CodexSessionRuntimeQuiescenceError({
+            detail: "Codex process exit could not be confirmed.",
+          }),
+      ),
+    );
+    options.onProcessSpawned?.({ session: initialSession, processExited, awaitProcessExit });
+
     const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
       Layer.build,
       Effect.provideService(Scope.Scope, runtimeScope),
@@ -1254,19 +1304,6 @@ export const makeCodexSessionRuntime = (
         ),
       );
 
-    const sessionCreatedAt = yield* nowIso;
-    const initialSession = {
-      provider: PROVIDER,
-      ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
-      status: "connecting",
-      runtimeMode: options.runtimeMode,
-      cwd: options.cwd,
-      ...(options.model ? { model: options.model } : {}),
-      threadId: options.threadId,
-      ...(options.resumeCursor !== undefined ? { resumeCursor: options.resumeCursor } : {}),
-      createdAt: sessionCreatedAt,
-      updatedAt: sessionCreatedAt,
-    } satisfies ProviderSession;
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
@@ -2317,11 +2354,44 @@ export const makeCodexSessionRuntime = (
       yield* Queue.shutdown(events);
     });
 
+    const closeIdleConfirmed = Effect.gen(function* () {
+      const session = yield* Ref.get(sessionRef);
+      if (
+        (yield* Ref.get(closedRef)) ||
+        (yield* Ref.get(quiescingRef)) ||
+        session.status !== "ready" ||
+        session.activeTurnId !== undefined ||
+        (yield* Ref.get(collabChildLiveTurnsRef)).size > 0 ||
+        (yield* Ref.get(pendingApprovalsRef)).size > 0 ||
+        (yield* Ref.get(pendingUserInputsRef)).size > 0
+      ) {
+        return yield* new CodexSessionRuntimeQuiescenceError({
+          detail: "The Codex session is not confirmed idle.",
+        });
+      }
+      yield* Ref.set(quiescingRef, true);
+      yield* child.kill({ forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER }).pipe(
+        Effect.andThen(child.exitCode),
+        Effect.timeout("10 seconds"),
+        Effect.mapError(
+          () =>
+            new CodexSessionRuntimeQuiescenceError({
+              detail: "Codex process exit could not be confirmed.",
+            }),
+        ),
+      );
+      yield* close;
+    });
+
     return {
       start,
       getSession: Ref.get(sessionRef),
       sendTurn: (input) =>
         Effect.gen(function* () {
+          if ((yield* Ref.get(quiescingRef)) || (yield* Ref.get(closedRef)))
+            return yield* new CodexSessionRuntimeQuiescenceError({
+              detail: "The Codex session is closing.",
+            });
           const providerThreadId = yield* readProviderThreadId;
           if (hasConfiguredMcpServer(options.appServerArgs)) {
             yield* client.request("config/mcpServer/reload", undefined).pipe(
@@ -2495,5 +2565,8 @@ export const makeCodexSessionRuntime = (
         }),
       events: Stream.fromQueue(events),
       close,
+      closeIdleConfirmed,
+      processExited,
+      awaitProcessExit,
     } satisfies CodexSessionRuntimeShape;
   });
