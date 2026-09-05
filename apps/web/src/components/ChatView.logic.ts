@@ -176,6 +176,7 @@ export function buildLocalDraftThread(
 export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
   return {
     ...shell,
+    backgroundLiveness: shell.backgroundLiveness ?? null,
     messages: [],
     proposedPlans: [],
     activities: [],
