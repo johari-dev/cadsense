@@ -14,6 +14,24 @@ export function createOnshapeProjectAtoms<R, E>(
       JSON.stringify([environmentId, input.projectId]),
   };
   return {
+    startCadOperation: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cad-user:start",
+      tag: WS_METHODS.cadUserStart,
+      scheduler,
+      concurrency,
+    }),
+    cancelCadOperation: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cad-user:cancel",
+      tag: WS_METHODS.cadUserCancel,
+      scheduler,
+      concurrency,
+    }),
+    setCadEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cad-user:enabled",
+      tag: WS_METHODS.cadUserSetEnabled,
+      scheduler,
+      concurrency,
+    }),
     create: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:onshape-projects:create",
       tag: WS_METHODS.onshapeProjectsCreate,

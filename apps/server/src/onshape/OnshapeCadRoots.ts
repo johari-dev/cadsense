@@ -47,9 +47,10 @@ export class OnshapeCadRootsError extends Schema.TaggedErrorClass<OnshapeCadRoot
 export class OnshapeCadRoots extends Context.Service<
   OnshapeCadRoots,
   {
-    readonly discover: (
+    readonly discover: <E = never, R = never>(
       source: OnshapeProjectSource,
-    ) => Effect.Effect<OnshapeCadRootCatalog, OnshapeConnectionError | OnshapeCadRootsError>;
+      beforeRequest?: Effect.Effect<void, E, R>,
+    ) => Effect.Effect<OnshapeCadRootCatalog, OnshapeConnectionError | OnshapeCadRootsError | E, R>;
   }
 >()("@cadsense/server/onshape/OnshapeCadRoots") {}
 
@@ -60,9 +61,21 @@ export class OnshapeCadRoots extends Context.Service<
 export const make = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
   const discover: OnshapeCadRoots["Service"]["discover"] = Effect.fn("OnshapeCadRoots.discover")(
-    function* (source) {
+    function* <E = never, R = never>(
+      source: OnshapeProjectSource,
+      beforeRequest?: Effect.Effect<void, E, R>,
+    ) {
       const read = (path: string, query = "") =>
-        connections.readJson({ connectionId: source.connectionId, host: source.host, path, query });
+        (beforeRequest ?? Effect.void).pipe(
+          Effect.andThen(
+            connections.readJson({
+              connectionId: source.connectionId,
+              host: source.host,
+              path,
+              query,
+            }),
+          ),
+        );
 
       // Resolve once, then list at that immutable revision even if the workspace advances.
       const microversionId =

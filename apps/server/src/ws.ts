@@ -95,6 +95,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import { CadUserOperations } from "./cad/CadUserOperations.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -382,6 +383,7 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
+      const cadUserOperations = yield* CadUserOperations;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -855,6 +857,22 @@ const makeWsRpcLayer = (
             WS_METHODS.onshapeProjectsSetConnection,
             onshapeProjects.setConnection(input),
             { "rpc.aggregate": "onshape-projects" },
+          ),
+        [WS_METHODS.cadUserStart]: (input) =>
+          observeRpcEffect(WS_METHODS.cadUserStart, cadUserOperations.start(input), {
+            "rpc.aggregate": "cad-user",
+          }),
+        [WS_METHODS.cadUserCancel]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cadUserCancel,
+            cadUserOperations.cancel(input.projectId, input.operationId),
+            { "rpc.aggregate": "cad-user" },
+          ),
+        [WS_METHODS.cadUserSetEnabled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cadUserSetEnabled,
+            cadUserOperations.setEnabled(input.projectId, input.enabled),
+            { "rpc.aggregate": "cad-user" },
           ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
