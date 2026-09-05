@@ -10,6 +10,7 @@ import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
 import { FetchHttpClient } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { OnshapeConnectionId } from "@cadsense/contracts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -32,6 +33,7 @@ interface HarnessState {
   status: number;
   retryAfter: string | null;
   failTransport: boolean;
+  failRead: boolean;
   verificationStarted: Deferred.Deferred<void> | null;
   verificationRelease: Deferred.Deferred<void> | null;
   failCreateAfterWrite: boolean;
@@ -52,6 +54,7 @@ const makeHarness = <E, R>(
     status: 200,
     retryAfter: null,
     failTransport: false,
+    failRead: false,
     verificationStarted: null,
     verificationRelease: null,
     failCreateAfterWrite: false,
@@ -75,10 +78,17 @@ const makeHarness = <E, R>(
     ServerSecretStore.ServerSecretStore,
     ServerSecretStore.ServerSecretStore.of({
       get: (name) =>
-        Effect.sync(() => {
-          const value = state.secrets.get(name);
-          return value === undefined ? Option.none() : Option.some(Uint8Array.from(value));
-        }),
+        state.failRead
+          ? Effect.fail(
+              new ServerSecretStore.SecretStoreReadError({
+                resource: "secret",
+                cause: new Error(OLD_SECRET_KEY),
+              }),
+            )
+          : Effect.sync(() => {
+              const value = state.secrets.get(name);
+              return value === undefined ? Option.none() : Option.some(Uint8Array.from(value));
+            }),
       set: (name, value) =>
         Effect.sync(() => {
           state.secrets.set(name, Uint8Array.from(value));
@@ -135,7 +145,11 @@ const makeHarness = <E, R>(
           Effect.andThen(
             state.failTransport
               ? Effect.fail(new OnshapeTransport.OnshapeTransportFailure())
-              : Effect.succeed({ status: state.status, retryAfter: state.retryAfter }),
+              : Effect.succeed({
+                  status: state.status,
+                  retryAfter: state.retryAfter,
+                  ...(request.responseType === "json" ? { body: { elements: [] } } : {}),
+                }),
           ),
         ),
     }),
@@ -198,7 +212,7 @@ describe("Onshape request signing", () => {
       const transport = yield* OnshapeTransport.OnshapeTransport;
       const response = yield* transport.execute({
         method: "GET",
-        url: "https://cad.onshape.com/api/v10/documents?limit=1",
+        url: "https://cad.onshape.com/api/v17/documents?limit=1",
         headers: { Accept: "application/json" },
       });
 
@@ -237,7 +251,7 @@ describe("Onshape request signing", () => {
       const failure = yield* transport
         .execute({
           method: "GET",
-          url: "https://cad.onshape.com/api/v10/documents?limit=1",
+          url: "https://cad.onshape.com/api/v17/documents?limit=1",
           headers: { Accept: "application/json" },
         })
         .pipe(Effect.flip, Effect.forkChild);
@@ -263,7 +277,7 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
       assert.equal(harness.state.requests.length, 1);
       assert.equal(
         harness.state.requests[0]?.url,
-        "https://cad.onshape.com/api/v10/documents?limit=1",
+        "https://cad.onshape.com/api/v17/documents?limit=1",
       );
       assert.equal(harness.state.requests[0]?.method, "GET");
       assert.equal(harness.state.requests[0]?.headers.Accept, "application/json");
@@ -860,4 +874,202 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
       }
     }),
   );
+});
+
+it.layer(NodeServices.layer)("Onshape authenticated JSON reads", (it) => {
+  const target = {
+    host: "https://cad.onshape.com",
+    path: "/api/v17/documents/example",
+    query: "configuration=Size%3DLarge%3BWidth%3D20+mm",
+  };
+
+  it.effect("signs the exact encoded query using the current saved credential revision", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const signer = yield* OnshapeRequestSigner.OnshapeRequestSigner;
+      const saved = yield* connections.create(createInput);
+      yield* connections.replaceCredentials({
+        connectionId: saved.connectionId,
+        host: saved.host,
+        accessKeyId: NEW_ACCESS_KEY,
+        secretKey: NEW_SECRET_KEY,
+      });
+      const body = yield* connections.readJson({
+        ...target,
+        connectionId: saved.connectionId,
+      });
+      assert.deepEqual(body, { elements: [] });
+      const request = harness.state.requests[2]!;
+      assert.equal(request.url, `${target.host}${target.path}?${target.query}`);
+      const expected = yield* signer.sign({
+        accessKeyId: NEW_ACCESS_KEY,
+        secretKey: NEW_SECRET_KEY,
+        method: "GET",
+        nonce: request.headers["On-Nonce"]!,
+        date: request.headers.Date!,
+        contentType: "application/json",
+        path: target.path,
+        query: target.query,
+      });
+      assert.equal(request.headers.Authorization, expected.Authorization);
+      assert.equal(harness.state.requests.length, 3);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect(
+    "rejects missing, mismatched, corrupt and unreadable credentials without requests",
+    () => {
+      const harness = makeMemoryHarness();
+      return Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        const saved = yield* connections.create(createInput);
+        const read = { ...target, connectionId: saved.connectionId };
+        assert.equal(
+          (yield* connections
+            .readJson({
+              ...read,
+              connectionId: OnshapeConnectionId.make("00000000-0000-4000-8000-000000000000"),
+            })
+            .pipe(Effect.asVoid, Effect.flip))._tag,
+          "OnshapeConnectionNotFoundError",
+        );
+        assert.equal(
+          (yield* connections
+            .readJson({ ...read, host: "https://enterprise.onshape.com" })
+            .pipe(Effect.asVoid, Effect.flip))._tag,
+          "OnshapeInvalidHostError",
+        );
+        harness.state.failRead = true;
+        const failure = yield* connections.readJson(read).pipe(Effect.asVoid, Effect.flip);
+        assert.equal(failure._tag, "OnshapeInvalidCredentialsError");
+        assert.notInclude(failure.message, OLD_SECRET_KEY);
+        assert.notProperty(failure, "cause");
+        harness.state.failRead = false;
+        const secret = [...harness.state.secrets.keys()][0]!;
+        for (const text of [
+          "invalid json",
+          '{"version":2}',
+          '{"version":1,"accessKeyId":"","secretKey":""}',
+        ]) {
+          harness.state.secrets.set(secret, new TextEncoder().encode(text));
+          assert.equal(
+            (yield* connections.readJson(read).pipe(Effect.asVoid, Effect.flip))._tag,
+            "OnshapeInvalidCredentialsError",
+          );
+        }
+        harness.state.secrets.clear();
+        assert.equal(
+          (yield* connections.readJson(read).pipe(Effect.asVoid, Effect.flip))._tag,
+          "OnshapeInvalidCredentialsError",
+        );
+        yield* connections.remove({ connectionId: saved.connectionId });
+        assert.equal(
+          (yield* connections.readJson(read).pipe(Effect.asVoid, Effect.flip))._tag,
+          "OnshapeConnectionNotFoundError",
+        );
+        assert.equal(harness.state.requests.length, 1);
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect("rejects nonrelative paths, normalization and fragments before network", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      for (const path of [
+        "https://example.com/api/v17/a",
+        "/api/v17/../secret",
+        "/api/v17/%2e%2e/secret",
+        "/api/v17/a#secret",
+        "/api/v17/a?query=1",
+        "/api/v9/a",
+      ]) {
+        assert.equal(
+          (yield* connections
+            .readJson({ ...target, path, connectionId: saved.connectionId })
+            .pipe(Effect.asVoid, Effect.flip))._tag,
+          "OnshapeNetworkError",
+        );
+      }
+      assert.equal(
+        (yield* connections
+          .readJson({ ...target, query: "x=1#fragment", connectionId: saved.connectionId })
+          .pipe(Effect.asVoid, Effect.flip))._tag,
+        "OnshapeNetworkError",
+      );
+      assert.equal(harness.state.requests.length, 1);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("shares sanitized status handling and server cooldown with verification", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      for (const [status, tag] of [
+        [401, "OnshapeInvalidCredentialsError"],
+        [402, "OnshapeAnnualQuotaExceededError"],
+        [403, "OnshapeInsufficientPermissionsError"],
+        [302, "OnshapeRedirectError"],
+        [500, "OnshapeNetworkError"],
+      ] as const) {
+        harness.state.status = status;
+        assert.equal(
+          (yield* connections
+            .readJson({ ...target, connectionId: saved.connectionId })
+            .pipe(Effect.asVoid, Effect.flip))._tag,
+          tag,
+        );
+      }
+      harness.state.status = 429;
+      harness.state.retryAfter = "60";
+      yield* connections
+        .readJson({ ...target, connectionId: saved.connectionId })
+        .pipe(Effect.asVoid, Effect.flip);
+      const count = harness.state.requests.length;
+      harness.state.status = 200;
+      assert.equal(
+        (yield* connections
+          .readJson({ ...target, connectionId: saved.connectionId })
+          .pipe(Effect.asVoid, Effect.flip))._tag,
+        "OnshapeRateLimitError",
+      );
+      assert.equal(
+        (yield* connections
+          .create({ ...createInput, name: "Other" })
+          .pipe(Effect.asVoid, Effect.flip))._tag,
+        "OnshapeRateLimitError",
+      );
+      assert.equal(harness.state.requests.length, count);
+      yield* TestClock.adjust("60 seconds");
+      yield* connections.readJson({ ...target, connectionId: saved.connectionId });
+      assert.equal(harness.state.requests.length, count + 1);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("releases the mutation semaphore before waiting on a JSON response", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      harness.state.verificationStarted = yield* Deferred.make<void>();
+      harness.state.verificationRelease = yield* Deferred.make<void>();
+      const read = yield* connections
+        .readJson({ ...target, connectionId: saved.connectionId })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(harness.state.verificationStarted);
+      yield* connections.remove({ connectionId: saved.connectionId });
+      yield* Deferred.succeed(harness.state.verificationRelease, undefined);
+      assert.deepEqual(yield* Fiber.join(read), { elements: [] });
+      assert.equal(
+        (yield* connections
+          .readJson({ ...target, connectionId: saved.connectionId })
+          .pipe(Effect.asVoid, Effect.flip))._tag,
+        "OnshapeConnectionNotFoundError",
+      );
+      assert.equal(harness.state.requests.length, 2);
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

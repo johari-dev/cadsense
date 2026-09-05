@@ -81,6 +81,7 @@ const makeHarness = Effect.fn(function* (options?: {
         rename: unsupported,
         replaceCredentials: unsupported,
         remove: unsupported,
+        readJson: unsupported,
       }),
     ),
     Layer.succeed(

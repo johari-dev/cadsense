@@ -1,5 +1,7 @@
 import {
   OnshapeAnnualQuotaExceededError,
+  OnshapeAccessKeyId,
+  OnshapeSecretKey,
   OnshapeConnectionConflictError,
   type OnshapeConnectionCreateInput,
   type OnshapeConnectionError,
@@ -33,11 +35,12 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import * as OnshapeRequestSigner from "./OnshapeRequestSigner.ts";
 import * as OnshapeTransport from "./OnshapeTransport.ts";
 
 const CREDENTIAL_VERSION = 1 as const;
-const VERIFY_PATH = "/api/v10/documents";
+const VERIFY_PATH = `${ONSHAPE_API_BASE_PATH}/documents`;
 const VERIFY_QUERY = "limit=1";
 const VERIFY_CONTENT_TYPE = "application/json";
 const VERIFICATION_WINDOW_MS = 60_000;
@@ -45,12 +48,15 @@ const VERIFICATION_LIMIT_PER_WINDOW = 5;
 
 const StoredCredentials = Schema.Struct({
   version: Schema.Literal(CREDENTIAL_VERSION),
-  accessKeyId: Schema.String,
-  secretKey: Schema.String,
+  accessKeyId: OnshapeAccessKeyId,
+  secretKey: OnshapeSecretKey,
 });
 type StoredCredentials = typeof StoredCredentials.Type;
 const decodeOnshapeConnectionSummary = Schema.decodeUnknownEffect(OnshapeConnectionSummary);
 const encodeStoredCredentials = Schema.encodeSync(Schema.fromJsonString(StoredCredentials));
+const decodeStoredCredentials = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(StoredCredentials),
+);
 
 interface ConnectionRow {
   readonly connectionId: string;
@@ -72,6 +78,12 @@ interface ConnectionCatalogRow {
 }
 
 export interface OnshapeConnectionsShape {
+  readonly readJson: (input: {
+    readonly connectionId: OnshapeConnectionId;
+    readonly host: string;
+    readonly path: string;
+    readonly query: string;
+  }) => Effect.Effect<unknown, OnshapeConnectionError>;
   readonly list: () => Effect.Effect<OnshapeConnectionListResult, OnshapeConnectionError>;
   readonly create: (
     input: OnshapeConnectionCreateInput,
@@ -345,10 +357,7 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const verify = Effect.fn("OnshapeConnections.verify")(function* (
-    host: string,
-    credentials: StoredCredentials,
-  ) {
+  const checkRemoteCooldown = Effect.fn("OnshapeConnections.checkRemoteCooldown")(function* () {
     const now = yield* DateTime.now;
     const nowMs = DateTime.toEpochMillis(now);
     if (remoteBlockedUntilMs > nowMs) {
@@ -357,6 +366,72 @@ export const make = Effect.gen(function* () {
       });
     }
     remoteBlockedUntilMs = 0;
+  });
+
+  const checkResponse = Effect.fn("OnshapeConnections.checkResponse")(function* (
+    response: OnshapeTransport.OnshapeTransportResponse,
+  ) {
+    if (response.status >= 200 && response.status < 300) return;
+    if (response.status === 401) return yield* new OnshapeInvalidCredentialsError();
+    if (response.status === 403) return yield* new OnshapeInsufficientPermissionsError();
+    if (response.status === 402) return yield* new OnshapeAnnualQuotaExceededError();
+    if (response.status >= 300 && response.status < 400) return yield* new OnshapeRedirectError();
+    if (response.status === 429) {
+      const retryAfterSeconds = parseRetryAfterSeconds(response.retryAfter);
+      if (retryAfterSeconds !== undefined) {
+        remoteBlockedUntilMs = Math.max(
+          remoteBlockedUntilMs,
+          DateTime.toEpochMillis(yield* DateTime.now) + retryAfterSeconds * 1_000,
+        );
+      }
+      return yield* new OnshapeRateLimitError(
+        retryAfterSeconds === undefined ? {} : { retryAfterSeconds },
+      );
+    }
+    return yield* new OnshapeNetworkError();
+  });
+
+  const request = Effect.fn("OnshapeConnections.request")(function* (
+    host: string,
+    credentials: StoredCredentials,
+    path: string,
+    query: string,
+    responseType?: "json",
+  ) {
+    yield* checkRemoteCooldown();
+    const nonce = yield* crypto.randomUUIDv4.pipe(
+      Effect.map((uuid) => uuid.replaceAll("-", "")),
+      Effect.mapError(() => new OnshapeNetworkError()),
+    );
+    const date = DateTime.toDateUtc(yield* DateTime.now).toUTCString();
+    const headers = yield* signer.sign({
+      accessKeyId: credentials.accessKeyId,
+      secretKey: credentials.secretKey,
+      method: "GET",
+      nonce,
+      date,
+      contentType: VERIFY_CONTENT_TYPE,
+      path,
+      query,
+    });
+    const response = yield* transport
+      .execute({
+        method: "GET",
+        url: `${host}${path}${query ? `?${query}` : ""}`,
+        headers: { ...headers, Accept: "application/json" },
+        ...(responseType ? { responseType } : {}),
+      })
+      .pipe(Effect.mapError(() => new OnshapeNetworkError()));
+    yield* checkResponse(response);
+    return response;
+  });
+
+  const verify = Effect.fn("OnshapeConnections.verify")(function* (
+    host: string,
+    credentials: StoredCredentials,
+  ) {
+    yield* checkRemoteCooldown();
+    const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
     while (
       verificationAttempts.length > 0 &&
       (verificationAttempts[0] ?? nowMs) <= nowMs - VERIFICATION_WINDOW_MS
@@ -371,50 +446,56 @@ export const make = Effect.gen(function* () {
     }
     verificationAttempts.push(nowMs);
 
-    const nonce = yield* crypto.randomUUIDv4.pipe(
-      Effect.map((uuid) => uuid.replaceAll("-", "")),
-      Effect.mapError(() => new OnshapeNetworkError()),
-    );
-    const date = DateTime.toDateUtc(now).toUTCString();
-    const headers = yield* signer.sign({
-      accessKeyId: credentials.accessKeyId,
-      secretKey: credentials.secretKey,
-      method: "GET",
-      nonce,
-      date,
-      contentType: VERIFY_CONTENT_TYPE,
-      path: VERIFY_PATH,
-      query: VERIFY_QUERY,
-    });
-    const response = yield* transport
-      .execute({
-        method: "GET",
-        url: `${host}${VERIFY_PATH}?${VERIFY_QUERY}`,
-        headers: { ...headers, Accept: "application/json" },
-      })
-      .pipe(Effect.mapError(() => new OnshapeNetworkError()));
-
-    if (response.status >= 200 && response.status < 300) {
-      return;
-    }
-    if (response.status === 401) return yield* new OnshapeInvalidCredentialsError();
-    if (response.status === 403) return yield* new OnshapeInsufficientPermissionsError();
-    if (response.status === 402) return yield* new OnshapeAnnualQuotaExceededError();
-    if (response.status >= 300 && response.status < 400) {
-      return yield* new OnshapeRedirectError();
-    }
-    if (response.status === 429) {
-      const retryAfterSeconds = parseRetryAfterSeconds(response.retryAfter);
-      if (retryAfterSeconds !== undefined) {
-        remoteBlockedUntilMs =
-          DateTime.toEpochMillis(yield* DateTime.now) + retryAfterSeconds * 1_000;
-      }
-      return yield* new OnshapeRateLimitError(
-        retryAfterSeconds === undefined ? {} : { retryAfterSeconds },
-      );
-    }
-    return yield* new OnshapeNetworkError();
+    yield* request(host, credentials, VERIFY_PATH, VERIFY_QUERY);
   });
+
+  const readJson: OnshapeConnectionsShape["readJson"] = Effect.fn("OnshapeConnections.readJson")(
+    function* (input) {
+      // These routes are supplied by server adapters, never an RPC or agent argument.
+      const validTarget = yield* Effect.try({
+        try: () => {
+          const url = new URL(
+            `${input.path}${input.query ? `?${input.query}` : ""}`,
+            "https://cad.onshape.com",
+          );
+          return (
+            input.path.startsWith(`${ONSHAPE_API_BASE_PATH}/`) &&
+            url.origin === "https://cad.onshape.com" &&
+            url.pathname === input.path &&
+            url.hash === "" &&
+            url.search === (input.query ? `?${input.query}` : "")
+          );
+        },
+        catch: () => new OnshapeNetworkError(),
+      });
+      if (!validTarget) return yield* new OnshapeNetworkError();
+      const host = yield* normalizeHost(input.host);
+      const credentials = yield* mutationLock.withPermits(1)(
+        Effect.gen(function* () {
+          const existing = yield* getRow(input.connectionId, "list").pipe(
+            Effect.mapError(() => new OnshapeNetworkError()),
+          );
+          if (Option.isNone(existing)) {
+            return yield* new OnshapeConnectionNotFoundError({ connectionId: input.connectionId });
+          }
+          if (existing.value.host !== host) return yield* new OnshapeInvalidHostError();
+          const stored = yield* secretStore
+            .get(secretName(input.connectionId, existing.value.credentialRevision))
+            .pipe(Effect.mapError(() => new OnshapeInvalidCredentialsError()));
+          if (Option.isNone(stored)) return yield* new OnshapeInvalidCredentialsError();
+          const text = yield* Effect.try({
+            try: () => new TextDecoder("utf-8", { fatal: true }).decode(stored.value),
+            catch: () => new OnshapeInvalidCredentialsError(),
+          });
+          return yield* decodeStoredCredentials(text).pipe(
+            Effect.mapError(() => new OnshapeInvalidCredentialsError()),
+          );
+        }),
+      );
+      const response = yield* request(host, credentials, input.path, input.query, "json");
+      return response.body;
+    },
+  );
 
   yield* Effect.forever(
     Effect.sleep("30 seconds").pipe(Effect.andThen(retryPendingCleanup())),
@@ -688,7 +769,7 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return OnshapeConnections.of({ list, create, rename, replaceCredentials, remove });
+  return OnshapeConnections.of({ list, create, rename, replaceCredentials, remove, readJson });
 });
 
 /** Test seam: callers may provide deterministic signer and transport services. */
