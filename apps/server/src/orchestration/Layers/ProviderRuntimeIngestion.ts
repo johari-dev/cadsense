@@ -1736,6 +1736,20 @@ const make = Effect.gen(function* () {
             },
             createdAt: now,
           });
+          const completedAdmissionTurn =
+            event.type === "turn.completed"
+              ? eventTurnId
+              : nextActiveTurnId === null && activeTurnId !== null
+                ? activeTurnId
+                : null;
+          if (completedAdmissionTurn != null) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.turn.lifecycle.settle",
+              commandId: yield* providerCommandId(event, "turn-lifecycle-settle"),
+              threadId: thread.id,
+              turnId: completedAdmissionTurn,
+            });
+          }
         }
       }
 

@@ -6,6 +6,11 @@ import {
   ThreadId,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
+import {
+  requestTurnAdmission,
+  settleTurnAdmission,
+  completeTurnAdmission,
+} from "../turnAdmission.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -387,6 +392,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyProjectsProjection",
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
+        case "project.cad-state-set": {
+          const existing = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isSome(existing))
+            yield* projectionProjectRepository.upsert({
+              ...existing.value,
+              cad: event.payload.cad,
+              updatedAt: event.payload.updatedAt,
+            });
+          return;
+        }
         case "project.created":
           yield* projectionProjectRepository.upsert({
             projectId: event.payload.projectId,
@@ -507,6 +524,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyThreadsProjection",
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
+        case "thread.turn-start-requested":
+        case "thread.turn-start-settled":
+        case "thread.turn-lifecycle-settled": {
+          if (event.type === "thread.turn-start-requested" && !event.payload.admissionTracked)
+            return;
+          const existing = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) return;
+          const state = existing.value.turnAdmission ?? undefined;
+          const turnAdmission =
+            event.type === "thread.turn-start-requested"
+              ? requestTurnAdmission(state, event.payload.messageId, event.payload.createdAt)
+              : event.type === "thread.turn-start-settled"
+                ? settleTurnAdmission(state, event.payload.messageId, event.payload.turnId)
+                : completeTurnAdmission(state, event.payload.turnId);
+          yield* projectionThreadRepository.upsert({
+            ...existing.value,
+            turnAdmission,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
         case "thread.created":
           yield* projectionThreadRepository.upsert({
             threadId: event.payload.threadId,

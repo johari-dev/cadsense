@@ -16,6 +16,7 @@ import {
   RuntimeMode,
   ThreadId,
   TurnId,
+  ThreadTurnAdmission,
 } from "@cadsense/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -32,6 +33,7 @@ export const ProjectionThread = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   latestTurnId: Schema.NullOr(TurnId),
+  turnAdmission: Schema.optionalKey(Schema.NullOr(ThreadTurnAdmission)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),

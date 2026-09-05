@@ -1,5 +1,6 @@
 import {
   type ChatAttachment,
+  type MessageId,
   CommandId,
   EventId,
   type ModelSelection,
@@ -367,6 +368,7 @@ const make = Effect.gen(function* () {
 
   const setThreadSessionErrorOnTurnStartFailure = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    readonly messageId: MessageId;
     readonly detail: string;
     readonly createdAt: string;
   }) {
@@ -375,6 +377,11 @@ const make = Effect.gen(function* () {
       return;
     }
     const session = thread.session;
+    if (
+      session?.activeTurnId ||
+      thread.turnAdmission?.pending.some((pending) => pending.messageId !== input.messageId)
+    )
+      return;
     yield* setThreadSession({
       threadId: input.threadId,
       session: {
@@ -971,6 +978,16 @@ const make = Effect.gen(function* () {
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
     const key = turnStartKeyForEvent(event);
+    const settleStart = (turnId: TurnId | null) =>
+      orchestrationEngine.dispatch({
+        type: "thread.turn.start.settle",
+        commandId: CommandId.make(
+          `server:turn-start-settled:${event.eventId}:${turnId ?? "failed"}`,
+        ),
+        threadId: event.payload.threadId,
+        messageId: event.payload.messageId,
+        turnId,
+      });
     if (yield* hasHandledTurnStartRecently(key)) {
       return;
     }
@@ -982,6 +999,7 @@ const make = Effect.gen(function* () {
 
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
+      yield* settleStart(null);
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.start.failed",
@@ -1020,9 +1038,11 @@ const make = Effect.gen(function* () {
       const detail = formatFailureDetail(cause);
       return setThreadSessionErrorOnTurnStartFailure({
         threadId: event.payload.threadId,
+        messageId: event.payload.messageId,
         detail,
         createdAt: event.payload.createdAt,
       }).pipe(
+        Effect.ensuring(settleStart(null).pipe(Effect.orDie)),
         Effect.flatMap(() =>
           appendProviderFailureActivity({
             threadId: event.payload.threadId,
@@ -1067,9 +1087,13 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    yield* providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.matchCauseEffect({
+        onFailure: recoverTurnStartFailure,
+        onSuccess: (result) => settleStart(result.turnId).pipe(Effect.asVoid),
+      }),
+      Effect.forkScoped,
+    );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1348,6 +1372,14 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
+    const interruptedStarts = (yield* projectionSnapshotQuery
+      .getCommandReadModel()
+      .pipe(Effect.orDie)).threads.flatMap((thread) =>
+      (thread.turnAdmission?.pending ?? []).map((pending) => ({
+        threadId: thread.id,
+        messageId: pending.messageId,
+      })),
+    );
     const interruptedTitleRegenerations = yield* findInterruptedThreadTitleRegenerations().pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
@@ -1381,6 +1413,21 @@ const make = Effect.gen(function* () {
     const clearInterrupted = clearInterruptedThreadTitleRegenerations(
       interruptedTitleRegenerations,
     ).pipe(
+      Effect.andThen(
+        Effect.forEach(
+          interruptedStarts,
+          (pending) =>
+            orchestrationEngine.dispatch({
+              type: "thread.turn.start.settle",
+              commandId: CommandId.make(
+                `server:interrupted-turn-start:${pending.threadId}:${pending.messageId}`,
+              ),
+              ...pending,
+              turnId: null,
+            }),
+          { discard: true },
+        ),
+      ),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.interrupt;

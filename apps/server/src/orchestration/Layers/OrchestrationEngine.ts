@@ -40,6 +40,7 @@ import {
   type OrchestrationProjectorDecodeError,
 } from "../Errors.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
+import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -69,6 +70,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.onshape.create":
     case "project.onshape.connection.set":
     case "project.onshape.workspace.ready":
+    case "project.cad.enabled.set":
+    case "project.cad.operation.reserve":
+    case "project.cad.operation.complete":
+    case "project.cad.operation.end":
     case "project.meta.update":
     case "project.delete":
       return {
@@ -90,6 +95,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const crypto = yield* Crypto.Crypto;
+  const backgroundLiveness = yield* Effect.serviceOption(ThreadBackgroundLivenessService);
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
@@ -174,7 +180,21 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel: commandReadModel,
+          readModel:
+            Option.isSome(backgroundLiveness) &&
+            (envelope.command.type === "project.cad.operation.reserve" ||
+              envelope.command.type === "project.cad.enabled.set" ||
+              envelope.command.type === "project.delete")
+              ? {
+                  ...commandReadModel,
+                  threads: commandReadModel.threads.map((thread) => ({
+                    ...thread,
+                    backgroundLiveness: backgroundLiveness.value.getThreadBackgroundLiveness(
+                      thread.id,
+                    ),
+                  })),
+                }
+              : commandReadModel,
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>
