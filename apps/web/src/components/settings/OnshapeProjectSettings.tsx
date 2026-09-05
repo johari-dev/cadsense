@@ -157,7 +157,11 @@ export function OnshapeProjectSettings({
           >
             Refresh connections
           </Button>
-          <Link to="/settings/integrations" className="text-sm underline underline-offset-4">
+          <Link
+            to="/settings/integrations"
+            search={{ environmentId: project.environmentId }}
+            className="text-sm underline underline-offset-4"
+          >
             Manage connections
           </Link>
         </div>

@@ -573,7 +573,10 @@ function OpenCommandPaletteDialog(props: {
         onCancel={() => setOnshapeEnvironmentId(null)}
         onConfigure={() => {
           props.setOpen(false);
-          void navigate({ to: "/settings/integrations" });
+          void navigate({
+            to: "/settings/integrations",
+            search: { environmentId: onshapeEnvironment.environmentId },
+          });
         }}
         onCreate={async (input) => {
           props.setBusy(true);

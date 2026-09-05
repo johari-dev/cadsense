@@ -18,6 +18,7 @@ import {
   PREVIEW_VIEWPORT_MIN_DIMENSION,
   PREVIEW_ZOOM_LEVELS,
   type PreviewAppearancePreference,
+  type EnvironmentId,
   type PreviewViewportSetting,
 } from "@cadsense/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@cadsense/shared/previewViewport";
@@ -454,7 +455,11 @@ function DesktopOnlyBrowserDefaults({ children }: { readonly children: ReactNode
   );
 }
 
-export function IntegrationsSettingsPanel() {
+export function IntegrationsSettingsPanel({
+  onshapeEnvironmentId,
+}: {
+  onshapeEnvironmentId?: EnvironmentId | undefined;
+}) {
   // Client-local preview defaults are editable only where the preview exists.
   const previewDefaultsDisabled = !isElectron;
   const previewDefaults = (
@@ -468,7 +473,10 @@ export function IntegrationsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <OnshapeConnectionsSettings />
+      <OnshapeConnectionsSettings
+        key={JSON.stringify([onshapeEnvironmentId])}
+        initialEnvironmentId={onshapeEnvironmentId}
+      />
       <SettingsSection id="browser" title="Browser">
         {/* Server-authoritative, so it stays editable on every client and sits
             outside the block covering the desktop-only defaults. */}

@@ -1,3 +1,4 @@
+import { resolveOnshapeSettingsEnvironment } from "../../lib/onshapeSettingsEnvironment";
 import {
   connectionStatusText,
   type EnvironmentPresentation as BaseEnvironmentPresentation,
@@ -915,7 +916,11 @@ function onshapeEnvironmentDetail(environment: BaseEnvironmentPresentation): str
   return "Local environment";
 }
 
-export function OnshapeConnectionsSettings() {
+export function OnshapeConnectionsSettings({
+  initialEnvironmentId,
+}: {
+  initialEnvironmentId?: EnvironmentId | undefined;
+}) {
   const { environments, isReady } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const options = useMemo(
@@ -928,15 +933,13 @@ export function OnshapeConnectionsSettings() {
     [environments, primaryEnvironmentId],
   );
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
+    initialEnvironmentId ?? null,
+  );
+  const effectiveEnvironmentId = resolveOnshapeSettingsEnvironment(
+    options.map((environment) => environment.environmentId),
+    selectedEnvironmentId,
     primaryEnvironmentId,
   );
-  const effectiveEnvironmentId =
-    options.find((environment) => environment.environmentId === selectedEnvironmentId)
-      ?.environmentId ??
-    options.find((environment) => environment.environmentId === primaryEnvironmentId)
-      ?.environmentId ??
-    options[0]?.environmentId ??
-    null;
   const selectedEnvironment =
     options.find((environment) => environment.environmentId === effectiveEnvironmentId) ?? null;
   const selectedPendingKey = useOnshapeConnectionPendingKey(effectiveEnvironmentId);
@@ -953,7 +956,7 @@ export function OnshapeConnectionsSettings() {
   const onlyPrimaryDevice =
     options.length === 1 && options[0]?.entry.target._tag === "PrimaryConnectionTarget";
   const deviceTabs =
-    !onlyPrimaryDevice && options.length > 0 ? (
+    (!onlyPrimaryDevice || selectedEnvironment === null) && options.length > 0 ? (
       <ScrollArea hideScrollbars scrollFade className="mx-3 h-11 min-w-0 rounded-none sm:mx-4">
         <div
           role="group"
@@ -1030,7 +1033,21 @@ export function OnshapeConnectionsSettings() {
     );
   }
 
-  if (selectedEnvironment === null) return null;
+  if (selectedEnvironment === null) {
+    return (
+      <SettingsSection id={onshapeSearchMetadata.id} title="Onshape">
+        {deviceTabs}
+        <SettingsRow
+          title={isReady ? "Device unavailable" : "Loading devices"}
+          description={
+            isReady
+              ? "The device selected for this Onshape project is unavailable. Connect it to manage its connections, or choose another device above."
+              : "Reading connected execution environments."
+          }
+        />
+      </SettingsSection>
+    );
+  }
   return (
     <EnvironmentOnshapeConnections
       key={selectedEnvironment.environmentId}
