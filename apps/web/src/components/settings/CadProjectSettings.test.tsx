@@ -9,7 +9,12 @@ const commands = vi.hoisted(() => ({ start: vi.fn(), cancel: vi.fn(), enabled: v
 vi.mock("react", async (original) => {
   const actual = await original<typeof import("react")>();
   const { reactHookHarness } = await import("../../test/reactHookHarness");
-  return { ...actual, useRef: reactHookHarness.useRef, useState: reactHookHarness.useState };
+  return {
+    ...actual,
+    useRef: reactHookHarness.useRef,
+    useState: reactHookHarness.useState,
+    useEffect: reactHookHarness.useEffect,
+  };
 });
 vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../../test/reactHookHarness");
@@ -82,6 +87,38 @@ const button = (text: string, active = false, current = project) =>
   find(render(active, current), (props) => props.children === text)[0]!;
 
 describe("manual CAD project controls", () => {
+  it("honors the retry deadline without retrying automatically or disabling local settings", async () => {
+    hooks.reset();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-05T00:00:00Z"));
+    Object.values(commands).forEach((command) => command.mockReset());
+    try {
+      const limited: typeof project = {
+        ...project,
+        cad: {
+          ...project.cad!,
+          lastOutcome: {
+            operationId: "00000000-0000-4000-8000-000000000001",
+            kind: "discover",
+            status: "failed",
+            completedAt: "2026-09-05T00:00:00Z",
+            reason: "Onshape is limiting requests.",
+            retryAt: "2026-09-05T00:01:00Z",
+          },
+        },
+      };
+      expect(button("Refresh CAD catalog", false, limited).disabled).toBe(true);
+      expect(button("Turn off CAD", false, limited).disabled).toBe(false);
+      button("Refresh CAD catalog", false, limited).onClick!();
+      expect(commands.start).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(button("Refresh CAD catalog", false, limited).disabled).toBe(false);
+      expect(commands.start).not.toHaveBeenCalled();
+    } finally {
+      hooks.reset();
+      vi.useRealTimers();
+    }
+  });
   beforeEach(() => {
     hooks.reset();
     Object.values(commands).forEach((command) => {

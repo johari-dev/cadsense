@@ -5,7 +5,7 @@ import {
 } from "@cadsense/client-runtime/state/runtime";
 import { CadUserOperationError, type CadUserStartInput } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { onshapeProjectEnvironment } from "../../state/onshapeProjects";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project } from "../../types";
@@ -43,11 +43,23 @@ export function CadProjectSettings({
     project.onshapeSource?.configuration || "default",
   );
   const cad = project.cad;
+  const retryAt = cad?.lastOutcome?.retryAt;
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    if (!retryAt) return;
+    const timer = setTimeout(
+      () => setClock(Date.now()),
+      Math.max(0, Date.parse(retryAt) - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [retryAt]);
+  const throttled = !!retryAt && Date.parse(retryAt) > clock;
   const enabled = cad?.enabled !== false;
   const operation = cad?.operation;
   const locked =
     runActive || pending || !!operation || project.onshapeSource?.managedWorkspaceReady === false;
   const selected = cad?.catalog?.roots.find((root) => root.elementId === elementId);
+  const remoteLocked = locked || !enabled || throttled;
   const perform = async (action: () => Promise<AtomCommandResult<unknown, unknown>>) => {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -69,7 +81,7 @@ export function CadProjectSettings({
     }
   };
   const sync = (root: Extract<CadUserStartInput, { kind: "sync" }>["root"]) => {
-    if (locked || !enabled) return;
+    if (remoteLocked) return;
     void perform(() =>
       start({
         environmentId: project.environmentId,
@@ -102,9 +114,9 @@ export function CadProjectSettings({
             </Button>
             <Button
               size="sm"
-              disabled={locked || !enabled}
+              disabled={remoteLocked}
               onClick={() => {
-                if (locked || !enabled) return;
+                if (remoteLocked) return;
                 void perform(() =>
                   start({
                     environmentId: project.environmentId,
@@ -119,6 +131,12 @@ export function CadProjectSettings({
         }
       />
       <div className="space-y-4 px-4 pb-4">
+        {throttled && retryAt ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Onshape requests can be tried again after {timestamp(retryAt)}. No automatic retry is
+            scheduled.
+          </p>
+        ) : null}
         {runActive ? (
           <p role="status" className="text-sm text-muted-foreground">
             CAD controls are locked while an agent run is active in this project.
@@ -190,7 +208,7 @@ export function CadProjectSettings({
                 />
               </label>
               <Button
-                disabled={locked || !enabled || !selected}
+                disabled={remoteLocked || !selected}
                 onClick={() => {
                   if (selected)
                     sync({
@@ -245,7 +263,7 @@ export function CadProjectSettings({
             <Button
               size="sm"
               variant="outline"
-              disabled={locked || !enabled}
+              disabled={remoteLocked}
               onClick={() =>
                 sync({
                   elementId: root.elementId,

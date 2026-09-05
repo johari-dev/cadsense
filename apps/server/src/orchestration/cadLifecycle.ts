@@ -62,6 +62,9 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
       command.type === "project.cad.operation.complete" ? ("succeeded" as const) : command.status,
     completedAt: now,
     reason: command.type === "project.cad.operation.complete" ? null : command.reason,
+    ...(command.type === "project.cad.operation.end" && command.retryAt
+      ? { retryAt: command.retryAt }
+      : {}),
   };
   let roots = cad.roots;
   let catalog = cad.catalog;

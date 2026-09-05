@@ -44,6 +44,7 @@ export const CadOperationOutcome = Schema.Struct({
   status: Schema.Literals(["succeeded", "failed", "cancelled", "interrupted"]),
   completedAt: IsoDateTime,
   reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+  retryAt: Schema.optionalKey(IsoDateTime),
 });
 export const CadRootLineage = Schema.Struct({
   ...CadRootIdentity.fields,

@@ -55,14 +55,17 @@ export class CadUserOperations extends Context.Service<
 
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(CadSnapshotManifest));
 const failed = () => new CadUserOperationError({ reason: "operation-failed" });
+const isOnshapeConnectionError = Schema.is(OnshapeConnectionError);
+const isCadSnapshotStoreError = Schema.is(CadSnapshotStoreError);
+const isCadUserOperationError = Schema.is(CadUserOperationError);
 const failureReason = (error: unknown): string => {
   let detail = "CAD operation failed.";
-  if (Schema.is(CadSnapshotStoreError)(error))
+  if (isCadSnapshotStoreError(error))
     detail =
       error.reason === "disk-space"
         ? "Not enough free disk space. Free space to keep at least 2 GiB available."
         : "Downloaded CAD could not be stored safely.";
-  else if (Schema.is(OnshapeConnectionError)(error)) {
+  else if (isOnshapeConnectionError(error)) {
     switch (error._tag) {
       case "OnshapeAnnualQuotaExceededError":
         detail = "The Onshape annual API quota is exhausted. No automatic retry will occur.";
@@ -84,7 +87,7 @@ const failureReason = (error: unknown): string => {
         detail = "Could not reach Onshape. Check your network connection.";
         break;
     }
-  } else if (Schema.is(CadUserOperationError)(error) && error.reason === "busy")
+  } else if (isCadUserOperationError(error) && error.reason === "busy")
     detail = "Native agent shutdown could not be confirmed. Stop active runs before trying again.";
   return `${detail} Existing downloaded CAD is unchanged.`;
 };
@@ -116,6 +119,11 @@ export const make = Effect.gen(function* () {
   });
   const start = Effect.fn("CadUserOperations.start")(function* (input: CadUserStartInput) {
     const { project, source } = yield* getProject(input.projectId);
+    if (
+      project.cad?.lastOutcome?.retryAt &&
+      Date.parse(project.cad.lastOutcome.retryAt) > DateTime.toEpochMillis(yield* DateTime.now)
+    )
+      return yield* new CadUserOperationError({ reason: "throttled" });
     let root: CadRootIdentity | null = null;
     if (input.kind === "sync") {
       const selected = input.root;
@@ -208,6 +216,17 @@ export const make = Effect.gen(function* () {
                 return;
               }
               const cancelled = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
+              const error = Exit.isFailure(exit)
+                ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
+                : undefined;
+              const retryAfter =
+                isOnshapeConnectionError(error) && "retryAfterSeconds" in error
+                  ? error.retryAfterSeconds
+                  : undefined;
+              const retryAt =
+                retryAfter === undefined
+                  ? undefined
+                  : DateTime.formatIso(DateTime.add(yield* DateTime.now, { seconds: retryAfter }));
               yield* engine
                 .dispatch({
                   type: "project.cad.operation.end",
@@ -215,13 +234,8 @@ export const make = Effect.gen(function* () {
                   projectId: input.projectId,
                   operationId,
                   status: cancelled ? "cancelled" : "failed",
-                  reason: cancelled
-                    ? "CAD operation cancelled."
-                    : failureReason(
-                        Exit.isFailure(exit)
-                          ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
-                          : undefined,
-                      ),
+                  ...(retryAt ? { retryAt } : {}),
+                  reason: cancelled ? "CAD operation cancelled." : failureReason(error),
                 })
                 .pipe(
                   Effect.catch(() =>

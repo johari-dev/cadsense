@@ -28,6 +28,7 @@ export class CadUserOperationError extends Schema.TaggedErrorClass<CadUserOperat
   {
     reason: Schema.Literals([
       "busy",
+      "throttled",
       "not-found",
       "unavailable",
       "invalid-root",

@@ -969,6 +969,7 @@ const CadOperationEndCommand = Schema.Struct({
   operationId: CadOperationId,
   status: Schema.Literals(["failed", "cancelled", "interrupted"]),
   reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+  retryAt: Schema.optionalKey(IsoDateTime),
 });
 const ThreadTurnStartSettleCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start.settle"),
