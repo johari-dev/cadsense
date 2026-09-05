@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { onshapeProjectUrl } from "../lib/onshapeProjects";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -217,9 +218,10 @@ function formatProjectMemberActionLabel(
     return member.title;
   }
 
-  return member.environmentLabel
-    ? `${member.environmentLabel} — ${member.workspaceRoot}`
+  const location = member.onshapeSource
+    ? onshapeProjectUrl(member.onshapeSource)
     : member.workspaceRoot;
+  return member.environmentLabel ? `${member.environmentLabel} — ${location}` : location;
 }
 
 function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string[] {
@@ -933,11 +935,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{
     path: string;
+    onshape?: boolean;
   }>({
     onCopy: (ctx) => {
       toastManager.add({
         type: "success",
-        title: "Path copied",
+        title: ctx.onshape ? "Onshape URL copied" : "Path copied",
         description: ctx.path,
       });
     },
@@ -945,7 +948,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to copy path",
+          title: "Failed to copy",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -1268,7 +1271,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                           `Remove project "${member.title}" and delete its ${latestProjectThreads.length} thread${
                             latestProjectThreads.length === 1 ? "" : "s"
                           }?`,
-                          `Path: ${member.workspaceRoot}`,
+                          member.onshapeSource
+                            ? `Onshape URL: ${onshapeProjectUrl(member.onshapeSource)}`
+                            : `Path: ${member.workspaceRoot}`,
                           ...(member.environmentLabel
                             ? [`Environment: ${member.environmentLabel}`]
                             : []),
@@ -1278,7 +1283,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                         ].join("\n")
                       : [
                           `Remove project "${member.title}"?`,
-                          `Path: ${member.workspaceRoot}`,
+                          member.onshapeSource
+                            ? `Onshape URL: ${onshapeProjectUrl(member.onshapeSource)}`
+                            : `Path: ${member.workspaceRoot}`,
                           ...(member.environmentLabel
                             ? [`Environment: ${member.environmentLabel}`]
                             : []),
@@ -1330,7 +1337,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       const message = [
         `Remove project "${member.title}"?`,
-        `Path: ${member.workspaceRoot}`,
+        member.onshapeSource
+          ? `Onshape URL: ${onshapeProjectUrl(member.onshapeSource)}`
+          : `Path: ${member.workspaceRoot}`,
         ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
         "This removes only this project entry.",
       ].join("\n");
@@ -1384,7 +1393,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 openProjectRenameDialog(member);
                 return;
               case "copy-path":
-                copyPathToClipboard(member.workspaceRoot, { path: member.workspaceRoot });
+                if (member.onshapeSource) {
+                  const url = onshapeProjectUrl(member.onshapeSource);
+                  copyPathToClipboard(url, { path: url, onshape: true });
+                } else {
+                  copyPathToClipboard(member.workspaceRoot, { path: member.workspaceRoot });
+                }
                 return;
               case "delete":
                 return handleRemoveProject(member);
@@ -1435,7 +1449,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         const clicked = await api.contextMenu.show(
           [
             buildTargetedItem("rename", "Rename"),
-            buildTargetedItem("copy-path", "Copy Path"),
+            buildTargetedItem(
+              "copy-path",
+              project.onshapeSource ? "Copy Onshape URL" : "Copy Path",
+            ),
             buildTargetedItem("delete", "Remove", {
               destructive: true,
             }),
@@ -1459,6 +1476,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       openProjectRenameDialog,
       project.groupedProjectCount,
       project.memberProjects,
+      project.onshapeSource,
       suppressProjectClickForContextMenuRef,
     ],
   );
@@ -1860,11 +1878,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
       const threadWorkspacePath = threadProject?.workspaceRoot ?? project.workspaceRoot ?? null;
+      const threadOnshapeSource = threadProject?.onshapeSource ?? project.onshapeSource;
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
-          { id: "copy-path", label: "Copy Path" },
+          { id: "copy-path", label: threadOnshapeSource ? "Copy Onshape URL" : "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
           { id: "delete", label: "Delete", destructive: true, icon: "trash" },
         ],
@@ -1881,6 +1900,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
       if (clicked === "copy-path") {
+        if (threadOnshapeSource) {
+          const url = onshapeProjectUrl(threadOnshapeSource);
+          copyPathToClipboard(url, { path: url, onshape: true });
+          return;
+        }
         if (!threadWorkspacePath) {
           toastManager.add(
             stackedThreadToast({
@@ -1933,6 +1957,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       markThreadUnread,
       memberProjectByScopedKey,
       project.workspaceRoot,
+      project.onshapeSource,
       startThreadRename,
     ],
   );
@@ -1980,7 +2005,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               }`}
             />
           )}
-          <ProjectFavicon environmentId={project.environmentId} cwd={project.workspaceRoot} />
+          <ProjectFavicon
+            environmentId={project.environmentId}
+            cwd={project.workspaceRoot}
+            onshapeSource={project.onshapeSource}
+          />
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="truncate text-sm font-medium text-sidebar-foreground/90">
               {project.displayName}
@@ -2063,7 +2092,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             <DialogTitle>Rename project</DialogTitle>
             <DialogDescription>
               {projectRenameTarget
-                ? `Update the title for ${projectRenameTarget.workspaceRoot}.`
+                ? `Update the title for ${projectRenameTarget.onshapeSource ? projectRenameTarget.title : projectRenameTarget.workspaceRoot}.`
                 : "Update the project title."}
             </DialogDescription>
           </DialogHeader>

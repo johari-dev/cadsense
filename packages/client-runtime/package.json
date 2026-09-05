@@ -71,6 +71,10 @@
       "types": "./src/state/onshapeConnections.ts",
       "default": "./src/state/onshapeConnections.ts"
     },
+    "./state/onshapeProjects": {
+      "types": "./src/state/onshapeProjects.ts",
+      "default": "./src/state/onshapeProjects.ts"
+    },
     "./state/orchestration": {
       "types": "./src/state/orchestration.ts",
       "default": "./src/state/orchestration.ts"

@@ -1,6 +1,11 @@
 import type { ComponentType, Dispatch, ReactElement, SetStateAction } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import type { EnvironmentId } from "@cadsense/contracts";
+import {
+  OnshapeConnectionId,
+  OnshapeDocumentId,
+  OnshapeWorkspaceId,
+  type EnvironmentId,
+} from "@cadsense/contracts";
 
 const testState = vi.hoisted(() => ({
   faviconUrl: "https://environment.test/api/assets/token-a/v1-20-favicon.svg",
@@ -83,10 +88,15 @@ function resolveImageComponent(): {
   readonly props: ProjectFaviconImageProps;
 } {
   hooks.beginRender();
-  const element = ProjectFavicon({
+  const wrapper = ProjectFavicon({
     environmentId: "environment-test" as EnvironmentId,
     cwd: "/workspace-test",
-  }) as ReactElement<ProjectFaviconImageProps>;
+  }) as ReactElement<Parameters<typeof ProjectFavicon>[0]>;
+  const LocalFavicon = wrapper.type as (
+    props: Parameters<typeof ProjectFavicon>[0],
+  ) => ReactElement<ProjectFaviconImageProps>;
+  hooks.reset();
+  const element = LocalFavicon(wrapper.props);
   hooks.reset();
 
   return {
@@ -106,6 +116,25 @@ function renderImage(
 describe("ProjectFavicon", () => {
   beforeEach(() => {
     hooks.reset();
+    testState.lastResource = null;
+  });
+
+  it("does not request a filesystem favicon for an Onshape project", () => {
+    ProjectFavicon({
+      environmentId: "environment-test" as EnvironmentId,
+      cwd: "/managed/onshape/project",
+      onshapeSource: {
+        connectionId: OnshapeConnectionId.make("00000000-0000-4000-8000-000000000001"),
+        host: "https://cad.onshape.com",
+        documentId: OnshapeDocumentId.make("05760c4d8b40fba37db8fa48"),
+        workspaceType: "w",
+        workspaceId: OnshapeWorkspaceId.make("f31b499c519e8471cced93dc"),
+        configuration: "",
+      },
+    });
+    expect(testState.lastResource).toBeNull();
+    resolveImageComponent();
+    expect(testState.lastResource).toEqual({ _tag: "project-favicon", cwd: "/workspace-test" });
   });
 
   it("falls back when the displayed favicon fails without discarding a valid older image early", () => {

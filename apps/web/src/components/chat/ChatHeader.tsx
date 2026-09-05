@@ -1,4 +1,4 @@
-import { type EnvironmentId, type ThreadId } from "@cadsense/contracts";
+import { type EnvironmentId, type ThreadId, type OnshapeProjectSource } from "@cadsense/contracts";
 import { scopeThreadRef } from "@cadsense/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -37,6 +37,7 @@ interface ChatHeaderProps {
   isServerThread: boolean;
   activeProjectName: string | undefined;
   activeProjectCwd: string | null;
+  activeProjectOnshapeSource?: OnshapeProjectSource | undefined;
   openInCwd: string | null;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
@@ -71,6 +72,7 @@ export const ChatHeader = memo(function ChatHeader({
   isServerThread,
   activeProjectName,
   activeProjectCwd,
+  activeProjectOnshapeSource,
   openInCwd,
   rightPanelOpen,
   onNewThreadInProject,
@@ -123,6 +125,7 @@ export const ChatHeader = memo(function ChatHeader({
   const { openMenu, closeMenu } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
+    onshapeSource: activeProjectOnshapeSource,
     onStartRename: startRename,
   });
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -230,6 +233,7 @@ export const ChatHeader = memo(function ChatHeader({
                   <ProjectFavicon
                     environmentId={activeThreadEnvironmentId}
                     cwd={activeProjectCwd ?? ""}
+                    onshapeSource={activeProjectOnshapeSource}
                     className="size-3.5"
                   />
                   <span className="max-w-40 truncate">{activeProjectName}</span>
@@ -302,7 +306,7 @@ export const ChatHeader = memo(function ChatHeader({
             : "pr-[calc(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap))]",
         )}
       >
-        {activeProjectName && (
+        {activeProjectName && !activeProjectOnshapeSource && (
           <OpenInExplorerButton environmentId={activeThreadEnvironmentId} path={openInCwd} />
         )}
       </div>

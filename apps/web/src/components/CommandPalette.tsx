@@ -9,7 +9,6 @@ import {
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   FileSearchIcon,
-  FolderIcon,
   FolderPlusIcon,
   MessageSquareIcon,
   SettingsIcon,
@@ -40,6 +39,7 @@ import { inferProjectTitleFromPath } from "../lib/projectPaths";
 import { cn, newProjectId } from "../lib/utils";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
 import { projectEnvironment } from "../state/projects";
+import { onshapeProjectEnvironment } from "../state/onshapeProjects";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
@@ -61,6 +61,7 @@ import {
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { OnshapeProjectCreateForm } from "./OnshapeProjectCreateForm";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { CommandDialog, CommandDialogPopup } from "./ui/command";
@@ -85,6 +86,7 @@ function projectIcon(project: Project) {
       className={ITEM_ICON_CLASS}
       cwd={project.workspaceRoot}
       environmentId={project.environmentId}
+      onshapeSource={project.onshapeSource}
     />
   );
 }
@@ -111,11 +113,16 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     mode: "command",
     openIntent: null,
   });
-  const setOpen = useCallback((open: boolean) => dispatch({ _tag: "SetOpen", open }), []);
-  const toggleMode = useCallback(
-    (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
-    [],
-  );
+  const busyRef = useRef(false);
+  const setBusy = useCallback((busy: boolean) => {
+    busyRef.current = busy;
+  }, []);
+  const setOpen = useCallback((open: boolean) => {
+    if (!busyRef.current) dispatch({ _tag: "SetOpen", open });
+  }, []);
+  const toggleMode = useCallback((mode: SearchOverlayMode) => {
+    if (!busyRef.current) dispatch({ _tag: "ToggleMode", mode });
+  }, []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
 
@@ -135,6 +142,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
+        if (busyRef.current) return;
         if (detail.open === "new-thread-in") {
           dispatch({ _tag: "OpenNewThreadIn" });
         } else if (detail.open === "add-project") {
@@ -151,6 +159,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       <CommandDialog
         open={state.open}
         onOpenChange={(open, eventDetails) => {
+          if (busyRef.current) {
+            eventDetails.cancel();
+            return;
+          }
           if (!open && eventDetails.reason === "escape-key" && state.mode !== "command") {
             eventDetails.cancel();
             toggleMode("command");
@@ -166,6 +178,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openIntent={state.openIntent}
           openOverlayMode={toggleMode}
           setOpen={setOpen}
+          setBusy={setBusy}
         />
       </CommandDialog>
     </ComposerHandleContext>
@@ -173,6 +186,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
 }
 
 function CommandPaletteDialog(props: {
+  readonly setBusy: (busy: boolean) => void;
   readonly mode: SearchOverlayMode;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
@@ -211,6 +225,7 @@ function CommandPaletteDialog(props: {
 }
 
 function OpenCommandPaletteDialog(props: {
+  readonly setBusy: (busy: boolean) => void;
   readonly mode: SearchOverlayMode;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
@@ -233,6 +248,10 @@ function OpenCommandPaletteDialog(props: {
   const providers = useAtomValue(primaryServerProvidersAtom);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const createOnshapeProject = useAtomCommand(onshapeProjectEnvironment.create, {
+    reportFailure: false,
+  });
+  const [onshapeEnvironmentId, setOnshapeEnvironmentId] = useState<string | null>(null);
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
 
@@ -397,13 +416,29 @@ function OpenCommandPaletteDialog(props: {
       actions.push({
         kind: "action",
         value: `action:add-project:${environment.environmentId}`,
-        searchTerms: ["add project", "open folder", "directory", label, "wsl"],
-        title: localEnvironments.length === 1 ? "Add project" : `Add project on ${label}`,
+        searchTerms: ["add project", "folder project", "open folder", "directory", label, "wsl"],
+        title:
+          localEnvironments.length === 1 ? "Add folder project" : `Add folder project on ${label}`,
         description: environment.connection.phase === "connected" ? undefined : "Unavailable",
         disabled: environment.connection.phase !== "connected",
         icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
         keepOpen: true,
         run: async () => addProject(environment),
+      });
+    }
+    for (const environment of environments) {
+      const label = environmentLabel(environment);
+      actions.push({
+        kind: "action",
+        value: `action:add-onshape-project:${environment.environmentId}`,
+        searchTerms: ["add project", "onshape", "cad", label],
+        title:
+          environments.length === 1 ? "Add Onshape project" : `Add Onshape project on ${label}`,
+        description: environment.connection.phase === "connected" ? undefined : "Unavailable",
+        disabled: environment.connection.phase !== "connected",
+        icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+        keepOpen: true,
+        run: async () => setOnshapeEnvironmentId(environment.environmentId),
       });
     }
     actions.push({
@@ -419,18 +454,26 @@ function OpenCommandPaletteDialog(props: {
       {
         kind: "action" as const,
         value: `project:${project.environmentId}:${project.id}`,
-        searchTerms: [project.title, project.workspaceRoot, "project"],
+        searchTerms: [
+          project.title,
+          project.onshapeSource ? "onshape cad" : project.workspaceRoot,
+          "project",
+        ],
         title: project.title,
-        description: project.workspaceRoot,
+        description: project.onshapeSource ? "Onshape project" : project.workspaceRoot,
         icon: projectIcon(project),
         run: async () => openProject(project),
       },
       {
         kind: "action" as const,
         value: `new-thread-in:${project.environmentId}:${project.id}`,
-        searchTerms: ["new thread in", project.title, project.workspaceRoot],
+        searchTerms: [
+          "new thread in",
+          project.title,
+          project.onshapeSource ? "onshape cad" : project.workspaceRoot,
+        ],
         title: `New thread in ${project.title}`,
-        description: project.workspaceRoot,
+        description: project.onshapeSource ? "Onshape project" : project.workspaceRoot,
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           await handleNewThread(scopeProjectRef(project.environmentId, project.id));
@@ -472,6 +515,7 @@ function OpenCommandPaletteDialog(props: {
     addProject,
     currentProjectRef,
     environmentLabel,
+    environments,
     handleNewThread,
     localEnvironments,
     navigate,
@@ -515,6 +559,69 @@ function OpenCommandPaletteDialog(props: {
     event.preventDefault();
     executeItem(item);
   };
+
+  const onshapeEnvironment = environments.find(
+    (environment) => environment.environmentId === onshapeEnvironmentId,
+  );
+  if (onshapeEnvironment) {
+    return (
+      <OnshapeProjectCreateForm
+        key={onshapeEnvironment.environmentId}
+        environmentId={onshapeEnvironment.environmentId}
+        environmentLabel={environmentLabel(onshapeEnvironment)}
+        connected={onshapeEnvironment.connection.phase === "connected"}
+        onCancel={() => setOnshapeEnvironmentId(null)}
+        onConfigure={() => {
+          props.setOpen(false);
+          void navigate({ to: "/settings/integrations" });
+        }}
+        onCreate={async (input) => {
+          props.setBusy(true);
+          try {
+            const projectId = newProjectId();
+            const result = await createOnshapeProject({
+              environmentId: onshapeEnvironment.environmentId,
+              input: {
+                ...input,
+                projectId,
+                defaultModelSelection: resolveDefaultProviderModelSelection(
+                  onshapeEnvironment.serverConfig?.providers ?? [],
+                  null,
+                ),
+              },
+            });
+            if (result._tag === "Failure") {
+              if (isAtomCommandInterrupted(result))
+                return "Project creation was interrupted. Check your projects before trying again.";
+              const cause = squashAtomCommandFailure(result);
+              return cause instanceof Error
+                ? cause.message
+                : "Could not create the Onshape project.";
+            }
+            try {
+              await handleNewThread(
+                scopeProjectRef(onshapeEnvironment.environmentId, result.value.projectId),
+              );
+            } catch {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Project created",
+                  description:
+                    "Could not open a thread. Open the project from the sidebar to try again.",
+                }),
+              );
+            }
+            props.setBusy(false);
+            props.setOpen(false);
+            return null;
+          } finally {
+            props.setBusy(false);
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <CommandPaletteContent

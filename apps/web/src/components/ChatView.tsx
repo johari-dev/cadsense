@@ -4043,6 +4043,7 @@ function ChatViewContent(props: ChatViewProps) {
             isServerThread={isServerThread}
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
+            activeProjectOnshapeSource={activeProject?.onshapeSource}
             openInCwd={activeProject?.workspaceRoot ?? null}
             rightPanelOpen={rightPanelOpen}
             onNewThreadInProject={handleNewThreadInActiveProject}

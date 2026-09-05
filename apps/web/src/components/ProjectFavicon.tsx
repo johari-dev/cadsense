@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@cadsense/contracts";
+import type { EnvironmentId, OnshapeProjectSource } from "@cadsense/contracts";
 import {
   getProjectFaviconCacheKey,
   isProjectFaviconFallbackUrl,
@@ -11,12 +11,28 @@ import { cn } from "~/lib/utils";
 
 const loadedProjectFaviconSrcs = new Map<string, string>();
 
-export function ProjectFavicon(input: {
+type ProjectFaviconProps = {
   environmentId: EnvironmentId;
   cwd: string;
   className?: string | undefined;
   fallbackIcon?: ComponentType<{ className?: string }>;
-}) {
+  onshapeSource?: OnshapeProjectSource | undefined;
+};
+
+export function ProjectFavicon(input: ProjectFaviconProps) {
+  if (input.onshapeSource) {
+    return (
+      <img
+        src="/onshape.svg"
+        alt=""
+        className={cn("size-3.5 shrink-0 object-contain", input.className)}
+      />
+    );
+  }
+  return <LocalProjectFavicon {...input} />;
+}
+
+function LocalProjectFavicon(input: ProjectFaviconProps) {
   const state = useProjectFaviconAsset(input);
   const src = state._tag === "Success" ? state.url : null;
   const FallbackIcon = input.fallbackIcon ?? FolderIcon;
