@@ -1,9 +1,31 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   filterCommandPaletteGroups,
+  commandPaletteThreadRouteKey,
   reduceCommandPaletteUiState,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
+
+describe("command palette thread route identity", () => {
+  it("keeps the query-reset dependency stable when a draft route is reselected", () => {
+    const first = commandPaletteThreadRouteKey({ draftId: "draft-1" });
+    expect(commandPaletteThreadRouteKey({ draftId: "draft-1" })).toBe(first);
+    expect(commandPaletteThreadRouteKey({ draftId: "draft-2" })).not.toBe(first);
+  });
+
+  it("distinguishes threads across environments and draft promotion", () => {
+    const server = commandPaletteThreadRouteKey({ environmentId: "local", threadId: "one" });
+    expect(commandPaletteThreadRouteKey({ environmentId: "local", threadId: "one" })).toBe(server);
+    expect(commandPaletteThreadRouteKey({ environmentId: "remote", threadId: "one" })).not.toBe(
+      server,
+    );
+    expect(commandPaletteThreadRouteKey({ environmentId: "local", threadId: "two" })).not.toBe(
+      server,
+    );
+    expect(commandPaletteThreadRouteKey({ draftId: "one" })).not.toBe(server);
+    expect(commandPaletteThreadRouteKey({})).toBeNull();
+  });
+});
 
 describe("reduceCommandPaletteUiState", () => {
   it("keeps only one search overlay open", () => {

@@ -1,7 +1,11 @@
 "use client";
 
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedProjectKey,
+} from "@cadsense/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -44,7 +48,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import { useProjects, useThreadShells } from "../state/entities";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
+import { buildThreadRouteParams } from "../threadRoutes";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import type { Project, ThreadShell } from "../types";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
@@ -54,6 +58,7 @@ import {
   type CommandPaletteOpenIntent,
   type CommandPaletteSubmenuItem,
   filterCommandPaletteGroups,
+  commandPaletteThreadRouteKey,
   ITEM_ICON_CLASS,
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
@@ -233,9 +238,9 @@ function OpenCommandPaletteDialog(props: {
   readonly clearOpenIntent: () => void;
 }) {
   const navigate = useNavigate();
-  const routeTarget = useParams({
+  const threadRouteKey = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+    select: commandPaletteThreadRouteKey,
   });
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -466,6 +471,25 @@ function OpenCommandPaletteDialog(props: {
       },
       {
         kind: "action" as const,
+        value: `project-settings:${project.environmentId}:${project.id}`,
+        searchTerms: [
+          "project settings",
+          project.title,
+          project.onshapeSource ? "onshape connection cad" : project.workspaceRoot,
+        ],
+        title: `Project settings for ${project.title}`,
+        description: project.onshapeSource ? "Onshape project" : project.workspaceRoot,
+        icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+        run: async () =>
+          navigate({
+            to: "/projects/$projectKey",
+            params: {
+              projectKey: scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+            },
+          }),
+      },
+      {
+        kind: "action" as const,
         value: `new-thread-in:${project.environmentId}:${project.id}`,
         searchTerms: [
           "new thread in",
@@ -536,7 +560,7 @@ function OpenCommandPaletteDialog(props: {
   useEffect(() => {
     setQuery("");
     setHighlightedItemValue(null);
-  }, [routeTarget]);
+  }, [threadRouteKey]);
 
   const rootGroups = deferredQuery.startsWith(">") ? groups.slice(0, 1) : groups;
   const displayedGroups = filterCommandPaletteGroups(rootGroups, deferredQuery);

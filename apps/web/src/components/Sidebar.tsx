@@ -1379,7 +1379,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "copy-path" | "delete",
+          action: "settings" | "rename" | "copy-path" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1389,6 +1389,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           const id = `${action}:${member.physicalProjectKey}`;
           actionHandlers.set(id, () => {
             switch (action) {
+              case "settings":
+                if (isMobile) setOpenMobile(false);
+                return router.navigate({
+                  to: "/projects/$projectKey",
+                  params: {
+                    projectKey: scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+                  },
+                });
               case "rename":
                 openProjectRenameDialog(member);
                 return;
@@ -1414,7 +1422,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "copy-path" | "delete",
+          action: "settings" | "rename" | "copy-path" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1448,6 +1456,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const clicked = await api.contextMenu.show(
           [
+            buildTargetedItem("settings", "Project settings"),
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem(
               "copy-path",
@@ -1474,6 +1483,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyPathToClipboard,
       handleRemoveProject,
       openProjectRenameDialog,
+      router,
+      isMobile,
+      setOpenMobile,
       project.groupedProjectCount,
       project.memberProjects,
       project.onshapeSource,

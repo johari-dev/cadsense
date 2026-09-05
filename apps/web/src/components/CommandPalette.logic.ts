@@ -3,6 +3,16 @@ import type { ReactNode } from "react";
 
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 
+/** Stable across rerenders so route-driven query resets only run when the thread changes. */
+export function commandPaletteThreadRouteKey(
+  params: Partial<Record<"environmentId" | "threadId" | "draftId", string | undefined>>,
+): string | null {
+  if (params.environmentId && params.threadId) {
+    return JSON.stringify(["server", params.environmentId, params.threadId]);
+  }
+  return params.draftId ? JSON.stringify(["draft", params.draftId]) : null;
+}
+
 export type SearchOverlayMode = "command" | "files" | "content";
 
 export interface CommandPaletteOpenIntent {
