@@ -4,7 +4,8 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import type { ScopedThreadRef, ThreadId } from "@cadsense/contracts";
+import type { ScopedThreadRef, ThreadId, OnshapeProjectSource } from "@cadsense/contracts";
+import { onshapeProjectUrl } from "../lib/onshapeProjects";
 import { useCallback } from "react";
 
 import {
@@ -37,9 +38,10 @@ function failureToast(title: string, error: unknown) {
 export function useThreadActionMenu(input: {
   readonly threadRef: ScopedThreadRef | null;
   readonly projectCwd: string | null;
+  readonly onshapeSource?: OnshapeProjectSource | undefined;
   readonly onStartRename: () => void;
 }) {
-  const { threadRef, projectCwd, onStartRename } = input;
+  const { threadRef, projectCwd, onshapeSource, onStartRename } = input;
   const { archiveThread, deleteThread } = useThreadActions();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -49,10 +51,17 @@ export function useThreadActionMenu(input: {
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((settings) => settings.confirmThreadArchive);
   const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
-  const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
-    onCopy: ({ path }) =>
-      toastManager.add({ type: "success", title: "Path copied", description: path }),
-    onError: (error) => failureToast("Failed to copy path", error),
+  const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{
+    path: string;
+    onshape?: boolean;
+  }>({
+    onCopy: ({ path, onshape }) =>
+      toastManager.add({
+        type: "success",
+        title: onshape ? "Onshape URL copied" : "Path copied",
+        description: path,
+      }),
+    onError: (error) => failureToast("Failed to copy", error),
   });
   const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{ threadId: ThreadId }>({
     onCopy: ({ threadId }) =>
@@ -71,6 +80,7 @@ export function useThreadActionMenu(input: {
 
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const items = buildThreadActionMenuItems({
+          isOnshapeProject: onshapeSource !== undefined,
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           isPinned: thread.pinnedAt != null,
@@ -106,6 +116,11 @@ export function useThreadActionMenu(input: {
             );
             return;
           case "copy-path":
+            if (onshapeSource) {
+              const url = onshapeProjectUrl(onshapeSource);
+              copyPathToClipboard(url, { path: url, onshape: true });
+              return;
+            }
             if (!projectCwd) {
               failureToast("Path unavailable", "This thread does not have a workspace path.");
               return;
@@ -179,6 +194,7 @@ export function useThreadActionMenu(input: {
       deleteThread,
       onStartRename,
       projectCwd,
+      onshapeSource,
       pinThread,
       threadRef,
       updateThreadMetadata,

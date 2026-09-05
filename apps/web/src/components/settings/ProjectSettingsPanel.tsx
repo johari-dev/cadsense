@@ -47,6 +47,7 @@ import {
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { OnshapeProjectSettings } from "./OnshapeProjectSettings";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -183,7 +184,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
       api.dialogs.confirm(
         [
           `Remove project "${project.title}"?`,
-          `Path: ${project.workspaceRoot}`,
+          ...(project.onshapeSource ? [] : [`Path: ${project.workspaceRoot}`]),
           ...(projectThreads.length > 0
             ? [
                 `This permanently deletes ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}.`,
@@ -262,22 +263,28 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
               />
             }
           />
-          <SettingsRow
-            title="Folder"
-            description={project.workspaceRoot}
-            control={
-              <Button
-                size="xs"
-                variant="outline"
-                type="button"
-                onClick={() => void showInExplorer()}
-              >
-                <FolderOpenIcon />
-                Open in Explorer
-              </Button>
-            }
-          />
+          {!project.onshapeSource && (
+            <SettingsRow
+              title="Folder"
+              description={project.workspaceRoot}
+              control={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  type="button"
+                  onClick={() => void showInExplorer()}
+                >
+                  <FolderOpenIcon />
+                  Open in Explorer
+                </Button>
+              }
+            />
+          )}
         </SettingsSection>
+
+        {project.onshapeSource && (
+          <OnshapeProjectSettings project={project} source={project.onshapeSource} />
+        )}
 
         <SettingsSection title="New threads">
           <SettingsRow

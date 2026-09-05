@@ -12,6 +12,7 @@ export type ThreadActionMenuId =
   | "delete";
 
 export interface ThreadActionMenuState {
+  readonly isOnshapeProject?: boolean;
   readonly isRegeneratingTitle: boolean;
   readonly isRunning: boolean;
   readonly isPinned: boolean;
@@ -47,7 +48,11 @@ export function buildThreadActionMenuItems(
       icon: "copy",
       separatorBefore: true,
       children: [
-        { id: "copy-path", label: "Path", icon: "folder" },
+        {
+          id: "copy-path",
+          label: state.isOnshapeProject ? "Onshape URL" : "Path",
+          icon: state.isOnshapeProject ? "link" : "folder",
+        },
         { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
       ],
     },
