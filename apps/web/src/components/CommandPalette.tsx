@@ -25,7 +25,6 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -67,6 +66,7 @@ import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { OnshapeProjectCreateForm } from "./OnshapeProjectCreateForm";
+import { useCommandPaletteQuery } from "./useCommandPaletteQuery";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { CommandDialog, CommandDialogPopup } from "./ui/command";
@@ -242,9 +242,12 @@ function OpenCommandPaletteDialog(props: {
     strict: false,
     select: commandPaletteThreadRouteKey,
   });
-  const [query, setQuery] = useState("");
+  const { query, setQuery, highlightedItemValue, setHighlightedItemValue } = useCommandPaletteQuery(
+    threadRouteKey,
+    props.openIntent,
+    props.clearOpenIntent,
+  );
   const deferredQuery = useDeferredValue(query);
-  const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -549,18 +552,6 @@ function OpenCommandPaletteDialog(props: {
     props,
     threads,
   ]);
-
-  useLayoutEffect(() => {
-    if (!props.openIntent) return;
-    setQuery(props.openIntent.kind === "add-project" ? "add project" : "new thread in");
-    setHighlightedItemValue(null);
-    props.clearOpenIntent();
-  }, [props]);
-
-  useEffect(() => {
-    setQuery("");
-    setHighlightedItemValue(null);
-  }, [threadRouteKey]);
 
   const rootGroups = deferredQuery.startsWith(">") ? groups.slice(0, 1) : groups;
   const displayedGroups = filterCommandPaletteGroups(rootGroups, deferredQuery);
