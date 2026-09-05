@@ -1,10 +1,12 @@
 import {
   CadSessionIndex,
+  CadCaptureRecord,
   CadUserView,
   CadUserViewIndex,
   CadViewState,
   type OrchestrationEvent,
   type ThreadId,
+  type TurnId,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -16,12 +18,58 @@ const SessionRow = Schema.Struct({
   view: Schema.NullOr(Schema.fromJsonString(CadViewState)),
 });
 const encodeView = Schema.encodeSync(Schema.fromJsonString(CadViewState));
+const encodeCamera = Schema.encodeSync(Schema.fromJsonString(CadViewState.fields.camera));
+const encodeCapture = Schema.encodeSync(Schema.fromJsonString(CadCaptureRecord));
+const decodeSessionIndexes = Schema.decodeUnknownEffect(Schema.Array(CadSessionIndex));
+const decodeUserIndexes = Schema.decodeUnknownEffect(Schema.Array(CadUserViewIndex));
+const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow));
+const decodeUserViews = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      threadId: CadUserView.fields.threadId,
+      view: Schema.fromJsonString(CadUserView.fields.view),
+    }),
+  ),
+);
+const decodeCaptures = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      record: Schema.fromJsonString(CadCaptureRecord),
+      view: Schema.fromJsonString(CadViewState),
+    }),
+  ),
+);
+
+export const readLatestCadCapture = Effect.fn("readLatestCadCapture")(
+  function* (threadId: ThreadId, turnId: TurnId) {
+    const sql = yield* SqlClient.SqlClient;
+    const rows =
+      yield* sql`SELECT record_json AS record, view_json AS view FROM projection_cad_captures
+      WHERE thread_id=${threadId} AND turn_id=${turnId} ORDER BY sequence DESC LIMIT 1`;
+    const captures = yield* decodeCaptures(rows).pipe(
+      Effect.mapError(toPersistenceDecodeError("CAD capture")),
+    );
+    return captures[0] ?? null;
+  },
+  Effect.catchTag("SqlError", (error) =>
+    Effect.fail(toPersistenceSqlError("CadSessionPersistence.capture")(error)),
+  ),
+);
 
 /** Called exclusively by the existing transactional projection pipeline. */
 export const projectCadSessionEvent = Effect.fn("projectCadSessionEvent")(
   function* (event: OrchestrationEvent) {
     const sql = yield* SqlClient.SqlClient;
     switch (event.type) {
+      case "thread.cad-capture-recorded": {
+        const record = event.payload;
+        const camera = encodeCamera({ kind: "pose", pose: record.cameraPose, fit: null });
+        yield* sql`INSERT INTO projection_cad_captures(capture_id, thread_id, turn_id, sequence, record_json, view_json)
+          SELECT ${record.capture.captureId}, ${record.threadId}, ${record.turnId}, ${event.sequence}, ${encodeCapture(record)}, json_set(view_json, '$.camera', json(${camera}))
+          FROM projection_cad_sessions WHERE context_id=${record.contextId} AND revision=${record.capture.revision}
+          ON CONFLICT(capture_id) DO NOTHING`;
+        return;
+      }
       case "thread.cad-context-ensured": {
         const session = event.payload.session;
         yield* sql`INSERT INTO projection_cad_sessions(context_id, thread_id, child_key, revision, view_json)
@@ -53,10 +101,10 @@ export const readCadSessionIndexes = Effect.fn("readCadSessionIndexes")(
     const users =
       yield* sql`SELECT thread_id AS "threadId", revision FROM projection_cad_user_views`;
     return {
-      cadSessions: yield* Schema.decodeUnknownEffect(Schema.Array(CadSessionIndex))(sessions).pipe(
+      cadSessions: yield* decodeSessionIndexes(sessions).pipe(
         Effect.mapError(toPersistenceDecodeError("CAD session index")),
       ),
-      cadUserViews: yield* Schema.decodeUnknownEffect(Schema.Array(CadUserViewIndex))(users).pipe(
+      cadUserViews: yield* decodeUserIndexes(users).pipe(
         Effect.mapError(toPersistenceDecodeError("CAD user view index")),
       ),
     };
@@ -71,7 +119,7 @@ export const readCadSession = Effect.fn("readCadSession")(
     const sql = yield* SqlClient.SqlClient;
     const rows =
       yield* sql`SELECT context_id AS "contextId", thread_id AS "threadId", child_key AS "childKey", revision, view_json AS "view" FROM projection_cad_sessions WHERE context_id=${contextId}`;
-    const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(SessionRow))(rows).pipe(
+    const decoded = yield* decodeSessions(rows).pipe(
       Effect.mapError(toPersistenceDecodeError("CAD session")),
     );
     return decoded[0] ?? null;
@@ -86,7 +134,7 @@ export const findCadSession = Effect.fn("findCadSession")(
     const sql = yield* SqlClient.SqlClient;
     const rows =
       yield* sql`SELECT context_id AS "contextId", thread_id AS "threadId", child_key AS "childKey", revision, view_json AS "view" FROM projection_cad_sessions WHERE thread_id=${threadId} AND child_key IS ${childKey}`;
-    const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(SessionRow))(rows).pipe(
+    const decoded = yield* decodeSessions(rows).pipe(
       Effect.mapError(toPersistenceDecodeError("CAD session binding")),
     );
     return decoded[0] ?? null;
@@ -101,14 +149,9 @@ export const readCadUserView = Effect.fn("readCadUserView")(
     const sql = yield* SqlClient.SqlClient;
     const rows =
       yield* sql`SELECT thread_id AS "threadId", view_json AS "view" FROM projection_cad_user_views WHERE thread_id=${threadId}`;
-    const decoded = yield* Schema.decodeUnknownEffect(
-      Schema.Array(
-        Schema.Struct({
-          threadId: CadUserView.fields.threadId,
-          view: Schema.fromJsonString(CadUserView.fields.view),
-        }),
-      ),
-    )(rows).pipe(Effect.mapError(toPersistenceDecodeError("CAD user view")));
+    const decoded = yield* decodeUserViews(rows).pipe(
+      Effect.mapError(toPersistenceDecodeError("CAD user view")),
+    );
     return decoded[0] ?? null;
   },
   Effect.catchTag("SqlError", (error) =>

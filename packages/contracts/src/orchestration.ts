@@ -1,6 +1,11 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  CadCaptureRecord,
+  CadCaptureRecordCommand,
+  CadPresentationSettleCommand,
+} from "./cadCaptures.ts";
+import {
   CadSessionIndex,
   CadUserViewIndex,
   CadContextEnsureCommand,
@@ -998,6 +1003,8 @@ const ThreadTurnLifecycleSettleCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  CadCaptureRecordCommand,
+  CadPresentationSettleCommand,
   CadContextEnsureCommand,
   CadSessionSetCommand,
   CadUserViewSetCommand,
@@ -1026,6 +1033,8 @@ export const OrchestrationCommand = Schema.Union([
 export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 
 export const OrchestrationEventType = Schema.Literals([
+  "thread.cad-capture-recorded",
+  "thread.cad-presentation-settled",
   "thread.cad-context-ensured",
   "thread.cad-view-set",
   "thread.cad-user-view-set",
@@ -1296,6 +1305,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.cad-user-view-set"),
     payload: CadUserViewSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-capture-recorded"),
+    payload: CadCaptureRecord,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-presentation-settled"),
+    payload: Schema.Struct({ threadId: ThreadId, captureId: Schema.String }),
   }),
   Schema.Struct({
     ...EventBaseFields,

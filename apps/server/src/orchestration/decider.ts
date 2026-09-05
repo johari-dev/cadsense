@@ -1,5 +1,6 @@
 import {
   EventId,
+  initialCadProjectState,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -25,7 +26,7 @@ import {
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 import { decideCadState } from "./cadLifecycle.ts";
-import { decideCadSession } from "./cadSessions.ts";
+import { decideCadSession, decideCadPresentation } from "./cadSessions.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -111,18 +112,96 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   Crypto.Crypto
 > {
   switch (command.type) {
-    case "thread.cad.context.ensure":
-    case "thread.cad.view.set":
-    case "thread.cad.user-view.set":
-      return {
+    case "thread.cad.presentation.settle": {
+      const { project, cad } = yield* decideCadPresentation(command, readModel);
+      const occurredAt = yield* nowIso;
+      const events: PlannedOrchestrationEvent[] = [];
+      if (command.view)
+        events.push({
+          ...(yield* withEventBase({
+            commandId: command.commandId,
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+          })),
+          type: "thread.cad-user-view-set",
+          payload: { threadId: command.threadId, view: command.view },
+        });
+      events.push({
+        ...(yield* withEventBase({
+          commandId: command.commandId,
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt,
+        })),
+        type: "project.cad-state-set",
+        payload: { projectId: project.id, updatedAt: occurredAt, cad },
+      });
+      events.push({
         ...(yield* withEventBase({
           commandId: command.commandId,
           aggregateKind: "thread",
           aggregateId: command.threadId,
-          occurredAt: yield* nowIso,
+          occurredAt,
+        })),
+        type: "thread.cad-presentation-settled",
+        payload: { threadId: command.threadId, captureId: command.captureId },
+      });
+      return events;
+    }
+    case "thread.cad.context.ensure":
+    case "thread.cad.view.set":
+    case "thread.cad.user-view.set":
+    case "thread.cad.capture.record": {
+      const occurredAt = yield* nowIso;
+      const event = {
+        ...(yield* withEventBase({
+          commandId: command.commandId,
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
         })),
         ...(yield* decideCadSession(command, readModel)),
       };
+      if (command.type !== "thread.cad.capture.record") return event;
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: thread.projectId,
+      });
+      const cad = project.cad ?? initialCadProjectState();
+      return [
+        {
+          ...(yield* withEventBase({
+            commandId: command.commandId,
+            aggregateKind: "project",
+            aggregateId: project.id,
+            occurredAt,
+          })),
+          type: "project.cad-state-set",
+          payload: {
+            projectId: project.id,
+            updatedAt: occurredAt,
+            cad: {
+              ...cad,
+              pendingPresentations: [
+                ...(cad.pendingPresentations ?? []).filter(
+                  (pending) => pending.threadId !== thread.id,
+                ),
+                {
+                  threadId: thread.id,
+                  turnId: command.turnId,
+                  captureId: command.capture.captureId,
+                  rootId: command.capture.rootId,
+                },
+              ],
+            },
+          },
+        },
+        event,
+      ];
+    }
     case "project.create":
     case "project.onshape.create": {
       yield* requireProjectAbsent({

@@ -473,6 +473,8 @@ const makeWsRpcLayer = (
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":
+          case "thread.cad-capture-recorded":
+          case "thread.cad-presentation-settled":
             return Effect.succeed(Option.none());
           case "project.created":
           case "project.meta-updated":

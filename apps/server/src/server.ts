@@ -76,6 +76,9 @@ import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisitio
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
+import * as CadCaptureArtifacts from "./cad/CadCaptureArtifacts.ts";
+import * as CadViewing from "./cad/CadViewing.ts";
+import * as CadPresentation from "./cad/CadPresentation.ts";
 import { routeLayer as cadRenderRouteLayer } from "./cad/http.ts";
 import * as CadProjectQuiescence from "./cad/CadProjectQuiescence.ts";
 import * as ManagedWorkspaceAllocator from "./workspace/ManagedWorkspaceAllocator.ts";
@@ -249,7 +252,13 @@ const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
   Layer.provideMerge(CadSnapshotStore.layer),
   Layer.provideMerge(OnshapeCadRoots.layer),
 );
-const AgentRuntimeLayerLive = CadUserOperations.layer.pipe(
+const AgentRuntimeLayerLive = Layer.mergeAll(
+  CadUserOperations.layer,
+  CadViewing.layer,
+  CadPresentation.reactorLayer,
+).pipe(
+  Layer.provideMerge(CadPresentation.layer),
+  Layer.provideMerge(CadCaptureArtifacts.layer),
   Layer.provideMerge(CadRenderBroker.layer),
   Layer.provideMerge(CadProjectQuiescence.layer),
   Layer.provideMerge(CadAcquisitionLayerLive),
