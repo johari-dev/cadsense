@@ -1274,6 +1274,11 @@ export const makeCodexSessionRuntime = (
     );
     const awaitProcessExit = child.exitCode.pipe(
       Effect.asVoid,
+      // POSIX signal termination has no numeric exit code. The handle's exit receipt
+      // still marks isRunning false; an error alone is never proof of shutdown.
+      Effect.catch((error) =>
+        processExited.pipe(Effect.flatMap((exited) => (exited ? Effect.void : Effect.fail(error)))),
+      ),
       Effect.timeout("10 seconds"),
       Effect.mapError(
         () =>
@@ -2371,7 +2376,7 @@ export const makeCodexSessionRuntime = (
       }
       yield* Ref.set(quiescingRef, true);
       yield* child.kill({ forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER }).pipe(
-        Effect.andThen(child.exitCode),
+        Effect.andThen(awaitProcessExit),
         Effect.timeout("10 seconds"),
         Effect.mapError(
           () =>

@@ -6,6 +6,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
@@ -14,7 +15,11 @@ import wireFixture from "../testFixtures/codexMultiAgentWire.json" with { type: 
 import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
 
 const encodeScript = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-const makeRuntime = (hideExit = false, notifications: readonly unknown[] = []) =>
+const makeRuntime = (
+  hideExit = false,
+  notifications: readonly unknown[] = [],
+  signalExit = false,
+) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-codex-exit-" });
@@ -51,7 +56,24 @@ const makeRuntime = (hideExit = false, notifications: readonly unknown[] = []) =
                       exitCode: Effect.never,
                       isRunning: Effect.succeed(true),
                     })
-                  : handle,
+                  : signalExit
+                    ? ChildProcessSpawner.makeHandle({
+                        ...handle,
+                        exitCode: handle.exitCode.pipe(
+                          Effect.andThen(
+                            Effect.fail(
+                              PlatformError.systemError({
+                                _tag: "Unknown",
+                                module: "ChildProcess",
+                                method: "exitCode",
+                                description:
+                                  "Process interrupted due to receipt of signal: SIGTERM",
+                              }),
+                            ),
+                          ),
+                        ),
+                      })
+                    : handle,
               ),
             ),
         ),
@@ -78,6 +100,15 @@ it.effect("does not terminate a running Codex turn", () =>
     assert.strictEqual((yield* Effect.exit(runtime.closeIdleConfirmed))._tag, "Failure");
     assert.strictEqual(yield* runtime.processExited, false);
     yield* runtime.close;
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("accepts a confirmed signal-based exit without requiring a numeric exit code", () =>
+  Effect.gen(function* () {
+    const runtime = yield* makeRuntime(false, [], true);
+    yield* runtime.closeIdleConfirmed;
+    assert.strictEqual(yield* runtime.processExited, true);
+    yield* runtime.awaitProcessExit;
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
