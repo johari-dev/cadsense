@@ -18,9 +18,11 @@ import { useOnshapeConnectionsController } from "./useOnshapeConnectionsControll
 export function OnshapeProjectSettings({
   project,
   source,
+  busy = false,
 }: {
   project: Project;
   source: OnshapeProjectSource;
+  busy?: boolean;
 }) {
   const catalog = useOnshapeConnectionsController(project.environmentId);
   const setConnection = useAtomCommand(onshapeProjectEnvironment.setConnection, {
@@ -38,7 +40,8 @@ export function OnshapeProjectSettings({
   const unavailable = !catalog.hasListData || catalog.listError !== null;
 
   const save = async () => {
-    if (!selected || unavailable || pendingRef.current || catalog.pendingKey !== null) return;
+    if (busy || !selected || unavailable || pendingRef.current || catalog.pendingKey !== null)
+      return;
     pendingRef.current = true;
     setPending(true);
     setError(null);
@@ -89,7 +92,11 @@ export function OnshapeProjectSettings({
                 setError(null);
               }}
               disabled={
-                pending || unavailable || catalog.pendingKey !== null || compatible.length === 0
+                busy ||
+                pending ||
+                unavailable ||
+                catalog.pendingKey !== null ||
+                compatible.length === 0
               }
             >
               <SelectTrigger aria-label="Onshape project connection" className="min-w-0 flex-1">
@@ -112,6 +119,7 @@ export function OnshapeProjectSettings({
             <Button
               size="sm"
               disabled={
+                busy ||
                 !selected ||
                 selected.connectionId === source.connectionId ||
                 unavailable ||
