@@ -8,6 +8,7 @@ import {
   CadUserEnabledInput,
   CadUserOperationError,
 } from "./cadUser.ts";
+import { CadRenderError, CadRenderEvent } from "./cadRender.ts";
 
 import { FileManagerError, OpenInFileManagerInput } from "./fileManager.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
@@ -161,6 +162,7 @@ export const WS_METHODS = {
   cadUserStart: "cad.user.start",
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
+  cadRenderConnect: "cad.render.connect",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -433,6 +435,12 @@ export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
   success: CadUserStartResult,
   error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
 });
+export const WsCadRenderConnectRpc = Rpc.make(WS_METHODS.cadRenderConnect, {
+  payload: Schema.Struct({}),
+  success: CadRenderEvent,
+  error: Schema.Union([CadRenderError, EnvironmentAuthorizationError]),
+  stream: true,
+});
 export const WsCadUserCancelRpc = Rpc.make(WS_METHODS.cadUserCancel, {
   payload: CadUserOperationInput,
   success: Schema.Void,
@@ -634,6 +642,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeProjectsCreateRpc,
   WsOnshapeProjectsSetConnectionRpc,
   WsCadUserStartRpc,
+  WsCadRenderConnectRpc,
   WsCadUserCancelRpc,
   WsCadUserSetEnabledRpc,
   WsPreviewOpenRpc,

@@ -27,6 +27,7 @@ import {
 } from "@cadsense/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import { readCadSessionIndexes } from "../../cad/CadSessionPersistence.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -1539,6 +1540,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.all([
+          readCadSessionIndexes().pipe(Effect.provideService(SqlClient.SqlClient, sql)),
           listProjectRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1591,7 +1593,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            cadIndexes,
+            projectRows,
+            threadRows,
+            proposedPlanRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
@@ -1709,6 +1719,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 projects,
                 threads,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
+                ...cadIndexes,
               } satisfies OrchestrationReadModel;
             }),
         ),

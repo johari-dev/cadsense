@@ -183,6 +183,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           readModel:
             Option.isSome(backgroundLiveness) &&
             (envelope.command.type === "project.cad.operation.reserve" ||
+              envelope.command.type === "thread.cad.user-view.set" ||
               envelope.command.type === "project.cad.enabled.set" ||
               envelope.command.type === "project.delete")
               ? {

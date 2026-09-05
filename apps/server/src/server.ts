@@ -75,6 +75,8 @@ import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
+import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
+import { routeLayer as cadRenderRouteLayer } from "./cad/http.ts";
 import * as CadProjectQuiescence from "./cad/CadProjectQuiescence.ts";
 import * as ManagedWorkspaceAllocator from "./workspace/ManagedWorkspaceAllocator.ts";
 
@@ -248,6 +250,7 @@ const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
   Layer.provideMerge(OnshapeCadRoots.layer),
 );
 const AgentRuntimeLayerLive = CadUserOperations.layer.pipe(
+  Layer.provideMerge(CadRenderBroker.layer),
   Layer.provideMerge(CadProjectQuiescence.layer),
   Layer.provideMerge(CadAcquisitionLayerLive),
   Layer.provideMerge(OnshapeLayerLive),
@@ -326,6 +329,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,
+    cadRenderRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),

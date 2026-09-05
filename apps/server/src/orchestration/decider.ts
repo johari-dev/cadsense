@@ -25,6 +25,7 @@ import {
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 import { decideCadState } from "./cadLifecycle.ts";
+import { decideCadSession } from "./cadSessions.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -110,6 +111,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   Crypto.Crypto
 > {
   switch (command.type) {
+    case "thread.cad.context.ensure":
+    case "thread.cad.view.set":
+    case "thread.cad.user-view.set":
+      return {
+        ...(yield* withEventBase({
+          commandId: command.commandId,
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: yield* nowIso,
+        })),
+        ...(yield* decideCadSession(command, readModel)),
+      };
     case "project.create":
     case "project.onshape.create": {
       yield* requireProjectAbsent({

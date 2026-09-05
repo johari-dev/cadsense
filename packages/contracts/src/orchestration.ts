@@ -1,5 +1,15 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import {
+  CadSessionIndex,
+  CadUserViewIndex,
+  CadContextEnsureCommand,
+  CadSessionSetCommand,
+  CadUserViewSetCommand,
+  CadContextEnsuredPayload,
+  CadSessionSetPayload,
+  CadUserViewSetPayload,
+} from "./cadSessions.ts";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { ProviderOptionSelections } from "./model.ts";
 import {
@@ -413,6 +423,8 @@ export const OrchestrationThread = Schema.Struct({
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
 export const OrchestrationReadModel = Schema.Struct({
+  cadSessions: Schema.optionalKey(Schema.Array(CadSessionIndex)),
+  cadUserViews: Schema.optionalKey(Schema.Array(CadUserViewIndex)),
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
@@ -986,6 +998,9 @@ const ThreadTurnLifecycleSettleCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  CadContextEnsureCommand,
+  CadSessionSetCommand,
+  CadUserViewSetCommand,
   CadEnabledSetCommand,
   CadOperationReserveCommand,
   CadOperationCompleteCommand,
@@ -1011,6 +1026,9 @@ export const OrchestrationCommand = Schema.Union([
 export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 
 export const OrchestrationEventType = Schema.Literals([
+  "thread.cad-context-ensured",
+  "thread.cad-view-set",
+  "thread.cad-user-view-set",
   "project.cad-state-set",
   "thread.turn-start-settled",
   "thread.turn-lifecycle-settled",
@@ -1264,6 +1282,21 @@ const EventBaseFields = {
 } as const;
 
 export const OrchestrationEvent = Schema.Union([
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-context-ensured"),
+    payload: CadContextEnsuredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-view-set"),
+    payload: CadSessionSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-user-view-set"),
+    payload: CadUserViewSetPayload,
+  }),
   Schema.Struct({
     ...EventBaseFields,
     type: Schema.Literal("project.cad-state-set"),

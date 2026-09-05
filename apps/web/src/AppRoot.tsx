@@ -1,4 +1,5 @@
 import { RouterProvider } from "@tanstack/react-router";
+import { CadRenderHosts } from "./cad/CadRenderHosts";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { PreviewAutomationHosts } from "./components/preview/PreviewAutomationHosts";
@@ -18,6 +19,7 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       <PreviewAutomationHosts />
       <ElectronBrowserHost />
       <QuitHoldOverlay />
+      <CadRenderHosts />
     </AppAtomRegistryProvider>
   );
 }

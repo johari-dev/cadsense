@@ -96,6 +96,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
+import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -384,6 +385,7 @@ const makeWsRpcLayer = (
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
       const cadUserOperations = yield* CadUserOperations;
+      const cadRenderBroker = yield* CadRenderBroker;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -468,6 +470,10 @@ const makeWsRpcLayer = (
         event: OrchestrationEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
         switch (event.type) {
+          case "thread.cad-context-ensured":
+          case "thread.cad-view-set":
+          case "thread.cad-user-view-set":
+            return Effect.succeed(Option.none());
           case "project.created":
           case "project.meta-updated":
           case "project.cad-state-set":
@@ -862,6 +868,8 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.cadUserStart, cadUserOperations.start(input), {
             "rpc.aggregate": "cad-user",
           }),
+        [WS_METHODS.cadRenderConnect]: () =>
+          observeRpcStream(WS_METHODS.cadRenderConnect, cadRenderBroker.connect()),
         [WS_METHODS.cadUserCancel]: (input) =>
           observeRpcEffect(
             WS_METHODS.cadUserCancel,
