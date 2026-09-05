@@ -57,6 +57,9 @@ export type CadSnapshotSummary = Pick<
   "snapshotId" | "projectId" | "rootId" | "createdAt"
 > & { readonly byteLength: number };
 export interface CadSnapshotStoreShape {
+  readonly findGeometry: (
+    keys: readonly string[],
+  ) => Effect.Effect<readonly CadGeometryAsset[], CadSnapshotStoreError>;
   readonly checkReserve: (additionalBytes?: number) => Effect.Effect<void, CadSnapshotStoreError>;
   readonly putAsset: (bytes: Uint8Array) => Effect.Effect<CadStoredAsset, CadSnapshotStoreError>;
   readonly publish: (manifest: CadSnapshotManifest) => Effect.Effect<void, CadSnapshotStoreError>;
@@ -72,7 +75,10 @@ export interface CadSnapshotStoreShape {
   ) => Effect.Effect<void, CadSnapshotStoreError>;
   readonly withPinned: <A, E, R>(
     snapshotId: string,
-    use: (manifest: CadSnapshotManifest) => Effect.Effect<A, E, R>,
+    use: (
+      manifest: CadSnapshotManifest,
+      readAsset: (sha256: string) => Effect.Effect<Uint8Array, CadSnapshotStoreError>,
+    ) => Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | CadSnapshotStoreError, R>;
   readonly withAcquisition: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
@@ -102,6 +108,7 @@ export const make = Effect.gen(function* () {
   const retired = NodePath.join(root, "retired");
   const pins = new Map<string, number>();
   let acquisitions = 0;
+  const pendingOrphans = new Set<string>();
 
   const assertDirectory = async (directory: string) => {
     const stat = await NodeFSP.lstat(directory);
@@ -143,13 +150,16 @@ export const make = Effect.gen(function* () {
     if (bytes.length > limit) throw failure("corrupt");
     return bytes;
   };
-  const atomicWrite = async (destination: string, bytes: Uint8Array) => {
+  const atomicWrite = async (destination: string, bytes: Uint8Array, repair = false) => {
     const temp = NodePath.join(staging, `${NodeCrypto.randomUUID()}.tmp`);
-    await NodeFSP.writeFile(temp, bytes, { flag: "wx", mode: 0o600 });
     try {
-      await NodeFSP.link(temp, destination);
+      await NodeFSP.writeFile(temp, bytes, { flag: "wx", mode: 0o600 });
+      if (repair) await NodeFSP.rename(temp, destination);
+      else await NodeFSP.link(temp, destination);
     } finally {
-      await NodeFSP.unlink(temp);
+      await NodeFSP.unlink(temp).catch((error: unknown) => {
+        if (!missing(error)) throw error;
+      });
     }
   };
   const manifestPath = (id: string) => NodePath.join(manifests, `${decodeSnapshotId(id)}.json`);
@@ -172,31 +182,79 @@ export const make = Effect.gen(function* () {
     completeSnapshotManifest(manifest, manifest.assets).pipe(
       Effect.mapError(() => failure("corrupt")),
     );
-  // Construction happens once per server, before acquisitions. Runtime orphan sweeps could remove
-  // geometry another acquisition has written but not yet published.
-  yield* Effect.gen(function* () {
+  // Run only at startup or under the mutex when every acquisition has settled.
+  // Pinned snapshots retain their manifests, so the reference scan protects their geometry.
+  const collectOrphans = Effect.fn("CadSnapshotStore.collectOrphans")(function* () {
+    if (acquisitions > 0) return;
+    yield* io(assertDirectories);
     const references = new Set<string>();
     for (const directory of [manifests, retired]) {
       for (const name of yield* io(() => NodeFSP.readdir(directory))) {
-        if (!name.endsWith(".json")) return;
+        if (!name.endsWith(".json")) return yield* failure("corrupt");
         const manifest = yield* io(
           () => readManifest(name.slice(0, -5), directory),
           "corrupt",
         ).pipe(Effect.flatMap(validateManifest), Effect.option);
-        if (manifest._tag === "None") return;
+        if (manifest._tag === "None") return yield* failure("corrupt");
         for (const asset of manifest.value.assets) references.add(asset.relativePath);
       }
     }
     yield* io(async () => {
-      for (const name of await NodeFSP.readdir(assets)) {
-        if (!/^[a-f0-9]{64}\.glb$/.test(name) || references.has(name)) continue;
+      for (const name of new Set([...pendingOrphans, ...(await NodeFSP.readdir(assets))])) {
+        if (!/^[a-f0-9]{64}\.glb$/.test(name) || references.has(name)) {
+          pendingOrphans.delete(name);
+          continue;
+        }
         const path = NodePath.join(assets, name);
-        const stat = await NodeFSP.lstat(path);
-        if (!stat.isFile() || stat.isSymbolicLink()) throw failure("corrupt");
-        await NodeFSP.unlink(path);
+        pendingOrphans.add(name);
+        try {
+          const stat = await NodeFSP.lstat(path);
+          if (!stat.isFile() || stat.isSymbolicLink()) continue;
+          await NodeFSP.unlink(path);
+          pendingOrphans.delete(name);
+        } catch (error) {
+          if (missing(error)) pendingOrphans.delete(name);
+        }
       }
     });
+    if (pendingOrphans.size > 0)
+      yield* Effect.logWarning("CAD asset cleanup pending; local cleanup will retry.");
   });
+  const retryOrphanCleanup = () =>
+    collectOrphans().pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("CAD asset cleanup pending; local cleanup will retry.", {
+          reason: error.reason,
+        }),
+      ),
+    );
+  yield* retryOrphanCleanup();
+  const findGeometry = (keys: readonly string[]) =>
+    lock.withPermits(1)(
+      Effect.gen(function* () {
+        yield* io(assertDirectories);
+        const requested = yield* Effect.try({
+          try: () => new Set(keys.map((key) => decodeHash(key))),
+          catch: () => failure("corrupt"),
+        });
+        const found = new Map<string, CadGeometryAsset>();
+        for (const name of yield* io(() => NodeFSP.readdir(manifests))) {
+          if (found.size === requested.size) break;
+          if (!name.endsWith(".json")) continue;
+          const manifest = yield* io(() => readManifest(name.slice(0, -5)), "corrupt").pipe(
+            Effect.flatMap(validateManifest),
+            Effect.option,
+          );
+          if (manifest._tag === "None") continue;
+          for (const asset of manifest.value.assets) {
+            if (!requested.has(asset.geometryKey) || found.has(asset.geometryKey)) continue;
+            const verified = yield* io(() => verifyAsset(asset), "corrupt").pipe(Effect.option);
+            if (verified._tag === "Some") found.set(asset.geometryKey, asset);
+          }
+        }
+        return [...found.values()];
+      }),
+    );
   const loadUnlocked = Effect.fn("CadSnapshotStore.load")(function* (snapshotId: string) {
     yield* io(assertDirectories);
     const manifest = yield* io(() => readManifest(snapshotId), "corrupt").pipe(
@@ -230,7 +288,14 @@ export const make = Effect.gen(function* () {
           }
         });
         if (exists) {
-          yield* io(() => verifyAsset(asset), "corrupt");
+          const verified = yield* io(() => verifyAsset(asset), "corrupt").pipe(Effect.option);
+          if (verified._tag === "Some") return asset;
+          yield* io(async () => {
+            const stat = await NodeFSP.lstat(NodePath.join(assets, asset.relativePath));
+            if (!stat.isFile() || stat.isSymbolicLink()) throw failure("corrupt");
+          });
+          yield* checkReserve(bytes.length);
+          yield* io(() => atomicWrite(NodePath.join(assets, asset.relativePath), bytes, true));
           return asset;
         }
         yield* checkReserve(bytes.length);
@@ -386,7 +451,27 @@ export const make = Effect.gen(function* () {
           ),
         ),
       ),
-      use,
+      (manifest) => {
+        const indexed = new Map(manifest.assets.map((asset) => [asset.sha256, asset]));
+        let open = true;
+        return use(manifest, (sha256) =>
+          lock.withPermits(1)(
+            Effect.gen(function* () {
+              if (!open) return yield* failure("busy");
+              yield* io(assertDirectories);
+              const asset = indexed.get(sha256);
+              if (!asset) return yield* failure("corrupt");
+              return yield* io(() => verifyAsset(asset), "corrupt");
+            }),
+          ),
+        ).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              open = false;
+            }),
+          ),
+        );
+      },
       () =>
         lock.withPermits(1)(
           Effect.sync(() => {
@@ -408,11 +493,12 @@ export const make = Effect.gen(function* () {
         lock.withPermits(1)(
           Effect.sync(() => {
             acquisitions--;
-          }),
+          }).pipe(Effect.andThen(retryOrphanCleanup())),
         ),
     );
   return CadSnapshotStore.of({
     checkReserve,
+    findGeometry,
     putAsset,
     publish,
     load,

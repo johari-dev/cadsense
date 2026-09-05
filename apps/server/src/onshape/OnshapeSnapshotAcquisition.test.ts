@@ -75,6 +75,7 @@ const harness = Effect.fn(function* (options?: {
   invalidPin?: boolean;
   linkedPin?: string;
   assembly?: unknown;
+  rejectCachedGeometry?: boolean;
 }) {
   const requests: OnshapeReadRequest[] = [];
   const published: CadSnapshotManifest[] = [];
@@ -82,6 +83,21 @@ const harness = Effect.fn(function* (options?: {
   let reserveChecks = 0;
   let active = false;
   const store = CadSnapshotStore.of({
+    findGeometry: (keys) =>
+      Effect.sync(() => {
+        assert.isTrue(active);
+        events.push("cache");
+        if (options?.rejectCachedGeometry) return [];
+        const requested = new Set(keys);
+        return [
+          ...new Map(
+            published
+              .flatMap((manifest) => manifest.assets)
+              .filter((asset) => requested.has(asset.geometryKey))
+              .map((asset) => [asset.geometryKey, asset]),
+          ).values(),
+        ];
+      }),
     checkReserve: () =>
       Effect.gen(function* () {
         assert.isTrue(active);
@@ -190,7 +206,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         assert.include(h.requests[2]!.path, "/partid/part%2B1/gltf");
         assert.isFalse(first.nodes[1]!.defaultVisible);
         assert.lengthOf(first.assets, 1);
-        const second = yield* h.service.acquire({ ...input, previousSnapshotId: first.snapshotId });
+        const second = yield* h.service.acquire(input);
         assert.notStrictEqual(second.snapshotId, first.snapshotId);
         assert.lengthOf(h.requests, 5);
         assert.deepEqual(second.assets, first.assets);
@@ -220,7 +236,9 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
   it.effect("quota failure does not retry or publish", () =>
     Effect.gen(function* () {
       const h = yield* harness({ failBinary: true });
-      const error = yield* h.service.acquire(input).pipe(Effect.flip);
+      const error = yield* h.service
+        .acquire({ ...input, root: { ...input.root, configuration: "Length=20" } })
+        .pipe(Effect.flip);
       assert.strictEqual(error._tag, "OnshapeRateLimitError");
       assert.lengthOf(h.requests, 3);
       assert.lengthOf(h.published, 0);
@@ -233,7 +251,9 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
       const h = yield* harness(options);
       const first = yield* h.service.acquire(input);
       options.failBinary = true;
-      const error = yield* h.service.acquire(input).pipe(Effect.flip);
+      const error = yield* h.service
+        .acquire({ ...input, root: { ...input.root, configuration: "Length=20" } })
+        .pipe(Effect.flip);
       assert.strictEqual(error._tag, "OnshapeRateLimitError");
       assert.deepEqual(h.published, [first]);
       assert.isFalse(h.active());
@@ -325,6 +345,48 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         h.requests.filter((request) => request.path.endsWith("/gltf")),
         1,
       );
+    }),
+  );
+  it.effect("reuses environment geometry across distinct projects and assembly roots", () =>
+    Effect.gen(function* () {
+      const definition = assembly();
+      const h = yield* harness({ assembly: definition });
+      const first = yield* h.service.acquire({
+        ...input,
+        root: { ...input.root, kind: "assembly" },
+      });
+      const otherElement = OnshapeElementId.make("aaaaaaaaaaaaaaaaaaaaaaaa");
+      definition.rootAssembly.elementId = otherElement;
+      const second = yield* h.service.acquire({
+        ...input,
+        projectId: ProjectId.make("another-project"),
+        root: { ...input.root, elementId: otherElement, kind: "assembly" },
+      });
+      assert.notStrictEqual(second.rootId, first.rootId);
+      assert.notStrictEqual(second.projectId, first.projectId);
+      assert.deepEqual(second.assets, first.assets);
+      assert.lengthOf(
+        h.requests.filter((request) => request.path.endsWith("/gltf")),
+        1,
+      );
+      assert.lengthOf(
+        h.events.filter((event) => event === "cache"),
+        2,
+      );
+    }),
+  );
+  it.effect("exports anew when store validation excludes an existing cache candidate", () =>
+    Effect.gen(function* () {
+      const options = { rejectCachedGeometry: false };
+      const h = yield* harness(options);
+      yield* h.service.acquire(input);
+      options.rejectCachedGeometry = true;
+      yield* h.service.acquire(input);
+      assert.lengthOf(
+        h.requests.filter((request) => request.path.endsWith("/gltf")),
+        2,
+      );
+      assert.lengthOf(h.published, 2);
     }),
   );
 });

@@ -78,6 +78,201 @@ const harness = <A, E, R>(
   );
 
 describe("CadSnapshotStore", () => {
+  it.effect("cancellation collects orphan geometry while an unrelated snapshot stays pinned", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        const manifest = yield* fixture(store);
+        yield* store.publish(manifest);
+        yield* store.withPinned(firstId, (_manifest, read) =>
+          Effect.gen(function* () {
+            const entered = yield* Deferred.make<void>();
+            const fiber = yield* store
+              .withAcquisition(
+                store
+                  .putAsset(new Uint8Array([9]))
+                  .pipe(
+                    Effect.andThen(Deferred.succeed(entered, undefined)),
+                    Effect.andThen(Effect.never),
+                  ),
+              )
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(entered);
+            yield* Fiber.interrupt(fiber);
+            assert.deepStrictEqual(
+              yield* Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "assets"))),
+              [manifest.assets[0]!.relativePath],
+            );
+            assert.deepStrictEqual(
+              Array.from(yield* read(manifest.assets[0]!.sha256)),
+              Array.from(bytes),
+            );
+            assert.strictEqual((yield* Effect.flip(store.remove([firstId], []))).reason, "busy");
+          }),
+        );
+      }),
+    ),
+  );
+  it.effect("corrupt-asset repair never replaces a junction at the hash filename", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        const asset = yield* store.putAsset(bytes);
+        const path = NodePath.join(dir, "assets", asset.relativePath);
+        const external = NodePath.join(dir, "external-asset");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(external);
+          await NodeFSP.unlink(path);
+          await NodeFSP.symlink(external, path, "junction");
+        });
+        assert.strictEqual((yield* Effect.flip(store.putAsset(bytes))).reason, "corrupt");
+        assert.isTrue((yield* Effect.promise(() => NodeFSP.lstat(path))).isSymbolicLink());
+        assert.deepStrictEqual(yield* Effect.promise(() => NodeFSP.readdir(external)), []);
+      }),
+    ),
+  );
+  it.effect(
+    "cancelled acquisition cleans bytes and blocked cleanup retries on the next release",
+    () =>
+      harness((store, dir) =>
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>();
+          const fiber = yield* store
+            .withAcquisition(
+              store
+                .putAsset(bytes)
+                .pipe(
+                  Effect.andThen(Deferred.succeed(entered, undefined)),
+                  Effect.andThen(Effect.never),
+                ),
+            )
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          yield* Fiber.interrupt(fiber);
+          assert.deepStrictEqual(
+            yield* Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "assets"))),
+            [],
+          );
+          const asset = yield* store.withAcquisition(
+            Effect.gen(function* () {
+              const asset = yield* store.putAsset(bytes);
+              const path = NodePath.join(dir, "assets", asset.relativePath);
+              yield* Effect.promise(async () => {
+                await NodeFSP.unlink(path);
+                await NodeFSP.mkdir(path);
+              });
+              return asset;
+            }),
+          );
+          const path = NodePath.join(dir, "assets", asset.relativePath);
+          yield* Effect.promise(async () => {
+            await NodeFSP.rmdir(path);
+            await NodeFSP.writeFile(path, bytes);
+          });
+          yield* store.withAcquisition(Effect.void);
+          assert.deepStrictEqual(
+            yield* Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "assets"))),
+            [],
+          );
+        }),
+      ),
+  );
+  it.effect("finds validated geometry across retained projects, skipping corrupt candidates", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        const first = yield* fixture(store);
+        yield* store.publish(first);
+        const second = yield* fixture(store, secondId);
+        yield* store.publish(second);
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(dir, "manifests", `${firstId}.json`), "broken"),
+        );
+        assert.deepStrictEqual(
+          yield* store.findGeometry([first.assets[0]!.geometryKey, "b".repeat(64)]),
+          second.assets,
+        );
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(dir, "assets", first.assets[0]!.relativePath), "broken"),
+        );
+        assert.deepStrictEqual(yield* store.findGeometry([first.assets[0]!.geometryKey]), []);
+      }),
+    ),
+  );
+  it.effect("cleans failed acquisition assets immediately without changing its error", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        const failure = { message: "acquisition failed" };
+        assert.strictEqual(
+          yield* Effect.flip(
+            store.withAcquisition(store.putAsset(bytes).pipe(Effect.andThen(Effect.fail(failure)))),
+          ),
+          failure,
+        );
+        assert.deepStrictEqual(
+          yield* Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "assets"))),
+          [],
+        );
+      }),
+    ),
+  );
+  it.effect(
+    "the last concurrent acquisition collects failures but preserves published geometry",
+    () =>
+      harness((store, dir) =>
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>();
+          const finish = yield* Deferred.make<void>();
+          const candidate = yield* fixture(store);
+          const fiber = yield* store
+            .withAcquisition(
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(finish)),
+                Effect.andThen(store.publish(candidate)),
+              ),
+            )
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          yield* store.withAcquisition(store.putAsset(new Uint8Array([9])));
+          assert.strictEqual(
+            (yield* Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "assets")))).length,
+            2,
+          );
+          yield* Deferred.succeed(finish, undefined);
+          yield* Fiber.join(fiber);
+          assert.strictEqual(
+            (yield* Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "assets")))).length,
+            1,
+          );
+          yield* store.load(firstId);
+        }),
+      ),
+  );
+  it.effect(
+    "pinned readers use one validated manifest, verify each asset, and expire with their session",
+    () =>
+      harness((store, dir) =>
+        Effect.gen(function* () {
+          const manifest = yield* fixture(store);
+          yield* store.publish(manifest);
+          const read = yield* store.withPinned(firstId, (_manifest, read) =>
+            Effect.gen(function* () {
+              const path = NodePath.join(dir, "manifests", `${firstId}.json`);
+              const original = yield* Effect.promise(() => NodeFSP.readFile(path));
+              yield* Effect.promise(() => NodeFSP.writeFile(path, "broken"));
+              assert.deepStrictEqual(
+                Array.from(yield* read(manifest.assets[0]!.sha256)),
+                Array.from(bytes),
+              );
+              assert.deepStrictEqual(
+                Array.from(yield* read(manifest.assets[0]!.sha256)),
+                Array.from(bytes),
+              );
+              yield* Effect.promise(() => NodeFSP.writeFile(path, original));
+              return read;
+            }),
+          );
+          assert.strictEqual((yield* Effect.flip(read(manifest.assets[0]!.sha256))).reason, "busy");
+        }),
+      ),
+  );
   it.effect(
     "startup reclaims failed acquisition assets and staging, preserving published geometry",
     () =>
@@ -165,8 +360,8 @@ describe("CadSnapshotStore", () => {
       }),
     ),
   );
-  it.effect("rejects corrupt bytes and out-of-snapshot asset access", () =>
-    harness((store, dir) =>
+  it.effect("repairs referenced corrupt bytes only after reserve admission", () =>
+    harness((store, dir, setAvailable) =>
       Effect.gen(function* () {
         const manifest = yield* fixture(store);
         yield* store.publish(manifest);
@@ -181,7 +376,19 @@ describe("CadSnapshotStore", () => {
           ),
         );
         assert.strictEqual((yield* Effect.flip(store.load(firstId))).reason, "corrupt");
-        assert.strictEqual((yield* Effect.flip(store.putAsset(bytes))).reason, "corrupt");
+        setAvailable(CAD_DISK_RESERVE_BYTES);
+        assert.strictEqual((yield* Effect.flip(store.putAsset(bytes))).reason, "disk-space");
+        assert.deepStrictEqual(
+          Array.from(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(dir, "assets", manifest.assets[0]!.relativePath)),
+            ),
+          ),
+          [5],
+        );
+        setAvailable(CAD_DISK_RESERVE_BYTES * 2);
+        yield* store.putAsset(bytes);
+        assert.deepStrictEqual(yield* store.load(firstId), manifest);
       }),
     ),
   );

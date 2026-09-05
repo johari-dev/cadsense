@@ -41,12 +41,7 @@ const decodeMetadataProof = Schema.decodeUnknownEffect(
 export class OnshapeSnapshotAcquisitionError extends Schema.TaggedErrorClass<OnshapeSnapshotAcquisitionError>()(
   "OnshapeSnapshotAcquisitionError",
   {
-    reason: Schema.Literals([
-      "invalid-response",
-      "missing-linked-version",
-      "invalid-previous-snapshot",
-      "identity-unavailable",
-    ]),
+    reason: Schema.Literals(["invalid-response", "missing-linked-version", "identity-unavailable"]),
   },
 ) {}
 export interface OnshapeSnapshotAcquisitionInput {
@@ -57,7 +52,6 @@ export interface OnshapeSnapshotAcquisitionInput {
     readonly kind: CadSnapshotRoot["kind"];
     readonly configuration: string;
   };
-  readonly previousSnapshotId?: string;
 }
 type AcquisitionError =
   | OnshapeConnectionError
@@ -124,15 +118,6 @@ export const make = Effect.gen(function* () {
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
-    const previous =
-      input.previousSnapshotId === undefined ? null : yield* store.load(input.previousSnapshotId);
-    if (
-      previous !== null &&
-      (previous.projectId !== input.projectId || previous.rootId !== context.rootId)
-    ) {
-      return yield* new OnshapeSnapshotAcquisitionError({ reason: "invalid-previous-snapshot" });
-    }
-    const previousAssets = new Map(previous?.assets.map((asset) => [asset.geometryKey, asset]));
     const base = `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${microversionId}/e/${root.elementId}`;
     const query = new URLSearchParams({ configuration: root.configuration });
     if (root.kind === "assembly") {
@@ -197,10 +182,15 @@ export const make = Effect.gen(function* () {
       }
       draft = yield* enrichSnapshotMetadata(draft, groups);
     }
+    const cachedAssets = new Map(
+      (yield* store.findGeometry(
+        draft.parts.filter((part) => part.geometryRequired).map((part) => part.geometryKey),
+      )).map((asset) => [asset.geometryKey, asset]),
+    );
     const assets: CadGeometryAsset[] = [];
     for (const part of draft.parts) {
       if (!part.geometryRequired) continue;
-      const cached = previousAssets.get(part.geometryKey);
+      const cached = cachedAssets.get(part.geometryKey);
       if (cached !== undefined) {
         assets.push(cached);
         continue;
