@@ -82,6 +82,7 @@ const makeHarness = Effect.fn(function* (options?: {
         replaceCredentials: unsupported,
         remove: unsupported,
         readJson: unsupported,
+        readBinary: unsupported,
       }),
     ),
     Layer.succeed(

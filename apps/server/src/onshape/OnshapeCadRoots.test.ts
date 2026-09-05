@@ -44,6 +44,7 @@ const makeHarness = Effect.fn(function* (options?: {
     rename: unused,
     replaceCredentials: unused,
     remove: unused,
+    readBinary: unused,
     readJson: (request) =>
       Effect.gen(function* () {
         yield* Ref.update(requests, (values) => [...values, request]);
