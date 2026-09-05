@@ -6,6 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
 import { FetchHttpClient } from "effect/unstable/http";
@@ -26,9 +27,11 @@ const OLD_ACCESS_KEY = "old-access-key";
 const OLD_SECRET_KEY = "old-secret-key";
 const NEW_ACCESS_KEY = "new-access-key";
 const NEW_SECRET_KEY = "new-secret-key";
+class ReserveFailure extends Schema.TaggedErrorClass<ReserveFailure>()("ReserveFailure", {}) {}
 
 interface HarnessState {
-  readonly requests: Array<OnshapeTransport.OnshapeTransportRequest>;
+  readonly requests: Array<Omit<OnshapeTransport.OnshapeTransportRequest, "beforeChunk">>;
+  readonly responses: Array<OnshapeTransport.OnshapeTransportResponse>;
   readonly secrets: Map<string, Uint8Array>;
   status: number;
   retryAfter: string | null;
@@ -50,6 +53,7 @@ const makeHarness = <E, R>(
 ) => {
   const state: HarnessState = sharedState ?? {
     requests: [],
+    responses: [],
     secrets: new Map(),
     status: 200,
     retryAfter: null,
@@ -131,7 +135,10 @@ const makeHarness = <E, R>(
     OnshapeTransport.OnshapeTransport,
     OnshapeTransport.OnshapeTransport.of({
       execute: (request) =>
-        Effect.sync(() => state.requests.push(request)).pipe(
+        Effect.sync(() => {
+          const { beforeChunk: _guard, ...recorded } = request;
+          state.requests.push(recorded);
+        }).pipe(
           Effect.andThen(
             state.verificationStarted === null
               ? Effect.void
@@ -145,11 +152,21 @@ const makeHarness = <E, R>(
           Effect.andThen(
             state.failTransport
               ? Effect.fail(new OnshapeTransport.OnshapeTransportFailure())
-              : Effect.succeed({
-                  status: state.status,
-                  retryAfter: state.retryAfter,
-                  ...(request.responseType === "json" ? { body: { elements: [] } } : {}),
-                }),
+              : Effect.succeed(
+                  state.responses.shift() ?? {
+                    status: state.status,
+                    retryAfter: state.retryAfter,
+                    ...(request.responseType === "json" ? { body: { elements: [] } } : {}),
+                    ...(request.responseType === "binary"
+                      ? { bytes: new Uint8Array([1, 2, 3]), contentType: "model/gltf-binary" }
+                      : {}),
+                  },
+                ),
+          ),
+          Effect.tap((response) =>
+            response.bytes && request.beforeChunk
+              ? request.beforeChunk(response.bytes.length)
+              : Effect.void,
           ),
         ),
     }),
@@ -876,12 +893,246 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
   );
 });
 
-it.layer(NodeServices.layer)("Onshape authenticated JSON reads", (it) => {
+it.layer(NodeServices.layer)("Onshape authenticated reads", (it) => {
   const target = {
     host: "https://cad.onshape.com",
     path: "/api/v17/documents/example",
     query: "configuration=Size%3DLarge%3BWidth%3D20+mm",
   };
+
+  it.effect(
+    "signs every trusted binary redirect independently and checks reserve on each hop",
+    () => {
+      const harness = makeMemoryHarness();
+      return Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        const signer = yield* OnshapeRequestSigner.OnshapeRequestSigner;
+        const saved = yield* connections.create(createInput);
+        harness.state.responses.push(
+          {
+            status: 307,
+            retryAfter: null,
+            location: "https://download.onshape.com/blob/a?token=%2f%2F&name=a+b",
+          },
+          { status: 307, retryAfter: null, location: "../asset/final?size=20%20mm" },
+          {
+            status: 200,
+            retryAfter: null,
+            bytes: new Uint8Array([1, 2, 3]),
+            contentType: "model/gltf+json",
+          },
+        );
+        let checks = 0;
+        const result = yield* connections.readBinary({
+          ...target,
+          connectionId: saved.connectionId,
+          beforeRequest: Effect.sync(() => {
+            checks++;
+          }),
+        });
+        assert.deepEqual(result, {
+          bytes: new Uint8Array([1, 2, 3]),
+          contentType: "model/gltf+json",
+        });
+        assert.equal(checks, 3);
+        const requests = harness.state.requests.slice(1);
+        assert.deepEqual(
+          requests.map((item) => item.url),
+          [
+            `${target.host}${target.path}?${target.query}`,
+            "https://download.onshape.com/blob/a?token=%2f%2F&name=a+b",
+            "https://download.onshape.com/asset/final?size=20%20mm",
+          ],
+        );
+        assert.equal(new Set(requests.map((item) => item.headers["On-Nonce"])).size, 3);
+        for (const item of requests) {
+          const url = new URL(item.url);
+          const expected = yield* signer.sign({
+            accessKeyId: OLD_ACCESS_KEY,
+            secretKey: OLD_SECRET_KEY,
+            method: "GET",
+            nonce: item.headers["On-Nonce"]!,
+            date: item.headers.Date!,
+            contentType: "application/json",
+            path: url.pathname,
+            query: url.search.slice(1),
+          });
+          assert.equal(item.headers.Authorization, expected.Authorization);
+          assert.equal(item.headers.Accept, "model/gltf-binary");
+        }
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect(
+    "rejects untrusted, credentialed, fragment and looping redirects without following",
+    () => {
+      const harness = makeMemoryHarness();
+      return Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        const saved = yield* connections.create(createInput);
+        for (const location of [
+          "https://example.com/asset",
+          "https://cad.onshape.com.example.com/asset",
+          "http://cad.onshape.com/asset",
+          "https://user:secret@cad.onshape.com/asset",
+          "https://cad.onshape.com:8443/asset",
+          "/asset#fragment",
+          "/asset#",
+          " /asset",
+          `${target.host}${target.path}?${target.query}`,
+        ]) {
+          const calls = harness.state.requests.length;
+          harness.state.responses.push({ status: 307, retryAfter: null, location });
+          assert.equal(
+            (yield* connections
+              .readBinary({ ...target, connectionId: saved.connectionId })
+              .pipe(Effect.flip))._tag,
+            "OnshapeRedirectError",
+          );
+          assert.equal(harness.state.requests.length, calls + 1);
+        }
+        harness.state.responses.push({ status: 307, retryAfter: null });
+        assert.equal(
+          (yield* connections
+            .readBinary({ ...target, connectionId: saved.connectionId })
+            .pipe(Effect.flip))._tag,
+          "OnshapeRedirectError",
+        );
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect("bounds redirect chains to three follow-ups and does not follow JSON redirects", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      for (let index = 0; index < 4; index++)
+        harness.state.responses.push({
+          status: 307,
+          retryAfter: null,
+          location: `/asset/${index}`,
+        });
+      assert.equal(
+        (yield* connections
+          .readBinary({ ...target, connectionId: saved.connectionId })
+          .pipe(Effect.flip))._tag,
+        "OnshapeRedirectError",
+      );
+      assert.equal(harness.state.requests.length, 5);
+      harness.state.responses.push({ status: 307, retryAfter: null, location: "/asset/json" });
+      assert.equal(
+        (yield* connections
+          .readJson({ ...target, connectionId: saved.connectionId })
+          .pipe(Effect.asVoid, Effect.flip))._tag,
+        "OnshapeRedirectError",
+      );
+      assert.equal(harness.state.requests.length, 6);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("preserves a streamed reserve failure without retrying the request", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      const failure = new ReserveFailure();
+      const totals: number[] = [];
+      assert.strictEqual(
+        yield* connections
+          .readBinary({
+            ...target,
+            connectionId: saved.connectionId,
+            beforeChunk: (received) => {
+              totals.push(received);
+              return Effect.fail(failure);
+            },
+          })
+          .pipe(Effect.flip),
+        failure,
+      );
+      assert.deepEqual(totals, [3]);
+      assert.equal(harness.state.requests.length, 2);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("preserves reserve errors and stops before initial or redirected GETs", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      const failure = new ReserveFailure();
+      assert.equal(
+        yield* connections
+          .readBinary({
+            ...target,
+            connectionId: saved.connectionId,
+            beforeRequest: Effect.fail(failure),
+          })
+          .pipe(Effect.flip),
+        failure,
+      );
+      assert.equal(harness.state.requests.length, 1);
+      harness.state.responses.push({ status: 307, retryAfter: null, location: "/asset/final" });
+      let checks = 0;
+      assert.equal(
+        yield* connections
+          .readBinary({
+            ...target,
+            connectionId: saved.connectionId,
+            beforeRequest: Effect.suspend(() =>
+              ++checks === 1 ? Effect.void : Effect.fail(failure),
+            ),
+          })
+          .pipe(Effect.flip),
+        failure,
+      );
+      assert.equal(checks, 2);
+      assert.equal(harness.state.requests.length, 2);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("shares quota errors and cooldown for binary downloads", () => {
+    const harness = makeMemoryHarness();
+    return Effect.gen(function* () {
+      const connections = yield* OnshapeConnections.OnshapeConnections;
+      const saved = yield* connections.create(createInput);
+      for (const [status, tag] of [
+        [401, "OnshapeInvalidCredentialsError"],
+        [402, "OnshapeAnnualQuotaExceededError"],
+        [403, "OnshapeInsufficientPermissionsError"],
+        [302, "OnshapeRedirectError"],
+        [500, "OnshapeNetworkError"],
+      ] as const) {
+        harness.state.status = status;
+        assert.equal(
+          (yield* connections
+            .readBinary({ ...target, connectionId: saved.connectionId })
+            .pipe(Effect.flip))._tag,
+          tag,
+        );
+      }
+      harness.state.responses.push(
+        { status: 307, retryAfter: null, location: "/asset/final" },
+        { status: 429, retryAfter: "60" },
+      );
+      assert.equal(
+        (yield* connections
+          .readBinary({ ...target, connectionId: saved.connectionId })
+          .pipe(Effect.flip))._tag,
+        "OnshapeRateLimitError",
+      );
+      const calls = harness.state.requests.length;
+      assert.equal(
+        (yield* connections
+          .readBinary({ ...target, connectionId: saved.connectionId })
+          .pipe(Effect.flip))._tag,
+        "OnshapeRateLimitError",
+      );
+      assert.equal(harness.state.requests.length, calls);
+    }).pipe(Effect.provide(harness.layer));
+  });
 
   it.effect("signs the exact encoded query using the current saved credential revision", () => {
     const harness = makeMemoryHarness();

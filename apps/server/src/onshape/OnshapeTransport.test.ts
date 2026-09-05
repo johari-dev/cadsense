@@ -29,6 +29,160 @@ const layer = (fetch: FetchHandler) =>
   );
 
 describe("bounded Onshape JSON transport", () => {
+  it.effect("checks cumulative bytes and cancels immediately on a typed reserve failure", () => {
+    let reads = 0;
+    let cancelled = false;
+    let calls = 0;
+    const totals: number[] = [];
+    const failure = { reason: "disk-space" };
+    const fetch: FetchHandler = async () => {
+      calls++;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              reads++;
+              controller.enqueue(new Uint8Array([1, 2]));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      );
+    };
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      assert.strictEqual(
+        yield* transport
+          .execute({
+            ...request,
+            responseType: "binary",
+            beforeChunk: (received) =>
+              Effect.suspend(() => {
+                totals.push(received);
+                return received >= 4 ? Effect.fail(failure) : Effect.void;
+              }),
+          })
+          .pipe(Effect.flip),
+        failure,
+      );
+      assert.deepEqual(totals, [2, 4]);
+      assert.equal(reads, 2);
+      assert.equal(calls, 1);
+      assert.isTrue(cancelled);
+    }).pipe(Effect.provide(layer(fetch)));
+  });
+  it.effect("returns bounded binary bytes and a normalized media type without assuming GLB", () => {
+    const fetch: FetchHandler = async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "Model/GLTF+JSON; charset=utf-8" },
+      });
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      const response = yield* transport.execute({ ...request, responseType: "binary" });
+      assert.deepEqual(response.bytes, new Uint8Array([1, 2, 3]));
+      assert.equal(response.contentType, "model/gltf+json");
+      assert.isUndefined(response.body);
+    }).pipe(Effect.provide(layer(fetch)));
+  });
+
+  it.effect("exposes redirect location without following it or consuming its body", () => {
+    let calls = 0;
+    let reads = 0;
+    const location = "https://download.onshape.com/asset?token=%2f%2F";
+    const fetch: FetchHandler = async (_input, init) => {
+      calls++;
+      assert.equal(init?.redirect, "manual");
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull() {
+              reads++;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        {
+          status: 307,
+          headers: { location, "content-type": "untrusted response text" },
+        },
+      );
+    };
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      const response = yield* transport.execute({ ...request, responseType: "binary" });
+      assert.equal(response.status, 307);
+      assert.equal(response.location, location);
+      assert.isNull(response.contentType);
+      assert.isUndefined(response.bytes);
+      assert.equal(calls, 1);
+      assert.equal(reads, 0);
+    }).pipe(Effect.provide(layer(fetch)));
+  });
+
+  it.effect("cancels a binary body when streamed bytes exceed the transport cap", () => {
+    let cancelled = false;
+    let chunks = 0;
+    const chunk = new Uint8Array(1024 * 1024);
+    const fetch: FetchHandler = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              chunks++;
+              controller.enqueue(chunk);
+            },
+            cancel() {
+              cancelled = true;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        { headers: { "content-length": "1" } },
+      );
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      assert.equal(
+        (yield* transport.execute({ ...request, responseType: "binary" }).pipe(Effect.flip))._tag,
+        "OnshapeTransportFailure",
+      );
+      assert.equal(chunks, OnshapeTransport.MAX_BINARY_BODY_BYTES / chunk.byteLength + 1);
+      assert.isTrue(cancelled);
+    }).pipe(Effect.provide(layer(fetch)));
+  });
+
+  it.effect("cancels a binary stream when the caller interrupts the download", () =>
+    Effect.gen(function* () {
+      const reading = yield* Deferred.make<void>();
+      let cancelled = false;
+      const fetch: FetchHandler = async () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull() {
+                Deferred.doneUnsafe(reading, Effect.void);
+              },
+              cancel() {
+                cancelled = true;
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        );
+      yield* Effect.gen(function* () {
+        const transport = yield* OnshapeTransport.OnshapeTransport;
+        const pending = yield* transport
+          .execute({ ...request, responseType: "binary" })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(reading);
+        yield* Fiber.interrupt(pending);
+        assert.isTrue(cancelled);
+      }).pipe(Effect.provide(layer(fetch)));
+    }),
+  );
+
   it.effect("decodes streamed JSON and preserves the encoded query with redirects disabled", () => {
     let calls = 0;
     const fetch: FetchHandler = async (input, init) => {
