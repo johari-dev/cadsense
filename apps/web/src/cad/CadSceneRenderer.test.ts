@@ -404,16 +404,17 @@ describe("CAD renderer lifecycle without WebGL", () => {
       const initialRotation = (calls.render.mock.calls.at(-1)![1] as Camera).quaternion.clone();
       renderer.transition({ ...state, explosion: 0.5 });
       expect(frames.size).toBe(1);
-      renderer.transition({ ...state, camera: { kind: "preset", preset: "back", fit: [] } });
+      renderer.transition({ ...state, camera: { kind: "preset", preset: "back", fit: [] } }, 400);
       expect(frames.size).toBe(1);
-      frame(performance.now() + 120);
+      frame(performance.now() + 200);
       expect(frames.size).toBe(1);
       const destinationRotation = new Quaternion().setFromRotationMatrix(
         new Matrix4().lookAt(new Vector3(0, 1, 0), new Vector3(), new Vector3(0, 0, 1)),
       );
       const halfway = (calls.render.mock.calls.at(-1)![1] as Camera).quaternion;
-      expect(halfway.angleTo(initialRotation.slerp(destinationRotation, 0.5))).toBeLessThan(1e-6);
-      frame(performance.now() + 300);
+      // Most travel happens early, leaving time for a gentle, exact settle.
+      expect(halfway.angleTo(initialRotation.slerp(destinationRotation, 0.875))).toBeLessThan(1e-6);
+      frame(performance.now() + 400);
       expect(frames.size).toBe(0);
       renderer.transition(state);
       renderer.apply(state);

@@ -211,10 +211,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     cancelTransition();
     return applyFrame(state);
   };
-  const transition = (state: CadViewState, duration = 240) => {
+  const transition = (state: CadViewState, duration?: number) => {
     cancelTransition();
     assertAvailable();
-    if (!model || !view || duration <= 0) {
+    if (!model || !view || (duration !== undefined && duration <= 0)) {
       applyFrame(state);
       return;
     }
@@ -233,18 +233,25 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         new THREE.Vector3(...to.up),
       ),
     );
+    // Larger moves get room to settle, without idle animation or overshoot.
+    const travel = Math.max(
+      fromRotation.angleTo(toRotation) / Math.PI,
+      Math.abs(state.explosion - explosion),
+      Math.min(1, Math.abs(toDistance - fromDistance) / Math.max(fromDistance, 1e-7)),
+    );
+    const settleDuration = duration ?? 360 + 200 * travel;
     const started = performance.now();
     if (controls) controls.enabled = false;
     const frame = (now: number) => {
       animationFrame = null;
       if (disposed || lost) return;
-      const progress = Math.min(1, Math.max(0, (now - started) / duration));
+      const progress = Math.min(1, Math.max(0, (now - started) / settleDuration));
       if (progress === 1) {
         applyFrame(state);
         if (controls) controls.enabled = interactive;
         return;
       }
-      const eased = progress * progress * (3 - 2 * progress);
+      const eased = 1 - (1 - progress) ** 3;
       const target = fromTarget.clone().lerp(toTarget, eased);
       const rotation = fromRotation.clone().slerp(toRotation, eased);
       const position = new THREE.Vector3(0, 0, 1)
