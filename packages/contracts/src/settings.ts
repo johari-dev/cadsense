@@ -55,7 +55,7 @@ export const InterfaceFontSize = Schema.Int.check(
   Schema.isBetween({ minimum: MIN_INTERFACE_FONT_SIZE, maximum: MAX_INTERFACE_FONT_SIZE }),
 );
 export type InterfaceFontSize = typeof InterfaceFontSize.Type;
-export const DEFAULT_INTERFACE_FONT_SIZE: InterfaceFontSize = 16;
+export const DEFAULT_INTERFACE_FONT_SIZE: InterfaceFontSize = 15;
 
 export const MIN_PROMPT_FONT_SIZE = 12;
 export const MAX_PROMPT_FONT_SIZE = 20;
@@ -63,7 +63,7 @@ export const PromptFontSize = Schema.Int.check(
   Schema.isBetween({ minimum: MIN_PROMPT_FONT_SIZE, maximum: MAX_PROMPT_FONT_SIZE }),
 );
 export type PromptFontSize = typeof PromptFontSize.Type;
-export const DEFAULT_PROMPT_FONT_SIZE: PromptFontSize = 14;
+export const DEFAULT_PROMPT_FONT_SIZE: PromptFontSize = 15;
 
 export const MIN_CODE_FONT_SIZE = 10;
 export const MAX_CODE_FONT_SIZE = 18;

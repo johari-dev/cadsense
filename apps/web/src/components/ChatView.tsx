@@ -4239,7 +4239,7 @@ function ChatViewContent(props: ChatViewProps) {
             >
               <div
                 ref={attachDraftHeroTransitionGroupRef}
-                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem)]"
+                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
               >
                 <div className="group/composer-stack pointer-events-auto relative z-10">
                   {isDraftHeroState ? (
@@ -4261,7 +4261,7 @@ function ChatViewContent(props: ChatViewProps) {
                   <div className="relative">
                     <div
                       className={cn(
-                        "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
+                        "chat-composer-glass-shell relative mx-auto w-full max-w-[50rem]",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >
