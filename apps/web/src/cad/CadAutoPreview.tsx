@@ -9,6 +9,7 @@ import type { Project } from "../types";
 import { CadPanel } from "./CadPanel";
 import { CadFloatingPreview } from "./CadFloatingPreview";
 import { useCadFloatingStore } from "./cadFloatingStore";
+import { cadActivityIndicator } from "./CadActivityIndicator";
 
 /** Watch metadata even when CAD is closed; only mount the renderer when it is shown. */
 export function CadAutoPreview({
@@ -39,8 +40,14 @@ export function CadAutoPreview({
   const activityTurn = data?.agentActivityTurnId ?? null;
   const noticeRun = runId ?? activityTurn;
   useLayoutEffect(() => {
-    if (noticeRun && activityTurn && (data?.agentControlling || activityTurn === runId))
+    if (noticeRun && activityTurn && (data?.agentControlling || activityTurn === runId)) {
       useCadFloatingStore.getState().observe(threadRef, noticeRun, inPanel);
+      // A fast first tool may finish before the floating renderer mounts.
+      const key = scopedThreadKey(threadRef);
+      cadActivityIndicator.observe(key, true);
+      cadActivityIndicator.observe(key, !!data?.agentControlling);
+      return () => cadActivityIndicator.observe(key, false);
+    }
   }, [activityTurn, noticeRun, runId, data?.agentControlling, inPanel, threadRef]);
   const close = () => useCadFloatingStore.getState().dismiss(threadRef, noticeRun);
   if (!visible || panelPresent || inPanel) return null;

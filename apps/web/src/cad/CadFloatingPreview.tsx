@@ -115,7 +115,7 @@ export function CadFloatingPreview({
         onPointerUp={end}
         onPointerCancel={end}
       >
-        <span className="flex-1 select-none text-xs text-muted-foreground">CAD</span>
+        <span className="flex-1" aria-hidden="true" />
         <Tooltip>
           <TooltipTrigger
             render={

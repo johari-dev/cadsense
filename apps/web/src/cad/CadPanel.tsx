@@ -19,6 +19,10 @@ import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
+import { scopedThreadKey } from "@cadsense/client-runtime/environment";
+import { useCadActivityIndicator } from "./useCadActivityIndicator";
+import { onshapeProjectUrl } from "../lib/onshapeProjects";
+import { useResizableWidth } from "../hooks/useResizableWidth";
 import "./CadPanel.css";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
@@ -79,6 +83,30 @@ function CadScene({
   );
   const [error, setError] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
+  const sceneContainer = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const maxTreeWidth = Math.max(1, Math.min(480, (containerWidth ?? 1067) * 0.45));
+  const minTreeWidth = Math.min(180, maxTreeWidth);
+  const treeResize = useResizableWidth({
+    storageKey: "cadsense:cad-components-width",
+    defaultWidth: 256,
+    minWidth: minTreeWidth,
+    maxWidth: maxTreeWidth,
+    edge: "right",
+  });
+  const cancelTreeResize = treeResize.cancelResize;
+  useLayoutEffect(() => {
+    if (!fullscreen || disabled) cancelTreeResize();
+  }, [fullscreen, disabled, cancelTreeResize]);
+  useLayoutEffect(() => {
+    if (!fullscreen || !sceneContainer.current) return;
+    const node = sceneContainer.current;
+    const measure = () => setContainerWidth(node.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }, [fullscreen]);
   const previousCapture = useRef(captureId);
   const previousCamera = useRef(view.camera);
   const previousExplosion = useRef(view.explosion);
@@ -220,13 +248,16 @@ function CadScene({
   const unavailable =
     error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null);
   return (
-    <div className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}>
+    <div
+      ref={sceneContainer}
+      className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}
+    >
       <div
-        className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "grayscale brightness-75" : ""}`}
+        className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50 [&_button:disabled]:cursor-not-allowed" : ""}`}
       >
         <div
           ref={canvas}
-          className="h-full w-full"
+          className={`h-full w-full ${disabled ? "grayscale opacity-55" : ""}`}
           style={{ pointerEvents: disabled ? "none" : "auto" }}
         />
         {(!manifest || unavailable) && (
@@ -249,15 +280,16 @@ function CadScene({
           }}
           className={
             fullscreen
-              ? "flex min-h-0 w-64 shrink-0 flex-col border-l"
-              : `shrink-0 ${treeOpen ? "" : "pb-1"}`
+              ? `relative order-first flex min-h-0 shrink-0 flex-col border-r ${disabled ? "cursor-not-allowed [&_:disabled]:cursor-not-allowed [&_[aria-label='CAD_components']]:grayscale [&_[aria-label='CAD_components']]:opacity-55" : ""}`
+              : `shrink-0 ${disabled ? "cursor-not-allowed [&_:disabled]:cursor-not-allowed [&_[aria-label='CAD_components']]:grayscale [&_[aria-label='CAD_components']]:opacity-55" : ""}`
           }
+          style={fullscreen ? { width: treeResize.width } : undefined}
         >
           <CollapsibleTrigger
             render={
               <Button
                 variant="ghost"
-                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:pointer-events-auto disabled:opacity-100 ${fullscreen ? "" : "border-t"}`}
+                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:pointer-events-auto disabled:opacity-100 ${disabled ? "text-muted-foreground disabled:cursor-not-allowed" : ""} ${fullscreen ? "" : `border-t ${treeOpen ? "" : "h-10 pb-1 sm:h-9"}`}`}
                 disabled={disabled || fullscreen}
               />
             }
@@ -276,6 +308,42 @@ function CadScene({
               fullHeight={fullscreen}
             />
           </CollapsiblePanel>
+          {fullscreen && (
+            <div
+              role="separator"
+              aria-label="Resize CAD components"
+              aria-orientation="vertical"
+              aria-valuemin={Math.round(minTreeWidth)}
+              aria-valuemax={Math.round(maxTreeWidth)}
+              aria-valuenow={Math.round(treeResize.width)}
+              aria-disabled={disabled}
+              tabIndex={disabled ? -1 : 0}
+              className={`absolute inset-y-0 -right-1 z-10 w-2 touch-none outline-none focus-visible:bg-ring/40 ${disabled ? "cursor-not-allowed" : "cursor-col-resize hover:bg-border/70"}`}
+              {...(disabled ? {} : treeResize.handlers)}
+              onPointerDown={(event) => {
+                if (disabled) return;
+                event.currentTarget.focus();
+                treeResize.handlers.onPointerDown(event);
+              }}
+              onKeyDown={(event) => {
+                if (disabled) return;
+                const step = event.shiftKey ? 40 : 10;
+                const next =
+                  event.key === "ArrowLeft"
+                    ? treeResize.width - step
+                    : event.key === "ArrowRight"
+                      ? treeResize.width + step
+                      : event.key === "Home"
+                        ? minTreeWidth
+                        : event.key === "End"
+                          ? maxTreeWidth
+                          : null;
+                if (next === null) return;
+                event.preventDefault();
+                treeResize.setWidth(next);
+              }}
+            />
+          )}
         </Collapsible>
       )}
     </div>
@@ -304,6 +372,10 @@ export function CadPanel({
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
+  const showActivity = useCadActivityIndicator(
+    scopedThreadKey(threadRef),
+    !!data?.agentControlling,
+  );
   const locked = runActive || data?.agentControlling || !!project.cad?.operation || !data;
   const [edits] = useState(() =>
     createCadViewEdits(
@@ -335,12 +407,15 @@ export function CadPanel({
   return (
     <section
       aria-label="CAD panel"
-      data-cad-agent-controlling={!!data?.agentControlling}
+      data-cad-agent-controlling={showActivity}
       className="relative flex min-h-0 flex-1 flex-col"
     >
       {!compact && (
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
           <CadScenePicker
+            documentUrl={
+              project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined
+            }
             scenes={roots.map((root) => {
               const name =
                 project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
