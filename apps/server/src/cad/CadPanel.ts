@@ -4,6 +4,7 @@ import {
   type CadPanelSceneTicket,
   type CadSnapshotManifest,
   type ThreadId,
+  type ProjectId,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -20,6 +21,8 @@ import { readCadUserView, readLatestCadCapture } from "./CadSessionPersistence.t
 import { initialCadView, rebaseCadView } from "./CadViewState.ts";
 
 interface Scene {
+  readonly cancel: Deferred.Deferred<void>;
+  readonly released: Deferred.Deferred<void>;
   readonly ticket: CadPanelSceneTicket;
   readonly manifest: CadSnapshotManifest;
   readonly readAsset: (hash: string) => Effect.Effect<Uint8Array, CadViewError>;
@@ -33,6 +36,7 @@ export class CadPanel extends Context.Service<
       snapshotId: string,
     ) => Stream.Stream<CadPanelSceneTicket, CadViewError>;
     readonly read: (ticket: CadPanelSceneTicket) => Effect.Effect<Scene, CadViewError>;
+    readonly releaseProject: (projectId: ProjectId) => Effect.Effect<void>;
   }
 >()("@cadsense/server/cad/CadPanel") {}
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
@@ -153,6 +157,8 @@ export const make = Effect.gen(function* () {
           token: yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable)),
         };
         const ready = yield* Deferred.make<CadPanelSceneTicket, CadViewError>();
+        const cancel = yield* Deferred.make<void>();
+        const released = yield* Deferred.make<void>();
         yield* store
           .withPinned(snapshotId, (manifest, readAsset) =>
             Effect.gen(function* () {
@@ -160,6 +166,8 @@ export const make = Effect.gen(function* () {
               yield* Effect.acquireRelease(
                 Effect.sync(() =>
                   scenes.set(ticket.sceneId, {
+                    cancel,
+                    released,
                     ticket,
                     manifest,
                     readAsset: (hash) => readAsset(hash).pipe(Effect.mapError(unavailable)),
@@ -170,12 +178,15 @@ export const make = Effect.gen(function* () {
                     scenes.delete(ticket.sceneId);
                   }),
               );
+              const currentProject = yield* projectFor(threadId);
+              if (currentProject.cad?.operation?.kind === "cleanup") return yield* unavailable();
               yield* Deferred.succeed(ready, ticket);
-              return yield* Effect.never;
+              return yield* Deferred.await(cancel);
             }),
           )
           .pipe(
             Effect.catch(() => Deferred.fail(ready, unavailable())),
+            Effect.ensuring(Deferred.succeed(released, undefined)),
             Effect.forkScoped,
           );
         return Stream.concat(Stream.succeed(yield* Deferred.await(ready)), Stream.never);
@@ -187,6 +198,11 @@ export const make = Effect.gen(function* () {
       if (!scene || scene.ticket.token !== ticket.token) return yield* unavailable();
       return scene;
     });
-  return CadPanel.of({ watch, scene, read });
+  const releaseProject = Effect.fn("CadPanel.releaseProject")(function* (projectId: ProjectId) {
+    const targets = [...scenes.values()].filter((scene) => scene.manifest.projectId === projectId);
+    for (const scene of targets) yield* Deferred.succeed(scene.cancel, undefined);
+    for (const scene of targets) yield* Deferred.await(scene.released);
+  });
+  return CadPanel.of({ watch, scene, read, releaseProject });
 });
 export const layer = Layer.effect(CadPanel, make);

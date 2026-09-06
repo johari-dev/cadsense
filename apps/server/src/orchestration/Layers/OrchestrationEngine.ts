@@ -70,6 +70,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.onshape.create":
     case "project.onshape.connection.set":
     case "project.onshape.workspace.ready":
+    case "project.onshape.remove":
+    case "project.onshape.cleanup.complete":
+    case "project.onshape.cleanup.request":
+    case "project.onshape.restore":
     case "project.cad.enabled.set":
     case "project.cad.operation.reserve":
     case "project.cad.operation.complete":

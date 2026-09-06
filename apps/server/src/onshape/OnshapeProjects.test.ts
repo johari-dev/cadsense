@@ -88,6 +88,7 @@ const makeHarness = Effect.fn(function* (options?: {
     Layer.succeed(
       ManagedWorkspaceAllocator,
       ManagedWorkspaceAllocator.of({
+        remove: unsupported,
         resolve: (id) =>
           Ref.update(resolveCount, (count) => count + 1).pipe(
             Effect.as(`C:/cadsense/managed-workspaces/${id}`),

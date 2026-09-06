@@ -96,6 +96,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
+import { CadStorage } from "./cad/CadStorage.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
 import { CadPanel } from "./cad/CadPanel.ts";
 import { CadViewing } from "./cad/CadViewing.ts";
@@ -387,6 +388,7 @@ const makeWsRpcLayer = (
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
       const cadUserOperations = yield* CadUserOperations;
+      const cadStorage = yield* CadStorage;
       const cadRenderBroker = yield* CadRenderBroker;
       const cadPanel = yield* CadPanel;
       const cadViewing = yield* CadViewing;
@@ -483,6 +485,7 @@ const makeWsRpcLayer = (
           case "project.created":
           case "project.meta-updated":
           case "project.cad-state-set":
+          case "project.onshape.storage-set":
             return projectUpsertOrRemove(event.payload.projectId, event.sequence);
           case "project.deleted":
             return Effect.succeed(
@@ -878,6 +881,10 @@ const makeWsRpcLayer = (
           observeRpcStream(WS_METHODS.cadRenderConnect, cadRenderBroker.connect()),
         [WS_METHODS.cadPanelWatch]: (input) =>
           observeRpcStream(WS_METHODS.cadPanelWatch, cadPanel.watch(input.threadId)),
+        [WS_METHODS.cadStorageWatch]: () =>
+          observeRpcStream(WS_METHODS.cadStorageWatch, cadStorage.watch),
+        [WS_METHODS.cadStorageRun]: (input) =>
+          observeRpcEffect(WS_METHODS.cadStorageRun, cadStorage.run(input)),
         [WS_METHODS.cadPanelScene]: (input) =>
           observeRpcStream(
             WS_METHODS.cadPanelScene,

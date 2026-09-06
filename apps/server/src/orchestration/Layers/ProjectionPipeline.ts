@@ -457,6 +457,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "project.onshape.storage-set": {
+          const existing = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isSome(existing))
+            yield* projectionProjectRepository.upsert({
+              ...existing.value,
+              cad: event.payload.cad,
+              deletedAt: event.payload.deletedAt,
+              updatedAt: event.payload.updatedAt,
+            });
+          return;
+        }
         case "project.deleted": {
           const existingRow = yield* projectionProjectRepository.getById({
             projectId: event.payload.projectId,

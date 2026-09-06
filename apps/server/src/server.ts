@@ -77,6 +77,7 @@ import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
+import * as CadStorage from "./cad/CadStorage.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
 import * as CadCaptureArtifacts from "./cad/CadCaptureArtifacts.ts";
 import * as CadViewing from "./cad/CadViewing.ts";
@@ -266,6 +267,7 @@ const CadViewingLayerLive = Layer.merge(CadViewing.layer, CadPanel.layer).pipe(
 );
 const AgentRuntimeLayerLive = Layer.mergeAll(
   CadUserOperations.layer,
+  CadStorage.layer,
   CadPresentation.reactorLayer,
 ).pipe(
   Layer.provideMerge(CadPresentation.layer),

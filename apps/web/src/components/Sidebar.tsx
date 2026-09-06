@@ -1,3 +1,4 @@
+import { useRemoveCadProject } from "../cad/useRemoveCadProject";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -1233,8 +1234,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [deleteProject, sidebarThreads],
   );
 
+  const removeCadProject = useRemoveCadProject();
   const handleRemoveProject = useCallback(
     async (member: SidebarProjectGroupMember) => {
+      if (member.onshapeSource) {
+        const result = await removeCadProject(member);
+        if (result?._tag === "Failure" && !isAtomCommandInterrupted(result))
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not remove Onshape project",
+              description: "Stop active runs and CAD operations, then try again.",
+            }),
+          );
+        return;
+      }
       const api = readLocalApi();
       if (!api) {
         return;
@@ -1366,7 +1380,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         );
       }
     },
-    [memberThreadCountByPhysicalKey, removeProject],
+    [memberThreadCountByPhysicalKey, removeProject, removeCadProject],
   );
 
   const handleProjectButtonContextMenu = useCallback(

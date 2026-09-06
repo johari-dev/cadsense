@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { useRemoveCadProject } from "../../cad/useRemoveCadProject";
 import {
   scopedProjectKey,
   scopeProjectRef,
@@ -70,6 +71,17 @@ export function ProjectSettingsPage({ projectKey: selectedProjectKey }: { projec
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const project = useSettingsProject(selectedProjectKey);
+  const previousProject = useRef<Project | null>(null);
+  useEffect(() => {
+    const previous = previousProject.current;
+    previousProject.current = project;
+    if (!project && previous && projectKey(previous) === selectedProjectKey) {
+      void navigate({
+        to: previous.onshapeSource ? "/settings/cad-storage" : "/",
+        replace: true,
+      });
+    }
+  }, [navigate, project, selectedProjectKey]);
   const close = useCallback(() => {
     if (canGoBack) {
       window.history.back();
@@ -178,8 +190,14 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
     [update],
   );
 
+  const removeCadProject = useRemoveCadProject();
   const removeProject = useCallback(async () => {
     if (cadBusy) return;
+    if (project.onshapeSource) {
+      const result = await removeCadProject(project);
+      if (result?._tag === "Failure") reportFailure("Failed to remove project", result);
+      return;
+    }
     const api = readLocalApi();
     if (!api) return;
     const projectThreads = threads.filter(
@@ -225,7 +243,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
     if (projectDraft) drafts.clearDraftThread(projectDraft.draftId);
     drafts.clearProjectDraftThreadId(ref);
     void navigate({ to: "/", replace: true });
-  }, [cadBusy, deleteProject, navigate, project, reportFailure, threads]);
+  }, [cadBusy, deleteProject, navigate, project, reportFailure, threads, removeCadProject]);
 
   const showInExplorer = useCallback(async () => {
     const result = await openInFileManager({
@@ -354,7 +372,11 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
         <SettingsSection title="Danger zone">
           <SettingsRow
             title="Remove project"
-            description="Deletes this project's threads without touching its files."
+            description={
+              project.onshapeSource
+                ? "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files."
+                : "Deletes this project's threads without touching its files."
+            }
             control={
               <Button
                 variant="destructive-outline"

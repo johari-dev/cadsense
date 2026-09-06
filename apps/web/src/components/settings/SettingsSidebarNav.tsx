@@ -48,6 +48,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/keybindings": KeyboardIcon,
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
+  "/settings/cad-storage": ArchiveIcon,
   "/settings/archived": ArchiveIcon,
 };
 

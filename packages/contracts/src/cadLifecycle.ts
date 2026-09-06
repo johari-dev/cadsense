@@ -66,6 +66,14 @@ export const CadOperation = Schema.Struct({
   startedAt: IsoDateTime,
 });
 export const CadProjectState = Schema.Struct({
+  storage: Schema.optionalKey(
+    Schema.Struct({
+      removedAt: IsoDateTime,
+      deleteCad: Schema.Boolean,
+      deleteWorkspace: Schema.Boolean,
+      cleanupPending: Schema.Boolean,
+    }),
+  ),
   pendingPresentations: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({

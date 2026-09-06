@@ -6,6 +6,7 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/providers"
   | "/settings/integrations"
+  | "/settings/cad-storage"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -22,10 +23,16 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
+  "/settings/cad-storage": "CAD storage",
   "/settings/archived": "Archive",
 };
 
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "cad-storage",
+    title: "CAD storage, retained Onshape projects, restore and cleanup",
+    to: "/settings/cad-storage",
+  },
   { id: "interface-font", title: "Interface font", to: "/settings/appearance" },
   { id: "prompt-font", title: "Prompt font", to: "/settings/appearance" },
   { id: "code-font", title: "Code font", to: "/settings/appearance" },
