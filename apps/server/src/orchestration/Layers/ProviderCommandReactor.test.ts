@@ -1974,6 +1974,45 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it.each(["codex", "claudeAgent"])(
+    "refreshes %s CAD attachment without discarding resume state",
+    async (provider) => {
+      let starts = 0;
+      const harness = await createHarness({
+        threadModelSelection: {
+          instanceId: ProviderInstanceId.make(provider),
+          model: "test-model",
+        },
+        startSessionEffect: (session) =>
+          Effect.succeed({ ...session, cadToolsAttached: starts++ === 0 }),
+      });
+      for (const index of [1, 2]) {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cad-attachment-${index}`),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId(`cad-attachment-${index}`),
+              role: "user",
+              text: "Continue",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "full-access",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          }),
+        );
+        await harness.drain();
+      }
+      expect(harness.startSession).toHaveBeenCalledTimes(2);
+      expect(harness.sendTurn).toHaveBeenCalledTimes(2);
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+        resumeCursor: { opaque: "resume-1" },
+      });
+    },
+  );
+
   it("restarts the provider session when runtime mode is updated on the thread", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

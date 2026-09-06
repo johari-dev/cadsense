@@ -43,6 +43,8 @@ export const ProviderSession = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
   resumeCursor: Schema.optional(Schema.Unknown),
+  /** Session-local attachment, distinct from tools persisted in a native conversation. */
+  cadToolsAttached: Schema.optional(Schema.Boolean),
   activeTurnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

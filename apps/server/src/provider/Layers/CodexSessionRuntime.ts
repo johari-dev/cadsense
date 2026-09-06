@@ -74,6 +74,7 @@ export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | un
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
+  cadTools: Schema.optionalKey(Schema.Boolean),
 });
 const CodexUserInputAnswerObject = Schema.Struct({
   answers: Schema.Array(Schema.String),
@@ -1274,6 +1275,7 @@ export const makeCodexSessionRuntime = (
 
     const initialSession = {
       provider: PROVIDER,
+      cadToolsAttached: options.cad !== undefined,
       ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
       status: "connecting",
       runtimeMode: options.runtimeMode,
@@ -1329,7 +1331,9 @@ export const makeCodexSessionRuntime = (
       );
 
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
-    let cadToolsEnabled = options.cad !== undefined;
+    // Native dynamic tools survive resume; changing the project toggle cannot add them.
+    // Legacy cursors predate this field and retain their existing compatibility behavior.
+    let cadToolsEnabled = options.resumeCursor?.cadTools ?? options.cad !== undefined;
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -1969,7 +1973,7 @@ export const makeCodexSessionRuntime = (
             return Effect.void;
           }
           return updateSession(sessionRef, {
-            resumeCursor: { threadId: payload.thread.id },
+            resumeCursor: { threadId: payload.thread.id, cadTools: cadToolsEnabled },
           });
         }),
       ),
@@ -2377,8 +2381,9 @@ export const makeCodexSessionRuntime = (
         client,
         ...(options.cad
           ? {
-              start: (params: EffectCodexSchema.V2ThreadStartParams) =>
-                client.raw
+              start: (params: EffectCodexSchema.V2ThreadStartParams) => {
+                cadToolsEnabled = true;
+                return client.raw
                   .request("thread/start", {
                     ...params,
                     dynamicTools: cadToolDefinitions,
@@ -2405,9 +2410,15 @@ export const makeCodexSessionRuntime = (
                         return client.request("thread/start", params);
                       },
                     ),
-                  ),
+                  );
+              },
             }
-          : {}),
+          : {
+              start: (params: EffectCodexSchema.V2ThreadStartParams) => {
+                cadToolsEnabled = false;
+                return client.request("thread/start", params);
+              },
+            }),
         threadId: options.threadId,
         runtimeMode: options.runtimeMode,
         cwd: options.cwd,
@@ -2422,11 +2433,16 @@ export const makeCodexSessionRuntime = (
         status: "ready",
         cwd: opened.cwd,
         model: opened.model,
-        resumeCursor: { threadId: providerThreadId },
+        resumeCursor: { threadId: providerThreadId, cadTools: cadToolsEnabled },
         updatedAt: yield* nowIso,
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      if (options.cad && !cadToolsEnabled)
+        yield* emitSessionEvent(
+          "session/cad-unavailable",
+          "This Codex thread does not have CAD tools. Start a new thread with CAD enabled and a Codex version that supports dynamic tools. Your existing conversation is unchanged.",
+        );
       return session;
     });
 
@@ -2561,7 +2577,7 @@ export const makeCodexSessionRuntime = (
             threadId: options.threadId,
             turnId,
             ...(resumedProviderThreadId
-              ? { resumeCursor: { threadId: resumedProviderThreadId } }
+              ? { resumeCursor: { threadId: resumedProviderThreadId, cadTools: cadToolsEnabled } }
               : {}),
           } satisfies ProviderTurnStartResult;
         }),

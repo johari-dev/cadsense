@@ -37,6 +37,82 @@ const decodeStart = Schema.decodeUnknownSync(
     }),
   ),
 );
+it.effect.each([
+  { attached: true, registered: false },
+  { attached: false, registered: true },
+  { attached: true, registered: true },
+])("preserves native CAD registration across resume %j", ({ attached, registered }) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-resume-" });
+    const scriptPath = NodePath.join(cwd, "script.json");
+    yield* fs.writeFileString(
+      scriptPath,
+      encodeJson({
+        rootThreadId: wire.rootThreadId,
+        notifications: [],
+        holdTurnOpen: true,
+        recordRequests: true,
+        recordStartRequests: true,
+        recordTurnRequests: true,
+      }),
+    );
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const runtime = yield* makeCodexSessionRuntime({
+      threadId: ThreadId.make("cad-resume"),
+      binaryPath: process.execPath,
+      cwd,
+      runtimeMode: "full-access",
+      resumeCursor: { threadId: wire.rootThreadId, cadTools: registered },
+      ...(attached
+        ? {
+            cad: {
+              close: Effect.void,
+              invoke: () => Effect.succeed({ result: {} }),
+              end: () => Effect.void,
+            },
+          }
+        : {}),
+    }).pipe(
+      Effect.provideService(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          spawner.spawn(
+            ChildProcess.make(
+              process.execPath,
+              [NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.mjs")],
+              {
+                cwd,
+                env: { ...process.env, CADSENSE_CODEX_COLLAB_SCRIPT: scriptPath },
+                forceKillAfter: "1 second",
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    const session = yield* runtime.start();
+    assert.deepEqual(session.resumeCursor, { threadId: wire.rootThreadId, cadTools: registered });
+    if (attached && !registered) {
+      const warnings = yield* runtime.events.pipe(
+        Stream.filter((event) => event.method === "session/cad-unavailable"),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      assert.include(warnings[0]!.message, "Your existing conversation is unchanged");
+    }
+    const turn = yield* runtime.sendTurn({
+      input: "Continue the conversation",
+      interactionMode: "default",
+    });
+    assert.deepEqual(turn.resumeCursor, session.resumeCursor);
+    const requests = yield* fs.readFileString(`${scriptPath}.requests`);
+    assert.include(requests, '"method":"thread/resume"');
+    assert.notInclude(requests, '"method":"thread/start"');
+    assert.strictEqual(requests.includes("## Local CAD tools"), attached && registered);
+    yield* runtime.close;
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 it.effect(
   "delivers native images from two trusted concurrent Codex children without sharing identities",
   () =>

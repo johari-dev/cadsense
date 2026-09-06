@@ -1013,6 +1013,28 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("surfaces unavailable CAD tools without failing or resetting the session", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const next = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      yield* runtime.emit({
+        id: asEventId("cad-unavailable"),
+        kind: "session",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "session/cad-unavailable",
+        message: "Start a new thread with CAD enabled. Your existing conversation is unchanged.",
+      });
+      const event = yield* Fiber.join(next);
+      NodeAssert.equal(event._tag, "Some");
+      if (event._tag !== "Some") return;
+      NodeAssert.equal(event.value.type, "runtime.warning");
+      if (event.value.type !== "runtime.warning") return;
+      NodeAssert.match(event.value.payload.message, /existing conversation is unchanged/);
+    }),
+  );
+
   it.effect("maps process stderr notifications to runtime.warning", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
