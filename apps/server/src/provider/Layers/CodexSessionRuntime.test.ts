@@ -578,6 +578,16 @@ describe("buildCodexDeveloperInstructions", () => {
 });
 
 describe("cadsense browser developer instructions", () => {
+  it("teaches CAD image emission only when the local CAD tools are attached", () => {
+    for (const mode of ["default", "plan"] as const) {
+      const runtime = { model: "test", reasoningEffort: "low" };
+      const enabled = buildCodexDeveloperInstructions(mode, runtime, false, true);
+      NodeAssert.match(enabled, /image\(result\.slice\(start\)\.trim\(\)\)/);
+      NodeAssert.match(enabled, /not an MCP content object/);
+      NodeAssert.match(enabled, /Never print the image data URL as text/);
+      NodeAssert.doesNotMatch(buildCodexDeveloperInstructions(mode, runtime, false), /cad_capture/);
+    }
+  });
   it("prefers the product-native preview tools in both collaboration modes", () => {
     for (const instructions of [
       codexDefaultModeDeveloperInstructions(true),
