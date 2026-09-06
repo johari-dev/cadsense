@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { scopeProjectRef, scopedProjectKey } from "@cadsense/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import { Box, ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -74,7 +74,8 @@ function CadScene({
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
   }, [captureId, manifest, view]);
-  useEffect(() => {
+  // OrbitControls disconnects from canvas.getRootNode(); dispose before React detaches that root.
+  useLayoutEffect(() => {
     if (!ticket || !baseUrl || !canvas.current) return;
     setError(null);
     setManifest(null);
