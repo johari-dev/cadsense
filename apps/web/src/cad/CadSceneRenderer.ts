@@ -51,12 +51,14 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     1000,
   );
   camera.up.set(0, 0, 1);
-  let controls =
+  const controls =
     "convertToBlob" in canvas
       ? null
-      : new OrbitControls<THREE.PerspectiveCamera | THREE.OrthographicCamera>(camera, canvas);
+      : new OrbitControls<THREE.PerspectiveCamera | THREE.OrthographicCamera>(
+          camera.clone(),
+          canvas,
+        );
   const target = new THREE.Vector3();
-  const controlsUp = camera.up.clone();
   if (controls) {
     controls.enabled = false;
     controls.enableDamping = false;
@@ -99,9 +101,29 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   });
   const changed = () => {
     if (!applying && !disposed && !lost) {
-      if (controls) target.copy(controls.target);
+      if (controls) {
+        const navigation = controls.object;
+        const direction = camera.position.clone().sub(target).normalize();
+        const nextDirection = navigation.position.clone().sub(controls.target).normalize();
+        // Panning/zooming must not roll a displayed capture or exact pole view.
+        if (direction.distanceTo(nextDirection) > 1e-5) {
+          camera.up.set(0, 0, 1);
+          camera.position.copy(navigation.position);
+        } else {
+          camera.position
+            .copy(direction)
+            .multiplyScalar(navigation.position.distanceTo(controls.target))
+            .add(controls.target);
+          navigation.position.copy(camera.position);
+        }
+        camera.zoom = navigation.zoom;
+        target.copy(controls.target);
+        camera.lookAt(target);
+        camera.updateProjectionMatrix();
+      }
       frameRevision++;
       render();
+      if (controls) controls.object.matrix.copy(camera.matrix);
     }
   };
   const ended = () => {
@@ -151,23 +173,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     camera.lookAt(new THREE.Vector3(...resolved.target));
     camera.updateProjectionMatrix();
     target.fromArray(resolved.target);
-    if (controls) {
-      if (synchronizeControls && !controlsUp.equals(camera.up)) {
-        // OrbitControls caches its up-axis basis at construction. Rebind through its public API.
-        controls.removeEventListener("change", changed);
-        controls.removeEventListener("end", ended);
-        controls.dispose();
-        if ("convertToBlob" in canvas) throw new CadRendererError("invalid-view");
-        controls = new OrbitControls(camera, canvas);
-        controlsUp.copy(camera.up);
-        controls.enableDamping = false;
-        controls.autoRotate = false;
-        controls.enabled = interactive;
-        controls.addEventListener("change", changed);
-        controls.addEventListener("end", ended);
-      } else controls.object = camera;
+    if (controls && synchronizeControls) {
+      // Display up determines image roll; navigation always uses the same world-Z limits.
+      camera.updateMatrixWorld();
+      controls.object = camera.clone();
+      controls.object.up.set(0, 0, 1);
       controls.target.copy(target);
-      if (synchronizeControls) controls.update();
     }
   };
   const applyFrame = (state: CadViewState, synchronizeControls = true): ResolvedCadCamera => {

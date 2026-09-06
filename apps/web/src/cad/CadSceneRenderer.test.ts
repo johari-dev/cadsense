@@ -155,6 +155,43 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it.each(
+    (["front", "top", "bottom"] as const).flatMap((preset) =>
+      [1, -1].map((limit) => ({ preset, limit })),
+    ),
+  )("keeps world-Z navigation limit $limit after $preset", async ({ preset, limit }) => {
+    const h = canvasHarness();
+    const ended = vi.fn();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas, onInteractionEnd: ended });
+    try {
+      await renderer.load(manifest, async () => geometry());
+      renderer.apply({ ...state, camera: { kind: "preset", preset, fit: [] } });
+      renderer.setInteractive(true);
+      const pointer = (type: string, y: number) =>
+        Object.assign(new Event(type), {
+          pointerId: 1,
+          pointerType: "mouse",
+          button: 0,
+          clientX: 200,
+          clientY: y,
+          pageX: 200,
+          pageY: y,
+          ctrlKey: false,
+          shiftKey: false,
+          metaKey: false,
+        });
+      h.canvas.dispatchEvent(pointer("pointerdown", 200));
+      h.canvas.ownerDocument.dispatchEvent(pointer("pointermove", 200 + limit * 1200));
+      h.canvas.ownerDocument.dispatchEvent(pointer("pointerup", 200 + limit * 1200));
+      const after = ended.mock.calls.at(-1)![0];
+      const direction = new Vector3(...after.position)
+        .sub(new Vector3(...after.target))
+        .normalize();
+      expect(direction.z).toBeCloseTo(limit, 6);
+    } finally {
+      renderer.dispose();
+    }
+  });
   it.each(["top", "bottom", "front", "back", "left", "right", "isometric"] as const)(
     "can drag away from %s after replacing the camera",
     async (preset) => {
@@ -172,9 +209,9 @@ describe("CAD renderer lifecycle without WebGL", () => {
             pointerType: "mouse",
             button: 0,
             clientX: x,
-            clientY: 200,
+            clientY: preset === "top" ? 400 - x : preset === "bottom" ? x : 200,
             pageX: x,
-            pageY: 200,
+            pageY: preset === "top" ? 400 - x : preset === "bottom" ? x : 200,
             ctrlKey: false,
             shiftKey: false,
             metaKey: false,
@@ -230,6 +267,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
         h.canvas.ownerDocument.dispatchEvent(pointer("pointermove", 260));
         h.canvas.ownerDocument.dispatchEvent(pointer("pointerup", 260));
         const after = ended.mock.calls.at(-1)![0];
+        expect(after.up).toEqual(before.up);
         const delta = new Vector3(...after.target).sub(new Vector3(...before.target));
         expect(delta.length()).toBeGreaterThan(0.01);
         expect(delta.clone().normalize().dot(right)).toBeCloseTo(-1, 6);
