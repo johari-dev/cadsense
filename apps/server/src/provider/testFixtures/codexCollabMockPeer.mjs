@@ -64,7 +64,7 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "thread/start") {
-    if (script.recordRequests) {
+    if (script.recordStartRequests) {
       NodeFS.appendFileSync(
         `${process.env.CADSENSE_CODEX_COLLAB_SCRIPT}.requests`,
         `${JSON.stringify({ method, params: message.params })}\n`,

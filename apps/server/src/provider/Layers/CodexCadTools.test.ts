@@ -65,6 +65,7 @@ it.effect(
           completeTurnOnServerResponse: true,
           completeAfterResponses: childTurns.length,
           recordRequests: true,
+          recordStartRequests: true,
           serverRequests: childTurns.map((event, index) => ({
             id: `cad-call-${index}`,
             method: "item/tool/call",
