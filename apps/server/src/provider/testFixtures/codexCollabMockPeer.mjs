@@ -18,6 +18,7 @@ const script = JSON.parse(NodeFS.readFileSync(process.env.CADSENSE_CODEX_COLLAB_
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 let turnStartCount = 0;
 let activeTurn;
+let serverResponseCount = 0;
 
 const rl = NodeReadline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {
@@ -33,7 +34,12 @@ rl.on("line", (line) => {
       `${process.env.CADSENSE_CODEX_COLLAB_SCRIPT}.responses`,
       `${JSON.stringify({ id, result: message.result, error: message.error })}\n`,
     );
-    if (script.completeTurnOnServerResponse && activeTurn) {
+    serverResponseCount += 1;
+    if (
+      script.completeTurnOnServerResponse &&
+      activeTurn &&
+      serverResponseCount === (script.completeAfterResponses ?? 1)
+    ) {
       write({
         jsonrpc: "2.0",
         method: "turn/completed",
@@ -58,6 +64,12 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "thread/start") {
+    if (script.recordRequests) {
+      NodeFS.appendFileSync(
+        `${process.env.CADSENSE_CODEX_COLLAB_SCRIPT}.requests`,
+        `${JSON.stringify({ method, params: message.params })}\n`,
+      );
+    }
     write({ id, result: fixture.responses.threadStart });
     return;
   }

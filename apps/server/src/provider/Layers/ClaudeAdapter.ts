@@ -68,6 +68,13 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Scope from "effect/Scope";
+import { compactClaudeCadMessage } from "../CadProviderContent.ts";
+import * as Option from "effect/Option";
+import { CadViewing } from "../../cad/CadViewing.ts";
+import { makeCadProviderTools, type CadProviderTools } from "../CadProviderTools.ts";
+import { ClaudeCadCapabilities, CLAUDE_CAD_CAPABILITY_FIELD } from "../ClaudeCadCapabilities.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
@@ -281,6 +288,13 @@ function rememberPendingTaskModel(
 }
 
 interface ClaudeSessionContext {
+  readonly cad?: {
+    readonly scope: Scope.Closeable;
+    readonly tools: CadProviderTools;
+    readonly providerSessionId: string;
+    readonly turnIds: Map<string, TurnId>;
+    readonly ended: Set<string>;
+  };
   readonly processExit: ReturnType<typeof makeClaudeProcessExit>;
   quiescing: boolean;
   session: ProviderSession;
@@ -1708,6 +1722,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const cadViewing = yield* Effect.serviceOption(CadViewing);
+  const cadQuery = yield* Effect.serviceOption(ProjectionSnapshotQuery);
+  const cadCapabilities = yield* Effect.serviceOption(ClaudeCadCapabilities);
+  const adapterScope = yield* Scope.Scope;
   const crypto = yield* Crypto.Crypto;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
@@ -2235,6 +2253,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     errorMessage?: string,
     result?: SDKResultMessage,
   ) {
+    if (context.cad && context.turnState)
+      yield* context.cad.tools.end(null, asCanonicalTurnId(context.turnState.turnId));
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
     if (resultContextWindow !== undefined) {
       context.lastKnownContextWindow = resultContextWindow;
@@ -2737,6 +2757,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (message.type !== "user") {
       return;
     }
+
+    message = compactClaudeCadMessage(
+      message,
+      new Set(
+        Array.from(context.inFlightTools.values())
+          .filter((tool) => tool.toolName === "mcp__cadsense_cad__cad_capture")
+          .map((tool) => tool.itemId),
+      ),
+    );
 
     if (context.turnState) {
       context.turnState.items.push(message.message);
@@ -3273,6 +3302,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           effort,
         });
         context.liveTaskIds.add(message.task_id);
+        if (context.cad && context.turnState) {
+          context.cad.ended.delete(message.task_id);
+          if (!context.cad.turnIds.has(message.task_id))
+            context.cad.turnIds.set(message.task_id, asCanonicalTurnId(context.turnState.turnId));
+        }
         yield* offerRuntimeEvent({
           ...base,
           type: "task.started",
@@ -3335,6 +3369,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           patch.status !== undefined ? CLAUDE_TASK_PATCH_STATUS[patch.status] : undefined;
         if (status === "completed" || status === "failed" || status === "cancelled") {
           context.liveTaskIds.delete(message.task_id);
+          if (context.cad) {
+            const turnId = context.cad.turnIds.get(message.task_id);
+            context.cad.ended.add(message.task_id);
+            context.cad.turnIds.delete(message.task_id);
+            if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId);
+          }
         }
         const endedAt =
           typeof patch.end_time === "number" && Number.isFinite(patch.end_time)
@@ -3359,6 +3399,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
       case "task_notification": {
         context.liveTaskIds.delete(message.task_id);
+        if (context.cad) {
+          const turnId = context.cad.turnIds.get(message.task_id);
+          context.cad.ended.add(message.task_id);
+          context.cad.turnIds.delete(message.task_id);
+          if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId);
+        }
         yield* emitThreadTokenUsage(
           context,
           normalizeClaudeTaskProgressTokenUsage(message.usage, context),
@@ -3687,6 +3733,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
 
     context.stopped = true;
+    if (context.cad) yield* Scope.close(context.cad.scope, Exit.void);
     stoppingSessions.add(context);
 
     for (const taskId of Array.from(context.liveTaskIds)) {
@@ -3854,6 +3901,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const liveTaskIds = new Set<string>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
+      let cadContext: ClaudeSessionContext | undefined;
 
       /**
        * Handle AskUserQuestion tool calls by emitting a `user-input.requested`
@@ -4082,6 +4130,48 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
+        if (toolName.startsWith("mcp__cadsense_cad__")) {
+          if (!context.cad || Option.isNone(cadCapabilities))
+            return {
+              behavior: "deny",
+              message: "CAD capability unavailable.",
+            } satisfies PermissionResult;
+          const agentId = callbackOptions.agentID;
+          const childKey = agentId === undefined ? null : `claude:${agentId}`;
+          if (agentId !== undefined && (agentId.length === 0 || context.cad.ended.has(agentId)))
+            return {
+              behavior: "deny",
+              message: "CAD capability unavailable.",
+            } satisfies PermissionResult;
+          const turnId =
+            (agentId === undefined ? undefined : context.cad.turnIds.get(agentId)) ??
+            (context.turnState ? asCanonicalTurnId(context.turnState.turnId) : undefined);
+          if (!turnId)
+            return {
+              behavior: "deny",
+              message: "CAD capability unavailable.",
+            } satisfies PermissionResult;
+          if (agentId !== undefined) context.cad.turnIds.set(agentId, turnId);
+          return yield* cadCapabilities.value
+            .issue(
+              context.cad.providerSessionId,
+              childKey,
+              turnId,
+              toolName.slice("mcp__cadsense_cad__".length),
+              toolInput,
+            )
+            .pipe(
+              Effect.map((token) => ({
+                behavior: "allow" as const,
+                updatedInput: { ...toolInput, [CLAUDE_CAD_CAPABILITY_FIELD]: token },
+              })),
+              Effect.orElseSucceed(() => ({
+                behavior: "deny" as const,
+                message: "CAD capability unavailable.",
+              })),
+            );
+        }
+
         // Handle AskUserQuestion: surface clarifying questions to the
         // user via the user-input runtime event channel, regardless of
         // runtime mode (plan mode relies on this heavily).
@@ -4291,6 +4381,46 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : {}),
       };
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+      const cad = yield* Effect.gen(function* () {
+        if (
+          !mcpSession ||
+          Option.isNone(cadViewing) ||
+          Option.isNone(cadQuery) ||
+          Option.isNone(cadCapabilities)
+        )
+          return undefined;
+        const thread = yield* cadQuery.value.getThreadShellById(threadId);
+        if (Option.isNone(thread)) return undefined;
+        const project = yield* cadQuery.value.getProjectShellById(thread.value.projectId);
+        if (
+          Option.isNone(project) ||
+          !project.value.onshapeSource ||
+          project.value.cad?.enabled === false ||
+          !project.value.cad?.roots.some((root) => root.current !== null)
+        )
+          return undefined;
+        const scope = yield* Scope.fork(adapterScope);
+        const tools = yield* makeCadProviderTools(threadId).pipe(
+          Effect.provideService(CadViewing, cadViewing.value),
+          Effect.provideService(Scope.Scope, scope),
+        );
+        const turnIds = new Map<string, TurnId>();
+        yield* cadCapabilities.value
+          .register(mcpSession.providerSessionId, tools, (childKey, turnId) => {
+            if (!cadContext || cadContext.stopped || cadContext.quiescing) return false;
+            return childKey === null
+              ? cadContext.turnState?.turnId === turnId
+              : turnIds.get(childKey.slice("claude:".length)) === turnId;
+          })
+          .pipe(Effect.provideService(Scope.Scope, scope));
+        return {
+          scope,
+          tools,
+          providerSessionId: mcpSession.providerSessionId,
+          turnIds,
+          ended: new Set<string>(),
+        };
+      }).pipe(Effect.orElseSucceed(() => undefined));
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment
@@ -4334,7 +4464,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(permissionMode === "bypassPermissions"
           ? { allowDangerouslySkipPermissions: true }
           : {}),
-        ...(Object.keys(settings).length > 0 ? { settings } : {}),
+        ...(Object.keys(settings).length > 0 || cad
+          ? {
+              settings: {
+                ...settings,
+                ...(cad ? { permissions: { ask: ["mcp__cadsense_cad__*"] } } : {}),
+              },
+            }
+          : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
@@ -4347,6 +4484,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(mcpSession
           ? {
               mcpServers: {
+                ...(cad
+                  ? {
+                      cadsense_cad: {
+                        type: "http" as const,
+                        url: `${mcpSession.endpoint}/cad`,
+                        headers: { Authorization: mcpSession.authorizationHeader },
+                      },
+                    }
+                  : {}),
                 cadsense: {
                   type: "http",
                   url: mcpSession.endpoint,
@@ -4397,7 +4543,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             detail: "Failed to start Claude runtime session.",
             cause,
           }),
-      });
+      }).pipe(Effect.onError(() => (cad ? Scope.close(cad.scope, Exit.void) : Effect.void)));
 
       const session: ProviderSession = {
         threadId,
@@ -4419,6 +4565,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
 
       const context: ClaudeSessionContext = {
+        ...(cad ? { cad } : {}),
         processExit,
         quiescing: false,
         session,
@@ -4448,6 +4595,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         stopped: false,
       };
       yield* Ref.set(contextRef, context);
+      cadContext = context;
       sessions.set(threadId, context);
       adopted = true;
       startingProcesses.delete(startingProcess);

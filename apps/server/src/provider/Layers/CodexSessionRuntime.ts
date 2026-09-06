@@ -40,7 +40,13 @@ import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
+import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
+import { handleCodexCadCall, codexCadFailure } from "./CodexCadTools.ts";
+import { compactCodexCadItem } from "../CadProviderContent.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeCadThreadStartResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadStartResponse,
+);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -160,6 +166,7 @@ export interface CodexProcessReceipt {
 }
 
 export interface CodexSessionRuntimeOptions {
+  readonly cad?: CadProviderTools;
   readonly onProcessSpawned?: (receipt: CodexProcessReceipt) => void;
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
@@ -751,6 +758,9 @@ interface CodexThreadOpenClient {
 }
 
 export const openCodexThread = (input: {
+  readonly start?: (
+    params: EffectCodexSchema.V2ThreadStartParams,
+  ) => Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError>;
   readonly client: CodexThreadOpenClient;
   readonly threadId: ThreadId;
   readonly runtimeMode: RuntimeMode;
@@ -766,9 +776,11 @@ export const openCodexThread = (input: {
     model: input.requestedModel,
     serviceTier: input.serviceTier,
   });
+  const start = () =>
+    input.start ? input.start(startParams) : input.client.request("thread/start", startParams);
 
   if (resumeThreadId === undefined) {
-    return input.client.request("thread/start", startParams);
+    return start();
   }
 
   return input.client
@@ -784,7 +796,7 @@ export const openCodexThread = (input: {
           resumeThreadId,
           recoverable: true,
           cause: error,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+        }).pipe(Effect.andThen(start())),
       ),
     );
 };
@@ -1296,7 +1308,10 @@ export const makeCodexSessionRuntime = (
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
     );
-    const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
+    const serverNotifications = yield* Queue.unbounded<
+      | { readonly notification: CodexServerNotification }
+      | { readonly drain: Deferred.Deferred<void> }
+    >();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const randomUUIDv4 = (purpose: CodexErrors.CodexAppServerIdentifierPurpose) =>
       crypto.randomUUIDv4.pipe(
@@ -1310,6 +1325,7 @@ export const makeCodexSessionRuntime = (
       );
 
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
+    let cadToolsEnabled = options.cad !== undefined;
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
@@ -1796,7 +1812,18 @@ export const makeCodexSessionRuntime = (
         const isMemoryConsolidationNotification =
           suppressMemoryConsolidationNotification(notification);
 
-        const payload = notification.params;
+        const payload =
+          notification.method === "item/completed" || notification.method === "item/started"
+            ? { ...notification.params, item: compactCodexCadItem(notification.params.item) }
+            : notification.method === "turn/completed" || notification.method === "turn/started"
+              ? {
+                  ...notification.params,
+                  turn: {
+                    ...notification.params.turn,
+                    items: notification.params.turn.items.map(compactCodexCadItem),
+                  },
+                }
+              : notification.params;
         const route = readRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
         const childParentTurnId = (() => {
@@ -1807,6 +1834,16 @@ export const makeCodexSessionRuntime = (
         })();
 
         rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
+        if (options.cad && notification.method === "turn/completed") {
+          const nativeThreadId = notification.params.threadId;
+          const primary = nativeThreadId === currentProviderThreadId(yield* Ref.get(sessionRef));
+          const parentTurnId = primary
+            ? TurnId.make(notification.params.turn.id)
+            : (childParentTurnId ??
+              (yield* Ref.get(collabChildAgentsRef)).get(nativeThreadId)?.spawnTurnId);
+          if (parentTurnId)
+            yield* options.cad.end(primary ? null : `codex:${nativeThreadId}`, parentTurnId);
+        }
         // Interception FIRST: a registered v2 child is usually also in the
         // receiver-turn map (collabAgentToolCall.receiverThreadIds), and the
         // legacy suppressor below would drop its lifecycle before it could
@@ -2213,15 +2250,38 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
-    yield* client.handleUnknownServerRequest((method) =>
-      Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
+    yield* client.handleUnknownServerRequest((method, params) =>
+      method === "item/tool/call" && options.cad && cadToolsEnabled
+        ? handleCodexCadCall(
+            options.cad,
+            (nativeThreadId, nativeTurnId) =>
+              Effect.gen(function* () {
+                const drain = yield* Deferred.make<void>();
+                yield* Queue.offer(serverNotifications, { drain });
+                yield* Deferred.await(drain);
+                const session = yield* Ref.get(sessionRef);
+                if (nativeThreadId === currentProviderThreadId(session))
+                  return session.activeTurnId === nativeTurnId
+                    ? { childKey: null, turnId: session.activeTurnId }
+                    : null;
+                const liveTurn = (yield* Ref.get(collabChildLiveTurnsRef)).get(nativeThreadId);
+                const parentTurn =
+                  (yield* Ref.get(collabReceiverTurnsRef)).get(nativeThreadId) ??
+                  (yield* Ref.get(collabChildAgentsRef)).get(nativeThreadId)?.spawnTurnId;
+                return liveTurn === nativeTurnId && parentTurn
+                  ? { childKey: `codex:${nativeThreadId}`, turnId: parentTurn }
+                  : null;
+              }),
+            params,
+          ).pipe(Effect.catch((error) => Effect.succeed(codexCadFailure(error))))
+        : Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
     );
 
     const registerServerNotification = <M extends CodexRpc.ServerNotificationMethod>(method: M) =>
       client.handleServerNotification(method, (params) =>
-        Queue.offer(serverNotifications, makeCodexServerNotification(method, params)).pipe(
-          Effect.asVoid,
-        ),
+        Queue.offer(serverNotifications, {
+          notification: makeCodexServerNotification(method, params),
+        }).pipe(Effect.asVoid),
       );
 
     yield* Effect.forEach(
@@ -2233,7 +2293,11 @@ export const makeCodexSessionRuntime = (
     );
 
     yield* Stream.fromQueue(serverNotifications).pipe(
-      Stream.runForEach(handleRawNotification),
+      Stream.runForEach((item) =>
+        "drain" in item
+          ? Deferred.succeed(item.drain, undefined).pipe(Effect.asVoid)
+          : handleRawNotification(item.notification),
+      ),
       Effect.forkIn(runtimeScope),
     );
 
@@ -2271,6 +2335,7 @@ export const makeCodexSessionRuntime = (
     );
 
     yield* child.exitCode.pipe(
+      Effect.onExit(() => options.cad?.close ?? Effect.void),
       Effect.flatMap((exitCode) =>
         Ref.get(closedRef).pipe(
           Effect.flatMap((closed) => {
@@ -2306,6 +2371,39 @@ export const makeCodexSessionRuntime = (
 
       const opened = yield* openCodexThread({
         client,
+        ...(options.cad
+          ? {
+              start: (params: EffectCodexSchema.V2ThreadStartParams) =>
+                client.raw
+                  .request("thread/start", {
+                    ...params,
+                    dynamicTools: cadToolDefinitions,
+                  })
+                  .pipe(
+                    Effect.flatMap((result) =>
+                      decodeCadThreadStartResponse(result).pipe(
+                        Effect.mapError((error) =>
+                          CodexErrors.CodexAppServerRequestError.invalidPayload(
+                            "thread/start",
+                            "decode-payload",
+                            error,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Effect.catchIf(
+                      (error) =>
+                        error._tag === "CodexAppServerRequestError" &&
+                        error.code === -32602 &&
+                        /dynamic.?tools|experimental/i.test(error.message),
+                      () => {
+                        cadToolsEnabled = false;
+                        return client.request("thread/start", params);
+                      },
+                    ),
+                  ),
+            }
+          : {}),
         threadId: options.threadId,
         runtimeMode: options.runtimeMode,
         cwd: options.cwd,
@@ -2339,6 +2437,7 @@ export const makeCodexSessionRuntime = (
     });
 
     const close = Effect.gen(function* () {
+      yield* options.cad?.close ?? Effect.void;
       const alreadyClosed = yield* Ref.getAndSet(closedRef, true);
       if (alreadyClosed) {
         return;

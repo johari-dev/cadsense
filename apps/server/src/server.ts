@@ -35,6 +35,8 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
+import * as ClaudeCadCapabilities from "./provider/ClaudeCadCapabilities.ts";
+import { routeLayer as cadMcpRouteLayer } from "./mcp/cadHttp.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -252,14 +254,20 @@ const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
   Layer.provideMerge(CadSnapshotStore.layer),
   Layer.provideMerge(OnshapeCadRoots.layer),
 );
+const CadViewingLayerLive = CadViewing.layer.pipe(
+  Layer.provideMerge(ClaudeCadCapabilities.layer),
+  Layer.provideMerge(CadCaptureArtifacts.layer),
+  Layer.provideMerge(CadRenderBroker.layer),
+  Layer.provideMerge(CadSnapshotStore.layer),
+  Layer.provideMerge(OrchestrationLayerLive),
+  Layer.provideMerge(PersistenceLayerLive),
+);
 const AgentRuntimeLayerLive = Layer.mergeAll(
   CadUserOperations.layer,
-  CadViewing.layer,
   CadPresentation.reactorLayer,
 ).pipe(
   Layer.provideMerge(CadPresentation.layer),
-  Layer.provideMerge(CadCaptureArtifacts.layer),
-  Layer.provideMerge(CadRenderBroker.layer),
+  Layer.provideMerge(CadViewingLayerLive),
   Layer.provideMerge(CadProjectQuiescence.layer),
   Layer.provideMerge(CadAcquisitionLayerLive),
   Layer.provideMerge(OnshapeLayerLive),
@@ -276,6 +284,7 @@ const ReactorLayerLive = Layer.empty.pipe(
 
 const ProviderInstanceServicesLive = TextGeneration.layer.pipe(
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  Layer.provideMerge(CadViewingLayerLive),
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
@@ -342,7 +351,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),
-  McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
+  McpHttpServer.layer,
+  cadMcpRouteLayer,
 ).pipe(
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(commandReadinessLayer),
@@ -379,6 +389,7 @@ export const makeServerLayer = Layer.unwrap(
     const serverApplicationLayer = Layer.mergeAll(routesLayer, httpListeningLayer);
 
     return serverApplicationLayer.pipe(
+      Layer.provideMerge(McpSessionRegistry.layer),
       Layer.provideMerge(runtimeServicesLive),
       Layer.provide(activationLayer),
       Layer.provideMerge(HttpServerLive),
