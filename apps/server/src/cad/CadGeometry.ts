@@ -114,7 +114,11 @@ export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* 
           for (const child of value) pending.push(child);
         } else if (isObject(value)) {
           for (const [key, child] of Object.entries(value)) {
-            if (key === "EXT_meshopt_compression" || key === "KHR_draco_mesh_compression")
+            if (
+              key === "EXT_meshopt_compression" ||
+              key === "KHR_draco_mesh_compression" ||
+              key === "EXT_mesh_gpu_instancing"
+            )
               throw invalid();
             if (key === "uri") {
               if (typeof child !== "string") throw invalid();

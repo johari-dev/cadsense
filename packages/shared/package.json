@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./cadSceneBudget": {
+      "types": "./src/cadSceneBudget.ts",
+      "import": "./src/cadSceneBudget.ts"
+    },
     "./cadScene": {
       "types": "./src/cadScene.ts",
       "import": "./src/cadScene.ts"

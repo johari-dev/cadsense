@@ -26,6 +26,7 @@ import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisitio
 import { snapshotRootId } from "../onshape/OnshapeSnapshotManifest.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
+import { CadGeometryError } from "./CadGeometry.ts";
 
 /** Implementations confirm native process exit while the project's durable reservation is held. */
 export class CadProjectQuiescence extends Context.Service<
@@ -58,9 +59,12 @@ const failed = () => new CadUserOperationError({ reason: "operation-failed" });
 const isOnshapeConnectionError = Schema.is(OnshapeConnectionError);
 const isCadSnapshotStoreError = Schema.is(CadSnapshotStoreError);
 const isCadUserOperationError = Schema.is(CadUserOperationError);
+const isCadGeometryError = Schema.is(CadGeometryError);
 const failureReason = (error: unknown): string => {
   let detail = "CAD operation failed.";
-  if (isCadSnapshotStoreError(error))
+  if (isCadGeometryError(error) && error.reason === "too-large")
+    detail = "This CAD exceeds the supported scene size. Choose a smaller assembly or part studio.";
+  else if (isCadSnapshotStoreError(error))
     detail =
       error.reason === "disk-space"
         ? "Not enough free disk space. Free space to keep at least 2 GiB available."

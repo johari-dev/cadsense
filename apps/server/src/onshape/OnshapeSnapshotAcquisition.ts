@@ -15,8 +15,13 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import {
+  CadSceneBudgetError,
+  createCadSceneBudget,
+  measureCadGeometry,
+} from "@cadsense/shared/cadSceneBudget";
 import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
-import { normalizeCadGeometry, type CadGeometryError } from "../cad/CadGeometry.ts";
+import { normalizeCadGeometry, CadGeometryError } from "../cad/CadGeometry.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
 import {
@@ -35,6 +40,10 @@ export const ONSHAPE_TESSELLATION_PROFILE = "onshape-gltf-chord-0.0005-angle-0.1
 const decodeMicroversion = Schema.decodeUnknownEffect(
   Schema.Struct({ microversion: OnshapeWorkspaceId }),
 );
+const geometryFailure = (error: unknown) =>
+  new CadGeometryError({
+    reason: error instanceof CadSceneBudgetError ? error.reason : "invalid-geometry",
+  });
 const decodeMetadataProof = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ microversionId: Schema.optionalKey(OnshapeWorkspaceId) })),
 );
@@ -133,6 +142,10 @@ export const make = Effect.gen(function* () {
     let draft = yield* root.kind === "assembly"
       ? parseAssemblySnapshotDraft(context, response)
       : parsePartStudioSnapshotDraft(context, response);
+    const budget = yield* Effect.try({
+      try: () => createCadSceneBudget(draft.nodes),
+      catch: geometryFailure,
+    });
     const studioRequest = Effect.fn(function* (part: CadPartStudioSource) {
       const linked = part.documentId !== root.documentId;
       if (linked && part.documentVersion === null)
@@ -192,6 +205,13 @@ export const make = Effect.gen(function* () {
       if (!part.geometryRequired) continue;
       const cached = cachedAssets.get(part.geometryKey);
       if (cached !== undefined) {
+        yield* Effect.try({
+          try: () => {
+            if (!cached.complexity) throw new Error("CAD geometry metrics unavailable");
+            budget.add(cached, cached.complexity);
+          },
+          catch: geometryFailure,
+        });
         assets.push(cached);
         continue;
       }
@@ -210,7 +230,20 @@ export const make = Effect.gen(function* () {
         beforeChunk: (receivedBytes) => store.checkReserve(receivedBytes),
       });
       const bytes = yield* normalizeCadGeometry(downloaded.bytes);
-      assets.push({ geometryKey: part.geometryKey, ...(yield* store.putAsset(bytes)) });
+      const complexity = yield* Effect.try({
+        try: () => measureCadGeometry(bytes),
+        catch: geometryFailure,
+      });
+      const asset = {
+        geometryKey: part.geometryKey,
+        ...(yield* store.putAsset(bytes)),
+        complexity,
+      };
+      yield* Effect.try({
+        try: () => budget.add(asset, complexity),
+        catch: geometryFailure,
+      });
+      assets.push(asset);
     }
     const manifest = yield* completeSnapshotManifest(draft, assets);
     yield* store.publish(manifest);

@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import { measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 
 import { ServerConfig } from "../config.ts";
 import { completeSnapshotManifest } from "../onshape/OnshapeSnapshotManifest.ts";
@@ -249,7 +250,16 @@ export const make = Effect.gen(function* () {
           for (const asset of manifest.value.assets) {
             if (!requested.has(asset.geometryKey) || found.has(asset.geometryKey)) continue;
             const verified = yield* io(() => verifyAsset(asset), "corrupt").pipe(Effect.option);
-            if (verified._tag === "Some") found.set(asset.geometryKey, asset);
+            if (verified._tag === "Some") {
+              const complexity = yield* Effect.try(() => measureCadGeometry(verified.value)).pipe(
+                Effect.option,
+              );
+              const { complexity: _previousComplexity, ...stored } = asset;
+              found.set(
+                asset.geometryKey,
+                complexity._tag === "Some" ? { ...stored, complexity: complexity.value } : stored,
+              );
+            }
           }
         }
         return [...found.values()];

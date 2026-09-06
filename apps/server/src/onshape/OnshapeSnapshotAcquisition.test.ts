@@ -10,6 +10,7 @@ import {
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { CAD_SCENE_LIMITS } from "@cadsense/shared/cadSceneBudget";
 import { CadSnapshotStore, CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
 import { OnshapeConnections, type OnshapeReadRequest } from "./OnshapeConnections.ts";
 import * as Acquisition from "./OnshapeSnapshotAcquisition.ts";
@@ -190,6 +191,33 @@ const harness = Effect.fn(function* (options?: {
 });
 
 it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
+  it.effect(
+    "rejects an oversized tree before metadata or geometry requests and preserves the last snapshot",
+    () =>
+      Effect.gen(function* () {
+        const oversized = assembly();
+        oversized.rootAssembly.instances = Array.from(
+          { length: CAD_SCENE_LIMITS.occurrences },
+          (_, index) => ({ ...oversized.rootAssembly.instances[0]!, id: `part-${index}` }),
+        );
+        oversized.rootAssembly.occurrences = oversized.rootAssembly.instances.map((instance) => ({
+          ...oversized.rootAssembly.occurrences[0]!,
+          path: [instance.id],
+        }));
+        const options = { assembly: assembly() };
+        const h = yield* harness(options);
+        const root = { ...input.root, kind: "assembly" as const };
+        const first = yield* h.service.acquire({ ...input, root });
+        const previousRequests = h.requests.length;
+        options.assembly = oversized;
+        const failure = yield* h.service.acquire({ ...input, root }).pipe(Effect.flip);
+        assert.equal(failure._tag, "CadGeometryError");
+        assert.equal("reason" in failure ? failure.reason : null, "too-large");
+        assert.equal(h.requests.length - previousRequests, 2);
+        assert.deepEqual(h.published, [first]);
+        assert.isFalse(h.active());
+      }),
+  );
   it.effect(
     "pins each workspace sync, preserves selected configuration, and reuses validated geometry",
     () =>

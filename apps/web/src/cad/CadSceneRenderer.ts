@@ -1,5 +1,6 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import * as THREE from "three";
+import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
@@ -233,6 +234,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     const token = ++generation;
     const loaded = new Map<string, THREE.Object3D>();
     const assetsByHash = new Map<string, THREE.Object3D>();
+    const complexities = new Map<string, ReturnType<typeof measureCadGeometry>>();
     const ownedScenes: THREE.Object3D[] = [];
     let candidate: CadSceneModel | null = null;
     const manager = new THREE.LoadingManager();
@@ -243,19 +245,23 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     });
     const loader = new GLTFLoader(manager);
     try {
+      const budget = createCadSceneBudget(manifest.nodes);
       for (const asset of manifest.assets) {
         assertAvailable();
         if (token !== generation) throw new CadRendererError("superseded");
         let prototype = assetsByHash.get(asset.sha256);
         if (!prototype) {
           const bytes = await readAsset(asset.sha256);
+          const complexity = measureCadGeometry(new Uint8Array(bytes));
+          budget.add(asset, complexity);
+          complexities.set(asset.sha256, complexity);
           assertAvailable();
           if (token !== generation) throw new CadRendererError("superseded");
           const parsed = await loader.parseAsync(bytes, "");
           ownedScenes.push(...parsed.scenes);
           prototype = parsed.scene;
           assetsByHash.set(asset.sha256, prototype);
-        }
+        } else budget.add(asset, complexities.get(asset.sha256)!);
         loaded.set(asset.geometryKey, prototype);
       }
       assertAvailable();
