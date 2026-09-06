@@ -118,7 +118,7 @@ export function CadHierarchyTree({
                 role="treeitem"
                 aria-level={row.depth + 1}
                 aria-expanded={branch ? expanded : undefined}
-                className="absolute left-0 flex h-7 w-full items-center gap-1 pr-2 text-xs hover:bg-muted/50"
+                className={`absolute left-0 flex h-7 w-full items-center gap-1 pr-2 text-xs ${disabled ? "" : "hover:bg-muted/50"}`}
                 style={{ top: (start + offset) * 28, paddingLeft: 8 + row.depth * 14 }}
               >
                 <button

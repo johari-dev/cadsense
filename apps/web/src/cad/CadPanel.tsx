@@ -54,6 +54,7 @@ function CadScene({
   threadRef,
   view,
   disabled,
+  cadDimmed,
   onChange,
   captureId,
   fullscreen,
@@ -62,6 +63,7 @@ function CadScene({
   threadRef: ScopedThreadRef;
   view: CadViewState;
   disabled: boolean;
+  cadDimmed: boolean;
   onChange: (view: CadViewState) => void;
   captureId: string | null;
   fullscreen: boolean;
@@ -253,11 +255,11 @@ function CadScene({
       className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}
     >
       <div
-        className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50 [&_button:disabled]:cursor-not-allowed" : ""}`}
+        className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
       >
         <div
           ref={canvas}
-          className={`h-full w-full ${disabled ? "grayscale opacity-55" : ""}`}
+          className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
           style={{ pointerEvents: disabled ? "none" : "auto" }}
         />
         {(!manifest || unavailable) && (
@@ -289,7 +291,7 @@ function CadScene({
             render={
               <Button
                 variant="ghost"
-                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:pointer-events-auto disabled:opacity-100 ${disabled ? "text-muted-foreground disabled:cursor-not-allowed" : ""} ${fullscreen ? "" : `border-t ${treeOpen ? "" : "h-10 pb-1 sm:h-9"}`}`}
+                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:opacity-100 ${disabled ? "text-muted-foreground" : ""} ${fullscreen ? "" : `border-t ${treeOpen ? "" : "h-10 pb-1 sm:h-9"}`}`}
                 disabled={disabled || fullscreen}
               />
             }
@@ -467,6 +469,7 @@ export function CadPanel({
             threadRef={threadRef}
             view={view}
             disabled={locked}
+            cadDimmed={locked && !showActivity}
             fullscreen={fullscreen}
             compact={compact}
             onChange={(next) => void change(next)}
