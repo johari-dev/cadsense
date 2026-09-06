@@ -1,28 +1,41 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
 import { ChevronDown, ChevronRight, Focus } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../components/ui/tooltip";
+import { cadHierarchyWindow } from "./CadHierarchyWindow";
 
 export function CadHierarchyTree({
   manifest,
   view,
   disabled,
   onChange,
+  fullHeight = false,
 }: {
   manifest: CadSnapshotManifest;
   view: CadViewState;
   disabled: boolean;
   onChange: (view: CadViewState) => void;
+  fullHeight?: boolean;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [scrollTop, setScrollTop] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
+  const [viewportHeight, setViewportHeight] = useState(240);
+  useLayoutEffect(() => {
+    const node = scroller.current;
+    if (!node) return;
+    const measure = () => setViewportHeight(node.clientHeight);
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }, []);
   const rows = useMemo(() => {
     const visible = index.visible(view);
     const matches = new Set<string>();
@@ -68,10 +81,13 @@ export function CadHierarchyTree({
       return [{ ...row, ...counts.get(row.id)! }];
     });
   }, [collapsed, index, manifest, search, view]);
-  const start = Math.max(0, Math.floor(scrollTop / 28) - 6);
+  const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, rows.length);
   return (
-    <div className="flex min-h-0 flex-col border-t" aria-label="CAD components">
-      <div className="flex items-center gap-2 p-2">
+    <div
+      className={`flex min-h-0 flex-col border-t ${fullHeight ? "flex-1" : ""}`}
+      aria-label="CAD components"
+    >
+      <div className="flex shrink-0 items-center gap-2 p-2">
         <Input
           aria-label="Search CAD components"
           placeholder="Search components"
@@ -88,11 +104,11 @@ export function CadHierarchyTree({
         ref={scroller}
         role="tree"
         aria-label="Components"
-        className="h-60 overflow-auto"
+        className={fullHeight ? "min-h-0 flex-1 overflow-auto" : "h-60 overflow-auto"}
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
       >
         <div style={{ height: rows.length * 28, position: "relative" }}>
-          {rows.slice(start, start + 22).map((row, offset) => {
+          {rows.slice(start, end).map((row, offset) => {
             const node = index.nodes.get(row.id)!;
             const branch = (index.children.get(row.id)?.length ?? 0) > 0;
             const expanded = !!search.trim() || !collapsed.has(row.id);

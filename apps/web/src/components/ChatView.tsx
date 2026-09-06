@@ -366,6 +366,9 @@ const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const CadPanel = lazy(() =>
   import("../cad/CadPanel").then((module) => ({ default: module.CadPanel })),
 );
+const CadAutoPreview = lazy(() =>
+  import("../cad/CadAutoPreview").then((module) => ({ default: module.CadAutoPreview })),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -4039,7 +4042,12 @@ function ChatViewContent(props: ChatViewProps) {
     displayedRightPanelSurface?.kind === "cad" && activeProject ? (
       <Suspense fallback={null}>
         {cadAvailable && isServerThread ? (
-          <CadPanel key={activeThreadKey} project={activeProject} threadRef={activeThreadRef} />
+          <CadPanel
+            key={activeThreadKey}
+            project={activeProject}
+            threadRef={activeThreadRef}
+            fullscreen={rightPanelMaximized}
+          />
         ) : (
           <div className="p-4 text-sm text-muted-foreground">
             {cadAvailable
@@ -4368,6 +4376,21 @@ function ChatViewContent(props: ChatViewProps) {
                 tabId={activePreviewMiniPlayer.tabId}
                 bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
               />
+            ) : null}
+            {activeThreadRef && activeProject && cadAvailable && isServerThread ? (
+              <Suspense fallback={null}>
+                <CadAutoPreview
+                  key={activeThreadKey}
+                  project={activeProject}
+                  threadRef={activeThreadRef}
+                  runId={!latestTurnSettled ? (activeLatestTurn?.turnId ?? null) : null}
+                  inPanel={rightPanelOpen && activeRightPanelSurface?.kind === "cad"}
+                  panelPresent={
+                    rightPanelPresence.present && displayedRightPanelSurface?.kind === "cad"
+                  }
+                  bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
+                />
+              </Suspense>
             ) : null}
           </div>
           {/* end chat column */}

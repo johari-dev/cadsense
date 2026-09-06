@@ -457,7 +457,10 @@ const harness = Effect.fn(function* (
   const presentation = yield* makePresentation.pipe(Effect.provideService(CadSnapshotStore, store));
   return {
     service,
-    panel: yield* makePanel.pipe(Effect.provideService(CadSnapshotStore, store)),
+    panel: yield* makePanel.pipe(
+      Effect.provideService(CadSnapshotStore, store),
+      Effect.provideService(CadViewing, service),
+    ),
     recreate: make.pipe(Effect.provideService(CadSnapshotStore, store)),
     pins: () => pins,
     dispatch,
@@ -694,6 +697,43 @@ it.effect(
       assert.deepEqual(h.removedWorkspaces, ["C:/cad-view-test"]);
       yield* h.storage.run({ kind: "restore", projectId, removedAt: entry.removedAt });
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("exposes actual CAD tool activity without marking an idle activation active", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const h = yield* harness(false, false, false, { started, release });
+    const contextId = yield* h.service.resolveContext(threadId);
+    const turnId = TurnId.make("cad-panel-activity");
+    const read = () =>
+      h.panel.watch(threadId).pipe(
+        Stream.runHead,
+        Effect.map((result) => {
+          if (result._tag !== "Some") throw new Error("Missing panel state");
+          return result.value;
+        }),
+      );
+    const activation = yield* h.service
+      .withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            assert.isFalse((yield* read()).agentControlling);
+            yield* tools.capture({ expectedRevision: 0 });
+          }),
+        turnId,
+      )
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(started);
+    const active = yield* read();
+    assert.isTrue(active.agentControlling);
+    assert.equal(active.agentActivityTurnId, turnId);
+    yield* Fiber.interrupt(activation);
+    const idle = yield* read();
+    assert.isFalse(idle.agentControlling);
+    assert.equal(idle.agentActivityTurnId, turnId);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
 it.effect(

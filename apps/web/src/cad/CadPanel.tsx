@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { CadSnapshotManifest, type CadViewState, type ScopedThreadRef } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
-import { ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
@@ -19,6 +19,7 @@ import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
+import "./CadPanel.css";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 
@@ -51,12 +52,16 @@ function CadScene({
   disabled,
   onChange,
   captureId,
+  fullscreen,
+  compact,
 }: {
   threadRef: ScopedThreadRef;
   view: CadViewState;
   disabled: boolean;
   onChange: (view: CadViewState) => void;
   captureId: string | null;
+  fullscreen: boolean;
+  compact: boolean;
 }) {
   const lease = useAtomValue(
     cadPanelEnvironment.scene({
@@ -215,8 +220,10 @@ function CadScene({
   const unavailable =
     error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null);
   return (
-    <>
-      <div className="relative min-h-48 flex-1 overflow-hidden bg-background">
+    <div className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}>
+      <div
+        className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "grayscale brightness-75" : ""}`}
+      >
         <div
           ref={canvas}
           className="h-full w-full"
@@ -230,40 +237,62 @@ function CadScene({
             {unavailable ?? "Opening downloaded CAD…"}
           </div>
         )}
-        {manifest && !unavailable && (
+        {manifest && !unavailable && !compact && (
           <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
         )}
       </div>
-      {manifest && (
-        <Collapsible open={treeOpen} onOpenChange={setTreeOpen} className="shrink-0">
+      {manifest && !compact && (
+        <Collapsible
+          open={fullscreen || treeOpen}
+          onOpenChange={(open) => {
+            if (!fullscreen) setTreeOpen(open);
+          }}
+          className={
+            fullscreen
+              ? "flex min-h-0 w-64 shrink-0 flex-col border-l"
+              : `shrink-0 ${treeOpen ? "" : "pb-1"}`
+          }
+        >
           <CollapsibleTrigger
             render={
               <Button
                 variant="ghost"
-                className="w-full justify-start rounded-none border-t px-3 text-xs disabled:pointer-events-auto disabled:opacity-100"
-                disabled={disabled}
+                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:pointer-events-auto disabled:opacity-100 ${fullscreen ? "" : "border-t"}`}
+                disabled={disabled || fullscreen}
               />
             }
-            disabled={disabled}
+            disabled={disabled || fullscreen}
           >
-            {treeOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Components{" "}
+            {!fullscreen && (treeOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}{" "}
+            Components{" "}
             <span className="ml-auto text-muted-foreground">{manifest.nodes.length}</span>
           </CollapsibleTrigger>
-          <CollapsiblePanel>
+          <CollapsiblePanel className={fullscreen ? "flex min-h-0 flex-1 flex-col" : undefined}>
             <CadHierarchyTree
               manifest={manifest}
               view={view}
               disabled={disabled}
               onChange={onChange}
+              fullHeight={fullscreen}
             />
           </CollapsiblePanel>
         </Collapsible>
       )}
-    </>
+    </div>
   );
 }
 
-export function CadPanel({ project, threadRef }: { project: Project; threadRef: ScopedThreadRef }) {
+export function CadPanel({
+  project,
+  threadRef,
+  fullscreen = false,
+  compact = false,
+}: {
+  project: Project;
+  threadRef: ScopedThreadRef;
+  fullscreen?: boolean;
+  compact?: boolean;
+}) {
   const state = useAtomValue(
     cadPanelEnvironment.watch({
       environmentId: threadRef.environmentId,
@@ -275,7 +304,7 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
-  const locked = runActive || !!project.cad?.operation || !data;
+  const locked = runActive || data?.agentControlling || !!project.cad?.operation || !data;
   const [edits] = useState(() =>
     createCadViewEdits(
       async (view, expectedRevision) => {
@@ -304,45 +333,47 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
   return (
-    <section aria-label="CAD panel" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-        <CadScenePicker
-          scenes={roots.map((root) => {
-            const name =
-              project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
-                ?.name ?? (root.kind === "assembly" ? "Assembly" : "Part Studio");
-            return {
-              id: root.rootId,
-              label: roots.some(
-                (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
-              )
-                ? `${name} · ${root.configuration}`
-                : name,
-            };
-          })}
-          selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
-          disabled={locked}
-          onSelect={(id) => {
-            const root = roots.find((root) => root.rootId === id);
-            if (root?.current)
-              void change({
-                rootId: root.rootId,
-                snapshotId: root.current.snapshotId,
-                revision: 0,
-                camera: { kind: "preset", preset: "isometric", fit: [] },
-                visibility: {},
-                isolatedOccurrenceIds: [],
-                explosion: 0,
-              });
-          }}
-        />
-      </div>
+    <section
+      aria-label="CAD panel"
+      data-cad-agent-controlling={!!data?.agentControlling}
+      className="relative flex min-h-0 flex-1 flex-col"
+    >
+      {!compact && (
+        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+          <CadScenePicker
+            scenes={roots.map((root) => {
+              const name =
+                project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
+                  ?.name ?? (root.kind === "assembly" ? "Assembly" : "Part Studio");
+              return {
+                id: root.rootId,
+                label: roots.some(
+                  (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
+                )
+                  ? `${name} · ${root.configuration}`
+                  : name,
+              };
+            })}
+            selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
+            disabled={locked}
+            onSelect={(id) => {
+              const root = roots.find((root) => root.rootId === id);
+              if (root?.current)
+                void change({
+                  rootId: root.rootId,
+                  snapshotId: root.current.snapshotId,
+                  revision: 0,
+                  camera: { kind: "preset", preset: "isometric", fit: [] },
+                  visibility: {},
+                  isolatedOccurrenceIds: [],
+                  explosion: 0,
+                });
+            }}
+          />
+        </div>
+      )}
       {runActive && (
-        <div
-          role="status"
-          className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground"
-        >
-          <LockKeyhole size={12} />
+        <div role="status" className="sr-only">
           {data?.captureId
             ? "Agent’s captured view · controls locked"
             : "Agent running · CAD controls locked"}
@@ -361,6 +392,8 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
             threadRef={threadRef}
             view={view}
             disabled={locked}
+            fullscreen={fullscreen}
+            compact={compact}
             onChange={(next) => void change(next)}
           />
         </>

@@ -1,0 +1,46 @@
+/* Keep a solid perimeter above both the header and content; pulse only its glow. */
+:is(.cad-floating-preview, [data-preview-panel-mode]):has(
+  [data-cad-agent-controlling="true"]
+)::before,
+:is(.cad-floating-preview, [data-preview-panel-mode]):has(
+  [data-cad-agent-controlling="true"]
+)::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: 60;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+:is(.cad-floating-preview, [data-preview-panel-mode]):has(
+  [data-cad-agent-controlling="true"]
+)::after {
+  border: 1px solid var(--color-emerald-400);
+}
+
+:is(.cad-floating-preview, [data-preview-panel-mode]):has(
+  [data-cad-agent-controlling="true"]
+)::before {
+  box-shadow:
+    inset 0 0 10px color-mix(in srgb, var(--color-emerald-400) 45%, transparent),
+    0 0 3px var(--color-emerald-400);
+  animation: cad-agent-control-pulse 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes cad-agent-control-pulse {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.cad-floating-preview, [data-preview-panel-mode]):has(
+    [data-cad-agent-controlling="true"]
+  )::before {
+    animation: none;
+  }
+}
