@@ -1,0 +1,110 @@
+name: Desktop Verification Artifacts
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-verification-${{ github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event.action != 'labeled' || github.event.label.name == 'verify:desktop' }}
+
+jobs:
+  build:
+    name: Package ${{ matrix.platform }} ${{ matrix.arch }}
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'verify:desktop') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'verify:desktop')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            platform: mac
+            arch: arm64
+            target: zip
+            rust_target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            platform: mac
+            arch: x64
+            target: zip
+            rust_target: x86_64-apple-darwin
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            target: AppImage
+            rust_target: x86_64-unknown-linux-gnu
+          - runner: windows-2025
+            platform: win
+            arch: x64
+            target: zip
+            rust_target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: ${{ matrix.platform != 'win' }}
+          run-install: false
+
+      - name: Install desktop dependencies
+        run: vp install --filter=@cadsense/desktop... --filter=@cadsense/server... --filter=@cadsense/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Windows native build libraries
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $installer = Start-Process -FilePath $setupExe -WindowStyle Hidden `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru
+          if ($installer.ExitCode -ne 0 -and $installer.ExitCode -ne 3010) {
+            throw "Native build library installation failed: $($installer.ExitCode)"
+          }
+
+      - name: Install Linux image tools
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - name: Build unsigned verification artifact
+        shell: bash
+        run: |
+          vp run dist:desktop:artifact \
+            --platform "${{ matrix.platform }}" \
+            --target "${{ matrix.target }}" \
+            --arch "${{ matrix.arch }}" \
+            --verbose
+
+      # These are workflow artifact downloads, not a release or update feed.
+      # Building a package alone does not establish CAD interaction/performance acceptance.
+      - name: Upload verification artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-verification-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.zip
+            release/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
