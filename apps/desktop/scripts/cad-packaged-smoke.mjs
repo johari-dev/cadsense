@@ -21,6 +21,7 @@ const { values } = NodeUtil.parseArgs({
     artifact: { type: "string" },
     executable: { type: "string" },
     output: { type: "string" },
+    video: { type: "boolean", default: false },
   },
 });
 if (Boolean(values.artifact) === Boolean(values.executable))
@@ -87,12 +88,15 @@ const report = {
   baseDir,
   steps: [],
 };
-const launch = async () => {
+const launch = async (record = false) => {
   application = await _electron.launch({
     executablePath,
     env,
     cwd: directory,
     timeout: 45_000,
+    ...(record && values.video
+      ? { recordVideo: { dir: output, size: { width: 1024, height: 768 } } }
+      : {}),
     args: softwareGraphics
       ? ["--use-gl=angle", "--use-angle=swiftshader-webgl", "--enable-unsafe-swiftshader"]
       : [],
@@ -146,7 +150,7 @@ try {
   await close();
   const fixture = await seedCadSmokeFixture(baseDir);
   report.steps.push("initialized isolated backend and seeded offline assembly/multipart fixtures");
-  let page = await launch();
+  let page = await launch(true);
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
   await openCad(page);
   await page.getByLabel("Camera view", { exact: true }).selectOption("front");

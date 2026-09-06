@@ -112,6 +112,7 @@ jobs:
       - name: Exercise packaged CAD offline
         shell: bash
         run: |
+          node apps/desktop/node_modules/playwright-core/cli.js install ffmpeg
           shopt -s nullglob
           artifacts=(release/*.zip release/*.AppImage)
           if [[ ${#artifacts[@]} != 1 ]]; then
@@ -119,7 +120,7 @@ jobs:
             exit 1
           fi
           command=(node apps/desktop/scripts/cad-packaged-smoke.mjs
-            --artifact "${artifacts[0]}" --output .cadsense/desktop-smoke-evidence)
+            --artifact "${artifacts[0]}" --output .cadsense/desktop-smoke-evidence --video)
           if [[ "${{ matrix.platform }}" == linux ]]; then
             xvfb-run -a "${command[@]}"
           else
