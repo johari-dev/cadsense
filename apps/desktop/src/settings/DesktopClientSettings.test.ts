@@ -31,6 +31,8 @@ const clientSettings: ClientSettings = {
   fontSizeInterface: 16,
   fontSizePrompt: 14,
   fontSmoothing: true,
+  showPermissionSettings: false,
+  showContextWindowIndicator: false,
   sidebarProjectSortOrder: "updated_at",
   sidebarThreadPreviewCount: 5,
   sidebarThreadSortOrder: "updated_at",

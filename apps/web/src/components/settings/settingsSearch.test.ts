@@ -78,14 +78,21 @@ describe("searchSettings", () => {
   });
 
   it("serves anchor props to panels from the catalog", () => {
-    expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "Word wrap" });
+    expect(searchableSetting("show-permission-settings")).toEqual({
+      id: "show-permission-settings",
+      title: "Show permission settings",
+    });
     expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
   });
 
   it("routes appearance settings to their current section", () => {
-    expect(searchSettings("word wrap")[0]).toMatchObject({
-      id: "word-wrap",
+    expect(searchSettings("show context window")[0]).toMatchObject({
+      id: "show-context-window-indicator",
       to: "/settings/appearance",
     });
+  });
+  it("does not offer removed appearance settings", () => {
+    expect(searchSettings("word wrap")).toEqual([]);
+    expect(searchSettings("code font")).toEqual([]);
   });
 });

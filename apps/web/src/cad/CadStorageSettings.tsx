@@ -7,7 +7,7 @@ import {
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useState } from "react";
 import { DatabaseIcon } from "lucide-react";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { cadStorageEnvironment } from "../state/cadStorage";
 import { useAtomCommand } from "../state/use-atom-command";
 import { Button } from "../components/ui/button";
@@ -131,11 +131,7 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
   );
 }
 export function CadStorageSettings() {
-  const { environments } = useEnvironments();
-  const primary = usePrimaryEnvironmentId();
-  const [selected, setSelected] = useState<EnvironmentId | null>(null);
-  const environment =
-    environments.find((item) => item.environmentId === (selected ?? primary)) ?? environments[0];
+  const environmentId = usePrimaryEnvironmentId();
   return (
     <SettingsPageContainer>
       <SettingsSection title="CAD storage" icon={<DatabaseIcon className="size-4" />}>
@@ -144,31 +140,8 @@ export function CadStorageSettings() {
             Restore removed Onshape projects or delete retained files. These actions use local data
             and do not contact Onshape. Threads and captured images are preserved.
           </p>
-          <label className="flex items-center gap-3 text-sm">
-            Environment
-            <select
-              aria-label="CAD storage environment"
-              className="rounded-md border bg-background p-2"
-              value={environment?.environmentId ?? ""}
-              onChange={(event) =>
-                setSelected(
-                  environments.find((item) => item.environmentId === event.target.value)
-                    ?.environmentId ?? null,
-                )
-              }
-            >
-              {environments.map((item) => (
-                <option key={item.environmentId} value={item.environmentId}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {environment ? (
-            <RetainedProjects
-              key={environment.environmentId}
-              environmentId={environment.environmentId}
-            />
+          {environmentId ? (
+            <RetainedProjects key={environmentId} environmentId={environmentId} />
           ) : (
             <p className="text-sm text-muted-foreground">
               Connect an environment to inspect CAD storage.

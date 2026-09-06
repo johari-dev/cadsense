@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { CadSnapshotManifest, type CadViewState, type ScopedThreadRef } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
-import { Box, ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
+import { ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
@@ -304,11 +304,10 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
   return (
     <section aria-label="CAD panel" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b p-2">
-        <Box size={15} className="shrink-0 text-muted-foreground" />
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
         <select
           aria-label="CAD scene"
-          className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+          className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-xs"
           value={view?.rootId ?? data?.unavailableRootId ?? ""}
           disabled={locked || roots.length === 0}
           onChange={(event) => {

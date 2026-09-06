@@ -20,6 +20,27 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("Appearance visibility", () => {
+  it("hides optional composer controls for existing and new settings", () => {
+    expect(decodeClientSettings({})).toMatchObject({
+      showPermissionSettings: false,
+      showContextWindowIndicator: false,
+    });
+    expect(decodeClientSettings({ fontInterface: "system" })).toMatchObject({
+      showPermissionSettings: false,
+      showContextWindowIndicator: false,
+    });
+  });
+  it("accepts visibility preferences independently", () => {
+    expect(
+      decodeClientSettingsPatch({
+        showPermissionSettings: true,
+        showContextWindowIndicator: false,
+      }),
+    ).toMatchObject({ showPermissionSettings: true, showContextWindowIndicator: false });
+  });
+});
+
 describe("ClaudeSettings auto-compaction", () => {
   it("uses Claude's default threshold when no override is configured", () => {
     expect(decodeClaudeSettings({}).autoCompactWindow).toBe("");

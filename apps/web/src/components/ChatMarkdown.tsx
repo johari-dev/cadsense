@@ -1,14 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  CheckIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  GlobeIcon,
-  Maximize2Icon,
-  Minimize2Icon,
-  TriangleAlertIcon,
-  WrapTextIcon,
-} from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CopyIcon, GlobeIcon, TriangleAlertIcon } from "lucide-react";
 import type { EnvironmentId, ScopedThreadRef, ServerProviderSkill } from "@cadsense/contracts";
 import {
   isAtomCommandInterrupted,
@@ -61,7 +52,6 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { recordVisitForThread } from "../browserHistoryStore";
-import { getClientSettings } from "../hooks/useSettings";
 import {
   chatMarkdownClipboardPayload,
   serializeTableElementToCsv,
@@ -399,42 +389,12 @@ function extractCodeBlock(
   };
 }
 
-function readInitialWordWrapSetting(): boolean {
-  return getClientSettings().wordWrap;
-}
-
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
-  const [expanded, setExpanded] = useState(readInitialWordWrapSetting);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
   const copyLabel = copied ? "Copied" : "Copy table";
-
-  function toggleExpanded() {
-    const table = tableRef.current;
-    if (!table) return;
-
-    if (!expanded) {
-      const rows = [...table.rows];
-      const columnWidths = rows.reduce<number[]>((widths, row) => {
-        [...row.cells].forEach((cell, columnIndex) => {
-          widths[columnIndex] = Math.max(
-            widths[columnIndex] ?? 0,
-            cell.getBoundingClientRect().width,
-          );
-        });
-        return widths;
-      }, []);
-
-      [...(table.tHead?.rows[0]?.cells ?? [])].forEach((cell, columnIndex) => {
-        cell.style.minWidth = `${columnWidths[columnIndex] ?? cell.getBoundingClientRect().width}px`;
-      });
-    }
-
-    setExpanded((value) => !value);
-  }
 
   const handleCopy = useCallback((format: "markdown" | "csv") => {
     const table = containerRef.current?.querySelector("table");
@@ -473,11 +433,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   );
 
   return (
-    <div
-      ref={containerRef}
-      className="chat-markdown-table-container"
-      data-expanded={expanded ? "true" : "false"}
-    >
+    <div ref={containerRef} className="chat-markdown-table-container" data-expanded="true">
       <ScrollArea
         chainVerticalScroll
         scrollFade
@@ -488,25 +444,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
           {children}
         </table>
       </ScrollArea>
-      <div className="mt-0.5 flex items-center justify-between select-none">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="chat-markdown-chrome-action"
-                aria-pressed={expanded}
-                onClick={toggleExpanded}
-                aria-label={expandLabel}
-              />
-            }
-          >
-            {expanded ? <Minimize2Icon className="size-3" /> : <Maximize2Icon className="size-3" />}
-          </TooltipTrigger>
-          <TooltipPopup side="top">{expandLabel}</TooltipPopup>
-        </Tooltip>
+      <div className="mt-0.5 flex items-center justify-end select-none">
         <Menu>
           <Tooltip>
             <TooltipTrigger
@@ -632,9 +570,7 @@ function MarkdownCodeBlock({
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
-  const [wrapped, setWrapped] = useState(readInitialWordWrapSetting);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
 
   const handleCopy = useCallback(() => {
@@ -679,31 +615,13 @@ function MarkdownCodeBlock({
     <div
       className="chat-markdown-codeblock my-[0.65rem] overflow-hidden rounded-[var(--radius)] border border-border/70 bg-secondary leading-snug dark:border-transparent dark:bg-input/32"
       data-language={language}
-      data-wrap={wrapped ? "true" : "false"}
+      data-wrap="true"
     >
       <div className="chat-markdown-codeblock-header flex items-center justify-between gap-2 pt-1.5 pr-1.5 pb-0 pl-3 select-none">
         <span className="inline-flex min-w-0 items-center gap-[0.4rem] [font-family:var(--font-mono,ui-monospace,SFMono-Regular,monospace)] [font-size:0.6875rem]">
           <MarkdownCodeBlockTitleContent fenceTitle={fenceTitle} language={language} />
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="chat-markdown-chrome-action"
-                  aria-pressed={wrapped}
-                  onClick={() => setWrapped((value) => !value)}
-                  aria-label={wrapLabel}
-                />
-              }
-            >
-              <WrapTextIcon className="size-3" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">{wrapLabel}</TooltipPopup>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={

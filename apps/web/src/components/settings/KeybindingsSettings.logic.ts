@@ -155,22 +155,24 @@ export function buildKeybindingRows(
   query: string,
 ): ReadonlyArray<KeybindingRow> {
   const normalizedQuery = query.trim().toLowerCase();
-  const rows = keybindings.map((binding, index) => {
-    const defaultBinding = defaultBindingForBinding(binding);
-    const key = shortcutToKeybindingInput(binding.shortcut);
-    const when = whenAstToExpression(binding.whenAst);
-    return {
-      id: `${keybindingRowId(binding.command, key, when)}\u0000${index}`,
-      command: binding.command,
-      key,
-      when,
-      source: sourceForBinding(binding),
-      defaultKey: defaultBinding ? shortcutToKeybindingInput(defaultBinding.shortcut) : null,
-      defaultWhen: whenAstToExpression(defaultBinding?.whenAst),
-      binding,
-      conflicts: [],
-    } satisfies KeybindingRow;
-  });
+  const rows = keybindings
+    .filter((binding) => binding.command !== "commandPalette.toggle")
+    .map((binding, index) => {
+      const defaultBinding = defaultBindingForBinding(binding);
+      const key = shortcutToKeybindingInput(binding.shortcut);
+      const when = whenAstToExpression(binding.whenAst);
+      return {
+        id: `${keybindingRowId(binding.command, key, when)}\u0000${index}`,
+        command: binding.command,
+        key,
+        when,
+        source: sourceForBinding(binding),
+        defaultKey: defaultBinding ? shortcutToKeybindingInput(defaultBinding.shortcut) : null,
+        defaultWhen: whenAstToExpression(defaultBinding?.whenAst),
+        binding,
+        conflicts: [],
+      } satisfies KeybindingRow;
+    });
 
   const rowsWithConflicts = rows.map((row) => {
     const conflicts = keybindingConflictLabels(rows, {
@@ -256,6 +258,7 @@ export function buildKeybindingCommandOptions(
   for (const binding of keybindings) {
     commands.add(binding.command);
   }
+  commands.delete("commandPalette.toggle");
   return [...commands].toSorted((left, right) =>
     commandLabel(left).localeCompare(commandLabel(right)),
   );

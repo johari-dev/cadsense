@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlState } from "~/assets/assetUrls";
 import { OpenInExplorerButton } from "~/components/chat/OpenInExplorerButton";
-import { useClientSettings } from "~/hooks/useSettings";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { cn } from "~/lib/utils";
@@ -253,7 +252,7 @@ function initialExplorerOpen(): boolean {
 }
 
 export default function FilePreviewPanel(props: FilePreviewPanelProps) {
-  const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const wordWrap = true;
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(props.environmentId);
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, { reportFailure: false });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });

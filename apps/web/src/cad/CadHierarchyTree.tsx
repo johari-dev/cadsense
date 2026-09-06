@@ -83,14 +83,6 @@ export function CadHierarchyTree({
             scroller.current?.scrollTo(0, 0);
           }}
         />
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          onClick={() => onChange({ ...view, visibility: {}, isolatedOccurrenceIds: [] })}
-        >
-          Show all
-        </Button>
       </div>
       <div
         ref={scroller}
