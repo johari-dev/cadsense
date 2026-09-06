@@ -165,6 +165,7 @@ try {
   await page.screenshot({ path: NodePath.join(output, "assembly.png") });
   report.steps.push("assembly camera, explosion, nested component visibility");
   await page.getByTestId(`thread-row-${cadSmokeThreads[1]}`).click();
+  await openCad(page);
   await waitValue(explosion, "0");
   await page.getByLabel("CAD scene", { exact: true }).selectOption(fixture.roots[1]);
   await page.getByRole("button", { name: /^Components/ }).click();
