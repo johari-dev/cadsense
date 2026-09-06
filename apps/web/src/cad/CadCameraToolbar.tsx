@@ -1,5 +1,5 @@
 import type { CadViewState } from "@cadsense/contracts";
-import { Expand } from "lucide-react";
+import { Boxes } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -88,7 +88,7 @@ export function CadCameraToolbar({
                 className="size-8 rounded-sm aria-pressed:bg-accent"
                 onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
               >
-                <Expand size={16} />
+                <Boxes size={16} />
               </Button>
             }
           />
