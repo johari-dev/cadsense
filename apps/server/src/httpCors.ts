@@ -4,6 +4,7 @@ export const browserApiCorsAllowedHeaders = [
   "b3",
   "traceparent",
   "content-type",
+  "x-cad-panel-token",
   "x-cad-render-token",
   "x-cad-render-receipt",
 ] as const;
