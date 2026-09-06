@@ -603,7 +603,10 @@ function deriveTurnFolds(input: {
       // Agent-spawn CTA rows never fold: workflows outlive their launching
       // turn (dynamic spawns, background execution), and folding the CTA
       // when the turn settles makes a still-running fleet invisible.
-      if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
+      if (
+        entry.kind === "work" &&
+        (entry.entry.agentSpawn !== undefined || entry.entry.cadCapture !== undefined)
+      ) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
@@ -928,12 +931,15 @@ export function deriveMessagesTimelineRows(input: {
           // (review finding: concatenating two filtered lists moved a
           // mid-group spawn row above earlier tool rows).
           const overflowCandidates = visibleGroupedEntries.filter(
-            (entry) => entry.agentSpawn === undefined,
+            (entry) => entry.agentSpawn === undefined && entry.cadCapture === undefined,
           );
           const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
           const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
           const visibleEntries = visibleGroupedEntries.filter(
-            (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
+            (entry) =>
+              entry.agentSpawn !== undefined ||
+              entry.cadCapture !== undefined ||
+              !hiddenIds.has(entry.id),
           );
           const renderedEntries = expanded ? visibleGroupedEntries : visibleEntries;
 

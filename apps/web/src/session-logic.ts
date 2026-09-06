@@ -3,6 +3,7 @@ import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { isBackgroundTaskActivity } from "@cadsense/client-runtime/state/subagentRuntime";
 import {
+  CadCaptureCard,
   ApprovalRequestId,
   isToolLifecycleItemType,
   type OrchestrationLatestTurn,
@@ -20,6 +21,7 @@ import {
 import type { ChatMessage, ProposedPlan, SessionPhase, Thread, ThreadSession } from "./types";
 
 export type ProviderPickerKind = ProviderDriverKind;
+const decodeCadCaptureCard = Schema.decodeUnknownOption(CadCaptureCard);
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -40,6 +42,7 @@ export type WorkLogToolLifecycleStatus =
   | "stopped";
 
 export interface WorkLogEntry {
+  cadCapture?: CadCaptureCard;
   id: string;
   createdAt: string;
   turnId?: TurnId | null;
@@ -956,6 +959,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     sourceActivityKind: activity.kind,
   };
   const itemType = extractWorkLogItemType(payload);
+  if (activity.kind === "cad.captured") {
+    const capture = decodeCadCaptureCard(activity.payload);
+    if (Option.isSome(capture)) entry.cadCapture = capture.value;
+  }
   const requestKind = extractWorkLogRequestKind(payload);
   if (detail) {
     entry.detail = detail;

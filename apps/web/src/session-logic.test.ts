@@ -26,6 +26,35 @@ import {
 
 let nextActivityId = 0;
 
+it("retains independent CAD capture cards without inline image bytes or local paths", () => {
+  const capture = {
+    captureId: "00000000-0000-4000-8000-000000000001",
+    snapshotId: "00000000-0000-4000-8000-000000000002",
+    revision: 4,
+  };
+  const entries = deriveWorkLogEntries([
+    makeActivity({
+      kind: "cad.captured",
+      tone: "info",
+      summary: "CAD view captured",
+      payload: capture,
+    }),
+    makeActivity({
+      kind: "cad.captured",
+      tone: "info",
+      summary: "CAD view captured",
+      payload: { ...capture, captureId: "00000000-0000-4000-8000-000000000003", revision: 5 },
+    }),
+  ]);
+  expect(entries.map((entry) => entry.cadCapture?.revision)).toEqual([4, 5]);
+  expect(entries[0]?.cadCapture).toEqual(capture);
+  expect(
+    deriveWorkLogEntries([
+      makeActivity({ kind: "cad.captured", payload: { captureId: "invalid" } }),
+    ])[0]?.cadCapture,
+  ).toBeUndefined();
+});
+
 function makeActivity(overrides: {
   id?: string;
   createdAt?: string;
