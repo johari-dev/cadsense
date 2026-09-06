@@ -7,10 +7,12 @@ import {
 import * as Schema from "effect/Schema";
 import { createCadBrowserPool } from "./CadBrowserWorkers";
 import { CadRendererError } from "./CadSceneModel";
+import { cadDiagnostics } from "./CadDiagnostics";
 const decodePayload = Schema.decodeUnknownSync(CadRenderPayload);
 
 /** The host outlives routed threads. Only two jobs may load manifests or render at once. */
 export const createCadRenderHost = (baseUrl: string) => {
+  const diagnostics = cadDiagnostics.register();
   const jobs = new Map<
     string,
     { ticket: CadRenderTicket; controller: AbortController; snapshotId?: string; runId?: string }
@@ -33,6 +35,8 @@ export const createCadRenderHost = (baseUrl: string) => {
     return response;
   };
   const pool = createCadBrowserPool({
+    onDiagnostic: diagnostics.record,
+    onRendererDiagnostic: diagnostics.record,
     isCurrent: (job) => !disposed && jobs.has(job.jobId),
     readAsset: async (snapshotId, hash, signal) => {
       const owner = [...jobs.values()].find(
@@ -129,6 +133,7 @@ export const createCadRenderHost = (baseUrl: string) => {
       jobs.clear();
       queued.length = 0;
       pool.dispose();
+      diagnostics.dispose();
     },
   };
 };

@@ -54,6 +54,7 @@ import {
   visibleResourceTelemetryProcesses,
 } from "./ResourceTelemetryDiagnostics.logic";
 import { SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import { CadDiagnosticsPanel } from "./CadDiagnosticsPanel";
 
 const HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 15_000 },
@@ -1220,6 +1221,8 @@ export function ResourceTelemetryDiagnostics() {
           </div>
         </div>
       </SettingsSection>
+
+      <CadDiagnosticsPanel />
 
       <SettingsSection
         title="Resource timeline"

@@ -20,6 +20,8 @@ export const CadWorkerInput = Schema.Union([
 ]);
 export type CadWorkerInput = typeof CadWorkerInput.Type;
 export const CadWorkerOutput = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("frame"), milliseconds: Schema.Number }),
+  Schema.Struct({ type: Schema.Literal("context-loss") }),
   Schema.Struct({ type: Schema.Literal("ready") }),
   Schema.Struct({ type: Schema.Literal("unavailable") }),
   Schema.Struct({

@@ -17,6 +17,8 @@ export interface CadSceneRendererOptions {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   readonly onInteractionEnd?: (pose: ResolvedCadCamera) => void;
   readonly onUnavailable?: (error: CadRendererError) => void;
+  readonly onFrame?: (milliseconds: number) => void;
+  readonly onContextLost?: () => void;
 }
 
 /** One on-demand renderer. Hosts own scheduling, retries, retention, and presentation policy. */
@@ -76,7 +78,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   };
   const render = () => {
     assertAvailable();
+    const start = options.onFrame ? performance.now() : 0;
     renderer.render(scene, camera);
+    options.onFrame?.(performance.now() - start);
   };
   const pose = (): ResolvedCadCamera => ({
     position: [camera.position.x, camera.position.y, camera.position.z],
@@ -100,6 +104,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     cancelTransition();
     event.preventDefault();
     lost = true;
+    options.onContextLost?.();
     if (controls) controls.enabled = false;
     options.onUnavailable?.(new CadRendererError("renderer-unavailable"));
   };
