@@ -4,6 +4,8 @@ import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSc
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
+import { prepareCadMaterials } from "./CadMaterials";
+import { createCadOutline, supportsCadOutline } from "./CadOutline";
 import {
   buildCadSceneModel,
   CAD_CAMERA_FOV,
@@ -34,8 +36,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     throw new CadRendererError("renderer-unavailable");
   }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
   renderer.setClearColor(DEFAULT_CAD_APPEARANCE.background);
+  const outline = createCadOutline(renderer);
   const scene = new THREE.Scene();
   const ambient = new THREE.HemisphereLight(0xffffff, 0x89939f, 1.5);
   scene.add(ambient);
@@ -66,6 +69,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     controls.autoRotate = false;
   }
   let model: CadSceneModel | null = null;
+  let outlineSupported = false;
+  const outlineBounds = new THREE.Vector3();
   const cachedScenes = new Map<
     string,
     {
@@ -73,6 +78,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       model: CadSceneModel;
       prototypes: THREE.Object3D[];
       bytes: number;
+      outlineSupported: boolean;
     }
   >();
   let activeSnapshot: string | null = null;
@@ -100,6 +106,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     assertAvailable();
     const start = options.onFrame ? performance.now() : 0;
     renderer.render(scene, camera);
+    if (model && outlineSupported)
+      outline.render(scene, camera, model.bounds.getSize(outlineBounds).length());
     options.onFrame?.(performance.now() - start);
   };
   const pose = (): ResolvedCadCamera => ({
@@ -291,6 +299,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (!sameScene) {
         if (model) scene.remove(model.group);
         model = cached.model;
+        outlineSupported = cached.outlineSupported;
         scene.add(model.group);
         view = null;
         activeSnapshot = manifest.snapshotId;
@@ -310,6 +319,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       return url;
     });
     const loader = new GLTFLoader(manager);
+    const partsByKey = new Map(manifest.parts.map((part) => [part.geometryKey, part]));
+    const appearancesByHash = new Map<
+      string,
+      Array<Parameters<typeof prepareCadMaterials>[1][number]>
+    >();
+    for (const asset of manifest.assets) {
+      const appearances = appearancesByHash.get(asset.sha256) ?? [];
+      appearances.push(partsByKey.get(asset.geometryKey)?.metadata?.appearance ?? null);
+      appearancesByHash.set(asset.sha256, appearances);
+    }
     try {
       const budget = createCadSceneBudget(manifest.nodes);
       for (const asset of manifest.assets) {
@@ -326,6 +345,20 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           const parsed = await loader.parseAsync(bytes, "");
           ownedScenes.push(...parsed.scenes);
           prototype = parsed.scene;
+          const definitions: ReadonlyArray<{
+            pbrMetallicRoughness?: { roughnessFactor?: number };
+          }> = parsed.parser?.json.materials ?? [];
+          const defaultFinish = new Set<THREE.Material>();
+          parsed.parser?.associations.forEach((association, object) => {
+            if (
+              object instanceof THREE.Material &&
+              association.materials !== undefined &&
+              definitions[association.materials]?.pbrMetallicRoughness?.roughnessFactor ===
+                undefined
+            )
+              defaultFinish.add(object);
+          });
+          prepareCadMaterials(prototype, appearancesByHash.get(asset.sha256) ?? [], defaultFinish);
           assetsByHash.set(asset.sha256, prototype);
         } else decodedBytes = budget.add(asset, complexities.get(asset.sha256)!).decodedBytes;
         loaded.set(asset.geometryKey, prototype);
@@ -338,11 +371,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (previous) scene.remove(previous.group);
       scene.add(candidate.group);
       model = candidate;
+      outlineSupported = ownedScenes.every(supportsCadOutline);
       cachedScenes.set(manifest.snapshotId, {
         manifest,
         model: candidate,
         prototypes: ownedScenes,
         bytes: decodedBytes,
+        outlineSupported,
       });
       activeSnapshot = manifest.snapshotId;
       let total = [...cachedScenes.values()].reduce((sum, entry) => sum + entry.bytes, 0);
@@ -440,6 +475,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     dispose: () => {
       cancelTransition();
       if (disposed) return;
+      outline.dispose();
       disposed = true;
       generation++;
       canvas.removeEventListener("webglcontextlost", contextLost);
