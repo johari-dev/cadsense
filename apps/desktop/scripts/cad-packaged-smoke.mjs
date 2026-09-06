@@ -12,9 +12,9 @@ import { cadSmokeThreads, seedCadSmokeFixture } from "./cad-smoke-fixture.mjs";
 const hostPlatform = NodeOS.platform();
 // oxlint-disable-next-line cadsense/no-global-process-runtime -- Standalone acceptance harness owns its process.
 const hostArchitecture = NodeOS.arch();
-// Disposable non-Mac runners have no GPU. This opt-in is confined to trusted generated fixtures;
+// Disposable x64 runners have no usable GPU. This opt-in is confined to trusted generated fixtures;
 // it does not alter the shipped app's graphics policy or establish hardware performance results.
-const softwareGraphics = process.env.GITHUB_ACTIONS === "true" && hostPlatform !== "darwin";
+const softwareGraphics = process.env.GITHUB_ACTIONS === "true" && hostArchitecture === "x64";
 
 const { values } = NodeUtil.parseArgs({
   options: {
