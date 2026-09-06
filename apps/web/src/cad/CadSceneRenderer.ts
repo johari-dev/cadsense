@@ -16,6 +16,7 @@ import {
 
 export { CadRendererError } from "./CadSceneModel";
 export interface CadSceneRendererOptions {
+  readonly cacheScenes?: boolean;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   readonly onInteractionEnd?: (pose: ResolvedCadCamera) => void;
   readonly onUnavailable?: (error: CadRendererError) => void;
@@ -65,7 +66,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     controls.autoRotate = false;
   }
   let model: CadSceneModel | null = null;
-  let prototypes: THREE.Object3D[] = [];
+  const cachedScenes = new Map<
+    string,
+    {
+      manifest: CadSnapshotManifest;
+      model: CadSceneModel;
+      prototypes: THREE.Object3D[];
+      bytes: number;
+    }
+  >();
+  let activeSnapshot: string | null = null;
   let generation = 0;
   let frameRevision = 0;
   let disposed = false;
@@ -269,11 +279,27 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     readAsset: (sha256: string) => Promise<ArrayBuffer>,
   ) => {
     assertAvailable();
+    cancelTransition();
     const token = ++generation;
+    const cached = cachedScenes.get(manifest.snapshotId);
+    if (cached) {
+      cachedScenes.delete(manifest.snapshotId);
+      cachedScenes.set(manifest.snapshotId, cached);
+      const sameScene = activeSnapshot === manifest.snapshotId;
+      if (!sameScene) {
+        if (model) scene.remove(model.group);
+        model = cached.model;
+        scene.add(model.group);
+        view = null;
+        activeSnapshot = manifest.snapshotId;
+      }
+      return sameScene;
+    }
     const loaded = new Map<string, THREE.Object3D>();
     const assetsByHash = new Map<string, THREE.Object3D>();
     const complexities = new Map<string, ReturnType<typeof measureCadGeometry>>();
     const ownedScenes: THREE.Object3D[] = [];
+    let decodedBytes = manifest.nodes.length * 4096;
     let candidate: CadSceneModel | null = null;
     const manager = new THREE.LoadingManager();
     manager.setURLModifier((url) => {
@@ -291,7 +317,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         if (!prototype) {
           const bytes = await readAsset(asset.sha256);
           const complexity = measureCadGeometry(new Uint8Array(bytes));
-          budget.add(asset, complexity);
+          decodedBytes = budget.add(asset, complexity).decodedBytes;
           complexities.set(asset.sha256, complexity);
           assertAvailable();
           if (token !== generation) throw new CadRendererError("superseded");
@@ -299,7 +325,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           ownedScenes.push(...parsed.scenes);
           prototype = parsed.scene;
           assetsByHash.set(asset.sha256, prototype);
-        } else budget.add(asset, complexities.get(asset.sha256)!);
+        } else decodedBytes = budget.add(asset, complexities.get(asset.sha256)!).decodedBytes;
         loaded.set(asset.geometryKey, prototype);
       }
       assertAvailable();
@@ -310,9 +336,23 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (previous) scene.remove(previous.group);
       scene.add(candidate.group);
       model = candidate;
-      disposeCadObjects(prototypes);
-      prototypes = ownedScenes;
+      cachedScenes.set(manifest.snapshotId, {
+        manifest,
+        model: candidate,
+        prototypes: ownedScenes,
+        bytes: decodedBytes,
+      });
+      activeSnapshot = manifest.snapshotId;
+      let total = [...cachedScenes.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+      for (const [id, entry] of cachedScenes) {
+        if (cachedScenes.size <= (options.cacheScenes ? 3 : 1) && total <= 256 * 1024 * 1024) break;
+        if (id === activeSnapshot) continue;
+        cachedScenes.delete(id);
+        total -= entry.bytes;
+        disposeCadObjects(entry.prototypes);
+      }
       view = null;
+      return false;
     } catch (error) {
       disposeCadObjects(ownedScenes);
       if (error instanceof CadRendererError) throw error;
@@ -341,6 +381,20 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     return blob;
   };
   return {
+    cachedManifest: (snapshotId: string) => cachedScenes.get(snapshotId)?.manifest ?? null,
+    suspend: () => {
+      cancelTransition();
+      generation++;
+      interactive = false;
+      if (controls) {
+        controls.enabled = false;
+        controls.disconnect();
+      }
+    },
+    resume: () => {
+      assertAvailable();
+      if (controls && !("convertToBlob" in canvas)) controls.connect(canvas);
+    },
     load,
     apply,
     transition,
@@ -390,8 +444,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       controls?.removeEventListener("change", changed);
       controls?.removeEventListener("end", ended);
       controls?.dispose();
-      disposeCadObjects(prototypes);
-      prototypes = [];
+      for (const entry of cachedScenes.values()) disposeCadObjects(entry.prototypes);
+      cachedScenes.clear();
       model = null;
       scene.clear();
       renderer.dispose();

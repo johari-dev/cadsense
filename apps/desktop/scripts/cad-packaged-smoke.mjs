@@ -130,23 +130,27 @@ const openCad = async (page) => {
     .waitFor({ state: "visible" });
   await page.getByRole("button", { name: /^Components/ }).waitFor();
 };
-const waitExplosion = (page, pressed) =>
-  page
-    .getByRole("button", { name: "Exploded view", exact: true })
-    .and(page.locator(`[aria-pressed="${pressed}"]`))
-    .waitFor();
 const waitHidden = async (page, name) => {
   await page
     .getByRole("checkbox", { name, exact: true })
     .and(page.locator('[aria-checked="false"]'))
     .waitFor();
 };
+const waitExplosion = (page, pressed) =>
+  page
+    .getByRole("button", { name: "Exploded view", exact: true })
+    .and(page.locator(`[aria-pressed="${pressed}"]`))
+    .waitFor();
 try {
   await launch();
   await close();
   const fixture = await seedCadSmokeFixture(baseDir);
   report.steps.push("initialized isolated backend and seeded offline assembly/multipart fixtures");
   let page = await launch(true);
+  let sceneReads = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/api/cad-panel/")) sceneReads++;
+  });
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
   await openCad(page);
   const originalBackground = await page.evaluate(() => ({
@@ -187,9 +191,27 @@ try {
   await waitHidden(page, "Show Component A");
   await page.screenshot({ path: NodePath.join(output, "assembly.png") });
   report.steps.push("assembly camera, explosion, nested component visibility");
+  const readsBeforeThread = sceneReads;
+  await page.evaluate(() => {
+    window.__cadWarmCanvas = new WeakRef(document.querySelector("canvas"));
+  });
   await page.getByTestId(`thread-row-${cadSmokeThreads[1]}`).click();
   await openCad(page);
   await waitExplosion(page, false);
+  NodeAssert.equal(
+    sceneReads,
+    readsBeforeThread,
+    "Threads sharing a warm snapshot must not read CAD assets again",
+  );
+  NodeAssert.equal(
+    await page.evaluate(() => document.querySelector("canvas") === window.__cadWarmCanvas.deref()),
+    true,
+    "Thread switches must reuse the visible renderer",
+  );
+  await page.evaluate(() => {
+    delete window.__cadWarmCanvas;
+  });
+  report.steps.push("thread switching reuses the same warm renderer without asset reads");
   await page.getByLabel("CAD scene", { exact: true }).selectOption(fixture.roots[1]);
   await page.getByRole("button", { name: /^Components/ }).click();
   await page.getByRole("checkbox", { name: "Show Studio body A", exact: true }).waitFor();
@@ -197,8 +219,14 @@ try {
   await waitHidden(page, "Show Studio body B");
   await page.screenshot({ path: NodePath.join(output, "multipart.png") });
   report.steps.push("multipart root, per-body visibility, independent thread state");
+  const readsBeforeReturn = sceneReads;
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
   await waitExplosion(page, true);
+  NodeAssert.equal(
+    sceneReads,
+    readsBeforeReturn,
+    "Returning to a cached scene must not read assets again",
+  );
   NodeAssert.equal(
     await page.getByLabel("CAD scene", { exact: true }).inputValue(),
     fixture.roots[0],
@@ -245,10 +273,12 @@ try {
     report.documentKeyListeners = { before, after };
     NodeAssert.equal(after, before, "Closed CAD viewers must release document key listeners");
     await cdp.send("HeapProfiler.collectGarbage");
-    report.retainedClosedCanvases = await page.evaluate(
-      () => window.__cadClosedCanvases.filter((reference) => reference.deref()).length,
+    report.warmClosedCanvases = await page.evaluate(
+      () =>
+        new Set(window.__cadClosedCanvases.map((reference) => reference.deref()).filter(Boolean))
+          .size,
     );
-    NodeAssert.equal(report.retainedClosedCanvases, 0, "Closed CAD canvases must be collectable");
+    NodeAssert.ok(report.warmClosedCanvases <= 1, "Only one reserved visible canvas may stay warm");
   } finally {
     await page.evaluate(() => {
       delete window.__cadClosedCanvases;

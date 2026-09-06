@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createCadSceneRenderer } from "./CadSceneRenderer";
 import { Camera, Matrix4, Quaternion, Vector3 } from "three";
+import * as CadBudget from "@cadsense/shared/cadSceneBudget";
 
 const calls = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() }));
 vi.mock("three", async (importOriginal) => {
@@ -155,6 +156,84 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("reuses warm scenes without reading assets and preserves the same-scene transition origin", async () => {
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
+    const read = vi.fn(async () => geometry());
+    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    try {
+      expect(await renderer.load(manifest, read)).toBe(false);
+      renderer.apply(state);
+      expect(await renderer.load(manifest, read)).toBe(true);
+      // The current view remains capturable while a different thread supplies its next view.
+      const captured = renderer.capture();
+      h.completeCapture();
+      await captured;
+      expect(await renderer.load(second, read)).toBe(false);
+      renderer.apply({ ...state, snapshotId: second.snapshotId });
+      expect(await renderer.load(manifest, read)).toBe(false);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBe(manifest);
+    } finally {
+      renderer.dispose();
+    }
+  });
+  it("evicts least-recent scenes at the aggregate memory limit", async () => {
+    const measurement = vi.spyOn(CadBudget, "measureCadGeometry").mockReturnValue({
+      decodedBytes: 100 * 1024 * 1024,
+      triangles: 0,
+      drawCalls: 0,
+      nodeCount: 0,
+    });
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
+    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    const third = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000003" };
+    try {
+      await renderer.load(manifest, async () => geometry());
+      await renderer.load(second, async () => geometry());
+      await renderer.load(manifest, async () => {
+        throw new Error("Unexpected read");
+      });
+      await renderer.load(third, async () => geometry());
+      expect(renderer.cachedManifest(second.snapshotId)).toBeNull();
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBe(manifest);
+      expect(renderer.cachedManifest(third.snapshotId)).toBe(third);
+    } finally {
+      renderer.dispose();
+      measurement.mockRestore();
+    }
+    expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
+  });
+  it("bounds small scene retention to three and cancels unfinished loads when detached", async () => {
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
+    try {
+      for (const suffix of [1, 2, 3, 4]) {
+        await renderer.load(
+          { ...manifest, snapshotId: `00000000-0000-4000-8000-00000000000${suffix}` },
+          async () => geometry(),
+        );
+      }
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
+      let finish!: (value: ArrayBuffer) => void;
+      const loading = renderer.load(
+        manifest,
+        () =>
+          new Promise<ArrayBuffer>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      renderer.suspend();
+      finish(geometry());
+      await expect(loading).rejects.toMatchObject({ reason: "superseded" });
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
+      renderer.resume();
+      expect(await renderer.load(manifest, async () => geometry())).toBe(false);
+    } finally {
+      renderer.dispose();
+    }
+  });
   it.each(
     (["front", "top", "bottom"] as const).flatMap((preset) =>
       [1, -1].map((limit) => ({ preset, limit })),

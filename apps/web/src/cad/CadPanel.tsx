@@ -12,14 +12,37 @@ import { useThreadShells } from "../state/entities";
 import { cadPanelEnvironment } from "../state/cadPanel";
 import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
-import { createCadSceneRenderer, type CadSceneRenderer } from "./CadSceneRenderer";
+import type { CadSceneRenderer } from "./CadSceneRenderer";
+import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
-import { cadDiagnostics } from "./CadDiagnostics";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
+
+function PendingCadScene({ environmentId }: { environmentId: string }) {
+  const container = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!container.current) return;
+    try {
+      const attachment = cadVisibleViewer.acquire(container.current, environmentId, {});
+      attachment.renderer.setInteractive(false);
+      return () => attachment.release();
+    } catch {
+      // The resolved scene owns graphics error reporting; a pending view has no scene yet.
+      return;
+    }
+  }, [environmentId]);
+  return (
+    <div
+      ref={container}
+      aria-label="Updating CAD view"
+      aria-busy="true"
+      className="min-h-48 flex-1 overflow-hidden pointer-events-none"
+    />
+  );
+}
 
 function CadScene({
   threadRef,
@@ -45,11 +68,15 @@ function CadScene({
   const canvas = useRef<HTMLDivElement>(null);
   const renderer = useRef<CadSceneRenderer | null>(null);
   const latest = useRef({ view, disabled, onChange });
-  const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
+  const [manifest, setManifest] = useState<CadSnapshotManifest | null>(() =>
+    cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId),
+  );
   const [error, setError] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const previousCapture = useRef(captureId);
   const previousCamera = useRef(view.camera);
+  const previousExplosion = useRef(view.explosion);
+  const applied = useRef<{ manifest: CadSnapshotManifest | null; state: string } | null>(null);
   useLayoutEffect(() => {
     latest.current = { view, disabled, onChange };
   }, [disabled, onChange, view]);
@@ -62,9 +89,13 @@ function CadScene({
   }, [disabled]);
   useLayoutEffect(() => {
     try {
+      const serialized = JSON.stringify(view);
+      if (applied.current?.manifest === manifest && applied.current.state === serialized) return;
+      applied.current = { manifest, state: serialized };
       if (manifest) {
         if (
           ((captureId && previousCapture.current !== captureId) ||
+            previousExplosion.current !== view.explosion ||
             (view.camera.kind === "preset" &&
               (previousCamera.current.kind !== "preset" ||
                 previousCamera.current.preset !== view.camera.preset))) &&
@@ -75,27 +106,19 @@ function CadScene({
       }
       previousCapture.current = captureId;
       previousCamera.current = view.camera;
+      previousExplosion.current = view.explosion;
     } catch {
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
   }, [captureId, manifest, view]);
   // OrbitControls disconnects from canvas.getRootNode(); dispose before React detaches that root.
   useLayoutEffect(() => {
-    if (!ticket || !baseUrl || !canvas.current) return;
+    if (!baseUrl || !canvas.current) return;
     setError(null);
-    setManifest(null);
     const controller = new AbortController();
-    const node = document.createElement("canvas");
-    node.setAttribute("aria-label", "CAD viewer");
-    node.className = "h-full w-full touch-none";
-    canvas.current.append(node);
-    let current: CadSceneRenderer;
-    const diagnostics = cadDiagnostics.register();
+    let attachment: ReturnType<typeof cadVisibleViewer.acquire>;
     try {
-      current = createCadSceneRenderer({
-        canvas: node,
-        onFrame: (milliseconds) => diagnostics.record({ type: "frame", milliseconds }),
-        onContextLost: () => diagnostics.record({ type: "context-loss" }),
+      attachment = cadVisibleViewer.acquire(canvas.current, threadRef.environmentId, {
         onInteractionEnd: (pose) => {
           const state = latest.current;
           if (!state.disabled)
@@ -107,11 +130,11 @@ function CadScene({
           ),
       });
     } catch {
-      diagnostics.dispose();
-      node.remove();
       setError("A graphics renderer is not available on this device.");
       return;
     }
+    const { renderer: current, canvas: node, diagnostics } = attachment;
+    setManifest(current.cachedManifest(view.snapshotId));
     renderer.current = current;
     const stopAppearance = observeCadAppearance((appearance) => {
       try {
@@ -137,6 +160,7 @@ function CadScene({
     observer.observe(node);
     resize();
     const request = async (hash?: string) => {
+      if (!ticket) throw new Error("CAD scene lease unavailable");
       const response = await fetch(
         new URL(
           `api/cad-panel/${ticket.sceneId}${hash ? `/${hash}` : ""}`,
@@ -153,16 +177,22 @@ function CadScene({
     };
     void (async () => {
       try {
-        const snapshot = decodeManifest(await (await request()).json());
-        await current.load(snapshot, async (hash) => (await request(hash)).arrayBuffer());
+        if (!ticket && !current.cachedManifest(view.snapshotId)) return;
+        const snapshot =
+          current.cachedManifest(view.snapshotId) ?? decodeManifest(await (await request()).json());
+        const sameScene = await current.load(snapshot, async (hash) =>
+          (await request(hash)).arrayBuffer(),
+        );
         if (controller.signal.aborted) return;
         diagnostics.record({
           type: "worker-count",
           workers: 1,
           snapshotIds: [snapshot.snapshotId],
         });
-        current.apply(latest.current.view);
         current.setInteractive(!latest.current.disabled);
+        if (sameScene && !matchMedia("(prefers-reduced-motion: reduce)").matches)
+          current.transition(latest.current.view);
+        else current.apply(latest.current.view);
         setError(null);
         setManifest(snapshot);
       } catch {
@@ -177,9 +207,7 @@ function CadScene({
       stopAppearance();
       observer.disconnect();
       renderer.current = null;
-      current.dispose();
-      diagnostics.dispose();
-      node.remove();
+      attachment.release();
     };
   }, [baseUrl, ticket]);
   const unavailable =
@@ -346,6 +374,10 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
             onChange={(next) => void change(next)}
           />
         </>
+      ) : !data &&
+        !AsyncResult.isFailure(state) &&
+        cadVisibleViewer.hasResident(threadRef.environmentId) ? (
+        <PendingCadScene environmentId={threadRef.environmentId} />
       ) : (
         <div
           role="status"

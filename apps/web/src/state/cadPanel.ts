@@ -9,7 +9,7 @@ export const cadPanelEnvironment = {
   watch: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "cad-panel:watch",
     tag: WS_METHODS.cadPanelWatch,
-    idleTtlMs: 0,
+    idleTtlMs: 60_000,
   }),
   scene: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "cad-panel:scene",
