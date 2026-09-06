@@ -20,7 +20,14 @@ const decode = Schema.decodeUnknownSync(
           Schema.Struct({ type: Schema.String, data: Schema.optionalKey(Schema.String) }),
         ),
       ),
-      tools: Schema.optionalKey(Schema.Array(Schema.Struct({ name: Schema.String }))),
+      tools: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            name: Schema.String,
+            inputSchema: Schema.Struct({ type: Schema.Literal("object") }),
+          }),
+        ),
+      ),
     }),
   }),
 );
