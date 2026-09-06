@@ -16,6 +16,7 @@ import { createCadSceneRenderer, type CadSceneRenderer } from "./CadSceneRendere
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
 import { cadDiagnostics } from "./CadDiagnostics";
+import { observeCadAppearance } from "./CadAppearance";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const presets = ["isometric", "front", "back", "left", "right", "top", "bottom"] as const;
@@ -108,6 +109,13 @@ function CadScene({
       return;
     }
     renderer.current = current;
+    const stopAppearance = observeCadAppearance((appearance) => {
+      try {
+        if (!controller.signal.aborted) current.setAppearance(appearance);
+      } catch {
+        setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
+      }
+    });
     diagnostics.record({ type: "worker-count", workers: 1 });
     const resize = () => {
       try {
@@ -162,6 +170,7 @@ function CadScene({
     })();
     return () => {
       controller.abort();
+      stopAppearance();
       observer.disconnect();
       renderer.current = null;
       current.dispose();
@@ -173,7 +182,7 @@ function CadScene({
     error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null);
   return (
     <>
-      <div className="relative min-h-48 flex-1 overflow-hidden bg-[#f1f3f5]">
+      <div className="relative min-h-48 flex-1 overflow-hidden bg-background">
         <div
           ref={canvas}
           className="h-full w-full"

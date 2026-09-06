@@ -1,6 +1,7 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import type { ResolvedCadCamera } from "./CadSceneModel";
 import { CadRendererError } from "./CadRendererError";
+import type { CadAppearance } from "./CadAppearance";
 
 export interface CadRenderJob {
   readonly jobId: string;
@@ -10,6 +11,7 @@ export interface CadRenderJob {
   readonly state: CadViewState;
   readonly width: number;
   readonly height: number;
+  readonly appearance?: CadAppearance;
 }
 export interface CadRenderResult {
   readonly jobId: string;

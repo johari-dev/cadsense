@@ -9,6 +9,7 @@ import { createCadBrowserPool } from "./CadBrowserWorkers";
 import { CadRendererError } from "./CadRendererError";
 import { cadDiagnostics } from "./CadDiagnostics";
 import { isCadMemoryConstrained } from "./CadMemoryPolicy";
+import { readCadAppearance } from "./CadAppearance";
 const decodePayload = Schema.decodeUnknownSync(CadRenderPayload);
 
 /** The host outlives routed threads. Only two jobs may load manifests or render at once. */
@@ -68,7 +69,7 @@ export const createCadRenderHost = (baseUrl: string) => {
       item.snapshotId = payload.state.snapshotId;
       item.runId = payload.runId;
       const result = await pool.capture(
-        { jobId: ticket.jobId, ...payload, ...CAD_CAPTURE_SIZE },
+        { jobId: ticket.jobId, ...payload, ...CAD_CAPTURE_SIZE, appearance: readCadAppearance() },
         item.controller.signal,
       );
       await request(ticket, {

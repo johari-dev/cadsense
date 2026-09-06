@@ -46,6 +46,7 @@ const capture = async (message: Extract<CadWorkerInput, { type: "capture" }>) =>
       snapshotId = message.state.snapshotId;
     }
     renderer.resize(message.width, message.height, 1);
+    if (message.appearance) renderer.setAppearance(message.appearance);
     const pose = renderer.apply(message.state);
     const png = await renderer.capture();
     post({
