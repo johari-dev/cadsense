@@ -32,6 +32,8 @@ import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
+  open?: boolean;
+  onExited?: () => void;
   maximized?: boolean;
   /** Forwarded to PreviewPanelShell so this surface persists its own width. */
   widthStorageKey?: string;
@@ -672,6 +674,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   return (
     <PreviewPanelShell
       mode={props.mode}
+      {...(props.open !== undefined ? { open: props.open } : {})}
+      {...(props.onExited !== undefined ? { onExited: props.onExited } : {})}
       {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
       {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
       {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}

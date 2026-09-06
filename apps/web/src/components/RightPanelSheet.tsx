@@ -7,10 +7,14 @@ export function RightPanelSheet(props: {
   children: ReactNode;
   open: boolean;
   onClose: () => void;
+  onExited?: () => void;
 }) {
   return (
     <Sheet
       open={props.open}
+      onOpenChangeComplete={(open) => {
+        if (!open) props.onExited?.();
+      }}
       onOpenChange={(open) => {
         if (!open) {
           props.onClose();
