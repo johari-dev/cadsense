@@ -1238,7 +1238,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const handleRemoveProject = useCallback(
     async (member: SidebarProjectGroupMember) => {
       if (member.onshapeSource) {
+        const previousLocation = router.state.location.href;
+        const removesActiveThread = sidebarThreads.some(
+          (thread) =>
+            thread.environmentId === member.environmentId &&
+            thread.projectId === member.id &&
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
+              activeRouteThreadKey,
+        );
         const result = await removeCadProject(member);
+        if (
+          result?._tag === "Success" &&
+          removesActiveThread &&
+          router.state.location.href === previousLocation
+        ) {
+          void router.navigate({ to: "/settings/cad-storage" });
+        }
         if (result?._tag === "Failure" && !isAtomCommandInterrupted(result))
           toastManager.add(
             stackedThreadToast({
@@ -1380,7 +1395,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         );
       }
     },
-    [memberThreadCountByPhysicalKey, removeProject, removeCadProject],
+    [
+      memberThreadCountByPhysicalKey,
+      removeProject,
+      removeCadProject,
+      router,
+      sidebarThreads,
+      activeRouteThreadKey,
+    ],
   );
 
   const handleProjectButtonContextMenu = useCallback(
