@@ -101,7 +101,13 @@ export const make = Effect.gen(function* () {
         )
         .pipe(Effect.orElseSucceed(() => null));
     } else if (!root) view = null;
-    return { threadId, userRevision: saved?.view.revision ?? null, view, captureId: null };
+    return {
+      threadId,
+      userRevision: saved?.view.revision ?? null,
+      view,
+      captureId: null,
+      ...(root && !view ? { unavailableRootId: root.rootId } : {}),
+    };
   });
   const watch = (threadId: ThreadId) =>
     Stream.unwrap(
@@ -126,6 +132,7 @@ export const make = Effect.gen(function* () {
             (left, right) =>
               left.userRevision === right.userRevision &&
               left.captureId === right.captureId &&
+              left.unavailableRootId === right.unavailableRootId &&
               left.view?.snapshotId === right.view?.snapshotId,
           ),
         );

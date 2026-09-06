@@ -265,7 +265,7 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
         <select
           aria-label="CAD scene"
           className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-xs"
-          value={view?.rootId ?? ""}
+          value={view?.rootId ?? data?.unavailableRootId ?? ""}
           disabled={locked || roots.length === 0}
           onChange={(event) => {
             const root = roots.find((root) => root.rootId === event.target.value);
@@ -384,9 +384,11 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
             ? "CAD is unavailable for this thread."
             : !data
               ? "Loading CAD view…"
-              : roots.length
-                ? "Select a CAD scene above."
-                : "No CAD has been downloaded. Select and sync CAD in project settings."}
+              : data.unavailableRootId
+                ? "This downloaded CAD is unavailable. You can select another cached scene."
+                : roots.length
+                  ? "Select a CAD scene above."
+                  : "No CAD has been downloaded. Select and sync CAD in project settings."}
         </div>
       )}
     </section>
