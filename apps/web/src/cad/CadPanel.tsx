@@ -18,6 +18,7 @@ import { isCadProjectRunActive } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
+import { CadScenePicker } from "./CadScenePicker";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 
@@ -305,13 +306,24 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
   return (
     <section aria-label="CAD panel" className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-        <select
-          aria-label="CAD scene"
-          className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-xs"
-          value={view?.rootId ?? data?.unavailableRootId ?? ""}
-          disabled={locked || roots.length === 0}
-          onChange={(event) => {
-            const root = roots.find((root) => root.rootId === event.target.value);
+        <CadScenePicker
+          scenes={roots.map((root) => {
+            const name =
+              project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
+                ?.name ?? (root.kind === "assembly" ? "Assembly" : "Part Studio");
+            return {
+              id: root.rootId,
+              label: roots.some(
+                (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
+              )
+                ? `${name} · ${root.configuration}`
+                : name,
+            };
+          })}
+          selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
+          disabled={locked}
+          onSelect={(id) => {
+            const root = roots.find((root) => root.rootId === id);
             if (root?.current)
               void change({
                 rootId: root.rootId,
@@ -323,17 +335,7 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
                 explosion: 0,
               });
           }}
-        >
-          <option value="" disabled>
-            Select CAD
-          </option>
-          {roots.map((root) => (
-            <option key={root.rootId} value={root.rootId}>
-              {project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
-                ?.name ?? (root.kind === "assembly" ? "Assembly" : "Part Studio")}
-            </option>
-          ))}
-        </select>
+        />
       </div>
       {runActive && (
         <div
