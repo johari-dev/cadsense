@@ -416,6 +416,18 @@ describe("CAD renderer lifecycle without WebGL", () => {
       expect(halfway.angleTo(initialRotation.slerp(destinationRotation, 0.875))).toBeLessThan(1e-6);
       frame(performance.now() + 400);
       expect(frames.size).toBe(0);
+      renderer.apply(state);
+      renderer.transition({ ...state, explosion: 1 });
+      frame(259);
+      expect(frames.size).toBe(1);
+      frame(260);
+      expect(frames.size).toBe(0);
+      renderer.apply(state);
+      renderer.transition({ ...state, camera: { kind: "preset", preset: "top", fit: [] } });
+      frame(279);
+      expect(frames.size).toBe(1);
+      frame(280);
+      expect(frames.size).toBe(0);
       renderer.transition(state);
       renderer.apply(state);
       expect(frames.size).toBe(0);

@@ -233,13 +233,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         new THREE.Vector3(...to.up),
       ),
     );
-    // Larger moves get room to settle, without idle animation or overshoot.
-    const travel = Math.max(
-      fromRotation.angleTo(toRotation) / Math.PI,
-      Math.abs(state.explosion - explosion),
-      Math.min(1, Math.abs(toDistance - fromDistance) / Math.max(fromDistance, 1e-7)),
-    );
-    const settleDuration = duration ?? 360 + 200 * travel;
+    // Match the PoC's camera and explosion timing, retaining exact orbital interpolation.
+    const settleDuration = duration ?? (state.explosion !== explosion ? 260 : 280);
     const started = performance.now();
     if (controls) controls.enabled = false;
     const frame = (now: number) => {

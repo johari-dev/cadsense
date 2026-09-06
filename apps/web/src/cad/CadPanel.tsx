@@ -236,7 +236,7 @@ function CadScene({
         <>
           <Button
             variant="ghost"
-            className="w-full justify-start rounded-none border-t px-3 text-xs"
+            className="w-full justify-start rounded-none border-t px-3 text-xs disabled:pointer-events-auto disabled:opacity-100"
             disabled={disabled}
             onClick={() => setTreeOpen(!treeOpen)}
           >
