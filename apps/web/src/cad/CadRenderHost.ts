@@ -13,7 +13,7 @@ const decodePayload = Schema.decodeUnknownSync(CadRenderPayload);
 export const createCadRenderHost = (baseUrl: string) => {
   const jobs = new Map<
     string,
-    { ticket: CadRenderTicket; controller: AbortController; snapshotId?: string }
+    { ticket: CadRenderTicket; controller: AbortController; snapshotId?: string; runId?: string }
   >();
   const queued: CadRenderTicket[] = [];
   let running = 0;
@@ -55,6 +55,7 @@ export const createCadRenderHost = (baseUrl: string) => {
       );
       if (item.controller.signal.aborted) return;
       item.snapshotId = payload.state.snapshotId;
+      item.runId = payload.runId;
       const result = await pool.capture(
         { jobId: ticket.jobId, ...payload, ...CAD_CAPTURE_SIZE },
         item.controller.signal,
@@ -96,6 +97,15 @@ export const createCadRenderHost = (baseUrl: string) => {
   return {
     accept: (event: CadRenderEvent) => {
       if (disposed || event.type === "ready") return;
+      if (event.type === "run-ended") {
+        for (const [id, item] of jobs) {
+          if (item.runId !== event.runId) continue;
+          item.controller.abort();
+          jobs.delete(id);
+        }
+        pool.endRun(event.runId);
+        return;
+      }
       if (event.type === "cancel") {
         jobs.get(event.jobId)?.controller.abort();
         jobs.delete(event.jobId);

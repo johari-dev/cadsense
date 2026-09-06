@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CadSnapshotManifest, type CadRenderEvent } from "@cadsense/contracts";
+import { CadSnapshotManifest, ThreadId, type CadRenderEvent } from "@cadsense/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -31,6 +31,7 @@ const manifest = Schema.decodeUnknownSync(CadSnapshotManifest)({
   dependencies: [],
 });
 const request = {
+  threadId: ThreadId.make("thread"),
   sessionId: "primary",
   runId: "run",
   manifest,
@@ -111,6 +112,33 @@ it.effect(
         (yield* broker.complete(ticket, receipt, pngEnvelope()).pipe(Effect.flip)).reason,
         "interrupted",
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "ends only the owning run, cancels pending tickets, and clears completed run bookkeeping",
+  () =>
+    Effect.gen(function* () {
+      const broker = yield* make;
+      const { events } = yield* connect(broker);
+      const first = yield* broker.capture(request).pipe(Effect.flip, Effect.forkChild);
+      const firstTicket = yield* takeTicket(events);
+      const second = yield* broker
+        .capture({ ...request, runId: "other", threadId: ThreadId.make("other-thread") })
+        .pipe(Effect.forkChild);
+      const secondTicket = yield* takeTicket(events);
+      assert.deepEqual(yield* broker.runsForThread(request.threadId), ["run"]);
+      yield* broker.endRun("run");
+      assert.equal((yield* Fiber.join(first)).reason, "interrupted");
+      assert.deepEqual(yield* Queue.take(events), { type: "cancel", jobId: firstTicket.jobId });
+      assert.deepEqual(yield* Queue.take(events), { type: "run-ended", runId: "run" });
+      assert.deepEqual(yield* broker.runsForThread(request.threadId), []);
+      yield* broker.complete(secondTicket, receipt, pngEnvelope());
+      yield* Fiber.join(second);
+      assert.deepEqual(yield* broker.runsForThread(ThreadId.make("other-thread")), ["other"]);
+      yield* broker.endRun("other");
+      assert.deepEqual(yield* Queue.take(events), { type: "run-ended", runId: "other" });
+      assert.deepEqual(yield* broker.runsForThread(ThreadId.make("other-thread")), []);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 

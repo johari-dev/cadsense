@@ -1,4 +1,4 @@
-import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
+import type { CadSnapshotManifest, CadViewState, ThreadId } from "@cadsense/contracts";
 import {
   CadRenderError,
   CAD_CAPTURE_SIZE,
@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 export interface CadRenderRequest {
+  readonly threadId: ThreadId;
   readonly sessionId: string;
   readonly runId: string;
   readonly manifest: CadSnapshotManifest;
@@ -46,6 +47,8 @@ export class CadRenderBroker extends Context.Service<
       png: Uint8Array,
     ) => Effect.Effect<void, CadRenderError>;
     readonly fail: (ticket: CadRenderTicket) => Effect.Effect<void, CadRenderError>;
+    readonly runsForThread: (threadId: ThreadId) => Effect.Effect<readonly string[]>;
+    readonly endRun: (runId: string) => Effect.Effect<void>;
   }
 >()("@cadsense/server/cad/CadRenderBroker") {}
 
@@ -63,6 +66,7 @@ const { width: WIDTH, height: HEIGHT } = CAD_CAPTURE_SIZE;
 export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const pending = new Map<string, Pending>();
+  const runs = new Map<string, ThreadId>();
   let host: Queue.Queue<CadRenderEvent> | null = null;
   const uuid = crypto.randomUUIDv4.pipe(Effect.mapError(() => error("unavailable")));
   const lookup = Effect.fn("CadRenderBroker.lookup")(function* (ticket: CadRenderTicket) {
@@ -75,6 +79,7 @@ export const make = Effect.gen(function* () {
     queue: Queue.Queue<CadRenderEvent>,
   ) {
     if (host === queue) host = null;
+    runs.clear();
     for (const [id, item] of pending) {
       if (item.host !== queue) continue;
       pending.delete(id);
@@ -115,6 +120,7 @@ export const make = Effect.gen(function* () {
         const result = yield* Deferred.make<CadRenderedImage, CadRenderError>();
         const item: Pending = { ticket, host: queue, request, result };
         pending.set(ticket.jobId, item);
+        runs.set(request.runId, request.threadId);
         if (!(yield* Queue.offer(queue, { type: "capture", ticket }))) {
           pending.delete(ticket.jobId);
           return yield* error("busy");
@@ -203,6 +209,28 @@ export const make = Effect.gen(function* () {
     pending.delete(ticket.jobId);
     yield* Deferred.fail(item.result, error("unavailable"));
   });
-  return CadRenderBroker.of({ connect, capture, readJob, readAsset, complete, fail });
+  const endRun = Effect.fn("CadRenderBroker.endRun")(function* (runId: string) {
+    if (!runs.delete(runId)) return;
+    for (const [id, item] of pending) {
+      if (item.request.runId !== runId) continue;
+      pending.delete(id);
+      yield* Deferred.fail(item.result, error("interrupted"));
+      if (!(yield* Queue.offer(item.host, { type: "cancel", jobId: id })))
+        yield* disconnect(item.host);
+    }
+    if (host && !(yield* Queue.offer(host, { type: "run-ended", runId }))) yield* disconnect(host);
+  });
+  const runsForThread = (threadId: ThreadId) =>
+    Effect.sync(() => [...runs].filter(([, id]) => id === threadId).map(([runId]) => runId));
+  return CadRenderBroker.of({
+    connect,
+    capture,
+    readJob,
+    readAsset,
+    complete,
+    fail,
+    runsForThread,
+    endRun,
+  });
 });
 export const layer = Layer.effect(CadRenderBroker, make);

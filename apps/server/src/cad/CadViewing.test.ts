@@ -53,6 +53,10 @@ import { CadProjectQuiescence } from "./CadUserOperations.ts";
 import { CadUserOperationError } from "@cadsense/contracts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as Stream from "effect/Stream";
+import * as Queue from "effect/Queue";
+import * as Option from "effect/Option";
+import { make as makeRenderBroker } from "./CadRenderBroker.ts";
+import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
@@ -406,6 +410,8 @@ const harness = Effect.fn(function* (
     Effect.provideService(
       CadRenderBroker,
       CadRenderBroker.of({
+        runsForThread: () => Effect.succeed([]),
+        endRun: () => Effect.void,
         connect: () => Stream.empty,
         readJob: unused,
         readAsset: unused,
@@ -500,6 +506,49 @@ const storageHarness = Effect.fn(function* () {
   );
   return { ...h, storage, failures, removedWorkspaces };
 });
+
+it.effect("keeps native descendant rendering alive until the thread becomes quiescent", () =>
+  Effect.gen(function* () {
+    yield* harness();
+    const broker = yield* makeRenderBroker;
+    const events = yield* Queue.unbounded<import("@cadsense/contracts").CadRenderEvent>();
+    yield* broker.connect().pipe(
+      Stream.runForEach((event) => Queue.offer(events, event)),
+      Effect.forkChild,
+    );
+    yield* Queue.take(events);
+    const capture = yield* broker
+      .capture({
+        threadId,
+        sessionId: "child",
+        runId: "parent-turn",
+        manifest: snapshot,
+        state: initialCadView(snapshot),
+        readAsset: unused,
+      })
+      .pipe(Effect.flip, Effect.forkChild);
+    assert.equal((yield* Queue.take(events)).type, "capture");
+    const query = yield* ProjectionSnapshotQuery;
+    yield* releaseCompletedCadRuns(threadId).pipe(
+      Effect.provideService(CadRenderBroker, broker),
+      Effect.provideService(ProjectionSnapshotQuery, {
+        ...query,
+        getThreadShellById: (id) =>
+          query
+            .getThreadShellById(id)
+            .pipe(
+              Effect.map(
+                Option.map((thread) => ({ ...thread, backgroundLiveness: "working" as const })),
+              ),
+            ),
+      }),
+    );
+    assert.deepEqual(yield* broker.runsForThread(threadId), ["parent-turn"]);
+    yield* releaseCompletedCadRuns(threadId).pipe(Effect.provideService(CadRenderBroker, broker));
+    assert.equal((yield* Fiber.join(capture)).reason, "interrupted");
+    assert.deepEqual(yield* broker.runsForThread(threadId), []);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 
 it.effect("marks only the selected missing root unavailable in the panel", () =>
   Effect.gen(function* () {

@@ -142,6 +142,24 @@ const harness = (mode: CadRenderWorker["mode"] = "offscreen") => {
 };
 
 describe("CAD background renderer pool", () => {
+  it("releases a finished run without cancelling another thread's renderer", async () => {
+    const h = harness();
+    const a = h.pool.capture(job("a", "A", "run-A"));
+    const rejected = expect(a).rejects.toMatchObject({ reason: "superseded" });
+    await h.started("a");
+    const b = h.pool.capture(job("b", "B", "run-B"));
+    await h.started("b");
+    h.pool.endRun("run-A");
+    await rejected;
+    expect(h.workers[0]!.disposed).toBe(true);
+    expect(h.workers[1]!.disposed).toBe(false);
+    await h.finish("b");
+    await b;
+    h.pool.endRun("run-B");
+    expect(h.workers.every((worker) => worker.disposed)).toBe(true);
+    await h.finish("a");
+    h.pool.dispose();
+  });
   it("is lazy, limits concurrent distinct sessions to two, and retains per-session FIFO", async () => {
     const h = harness();
     expect(h.workers).toHaveLength(0);
