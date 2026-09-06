@@ -86,7 +86,7 @@ jobs:
 
       - name: Install Linux image tools
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick xvfb
 
       - name: Build unsigned verification artifact
         shell: bash
@@ -107,4 +107,30 @@ jobs:
             release/*.zip
             release/*.AppImage
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Exercise packaged CAD offline
+        shell: bash
+        run: |
+          shopt -s nullglob
+          artifacts=(release/*.zip release/*.AppImage)
+          if [[ ${#artifacts[@]} != 1 ]]; then
+            echo "Expected exactly one desktop package"
+            exit 1
+          fi
+          command=(node apps/desktop/scripts/cad-packaged-smoke.mjs
+            --artifact "${artifacts[0]}" --output .cadsense/desktop-smoke-evidence)
+          if [[ "${{ matrix.platform }}" == linux ]]; then
+            xvfb-run -a "${command[@]}"
+          else
+            "${command[@]}"
+          fi
+
+      - name: Upload CAD smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-cad-smoke-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .cadsense/desktop-smoke-evidence/
+          if-no-files-found: warn
           retention-days: 7
