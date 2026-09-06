@@ -1,6 +1,6 @@
 import type { CadSnapshotNode } from "@cadsense/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { CAD_SCENE_LIMITS, createCadSceneBudget, measureCadGeometry } from "./cadSceneBudget";
+import { CAD_SCENE_LIMITS, createCadSceneBudget, measureCadGeometry } from "./cadSceneBudget.js";
 
 const glb = (document: unknown) => {
   const json = new TextEncoder().encode(JSON.stringify(document));

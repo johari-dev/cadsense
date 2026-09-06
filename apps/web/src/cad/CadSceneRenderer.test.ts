@@ -51,6 +51,21 @@ vi.mock("three/addons/loaders/GLTFLoader.js", async () => {
 });
 
 const id = "1".repeat(64);
+// Valid empty GLB: lifecycle tests fake the graphics boundary, not asset admission.
+const geometry = () => {
+  const json = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" }, nodes: [] }));
+  const length = Math.ceil(json.length / 4) * 4;
+  const bytes = new Uint8Array(20 + length);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, 0x46546c67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, bytes.length, true);
+  view.setUint32(12, length, true);
+  view.setUint32(16, 0x4e4f534a, true);
+  bytes.fill(32, 20);
+  bytes.set(json, 20);
+  return bytes.buffer;
+};
 const geometryKey = "2".repeat(64);
 const partSource = {
   host: "https://cad.onshape.com",
@@ -114,7 +129,7 @@ const manifest = Schema.decodeUnknownSync(CadSnapshotManifest)({
     {
       geometryKey,
       sha256: geometryKey,
-      byteLength: 4,
+      byteLength: geometry().byteLength,
       relativePath: `${geometryKey}.glb`,
       format: "glb",
     },
@@ -161,7 +176,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
       for (const callback of queued) callback(time);
     };
     try {
-      await renderer.load(manifest, async () => new ArrayBuffer(4));
+      await renderer.load(manifest, async () => geometry());
       renderer.apply(state);
       renderer.transition({ ...state, explosion: 0.5 });
       expect(frames.size).toBe(1);
@@ -186,7 +201,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas });
     const before = calls.render.mock.calls.length;
-    await renderer.load(manifest, async () => new ArrayBuffer(4));
+    await renderer.load(manifest, async () => geometry());
     expect(calls.render.mock.calls.length).toBe(before);
     renderer.apply(state);
     const failed = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
@@ -201,7 +216,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
   it("rejects stale captures even when a replacement view has the same semantic revision", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas });
-    await renderer.load(manifest, async () => new ArrayBuffer(4));
+    await renderer.load(manifest, async () => geometry());
     renderer.apply(state);
     const capture = renderer.capture();
     renderer.apply({ ...state, camera: { kind: "preset", preset: "front", fit: [] } });
@@ -236,7 +251,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
     const before = calls.dispose.mock.calls.length;
     renderer.dispose();
     renderer.dispose();
-    complete(new ArrayBuffer(4));
+    complete(geometry());
     await expect(loading).rejects.toMatchObject({ reason: "renderer-unavailable" });
     expect(calls.dispose.mock.calls.length).toBe(before + 1);
   });
