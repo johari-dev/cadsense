@@ -12,6 +12,9 @@ import { cadSmokeThreads, seedCadSmokeFixture } from "./cad-smoke-fixture.mjs";
 const hostPlatform = NodeOS.platform();
 // oxlint-disable-next-line cadsense/no-global-process-runtime -- Standalone acceptance harness owns its process.
 const hostArchitecture = NodeOS.arch();
+// Disposable non-Mac runners have no GPU. This opt-in is confined to trusted generated fixtures;
+// it does not alter the shipped app's graphics policy or establish hardware performance results.
+const softwareGraphics = process.env.GITHUB_ACTIONS === "true" && hostPlatform !== "darwin";
 
 const { values } = NodeUtil.parseArgs({
   options: {
@@ -79,12 +82,21 @@ const errors = [];
 const report = {
   platform: hostPlatform,
   architecture: hostArchitecture,
+  graphics: softwareGraphics ? "CI SwiftShader" : "default platform graphics",
   executablePath,
   baseDir,
   steps: [],
 };
 const launch = async () => {
-  application = await _electron.launch({ executablePath, env, cwd: directory, timeout: 45_000 });
+  application = await _electron.launch({
+    executablePath,
+    env,
+    cwd: directory,
+    timeout: 45_000,
+    args: softwareGraphics
+      ? ["--use-gl=angle", "--use-angle=swiftshader-webgl", "--enable-unsafe-swiftshader"]
+      : [],
+  });
   console.log(`CAD smoke Electron PID: ${application.process().pid}`);
   const page = await application.firstWindow({ timeout: 45_000 });
   page.setDefaultTimeout(20_000);
