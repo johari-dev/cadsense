@@ -198,6 +198,9 @@ export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* 
     try: () =>
       validateBytes(output, {
         maxIssues: 32,
+        // Onshape omits this optional GPU binding hint on many valid face primitives.
+        // Do not let repeated hints exhaust the bounded report before validation finishes.
+        ignoredIssues: ["BUFFER_VIEW_TARGET_MISSING"],
         externalResourceFunction: () =>
           Promise.reject(new Error("External CAD resource unavailable")),
       }),
