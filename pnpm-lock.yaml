@@ -52,6 +52,7 @@ patchedDependencies:
   '@effect/vitest@4.0.0-beta.103': a16b1e870d8c29e4a98b17cc4c638a4ff471753d8ca3487f78a22b759caf951b
   '@ff-labs/fff-node@0.9.4': ab9ff544009e1891cfe3930105862d3699007f38922a79f3c98d90018deca368
   effect@4.0.0-beta.103: af36b7948b6f9c56623074662b51dade5699880c1a7c71245de73e13c3185fb6
+  three@0.185.1: 9112d47083b18c2b163c3cb82f2ebb2db23d88dadfde35f63a7eb9b080d42e8b
 
 importers:
 
@@ -296,7 +297,7 @@ importers:
         version: 3.6.0
       three:
         specifier: 0.185.1
-        version: 0.185.1
+        version: 0.185.1(patch_hash=9112d47083b18c2b163c3cb82f2ebb2db23d88dadfde35f63a7eb9b080d42e8b)
       zustand:
         specifier: ^5.0.11
         version: 5.0.14(@types/react@19.2.16)(react@19.2.6)(use-sync-external-store@1.6.0(react@19.2.6))
@@ -11543,7 +11544,7 @@ snapshots:
       source-map-support: 0.5.21
     optional: true
 
-  three@0.185.1: {}
+  three@0.185.1(patch_hash=9112d47083b18c2b163c3cb82f2ebb2db23d88dadfde35f63a7eb9b080d42e8b): {}
 
   timestring@6.0.0: {}
 
