@@ -248,6 +248,7 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
   if (itemType === "mcp_tool_call" && item?.type === "mcpToolCall") {
     return `${item.server} · ${item.tool}`;
   }
+  if (itemType === "dynamic_tool_call" && item?.type === "dynamicToolCall") return item.tool;
   switch (itemType) {
     case "assistant_message":
       return "Assistant message";

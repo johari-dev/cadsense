@@ -13,7 +13,7 @@ const descriptions = {
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
   cad_update_view:
-    "Atomically update your private CAD view at expectedRevision. Changes remain private until captured.",
+    'Atomically update your private CAD view at expectedRevision. operations is an array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}. For example, hide a component with {expectedRevision:0,operations:[{type:"hide",occurrenceIds:["id from cad_hierarchy"]}]}. Use the returned revision for the next update or capture. Changes remain private until captured.',
   cad_capture:
     "Capture exactly expectedRevision as a PNG image and managed artifact. The captured view is eligible for display to the user.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
