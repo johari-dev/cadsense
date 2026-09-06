@@ -113,10 +113,21 @@ const openCad = async (page) => {
   await page.getByRole("button", { name: /^Components/ }).waitFor();
 };
 const waitValue = async (locator, value) => {
-  await locator.page().waitForFunction(({ element, expected }) => element.value === expected, {
-    element: await locator.elementHandle(),
-    expected: value,
-  });
+  const label = await locator.getAttribute("aria-label");
+  NodeAssert.ok(label, "Smoke inputs must have accessible labels");
+  await locator
+    .page()
+    .waitForFunction(
+      ({ label, expected }) =>
+        document.querySelector(`[aria-label=${JSON.stringify(label)}]`)?.value === expected,
+      { label, expected: value },
+    );
+};
+const waitHidden = async (page, name) => {
+  await page
+    .getByRole("checkbox", { name, exact: true })
+    .and(page.locator('[aria-checked="false"]'))
+    .waitFor();
 };
 try {
   await launch();
@@ -134,12 +145,7 @@ try {
   await page.getByRole("button", { name: "Collapse Nested assembly", exact: true }).click();
   await page.getByRole("button", { name: "Expand Nested assembly", exact: true }).click();
   await page.getByRole("checkbox", { name: "Show Component A", exact: true }).click();
-  NodeAssert.equal(
-    await page
-      .getByRole("checkbox", { name: "Show Component A", exact: true })
-      .getAttribute("aria-checked"),
-    "false",
-  );
+  await waitHidden(page, "Show Component A");
   await page.screenshot({ path: NodePath.join(output, "assembly.png") });
   report.steps.push("assembly camera, explosion, nested component visibility");
   await page.getByTestId(`thread-row-${cadSmokeThreads[1]}`).click();
@@ -148,6 +154,7 @@ try {
   await page.getByRole("button", { name: /^Components/ }).click();
   await page.getByRole("checkbox", { name: "Show Studio body A", exact: true }).waitFor();
   await page.getByRole("checkbox", { name: "Show Studio body B", exact: true }).click();
+  await waitHidden(page, "Show Studio body B");
   await page.screenshot({ path: NodePath.join(output, "multipart.png") });
   report.steps.push("multipart root, per-body visibility, independent thread state");
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
