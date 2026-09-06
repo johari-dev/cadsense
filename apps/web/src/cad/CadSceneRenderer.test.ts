@@ -145,6 +145,43 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("coalesces camera transitions and stops scheduling when settled, snapped, or disposed", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++id, callback);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas });
+    const frame = (time: number) => {
+      const queued = [...frames.values()];
+      frames.clear();
+      for (const callback of queued) callback(time);
+    };
+    try {
+      await renderer.load(manifest, async () => new ArrayBuffer(4));
+      renderer.apply(state);
+      renderer.transition({ ...state, explosion: 0.5 });
+      expect(frames.size).toBe(1);
+      renderer.transition({ ...state, camera: { kind: "preset", preset: "back", fit: [] } });
+      expect(frames.size).toBe(1);
+      frame(performance.now() + 120);
+      expect(frames.size).toBe(1);
+      frame(performance.now() + 300);
+      expect(frames.size).toBe(0);
+      renderer.transition(state);
+      renderer.apply(state);
+      expect(frames.size).toBe(0);
+      renderer.transition(state);
+      renderer.dispose();
+      expect(frames.size).toBe(0);
+    } finally {
+      renderer.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
   it("keeps the prior snapshot usable if candidate loading fails and never renders partial loads", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas });

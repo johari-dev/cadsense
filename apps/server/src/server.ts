@@ -80,6 +80,8 @@ import * as CadUserOperations from "./cad/CadUserOperations.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
 import * as CadCaptureArtifacts from "./cad/CadCaptureArtifacts.ts";
 import * as CadViewing from "./cad/CadViewing.ts";
+import * as CadPanel from "./cad/CadPanel.ts";
+import { routeLayer as cadPanelRouteLayer } from "./cad/panelHttp.ts";
 import * as CadPresentation from "./cad/CadPresentation.ts";
 import { routeLayer as cadRenderRouteLayer } from "./cad/http.ts";
 import * as CadProjectQuiescence from "./cad/CadProjectQuiescence.ts";
@@ -254,7 +256,7 @@ const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
   Layer.provideMerge(CadSnapshotStore.layer),
   Layer.provideMerge(OnshapeCadRoots.layer),
 );
-const CadViewingLayerLive = CadViewing.layer.pipe(
+const CadViewingLayerLive = Layer.merge(CadViewing.layer, CadPanel.layer).pipe(
   Layer.provideMerge(ClaudeCadCapabilities.layer),
   Layer.provideMerge(CadCaptureArtifacts.layer),
   Layer.provideMerge(CadRenderBroker.layer),
@@ -348,6 +350,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     assetRouteLayer,
     attachmentUploadRouteLayer,
     cadRenderRouteLayer,
+    cadPanelRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),

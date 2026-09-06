@@ -46,6 +46,7 @@ import { CadRenderBroker, type CadRenderRequest } from "./CadRenderBroker.ts";
 import { CadCaptureArtifacts, make as makeArtifacts } from "./CadCaptureArtifacts.ts";
 import { readLatestCadCapture, readCadUserView } from "./CadSessionPersistence.ts";
 import { make as makePresentation } from "./CadPresentation.ts";
+import { make as makePanel } from "./CadPanel.ts";
 import * as Stream from "effect/Stream";
 
 const now = "2026-09-05T00:00:00Z";
@@ -445,6 +446,7 @@ const harness = Effect.fn(function* (
   const presentation = yield* makePresentation.pipe(Effect.provideService(CadSnapshotStore, store));
   return {
     service,
+    panel: yield* makePanel.pipe(Effect.provideService(CadSnapshotStore, store)),
     recreate: make.pipe(Effect.provideService(CadSnapshotStore, store)),
     pins: () => pins,
     dispatch,
@@ -455,6 +457,92 @@ const harness = Effect.fn(function* (
     snapshots,
   };
 });
+
+it.effect(
+  "shows only captured private edits in the owning thread and preserves the final view",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const read = (id: ThreadId) =>
+        h.panel.watch(id).pipe(
+          Stream.runHead,
+          Effect.map((result) => {
+            assert.equal(result._tag, "Some");
+            if (result._tag !== "Some") throw new Error("Missing panel state");
+            return result.value;
+          }),
+        );
+      yield* h.service.saveUserView(threadId, null, {
+        ...initialCadView(snapshot),
+        explosion: 0.2,
+      });
+      yield* h.service.saveUserView(otherThreadId, null, {
+        ...initialCadView(snapshot),
+        explosion: 0.8,
+      });
+      const contextId = yield* h.service.resolveContext(threadId);
+      const turnId = TurnId.make("panel-captured-view");
+      yield* h.service.withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            const initial = yield* tools.context();
+            yield* tools.updateView({
+              expectedRevision: initial.revision,
+              operations: [{ type: "explode", amount: 0.4 }],
+            });
+            assert.equal((yield* read(threadId)).view?.explosion, 0.2);
+            yield* tools.capture({ expectedRevision: initial.revision + 1 });
+            const presented = yield* read(threadId);
+            assert.equal(presented.view?.explosion, 0.4);
+            assert.isNotNull(presented.captureId);
+            assert.equal(presented.userRevision, 0);
+            yield* tools.updateView({
+              expectedRevision: initial.revision + 1,
+              operations: [{ type: "explode", amount: 0.6 }],
+            });
+            assert.equal((yield* read(threadId)).view?.explosion, 0.4);
+            const other = yield* read(otherThreadId);
+            assert.equal(other.view?.explosion, 0.8);
+            assert.isNull(other.captureId);
+          }),
+        turnId,
+      );
+      assert.isTrue(yield* h.presentation.settle(threadId));
+      const final = yield* read(threadId);
+      assert.equal(final.view?.explosion, 0.4);
+      assert.isNull(final.captureId);
+      assert.equal(final.userRevision, 1);
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("leases panel geometry only while its thread-scoped stream remains open", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const initial = yield* h.panel.watch(threadId).pipe(Stream.runHead);
+    assert.equal(initial._tag, "Some");
+    if (initial._tag !== "Some" || !initial.value.view)
+      return yield* Effect.die("Missing default CAD view");
+    assert.isNull(initial.value.userRevision);
+    assert.isNull(initial.value.captureId);
+    const ready = yield* Deferred.make<import("@cadsense/contracts").CadPanelSceneTicket>();
+    const stream = yield* h.panel.scene(threadId, initial.value.view.snapshotId).pipe(
+      Stream.tap((ticket) => Deferred.succeed(ready, ticket)),
+      Stream.runDrain,
+      Effect.forkChild,
+    );
+    const ticket = yield* Deferred.await(ready);
+    assert.equal(h.pins(), 1);
+    assert.equal((yield* h.panel.read(ticket)).manifest.snapshotId, initial.value.view.snapshotId);
+    assert.equal(
+      (yield* h.panel.read({ ...ticket, token: "forged" }).pipe(Effect.exit))._tag,
+      "Failure",
+    );
+    yield* Fiber.interrupt(stream);
+    assert.equal(h.pins(), 0);
+    assert.equal((yield* h.panel.read(ticket).pipe(Effect.exit))._tag, "Failure");
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 
 it.effect(
   "retains a committed image when its receipt is uncertain and recovers its final view",

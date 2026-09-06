@@ -12,6 +12,7 @@ import {
 } from "@cadsense/client-runtime/state/runtime";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
+  BoxIcon,
   FileSearchIcon,
   FolderPlusIcon,
   MessageSquareIcon,
@@ -67,6 +68,7 @@ import { CommandPaletteResults } from "./CommandPaletteResults";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { OnshapeProjectCreateForm } from "./OnshapeProjectCreateForm";
 import { useCommandPaletteQuery } from "./useCommandPaletteQuery";
+import { useRightPanelStore } from "../rightPanelStore";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { CommandDialog, CommandDialogPopup } from "./ui/command";
@@ -384,6 +386,25 @@ function OpenCommandPaletteDialog(props: {
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {
     const actions: CommandPaletteActionItem[] = [];
+    const cadProject =
+      activeThread &&
+      projects.find(
+        (project) =>
+          project.id === activeThread.projectId &&
+          project.environmentId === activeThread.environmentId,
+      );
+    if (activeThread && cadProject?.onshapeSource && cadProject.cad?.enabled !== false)
+      actions.push({
+        kind: "action",
+        value: "action:toggle-cad",
+        title: "Toggle CAD panel",
+        searchTerms: ["onshape", "cad", "viewer", "components"],
+        icon: <BoxIcon className={ITEM_ICON_CLASS} />,
+        run: async () =>
+          useRightPanelStore
+            .getState()
+            .toggle(scopeThreadRef(activeThread.environmentId, activeThread.id), "cad"),
+      });
     if (currentProjectRef) {
       actions.push({
         kind: "action",
@@ -540,6 +561,7 @@ function OpenCommandPaletteDialog(props: {
     ];
   }, [
     addProject,
+    activeThread,
     currentProjectRef,
     environmentLabel,
     environments,

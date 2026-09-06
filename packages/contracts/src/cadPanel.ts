@@ -1,0 +1,21 @@
+import * as Schema from "effect/Schema";
+import { ThreadId } from "./baseSchemas.ts";
+import { CadSnapshotId } from "./cad.ts";
+import { CadViewState } from "./cadView.ts";
+
+export const CadPanelInput = Schema.Struct({ threadId: ThreadId });
+export const CadPanelState = Schema.Struct({
+  threadId: ThreadId,
+  userRevision: Schema.NullOr(Schema.Int),
+  view: Schema.NullOr(CadViewState),
+  captureId: Schema.NullOr(CadSnapshotId),
+});
+export type CadPanelState = typeof CadPanelState.Type;
+export const CadPanelSaveInput = Schema.Struct({
+  threadId: ThreadId,
+  expectedRevision: Schema.NullOr(Schema.Int),
+  view: CadViewState,
+});
+export const CadPanelSceneInput = Schema.Struct({ threadId: ThreadId, snapshotId: CadSnapshotId });
+export const CadPanelSceneTicket = Schema.Struct({ sceneId: CadSnapshotId, token: CadSnapshotId });
+export type CadPanelSceneTicket = typeof CadPanelSceneTicket.Type;

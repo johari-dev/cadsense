@@ -1,5 +1,5 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@cadsense/contracts";
-import { Bot, Files, Globe2, Plus, Volume2, VolumeOff } from "lucide-react";
+import { Bot, Box, Files, Globe2, Plus, Volume2, VolumeOff } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -58,6 +58,8 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddCad?: () => void;
+  cadAvailable?: boolean;
   browserAvailable: boolean;
   filesAvailable: boolean;
   agentsAvailable: boolean;
@@ -215,6 +217,8 @@ function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddCad?: (() => void) | undefined;
+  cadAvailable?: boolean | undefined;
   browserAvailable: boolean;
   filesAvailable: boolean;
   agentsAvailable: boolean;
@@ -224,6 +228,20 @@ function RightPanelEmptyState(props: {
   const [highlight, setHighlight] = useState(-1);
 
   const actions = [
+    ...(props.cadAvailable && props.onAddCad
+      ? [
+          {
+            label: "CAD",
+            description: "Inspect the Onshape project.",
+            icon: Box,
+            shortcut: "C",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddCad,
+            badgeCount: 0,
+          },
+        ]
+      : []),
     {
       label: "Browser",
       description: "Open a local app or URL.",
@@ -422,6 +440,8 @@ function surfaceTitle(
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
 ): string {
   switch (surface.kind) {
+    case "cad":
+      return "CAD";
     case "files":
       return "Files";
     case "file":
@@ -470,6 +490,8 @@ function SurfaceIcon({
   desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>;
 }) {
   switch (surface.kind) {
+    case "cad":
+      return <Box className="size-3 shrink-0" />;
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       const url = !snapshot || snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;
@@ -493,6 +515,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
 
   const addSurfaceActions = [
+    ...(props.cadAvailable && props.onAddCad
+      ? [
+          {
+            label: "CAD",
+            icon: Box,
+            shortcut: "C",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddCad,
+          },
+        ]
+      : []),
     {
       label: "Browser",
       icon: Globe2,
@@ -796,6 +830,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
+            onAddCad={props.onAddCad}
+            cadAvailable={props.cadAvailable}
             onAddBrowser={props.onAddBrowser}
             onAddFiles={props.onAddFiles}
             onAddAgents={props.onAddAgents}

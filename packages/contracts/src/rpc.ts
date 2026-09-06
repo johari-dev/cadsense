@@ -9,6 +9,14 @@ import {
   CadUserOperationError,
 } from "./cadUser.ts";
 import { CadRenderError, CadRenderEvent } from "./cadRender.ts";
+import { CadViewError, CadViewState } from "./cadView.ts";
+import {
+  CadPanelInput,
+  CadPanelState,
+  CadPanelSaveInput,
+  CadPanelSceneInput,
+  CadPanelSceneTicket,
+} from "./cadPanel.ts";
 
 import { FileManagerError, OpenInFileManagerInput } from "./fileManager.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
@@ -163,6 +171,9 @@ export const WS_METHODS = {
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
   cadRenderConnect: "cad.render.connect",
+  cadPanelWatch: "cad.panel.watch",
+  cadPanelSave: "cad.panel.save",
+  cadPanelScene: "cad.panel.scene",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -441,6 +452,23 @@ export const WsCadRenderConnectRpc = Rpc.make(WS_METHODS.cadRenderConnect, {
   error: Schema.Union([CadRenderError, EnvironmentAuthorizationError]),
   stream: true,
 });
+export const WsCadPanelWatchRpc = Rpc.make(WS_METHODS.cadPanelWatch, {
+  payload: CadPanelInput,
+  success: CadPanelState,
+  error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+export const WsCadPanelSceneRpc = Rpc.make(WS_METHODS.cadPanelScene, {
+  payload: CadPanelSceneInput,
+  success: CadPanelSceneTicket,
+  error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+export const WsCadPanelSaveRpc = Rpc.make(WS_METHODS.cadPanelSave, {
+  payload: CadPanelSaveInput,
+  success: CadViewState,
+  error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+});
 export const WsCadUserCancelRpc = Rpc.make(WS_METHODS.cadUserCancel, {
   payload: CadUserOperationInput,
   success: Schema.Void,
@@ -643,6 +671,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeProjectsSetConnectionRpc,
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
+  WsCadPanelWatchRpc,
+  WsCadPanelSceneRpc,
+  WsCadPanelSaveRpc,
   WsCadUserCancelRpc,
   WsCadUserSetEnabledRpc,
   WsPreviewOpenRpc,

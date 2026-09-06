@@ -6,7 +6,7 @@ import {
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { indexCadSnapshot } from "@cadsense/shared/cadScene";
+import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
 export { indexCadSnapshot } from "@cadsense/shared/cadScene";
 
 const decodeUpdate = Schema.decodeUnknownEffect(CadUpdateViewInput);
@@ -66,15 +66,7 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
         break;
       }
       case "isolate": {
-        const visibility = { ...state.visibility };
-        for (const id of index.subtree(operation.occurrenceIds)) visibility[id] = true;
-        for (const id of operation.occurrenceIds) {
-          let parentId = index.nodes.get(id)?.parentId;
-          while (parentId) {
-            visibility[parentId] = true;
-            parentId = index.nodes.get(parentId)?.parentId;
-          }
-        }
+        const visibility = revealCadOccurrences(index, state, operation.occurrenceIds);
         state = {
           ...state,
           visibility,
