@@ -4,7 +4,8 @@ export function formatAppDisplayName(input: {
   readonly baseName: string;
   readonly stageLabel: string;
 }): string {
-  if (input.stageLabel.trim().toLowerCase() === "latest") {
+  const stage = input.stageLabel.trim().toLowerCase();
+  if (stage === "" || stage === "latest" || stage === "alpha") {
     return input.baseName;
   }
 
@@ -18,7 +19,9 @@ export function resolveServerBackedAppStageLabel(input: {
   return input.primaryServerVersion &&
     NIGHTLY_SERVER_VERSION_PATTERN.test(input.primaryServerVersion)
     ? "Nightly"
-    : input.fallbackStageLabel;
+    : input.fallbackStageLabel.trim().toLowerCase() === "alpha"
+      ? ""
+      : input.fallbackStageLabel;
 }
 
 export function resolveServerBackedAppDisplayName(input: {

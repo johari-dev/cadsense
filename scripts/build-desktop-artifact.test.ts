@@ -242,7 +242,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "Cadsense (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "Cadsense");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Cadsense (Nightly)");
   });
 
@@ -613,7 +613,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "**/node_modules/.bin/**",
       ]);
       assert.deepStrictEqual(mac.dmg, {
-        title: "Cadsense (Alpha) 1.2.3 Installer",
+        title: "Cadsense 1.2.3 Installer",
         background: "dmg/dmg-background-latest.png",
         window: { width: 540, height: 412 },
         contents: [
