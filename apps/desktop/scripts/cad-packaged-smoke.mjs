@@ -123,7 +123,7 @@ const openCad = async (page) => {
   await page
     .getByRole("button", { name: "C CAD Inspect the Onshape project.", exact: true })
     .click();
-  await page.getByLabel("Camera view", { exact: true }).waitFor();
+  await page.getByRole("toolbar", { name: "CAD camera views", exact: true }).waitFor();
   await page.locator("canvas").waitFor();
   await page.getByLabel("Explode CAD", { exact: true }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: /^Components/ }).waitFor();
@@ -168,8 +168,10 @@ try {
       return [34, 51, 68].every((channel, index) => Math.abs(clear[index] * 255 - channel) < 1);
     });
     NodeAssert.equal(
-      await page.getByLabel("Camera view", { exact: true }).inputValue(),
-      "isometric",
+      await page
+        .getByRole("button", { name: "Isometric CAD view", exact: true })
+        .getAttribute("aria-pressed"),
+      "true",
     );
   } finally {
     await page.evaluate(({ value, priority }) => {
@@ -178,7 +180,7 @@ try {
     }, originalBackground);
   }
   report.steps.push("CAD follows the app palette without changing its camera");
-  await page.getByLabel("Camera view", { exact: true }).selectOption("front");
+  await page.getByRole("button", { name: "Front CAD view", exact: true }).click();
   const explosion = page.getByLabel("Explode CAD", { exact: true });
   await explosion.fill("0.5");
   await explosion.press("Tab");

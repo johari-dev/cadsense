@@ -17,9 +17,9 @@ import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
 import { cadDiagnostics } from "./CadDiagnostics";
 import { observeCadAppearance } from "./CadAppearance";
+import { CadCameraToolbar } from "./CadCameraToolbar";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
-const presets = ["isometric", "front", "back", "left", "right", "top", "bottom"] as const;
 
 function CadScene({
   threadRef,
@@ -49,6 +49,7 @@ function CadScene({
   const [error, setError] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const previousCapture = useRef(captureId);
+  const previousCamera = useRef(view.camera);
   useLayoutEffect(() => {
     latest.current = { view, disabled, onChange };
   }, [disabled, onChange, view]);
@@ -63,14 +64,17 @@ function CadScene({
     try {
       if (manifest) {
         if (
-          captureId &&
-          previousCapture.current !== captureId &&
+          ((captureId && previousCapture.current !== captureId) ||
+            (view.camera.kind === "preset" &&
+              (previousCamera.current.kind !== "preset" ||
+                previousCamera.current.preset !== view.camera.preset))) &&
           !matchMedia("(prefers-reduced-motion: reduce)").matches
         )
           renderer.current?.transition(view);
         else renderer.current?.apply(view);
       }
       previousCapture.current = captureId;
+      previousCamera.current = view.camera;
     } catch {
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
@@ -196,6 +200,9 @@ function CadScene({
             {unavailable ?? "Opening downloaded CAD…"}
           </div>
         )}
+        {manifest && !unavailable && (
+          <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
+        )}
       </div>
       {manifest && (
         <>
@@ -313,27 +320,6 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
             </option>
           ))}
         </select>
-        {view && (
-          <select
-            aria-label="Camera view"
-            className="rounded-md border bg-background px-2 py-1 text-xs"
-            disabled={locked}
-            value={view.camera.kind === "preset" ? view.camera.preset : "custom"}
-            onChange={(event) => {
-              const preset = presets.find((value) => value === event.target.value);
-              if (preset) void change({ ...view, camera: { kind: "preset", preset, fit: [] } });
-            }}
-          >
-            <option value="custom" disabled>
-              Custom view
-            </option>
-            {presets.map((preset) => (
-              <option key={preset} value={preset}>
-                {preset[0]!.toUpperCase() + preset.slice(1)}
-              </option>
-            ))}
-          </select>
-        )}
       </div>
       <div className="flex justify-end border-b px-3 py-1 text-xs">
         <Link
@@ -390,7 +376,7 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
           </div>
           <CadScene
             captureId={data?.captureId ?? null}
-            key={view.snapshotId}
+            key={`${threadRef.threadId}:${view.snapshotId}`}
             threadRef={threadRef}
             view={displayedView ?? view}
             disabled={locked}

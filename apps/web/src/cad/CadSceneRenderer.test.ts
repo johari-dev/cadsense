@@ -2,6 +2,7 @@ import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createCadSceneRenderer } from "./CadSceneRenderer";
+import { Camera, Matrix4, Quaternion, Vector3 } from "three";
 
 const calls = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() }));
 vi.mock("three", async (importOriginal) => {
@@ -16,25 +17,12 @@ vi.mock("three", async (importOriginal) => {
       getContext() {
         return { isContextLost: () => false };
       }
-      render = calls.render;
+      render(scene: unknown, camera: Camera) {
+        camera.updateMatrixWorld();
+        calls.render(scene, camera);
+      }
       dispose = calls.dispose;
       forceContextLoss = calls.forceContextLoss;
-    },
-  };
-});
-vi.mock("three/addons/controls/OrbitControls.js", async () => {
-  const { EventDispatcher, Vector3 } = await import("three");
-  return {
-    OrbitControls: class extends EventDispatcher {
-      constructor(public object: unknown) {
-        super();
-      }
-      target = new Vector3();
-      enabled = false;
-      enableDamping = false;
-      autoRotate = false;
-      update() {}
-      dispose() {}
     },
   };
 });
@@ -149,10 +137,17 @@ const canvasHarness = () => {
   let captureCallback: BlobCallback | undefined;
   // Browser boundary fake: only the methods used by this renderer are represented.
   const canvas = Object.assign(new EventTarget(), {
+    style: {},
+    ownerDocument: new EventTarget(),
+    getRootNode: () => canvas.ownerDocument,
+    clientWidth: 800,
+    clientHeight: 600,
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
     toBlob: (callback: BlobCallback) => {
       captureCallback = callback;
     },
-  }) as HTMLCanvasElement;
+  }) as unknown as HTMLCanvasElement;
   return {
     canvas,
     completeCapture: () => captureCallback?.(new Blob(["png"], { type: "image/png" })),
@@ -160,6 +155,96 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it.each(["top", "bottom", "front", "back", "left", "right", "isometric"] as const)(
+    "can drag away from %s after replacing the camera",
+    async (preset) => {
+      const h = canvasHarness();
+      const ended = vi.fn();
+      const renderer = createCadSceneRenderer({ canvas: h.canvas, onInteractionEnd: ended });
+      try {
+        await renderer.load(manifest, async () => geometry());
+        renderer.apply(state);
+        const before = renderer.apply({ ...state, camera: { kind: "preset", preset, fit: [] } });
+        renderer.setInteractive(true);
+        const pointer = (type: string, x: number) =>
+          Object.assign(new Event(type), {
+            pointerId: 1,
+            pointerType: "mouse",
+            button: 0,
+            clientX: x,
+            clientY: 200,
+            pageX: x,
+            pageY: 200,
+            ctrlKey: false,
+            shiftKey: false,
+            metaKey: false,
+          });
+        h.canvas.dispatchEvent(pointer("pointerdown", 200));
+        h.canvas.ownerDocument.dispatchEvent(pointer("pointermove", 260));
+        h.canvas.ownerDocument.dispatchEvent(pointer("pointerup", 260));
+        expect(ended).toHaveBeenCalledOnce();
+        const after = ended.mock.calls[0]![0];
+        expect(
+          new Vector3(...after.position).distanceTo(new Vector3(...before.position)),
+        ).toBeGreaterThan(0.1);
+        expect(after.target).toEqual(before.target);
+        const saved = {
+          ...state,
+          camera: { kind: "pose", fit: null, pose: after },
+        } satisfies CadViewState;
+        const restored = renderer.apply(saved);
+        expect(
+          new Vector3(...restored.position).distanceTo(new Vector3(...after.position)),
+        ).toBeLessThan(1e-8);
+      } finally {
+        renderer.dispose();
+      }
+    },
+  );
+  it("pans in screen space and retains its target after camera rebinding and save", async () => {
+    const h = canvasHarness();
+    const ended = vi.fn();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas, onInteractionEnd: ended });
+    try {
+      await renderer.load(manifest, async () => geometry());
+      renderer.resize(800, 600);
+      for (const preset of ["top", "front", "bottom", "right", "isometric"] as const) {
+        const before = renderer.apply({ ...state, camera: { kind: "preset", preset, fit: [] } });
+        renderer.setInteractive(true);
+        const camera: Camera = calls.render.mock.calls.at(-1)![1];
+        const right = new Vector3().setFromMatrixColumn(camera.matrix, 0);
+        const pointer = (type: string, x: number) =>
+          Object.assign(new Event(type), {
+            pointerId: 1,
+            pointerType: "mouse",
+            button: 2,
+            clientX: x,
+            clientY: 200,
+            pageX: x,
+            pageY: 200,
+            ctrlKey: false,
+            shiftKey: false,
+            metaKey: false,
+          });
+        h.canvas.dispatchEvent(pointer("pointerdown", 200));
+        h.canvas.ownerDocument.dispatchEvent(pointer("pointermove", 260));
+        h.canvas.ownerDocument.dispatchEvent(pointer("pointerup", 260));
+        const after = ended.mock.calls.at(-1)![0];
+        const delta = new Vector3(...after.target).sub(new Vector3(...before.target));
+        expect(delta.length()).toBeGreaterThan(0.01);
+        expect(delta.clone().normalize().dot(right)).toBeCloseTo(-1, 6);
+        const eyeDelta = new Vector3(...after.position).sub(new Vector3(...before.position));
+        expect(eyeDelta.distanceTo(delta)).toBeLessThan(1e-8);
+        const restored = renderer.apply({
+          ...state,
+          camera: { kind: "pose", fit: null, pose: after },
+        });
+        expect(restored.target).toEqual(after.target);
+      }
+    } finally {
+      renderer.dispose();
+    }
+  });
   it("redraws changed appearance without changing the view or accepting a stale capture", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas });
@@ -181,6 +266,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
     }
   });
   it("coalesces camera transitions and stops scheduling when settled, snapped, or disposed", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
     const frames = new Map<number, FrameRequestCallback>();
     let id = 0;
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -198,12 +284,18 @@ describe("CAD renderer lifecycle without WebGL", () => {
     try {
       await renderer.load(manifest, async () => geometry());
       renderer.apply(state);
+      const initialRotation = (calls.render.mock.calls.at(-1)![1] as Camera).quaternion.clone();
       renderer.transition({ ...state, explosion: 0.5 });
       expect(frames.size).toBe(1);
       renderer.transition({ ...state, camera: { kind: "preset", preset: "back", fit: [] } });
       expect(frames.size).toBe(1);
       frame(performance.now() + 120);
       expect(frames.size).toBe(1);
+      const destinationRotation = new Quaternion().setFromRotationMatrix(
+        new Matrix4().lookAt(new Vector3(0, 1, 0), new Vector3(), new Vector3(0, 0, 1)),
+      );
+      const halfway = (calls.render.mock.calls.at(-1)![1] as Camera).quaternion;
+      expect(halfway.angleTo(initialRotation.slerp(destinationRotation, 0.5))).toBeLessThan(1e-6);
       frame(performance.now() + 300);
       expect(frames.size).toBe(0);
       renderer.transition(state);
@@ -215,6 +307,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
     } finally {
       renderer.dispose();
       vi.unstubAllGlobals();
+      clock.mockRestore();
     }
   });
   it("keeps the prior snapshot usable if candidate loading fails and never renders partial loads", async () => {

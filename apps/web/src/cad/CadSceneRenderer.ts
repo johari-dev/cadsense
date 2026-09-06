@@ -51,11 +51,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     1000,
   );
   camera.up.set(0, 0, 1);
-  const controls =
+  let controls =
     "convertToBlob" in canvas
       ? null
       : new OrbitControls<THREE.PerspectiveCamera | THREE.OrthographicCamera>(camera, canvas);
-  const target = controls?.target ?? new THREE.Vector3();
+  const target = new THREE.Vector3();
+  const controlsUp = camera.up.clone();
   if (controls) {
     controls.enabled = false;
     controls.enableDamping = false;
@@ -73,9 +74,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let view: CadViewState | null = null;
   let appearance = DEFAULT_CAD_APPEARANCE;
   let animationFrame: number | null = null;
+  let interactive = false;
   const cancelTransition = () => {
     if (animationFrame !== null) cancelAnimationFrame(animationFrame);
     animationFrame = null;
+    if (controls) controls.enabled = interactive && !lost && !disposed;
   };
   const assertAvailable = () => {
     if (disposed || lost || renderer.getContext().isContextLost())
@@ -96,6 +99,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   });
   const changed = () => {
     if (!applying && !disposed && !lost) {
+      if (controls) target.copy(controls.target);
       frameRevision++;
       render();
     }
@@ -114,7 +118,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     options.onUnavailable?.(new CadRendererError("renderer-unavailable"));
   };
   canvas.addEventListener("webglcontextlost", contextLost);
-  const configureCamera = (resolved: ResolvedCadCamera) => {
+  const configureCamera = (resolved: ResolvedCadCamera, synchronizeControls = true) => {
     const distance = new THREE.Vector3(...resolved.position).distanceTo(
       new THREE.Vector3(...resolved.target),
     );
@@ -148,18 +152,32 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     camera.updateProjectionMatrix();
     target.fromArray(resolved.target);
     if (controls) {
-      controls.object = camera;
-      controls.update();
+      if (synchronizeControls && !controlsUp.equals(camera.up)) {
+        // OrbitControls caches its up-axis basis at construction. Rebind through its public API.
+        controls.removeEventListener("change", changed);
+        controls.removeEventListener("end", ended);
+        controls.dispose();
+        if ("convertToBlob" in canvas) throw new CadRendererError("invalid-view");
+        controls = new OrbitControls(camera, canvas);
+        controlsUp.copy(camera.up);
+        controls.enableDamping = false;
+        controls.autoRotate = false;
+        controls.enabled = interactive;
+        controls.addEventListener("change", changed);
+        controls.addEventListener("end", ended);
+      } else controls.object = camera;
+      controls.target.copy(target);
+      if (synchronizeControls) controls.update();
     }
   };
-  const applyFrame = (state: CadViewState): ResolvedCadCamera => {
+  const applyFrame = (state: CadViewState, synchronizeControls = true): ResolvedCadCamera => {
     assertAvailable();
     if (!model) throw new CadRendererError("invalid-view");
     const bounds = model.apply(state);
     const resolved = resolveCadCamera(state.camera, bounds, width / height);
     applying = true;
     try {
-      configureCamera(resolved);
+      configureCamera(resolved, synchronizeControls);
       frameRevision++;
       view = state;
       render();
@@ -195,12 +213,14 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       ),
     );
     const started = performance.now();
+    if (controls) controls.enabled = false;
     const frame = (now: number) => {
       animationFrame = null;
       if (disposed || lost) return;
       const progress = Math.min(1, Math.max(0, (now - started) / duration));
       if (progress === 1) {
         applyFrame(state);
+        if (controls) controls.enabled = interactive;
         return;
       }
       const eased = progress * progress * (3 - 2 * progress);
@@ -211,21 +231,24 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         .multiplyScalar(THREE.MathUtils.lerp(fromDistance, toDistance, eased))
         .add(target);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation);
-      applyFrame({
-        ...state,
-        explosion: THREE.MathUtils.lerp(explosion, state.explosion, eased),
-        camera: {
-          kind: "pose",
-          fit: null,
-          pose: {
-            position: [position.x, position.y, position.z],
-            target: [target.x, target.y, target.z],
-            up: [up.x, up.y, up.z],
-            projection: to.projection,
-            zoom: THREE.MathUtils.lerp(from.zoom, to.zoom, eased),
+      applyFrame(
+        {
+          ...state,
+          explosion: THREE.MathUtils.lerp(explosion, state.explosion, eased),
+          camera: {
+            kind: "pose",
+            fit: null,
+            pose: {
+              position: [position.x, position.y, position.z],
+              target: [target.x, target.y, target.z],
+              up: [up.x, up.y, up.z],
+              projection: to.projection,
+              zoom: THREE.MathUtils.lerp(from.zoom, to.zoom, eased),
+            },
           },
         },
-      });
+        false,
+      );
       animationFrame = requestAnimationFrame(frame);
     };
     animationFrame = requestAnimationFrame(frame);
@@ -335,7 +358,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       frameRevision++;
       applying = true;
       try {
-        configureCamera(currentPose);
+        configureCamera(currentPose, animationFrame === null);
         if (view) render();
       } finally {
         applying = false;
@@ -343,7 +366,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     },
     setInteractive: (enabled: boolean) => {
       assertAvailable();
-      if (controls) controls.enabled = enabled;
+      interactive = enabled;
+      if (controls) controls.enabled = enabled && animationFrame === null;
       else if (enabled) throw new CadRendererError("invalid-view");
     },
     dispose: () => {
