@@ -1,0 +1,26 @@
+[
+  {
+    "partId": "body",
+    "name": "Body",
+    "bodyType": "solid",
+    "isHidden": false,
+    "isMesh": false,
+    "appearance": { "color": { "red": 35, "green": 110, "blue": 190 }, "opacity": 255 }
+  },
+  {
+    "partId": "guard",
+    "name": "Guard",
+    "bodyType": "sheet",
+    "isHidden": true,
+    "isMesh": false,
+    "appearance": { "color": { "red": 220, "green": 220, "blue": 220 }, "opacity": 128 }
+  },
+  {
+    "partId": "roller",
+    "name": "Roller",
+    "bodyType": "solid",
+    "isHidden": false,
+    "isMesh": true,
+    "appearance": { "color": { "red": 40, "green": 40, "blue": 40 }, "opacity": 255 }
+  }
+]
