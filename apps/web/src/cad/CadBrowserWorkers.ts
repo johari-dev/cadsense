@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/require-post-message-target-origin -- Dedicated Worker messages accept transfer lists, not window target origins. */
 import * as Schema from "effect/Schema";
-import { createCadSceneRenderer, CadRendererError } from "./CadSceneRenderer";
+import { CadRendererError } from "./CadRendererError";
 import { CadWorkerOutput } from "./CadWorkerProtocol";
 import type { CadDiagnosticEvent } from "./CadDiagnostics";
 import {
@@ -140,10 +140,11 @@ const createOffscreenWorker = (
     const canvas = new OffscreenCanvas(1, 1);
     worker.postMessage({ type: "initialize", canvas }, [canvas]);
   });
-const createMainThreadWorker = (
+const createMainThreadWorker = async (
   readAsset: CadBrowserPoolOptions["readAsset"],
   onDiagnostic?: CadBrowserPoolOptions["onRendererDiagnostic"],
-): CadRenderWorker => {
+): Promise<CadRenderWorker> => {
+  const { createCadSceneRenderer } = await import("./CadSceneRenderer");
   const canvas = document.createElement("canvas");
   const renderer = createCadSceneRenderer({
     canvas,

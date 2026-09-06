@@ -6,7 +6,7 @@ import {
 } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { createCadBrowserPool } from "./CadBrowserWorkers";
-import { CadRendererError } from "./CadSceneModel";
+import { CadRendererError } from "./CadRendererError";
 import { cadDiagnostics } from "./CadDiagnostics";
 const decodePayload = Schema.decodeUnknownSync(CadRenderPayload);
 

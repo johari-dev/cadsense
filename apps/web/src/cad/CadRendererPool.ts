@@ -1,5 +1,6 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
-import { CadRendererError, type ResolvedCadCamera } from "./CadSceneModel";
+import type { ResolvedCadCamera } from "./CadSceneModel";
+import { CadRendererError } from "./CadRendererError";
 
 export interface CadRenderJob {
   readonly jobId: string;
