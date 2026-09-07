@@ -3,6 +3,7 @@ import { MessageId, ThreadId } from "./baseSchemas.ts";
 import { CadHash, CadSnapshotId } from "./cad.ts";
 
 export const CAD_MEMORY_MAX_ENTRIES = 20;
+export const CAD_MEMORY_MAX_NEW_PER_MESSAGE = 3;
 export const CAD_MEMORY_MAX_BYTES = 12_000;
 const Key = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
 const Quote = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(400));

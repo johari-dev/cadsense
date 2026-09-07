@@ -68,6 +68,7 @@ it.effect.each(["entries", "bytes"] as const)(
   (budget) =>
     Effect.gen(function* () {
       const h = yield* harness();
+      assert.equal(yield* h.service.projectBrief(threadId), "");
       const contextId = yield* h.service.resolveContext(threadId);
       const captured = yield* h.service.withActivation(
         contextId,
@@ -403,6 +404,12 @@ it.effect(
             yield* tools.inspection({
               operation: { type: "forget", expectedRevision: 4, key: "access" },
             });
+            assert.equal(
+              (yield* tools
+                .inspection({ operation: { type: "forget", expectedRevision: 5, key: "access" } })
+                .pipe(Effect.flip)).reason,
+              "invalid-operation",
+            );
             assert.equal(
               (yield* tools.inspection({ operation: { type: "recall", key: "access" } }))
                 .totalMatches,

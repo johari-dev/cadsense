@@ -1,6 +1,7 @@
 import {
   CAD_MEMORY_MAX_BYTES,
   CAD_MEMORY_MAX_ENTRIES,
+  CAD_MEMORY_MAX_NEW_PER_MESSAGE,
   CadMemoryInput,
   CadProjectMemory,
   CadViewError,
@@ -112,6 +113,12 @@ export const updateCadProjectMemory = Effect.fn("updateCadProjectMemory")(functi
       if (input.change.type === "remember") {
         // Identical excerpts under different keys do not consume additional slots.
         if (entries.some((entry) => entry.quote === input.quote)) return yield* invalid();
+        if (
+          !memory.entries.some((entry) => entry.key === input.key) &&
+          memory.entries.filter((entry) => entry.sourceMessageId === source.id).length >=
+            CAD_MEMORY_MAX_NEW_PER_MESSAGE
+        )
+          return yield* new CadViewError({ reason: "memory-write-limit" });
         entries.push({
           key: input.key,
           kind: input.change.kind,

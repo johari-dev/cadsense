@@ -155,14 +155,15 @@ it.effect("enforces entry and UTF-8 byte budgets and rejects duplicate excerpts"
   Effect.gen(function* () {
     yield* seed;
     const quotes = Array.from({ length: 21 }, (_, i) => `Constraint ${i}.`);
-    yield* message("1", quotes.join(" "));
-    for (const [i, quote] of quotes.slice(0, 20).entries())
+    for (const [i, quote] of quotes.slice(0, 20).entries()) {
+      yield* message(`1-${String(i).padStart(2, "0")}`, quotes.join(" "));
       yield* updateCadProjectMemory(
         projectId,
         threadId,
         remember(`constraint-${i}`, quote, i),
         null,
       );
+    }
     assert.equal(
       reason(
         yield* updateCadProjectMemory(
@@ -188,9 +189,9 @@ it.effect("enforces entry and UTF-8 byte budgets and rejects duplicate excerpts"
     const sql = yield* SqlClient.SqlClient;
     yield* sql`DELETE FROM cad_project_memory`;
     const longQuotes = Array.from({ length: 20 }, (_, i) => `${i}${"界".repeat(390)}`);
-    yield* message("2", longQuotes.join(" "));
     let revision = 0;
     for (const quote of longQuotes) {
+      yield* message(`2-${String(revision).padStart(2, "0")}`, longQuotes.join(" "));
       const result = yield* updateCadProjectMemory(
         projectId,
         threadId,
@@ -205,5 +206,41 @@ it.effect("enforces entry and UTF-8 byte budgets and rejects duplicate excerpts"
     }
     assert.isTrue(revision > 0 && revision < 20);
     assert.equal((yield* readCadProjectMemory(projectId)).revision, revision);
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
+
+it.effect("limits new facts from one user message while allowing corrections", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    yield* message("1", "Keep A. Keep B. Keep C. Keep D. Keep A larger.");
+    for (const [i, key] of ["a", "b", "c"].entries())
+      yield* updateCadProjectMemory(
+        projectId,
+        threadId,
+        remember(key, `Keep ${key.toUpperCase()}.`, i),
+        null,
+      );
+    const error = yield* updateCadProjectMemory(
+      projectId,
+      threadId,
+      remember("d", "Keep D.", 3),
+      null,
+    ).pipe(Effect.flip);
+    assert.equal(reason(error), "memory-write-limit");
+    const corrected = yield* updateCadProjectMemory(
+      projectId,
+      threadId,
+      remember("a", "Keep A larger.", 3),
+      null,
+    );
+    assert.equal(corrected.entries.length, 3);
+    yield* message("2", "Keep D.");
+    const next = yield* updateCadProjectMemory(
+      projectId,
+      threadId,
+      remember("d", "Keep D.", 4),
+      null,
+    );
+    assert.equal(next.entries.length, 4);
   }).pipe(Effect.provide(SqlitePersistenceMemory)),
 );

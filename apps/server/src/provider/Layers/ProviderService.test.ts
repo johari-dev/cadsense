@@ -650,6 +650,23 @@ memoryRouting.layer("CAD project context delivery", (it) => {
           const sent = adapter.sendTurn.mock.calls[0]?.[0];
           assert.include(sent?.input ?? "", "Leave space for gloves.");
           assert.isTrue(sent?.input?.endsWith("Current user request:\nInspect the opening."));
+          adapter.updateSession(threadId, (session) => ({
+            ...session,
+            activeTurnId: TurnId.make("active"),
+          }));
+          yield* provider.sendTurn({ threadId, input: "Stop, use the other bracket." });
+          assert.equal(adapter.sendTurn.mock.calls[1]?.[0].input, "Stop, use the other bracket.");
+          adapter.updateSession(threadId, ({ activeTurnId: _activeTurnId, ...session }) => session);
+          const attachment = {
+            type: "image" as const,
+            id: "memory-12345678-1234-1234-1234-123456789abc",
+            name: "screenshot.png",
+            mimeType: "image/png",
+            sizeBytes: 123,
+          };
+          yield* provider.sendTurn({ threadId, attachments: [attachment] });
+          assert.include(adapter.sendTurn.mock.calls[2]?.[0].input ?? "", "screenshot.png");
+          assert.deepEqual(adapter.sendTurn.mock.calls[2]?.[0].attachments, [attachment]);
         }
         const threadId = asThreadId("non-cad");
         yield* provider.startSession(threadId, {

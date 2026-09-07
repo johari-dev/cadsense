@@ -132,6 +132,7 @@ export const useCadInspectionMemory = Effect.fn("useCadInspectionMemory")(functi
       const existing = current.find(
         (entry) => entry.rootId === snapshot.rootId && entry.key === operation.key,
       );
+      if (operation.type === "forget" && !existing) return yield* invalid();
       const entries = current.filter((entry) => entry !== existing);
       if (operation.type === "remember") {
         if (!normalize(operation.question) || !normalize(operation.finding))

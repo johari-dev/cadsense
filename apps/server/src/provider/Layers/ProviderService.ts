@@ -798,14 +798,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // rather than issuing a new one: sessions that go a long time between
       // browser tool calls used to lose the toolkit outright.
       yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
-      const brief = Option.isSome(cadViewing)
-        ? yield* cadViewing.value.projectBrief(input.threadId).pipe(Effect.orElseSucceed(() => ""))
-        : "";
+      const brief = yield* Effect.gen(function* () {
+        if (Option.isNone(cadViewing)) return "";
+        const sessions = yield* routed.adapter.listSessions();
+        // Steers belong to a turn that already received its project context.
+        if (sessions.some((session) => session.threadId === input.threadId && session.activeTurnId))
+          return "";
+        return yield* cadViewing.value
+          .projectBrief(input.threadId)
+          .pipe(Effect.orElseSucceed(() => ""));
+      });
       const turn = yield* routed.adapter.sendTurn(
         brief
           ? {
               ...input,
-              input: `${brief}\n\nCurrent user request:\n${input.input ?? ""}`,
+              input: input.input ? `${brief}\n\nCurrent user request:\n${input.input}` : brief,
             }
           : input,
       );
