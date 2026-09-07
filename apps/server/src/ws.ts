@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import { coalesceShellDomainEvents } from "./orchestration/shellEventCoalescing.ts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -479,9 +480,21 @@ const makeWsRpcLayer = (
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":
+            return Effect.succeed(Option.none());
           case "thread.cad-capture-recorded":
           case "thread.cad-presentation-settled":
-            return Effect.succeed(Option.none());
+            return retryShellProjectionRead(
+              "thread",
+              event.payload.threadId,
+              projectionSnapshotQuery.getThreadShellById(event.payload.threadId),
+            ).pipe(
+              Effect.flatMap((read) => {
+                const thread = Option.flatten(read);
+                return Option.isSome(thread)
+                  ? projectUpsertOrRemove(thread.value.projectId, event.sequence)
+                  : Effect.succeed(Option.none());
+              }),
+            );
           case "project.created":
           case "project.meta-updated":
           case "project.cad-state-set":
@@ -625,13 +638,7 @@ const makeWsRpcLayer = (
           if (events.length === 0) {
             return [];
           }
-          const latestByAggregate = new Map<string, OrchestrationEvent>();
-          for (const event of events) {
-            latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event);
-          }
-          const survivors = Array.from(latestByAggregate.values()).sort(
-            (left, right) => left.sequence - right.sequence,
-          );
+          const survivors = coalesceShellDomainEvents(events);
           const shellEvents = yield* Effect.forEach(survivors, toShellStreamEvent, {
             concurrency: SHELL_REFETCH_CONCURRENCY,
           });
