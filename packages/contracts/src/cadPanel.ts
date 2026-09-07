@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 import { ThreadId } from "./baseSchemas.ts";
-import { CadSnapshotId } from "./cad.ts";
+import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CadViewState } from "./cadView.ts";
 
 export const CadPanelInput = Schema.Struct({ threadId: ThreadId });
@@ -9,6 +9,7 @@ export const CadPanelState = Schema.Struct({
   userRevision: Schema.NullOr(Schema.Int),
   view: Schema.NullOr(CadViewState),
   captureId: Schema.NullOr(CadSnapshotId),
+  unavailableRootId: Schema.optional(CadHash),
 });
 export type CadPanelState = typeof CadPanelState.Type;
 export const CadPanelSaveInput = Schema.Struct({

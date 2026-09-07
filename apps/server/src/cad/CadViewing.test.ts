@@ -501,6 +501,52 @@ const storageHarness = Effect.fn(function* () {
   return { ...h, storage, failures, removedWorkspaces };
 });
 
+it.effect("marks only the selected missing root unavailable in the panel", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    h.snapshots.delete(snapshot.snapshotId);
+    const state = yield* h.panel.watch(threadId).pipe(Stream.runHead);
+    assert.equal(state._tag, "Some");
+    if (state._tag !== "Some") return yield* Effect.die("Missing panel state");
+    assert.isNull(state.value.view);
+    assert.equal(state.value.unavailableRootId, snapshot.rootId);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("keeps healthy roots usable when a selected snapshot disappears between runs", () =>
+  Effect.gen(function* () {
+    const h = yield* harness(true);
+    const contextId = yield* h.service.resolveContext(threadId);
+    yield* h.service.withActivation(contextId, (tools) =>
+      tools.updateView({
+        expectedRevision: 0,
+        operations: [{ type: "select-root", rootId: snapshot.rootId }],
+      }),
+    );
+    h.snapshots.delete(snapshot.snapshotId);
+    yield* h.service.withActivation(contextId, (tools) =>
+      Effect.gen(function* () {
+        const context = yield* tools.context();
+        assert.isNull(context.state);
+        assert.equal(context.revision, 1);
+        assert.lengthOf(context.roots, 2);
+        assert.equal(
+          (yield* tools.hierarchy({}).pipe(Effect.flip)).reason,
+          "capability-unavailable",
+        );
+        const next = yield* tools.updateView({
+          expectedRevision: context.revision,
+          operations: [{ type: "select-root", rootId: "3".repeat(64) }],
+        });
+        assert.equal(next.revision, 2);
+        assert.equal(next.rootId, "3".repeat(64));
+        assert.equal((yield* tools.context()).state?.rootId, next.rootId);
+      }),
+    );
+    assert.equal(h.pins(), 0);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
 it.effect("retains and restores Onshape projects without deleting threads or downloaded CAD", () =>
   Effect.gen(function* () {
     const h = yield* storageHarness();

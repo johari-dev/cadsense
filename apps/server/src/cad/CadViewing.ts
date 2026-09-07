@@ -210,7 +210,10 @@ export const make = Effect.gen(function* () {
               Effect.catch(() => Deferred.fail(ready, unavailable())),
               Effect.forkIn(scope),
             );
-          return { ...(yield* Deferred.await(ready)), scope };
+          const result = yield* Deferred.await(ready).pipe(
+            Effect.tapError(() => Scope.close(scope, Exit.void)),
+          );
+          return { ...result, scope };
         });
         const persist = Effect.fn("CadViewing.persist")(function* (view: CadViewState) {
           yield* dispatch({
@@ -247,7 +250,10 @@ export const make = Effect.gen(function* () {
                 ? roots[0]
                 : undefined;
           if (!selected?.current) return null;
-          const next = yield* bind(selected.current.snapshotId);
+          const next = yield* bind(selected.current.snapshotId).pipe(
+            Effect.orElseSucceed(() => null),
+          );
+          if (!next) return null;
           const revision =
             currentSession.revision === null
               ? 0
@@ -270,7 +276,7 @@ export const make = Effect.gen(function* () {
               const { project, roots } = yield* availableRoots();
               return {
                 state,
-                revision: state?.revision ?? 0,
+                revision: state?.revision ?? currentSession.revision ?? 0,
                 roots: roots.map((root) => ({
                   rootId: root.rootId,
                   kind: root.kind,
@@ -299,7 +305,10 @@ export const make = Effect.gen(function* () {
               const update = yield* decodeUpdate(input).pipe(
                 Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
               );
-              if (update.expectedRevision !== (initialized?.state.revision ?? 0))
+              if (
+                update.expectedRevision !==
+                (initialized?.state.revision ?? currentSession.revision ?? 0)
+              )
                 return yield* conflict();
               const candidates: Binding[] = [];
               const result = yield* Effect.exit(
@@ -311,7 +320,10 @@ export const make = Effect.gen(function* () {
                     if (!root?.current) return yield* unavailable();
                     const candidate = yield* bind(root.current.snapshotId);
                     candidates.push(candidate);
-                    initialized = { binding: candidate, state: initialCadView(candidate.snapshot) };
+                    initialized = {
+                      binding: candidate,
+                      state: initialCadView(candidate.snapshot, currentSession.revision ?? 0),
+                    };
                   }
                   const snapshots = new Map([
                     [initialized.binding.snapshot.rootId, initialized.binding.snapshot],
