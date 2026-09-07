@@ -2,7 +2,7 @@
 
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-const HEIGHT_TRANSITION_FALLBACK_MS = 250;
+const HEIGHT_TRANSITION_FALLBACK_MS = 200;
 
 export function AnimatedHeight({ children }: { readonly children: ReactNode }) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -72,7 +72,7 @@ export function AnimatedHeight({ children }: { readonly children: ReactNode }) {
   return (
     <div
       data-slot="animated-height"
-      className="transition-[height] duration-200 ease-out motion-reduce:transition-none"
+      className="transition-[height] duration-150 ease-out motion-reduce:transition-none"
       style={
         heightState.height === null
           ? undefined
