@@ -642,10 +642,7 @@ function deriveTurnFolds(input: {
       // Agent-spawn CTA rows never fold: workflows outlive their launching
       // turn (dynamic spawns, background execution), and folding the CTA
       // when the turn settles makes a still-running fleet invisible.
-      if (
-        entry.kind === "work" &&
-        (entry.entry.agentSpawn !== undefined || entry.entry.cadCapture !== undefined)
-      ) {
+      if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
         continue;
       }
       hiddenEntryIds.add(entry.id);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { TurnId } from "@cadsense/contracts";
+import { MessageId, TurnId } from "@cadsense/contracts";
 import type { TimelineEntry } from "../../session-logic";
 import {
   deriveMessagesTimelineRows,
@@ -61,41 +61,83 @@ it("keeps CAD activity tied to the live chat row, including completed tool gaps"
   }
 });
 
-it("keeps captured images visible outside collapsed turn and work-log details", () => {
+describe("captured images in turn folds", () => {
   const turnId = TurnId.make("captured-turn");
-  const capture = {
-    captureId: "00000000-0000-4000-8000-000000000001",
-    snapshotId: "00000000-0000-4000-8000-000000000002",
-    revision: 1,
-  };
-  const entries: TimelineEntry[] = [0, 1, 2].map((index) => ({
-    kind: "work",
-    id: `work-${index}`,
-    createdAt: `2026-09-06T00:00:0${index}Z`,
-    entry: {
-      id: `work-${index}`,
-      createdAt: `2026-09-06T00:00:0${index}Z`,
-      turnId,
-      tone: "info",
-      label: index === 1 ? "CAD view captured" : "Other work",
-      ...(index === 1 ? { cadCapture: capture } : {}),
-    },
-  }));
-  for (const isWorking of [true, false]) {
+  const entries: TimelineEntry[] = [0, 1, 2, 3, 4].map((index) => {
+    const id = `entry-${index}`;
+    const createdAt = `2026-09-06T00:00:0${index}Z`;
+    if (index % 2 === 0) {
+      return {
+        kind: "message",
+        id,
+        createdAt,
+        message: {
+          id: MessageId.make(id),
+          role: "assistant",
+          text: `Commentary ${index}`,
+          turnId,
+          createdAt,
+          updatedAt: createdAt,
+          streaming: false,
+        },
+      };
+    }
+    return {
+      kind: "work",
+      id,
+      createdAt,
+      entry: {
+        id,
+        createdAt,
+        turnId,
+        tone: "info",
+        label: "CAD view captured",
+        cadCapture: {
+          captureId: `00000000-0000-4000-8000-00000000000${index}`,
+          snapshotId: "00000000-0000-4000-8000-000000000002",
+          revision: 1,
+        },
+      },
+    };
+  });
+
+  it("collapses screenshots with commentary and restores their chronological order", () => {
+    for (const expanded of [false, true, false]) {
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries: entries,
+        isWorking: false,
+        activeTurnStartedAt: null,
+        expandedTurnIds: expanded ? new Set([turnId]) : new Set(),
+      });
+      expect(rows.map((row) => row.id)).toEqual(
+        expanded
+          ? ["entry-0", `turn-fold:${turnId}`, "entry-1", "entry-2", "entry-3", "entry-4"]
+          : ["entry-0", `turn-fold:${turnId}`, "entry-4"],
+      );
+      expect(rows.find((row) => row.kind === "turn-fold")).toMatchObject({
+        label: "Worked for 4.0s",
+        expanded,
+      });
+      expect(
+        rows.flatMap((row) =>
+          row.kind === "work" ? row.groupedEntries.map((entry) => entry.cadCapture?.captureId) : [],
+        ),
+      ).toHaveLength(expanded ? 2 : 0);
+    }
+  });
+
+  it("keeps screenshots visible in sequence while the turn is running", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: entries,
-      isWorking,
-      runningTurnId: isWorking ? turnId : null,
-      activeTurnStartedAt: isWorking ? entries[0]!.createdAt : null,
+      isWorking: true,
+      runningTurnId: turnId,
+      activeTurnStartedAt: entries[0]!.createdAt,
     });
-    expect(
-      rows.some(
-        (row) =>
-          row.kind === "work" &&
-          row.groupedEntries.some((entry) => entry.cadCapture?.captureId === capture.captureId),
-      ),
-    ).toBe(true);
-  }
+    expect(rows.map((row) => row.id)).toEqual([
+      "working-indicator-row",
+      ...entries.map((entry) => entry.id),
+    ]);
+  });
 });
 
 describe("shouldPreserveAssistantLineBreaks", () => {
