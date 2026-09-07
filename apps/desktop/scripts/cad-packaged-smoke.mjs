@@ -234,7 +234,7 @@ try {
     .waitFor();
   await page.keyboard.press("Escape");
   await close();
-  page = await launch();
+  page = await launch(true);
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
   if ((await page.getByRole("button", { name: "Close CAD", exact: true }).count()) === 0)
     await openCad(page);
@@ -288,6 +288,40 @@ try {
     await cdp.detach();
   }
   report.steps.push("repeated CAD close/reopen releases document listeners");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  for (const name of ["Show permission settings", "Show context window indicator"]) {
+    const toggle = page.getByRole("switch", { name, exact: true });
+    await toggle.waitFor();
+    NodeAssert.equal(await toggle.getAttribute("aria-checked"), "false", `${name} defaults off`);
+  }
+  const transparency = page.getByRole("slider", { name: "Transparency", exact: true });
+  NodeAssert.equal(await transparency.getAttribute("type"), "range");
+  NodeAssert.equal(await transparency.getAttribute("min"), "40");
+  NodeAssert.equal(await transparency.getAttribute("max"), "100");
+  NodeAssert.equal(await transparency.inputValue(), "80");
+  await page.screenshot({ path: NodePath.join(output, "appearance.png") });
+  report.steps.push(
+    "appearance defaults hide permission/context controls and expose 40–100% transparency",
+  );
+  // Settings section changes replace history, so Back returns to the preceding thread.
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.getByTestId("composer-editor").waitFor();
+  NodeAssert.equal(await page.getByRole("button", { name: /stash/i }).count(), 0);
+  NodeAssert.equal(await page.locator("[data-prompt-stash-badge]").count(), 0);
+  await page.getByTestId("sidebar-add-project-trigger").click();
+  const addProject = page.getByRole("dialog", { name: "Add project", exact: true });
+  await addProject.waitFor();
+  await addProject.getByRole("button", { name: "Folder project", exact: true }).waitFor();
+  await addProject.getByRole("button", { name: "Onshape project", exact: true }).waitFor();
+  await page.screenshot({ path: NodePath.join(output, "add-project.png") });
+  await addProject.getByRole("button", { name: "Close", exact: true }).click();
+  await addProject.waitFor({ state: "hidden" });
+  await page.getByTestId("composer-editor").waitFor();
+  await page.screenshot({ path: NodePath.join(output, "composer.png") });
+  report.steps.push(
+    "chat has no stash controls; Add project opens a dedicated folder/Onshape dialog and closes back to chat",
+  );
   NodeAssert.deepEqual(errors, [], "Renderer must not raise page errors");
   report.passed = true;
 } catch (error) {
