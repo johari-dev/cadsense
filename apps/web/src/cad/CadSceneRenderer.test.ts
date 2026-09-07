@@ -6,6 +6,10 @@ import { Camera, Matrix4, Quaternion, Vector3 } from "three";
 import * as CadBudget from "@cadsense/shared/cadSceneBudget";
 
 const calls = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() }));
+vi.mock("./CadOutline", () => ({
+  createCadOutline: () => ({ render() {}, dispose() {} }),
+  supportsCadOutline: () => true,
+}));
 vi.mock("three", async (importOriginal) => {
   const actual = await importOriginal<typeof import("three")>();
   return {
