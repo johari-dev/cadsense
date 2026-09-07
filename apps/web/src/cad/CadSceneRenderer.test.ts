@@ -429,6 +429,18 @@ describe("CAD renderer lifecycle without WebGL", () => {
       frame(280);
       expect(frames.size).toBe(0);
       renderer.transition(state);
+      frame(100);
+      const interrupted = (calls.render.mock.calls.at(-1)![1] as Camera).quaternion.clone();
+      clock.mockReturnValue(100);
+      renderer.transition({ ...state, camera: { kind: "preset", preset: "front", fit: [] } });
+      frame(100);
+      expect(
+        (calls.render.mock.calls.at(-1)![1] as Camera).quaternion.angleTo(interrupted),
+      ).toBeLessThan(1e-6);
+      expect(frames.size).toBe(1);
+      frame(380);
+      expect(frames.size).toBe(0);
+      renderer.transition(state);
       renderer.apply(state);
       expect(frames.size).toBe(0);
       renderer.transition(state);

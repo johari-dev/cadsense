@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { scopeProjectRef, scopedProjectKey } from "@cadsense/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import { Box, ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../components/ui/button";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -18,6 +18,7 @@ import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
+import { createCadViewEdits } from "./CadViewEdits";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 
@@ -89,7 +90,8 @@ function CadScene({
   }, [disabled]);
   useLayoutEffect(() => {
     try {
-      const serialized = JSON.stringify(view);
+      // Save acknowledgements must not interrupt an unchanged visual transition.
+      const serialized = JSON.stringify({ ...view, revision: 0 });
       if (applied.current?.manifest === manifest && applied.current.state === serialized) return;
       applied.current = { manifest, state: serialized };
       if (manifest) {
@@ -267,39 +269,34 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
   const threads = useThreadShells();
   const runActive = isCadProjectRunActive(project, threads);
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
-  const [pending, setPending] = useState(false);
-  const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
-  const view = data?.view ?? null;
-  const locked = runActive || !!project.cad?.operation || pending || !data;
-  const latest = useRef({ locked, data });
-  useLayoutEffect(() => {
-    latest.current = { locked, data };
-  }, [locked, data]);
-  const change = async (next: CadViewState) => {
-    if (latest.current.locked || !latest.current.data || pendingRef.current) return;
-    pendingRef.current = true;
-    setPending(true);
-    setError(null);
-    const expectedRevision = latest.current.data.userRevision;
-    try {
-      const result = await save({
-        environmentId: threadRef.environmentId,
-        input: {
-          threadId: threadRef.threadId,
-          expectedRevision,
-          view: { ...next, revision: expectedRevision === null ? 0 : expectedRevision + 1 },
-        },
-      });
-      if (result._tag === "Failure")
+  const locked = runActive || !!project.cad?.operation || !data;
+  const [edits] = useState(() =>
+    createCadViewEdits(
+      async (view, expectedRevision) => {
+        const result = await save({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, expectedRevision, view },
+        });
+        if (result._tag === "Failure") throw new Error("CAD view save failed");
+        return result.value;
+      },
+      () =>
         setError(
           "The view could not be saved. CAD may be busy or the view changed; your latest saved view is preserved.",
-        );
-    } finally {
-      pendingRef.current = false;
-      setPending(false);
-    }
+        ),
+    ),
+  );
+  const optimistic = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
+  const view = (!locked && optimistic) || data?.view || null;
+  useLayoutEffect(() => {
+    edits.observe(data?.userRevision ?? null, locked);
+  }, [edits, data, locked]);
+  const change = (next: CadViewState) => {
+    if (locked) return;
+    setError(null);
+    edits.select(next);
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
   return (
