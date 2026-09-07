@@ -1003,6 +1003,34 @@ const ThreadTurnLifecycleSettleCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("project.onshape.remove"),
+    commandId: CommandId,
+    projectId: ProjectId,
+    operationId: CadOperationId,
+    deleteCad: Schema.Boolean,
+    deleteWorkspace: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("project.onshape.cleanup.request"),
+    commandId: CommandId,
+    projectId: ProjectId,
+    removedAt: IsoDateTime,
+    deleteCad: Schema.Boolean,
+    deleteWorkspace: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("project.onshape.cleanup.complete"),
+    commandId: CommandId,
+    projectId: ProjectId,
+    removedAt: IsoDateTime,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("project.onshape.restore"),
+    commandId: CommandId,
+    projectId: ProjectId,
+    removedAt: IsoDateTime,
+  }),
   CadCaptureRecordCommand,
   CadPresentationSettleCommand,
   CadContextEnsureCommand,
@@ -1039,6 +1067,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.cad-view-set",
   "thread.cad-user-view-set",
   "project.cad-state-set",
+  "project.onshape.storage-set",
   "thread.turn-start-settled",
   "thread.turn-lifecycle-settled",
   "project.created",
@@ -1074,6 +1103,10 @@ export const ProjectCadStateSetPayload = Schema.Struct({
   projectId: ProjectId,
   cad: CadProjectState,
   updatedAt: IsoDateTime,
+});
+export const ProjectOnshapeStorageSetPayload = Schema.Struct({
+  ...ProjectCadStateSetPayload.fields,
+  deletedAt: Schema.NullOr(IsoDateTime),
 });
 export const ThreadTurnStartSettledPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1320,6 +1353,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.cad-state-set"),
     payload: ProjectCadStateSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.onshape.storage-set"),
+    payload: ProjectOnshapeStorageSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

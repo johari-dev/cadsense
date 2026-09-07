@@ -133,6 +133,7 @@ it.effect("provisions a live project event before completing its receipt", () =>
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: (input) =>
               Ref.update(provisions, (current) => [...current, input.workspaceRoot]),
@@ -172,6 +173,7 @@ it.effect("buffers project creation across the activation handoff", () =>
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: () => Ref.update(provisions, (count) => count + 1),
           }),
@@ -205,6 +207,7 @@ it.effect("does not delete a project when shutdown interrupts provisioning", () 
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: () =>
               Deferred.succeed(provisionStarted, undefined).pipe(
@@ -238,6 +241,7 @@ it.effect("leaves a provisioned project pending when readiness persistence fails
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: () => Effect.void,
           }),
@@ -273,6 +277,7 @@ it.effect("deletes a failed live project and fails its provisioning receipt", ()
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: () => Effect.die("disk unavailable"),
           }),
@@ -315,6 +320,7 @@ it.effect("reconciles a pending workspace during startup", () =>
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: () => Ref.update(provisions, (count) => count + 1),
           }),
@@ -355,6 +361,7 @@ it.effect("fails startup without deleting a pending project when reconciliation 
         Layer.succeed(
           ManagedWorkspaceAllocator,
           ManagedWorkspaceAllocator.of({
+            remove: () => Effect.die("Unexpected removal"),
             resolve: () => Effect.succeed(workspaceRoot),
             provision: () => Effect.die("disk unavailable"),
           }),

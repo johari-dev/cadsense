@@ -1,6 +1,7 @@
 import {
   EventId,
   initialCadProjectState,
+  isCadThreadRunActive,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -112,6 +113,92 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   Crypto.Crypto
 > {
   switch (command.type) {
+    case "project.onshape.remove":
+    case "project.onshape.cleanup.complete":
+    case "project.onshape.cleanup.request":
+    case "project.onshape.restore": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const fail = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (!project.onshapeSource) return yield* fail("This project has no Onshape source.");
+      const occurredAt = yield* nowIso;
+      let cad = project.cad ?? initialCadProjectState();
+      let deletedAt = project.deletedAt;
+      if (command.type === "project.onshape.remove") {
+        if (
+          deletedAt !== null ||
+          cad.operation?.kind !== "cleanup" ||
+          cad.operation.operationId !== command.operationId
+        )
+          return yield* fail("This removal is no longer reserved.");
+        if (
+          (cad.pendingPresentations?.length ?? 0) > 0 ||
+          readModel.threads.some(
+            (thread) => thread.projectId === project.id && isCadThreadRunActive(thread),
+          )
+        )
+          return yield* fail("An agent run is active for this project.");
+        // The reservation fenced new runs before native quiescence was confirmed.
+        cad = {
+          ...cad,
+          operation: null,
+          storage: {
+            removedAt: occurredAt,
+            deleteCad: command.deleteCad,
+            deleteWorkspace: command.deleteWorkspace,
+            cleanupPending: command.deleteCad || command.deleteWorkspace,
+          },
+        };
+        deletedAt = occurredAt;
+      } else {
+        const storage = cad.storage;
+        if (deletedAt === null || !storage || storage.removedAt !== command.removedAt)
+          return yield* fail("This retained project has changed.");
+        if (command.type === "project.onshape.cleanup.request") {
+          cad = {
+            ...cad,
+            storage: {
+              ...storage,
+              deleteCad: storage.deleteCad || command.deleteCad,
+              deleteWorkspace: storage.deleteWorkspace || command.deleteWorkspace,
+              cleanupPending: true,
+            },
+          };
+        } else if (command.type === "project.onshape.cleanup.complete") {
+          cad = {
+            ...cad,
+            roots: storage.deleteCad ? [] : cad.roots,
+            storage: { ...storage, cleanupPending: false },
+          };
+        } else {
+          if (storage.cleanupPending)
+            return yield* fail("Finish pending cleanup before restoring this project.");
+          yield* requireActiveProjectWorkspaceRootAbsent({
+            readModel,
+            command,
+            workspaceRoot: project.workspaceRoot,
+          });
+          yield* requireActiveOnshapeProjectSourceAbsent({
+            readModel,
+            command,
+            source: project.onshapeSource,
+          });
+          const { storage: _storage, ...retained } = cad;
+          cad = retained;
+          deletedAt = null;
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          commandId: command.commandId,
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt,
+        })),
+        type: "project.onshape.storage-set",
+        payload: { projectId: project.id, cad, deletedAt, updatedAt: occurredAt },
+      };
+    }
     case "thread.cad.presentation.settle": {
       const { project, cad } = yield* decideCadPresentation(command, readModel);
       const occurredAt = yield* nowIso;
@@ -399,6 +486,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.delete": {
+      const target = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (target.onshapeSource?.managedWorkspaceReady === true)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Remove this Onshape project through CAD storage controls to choose which files to retain.",
+        });
       yield* requireProjectCadIdle({
         readModel,
         command,

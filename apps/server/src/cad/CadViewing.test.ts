@@ -47,6 +47,11 @@ import { CadCaptureArtifacts, make as makeArtifacts } from "./CadCaptureArtifact
 import { readLatestCadCapture, readCadUserView } from "./CadSessionPersistence.ts";
 import { make as makePresentation } from "./CadPresentation.ts";
 import { make as makePanel } from "./CadPanel.ts";
+import { CadPanel } from "./CadPanel.ts";
+import { make as makeStorage } from "./CadStorage.ts";
+import { CadProjectQuiescence } from "./CadUserOperations.ts";
+import { CadUserOperationError } from "@cadsense/contracts";
+import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as Stream from "effect/Stream";
 
 const now = "2026-09-05T00:00:00Z";
@@ -455,8 +460,146 @@ const harness = Effect.fn(function* (
     presentation,
     recreatePresentation: makePresentation.pipe(Effect.provideService(CadSnapshotStore, store)),
     snapshots,
+    store,
   };
 });
+
+const storageHarness = Effect.fn(function* () {
+  const h = yield* harness();
+  const failures = { cleanup: false, quiescence: false };
+  const removedWorkspaces: string[] = [];
+  const storage = yield* makeStorage.pipe(
+    Effect.provideService(CadPanel, h.panel),
+    Effect.provideService(CadProjectQuiescence, {
+      confirm: () =>
+        failures.quiescence
+          ? Effect.fail(new CadUserOperationError({ reason: "busy" }))
+          : Effect.void,
+    }),
+    Effect.provideService(ManagedWorkspaceAllocator, {
+      resolve: () => Effect.succeed("C:/cad-view-test"),
+      provision: () => Effect.void,
+      remove: (input) =>
+        Effect.sync(() => {
+          removedWorkspaces.push(input.workspaceRoot);
+        }),
+    }),
+    Effect.provideService(CadSnapshotStore, {
+      ...h.store,
+      list: () =>
+        Effect.succeed(
+          [...h.snapshots.values()].map((snapshot) => ({ ...snapshot, byteLength: 1 })),
+        ),
+      remove: (ids) =>
+        Effect.gen(function* () {
+          if (failures.cleanup || h.pins() > 0)
+            return yield* new CadSnapshotStoreError({ reason: "busy" });
+          for (const id of ids) h.snapshots.delete(id);
+        }),
+    }),
+  );
+  return { ...h, storage, failures, removedWorkspaces };
+});
+
+it.effect("retains and restores Onshape projects without deleting threads or downloaded CAD", () =>
+  Effect.gen(function* () {
+    const h = yield* storageHarness();
+    yield* h.storage.run({ kind: "remove", projectId, deleteCad: false, deleteWorkspace: false });
+    const retained = yield* h.storage.watch.pipe(Stream.runHead);
+    assert.equal(retained._tag, "Some");
+    if (retained._tag !== "Some") return yield* Effect.die("Missing retained project");
+    const entry = retained.value[0]!;
+    assert.isFalse(entry.cleanupPending);
+    assert.equal(h.snapshots.size, 1);
+    const query = yield* ProjectionSnapshotQuery;
+    assert.equal((yield* query.getThreadDetailById(threadId))._tag, "Some");
+    yield* h.storage.run({ kind: "restore", projectId, removedAt: entry.removedAt });
+    assert.equal((yield* query.getProjectShellById(projectId))._tag, "Some");
+    assert.deepEqual(h.removedWorkspaces, []);
+    assert.equal(
+      (yield* h.storage
+        .run({ kind: "retry", projectId, removedAt: entry.removedAt })
+        .pipe(Effect.exit))._tag,
+      "Failure",
+    );
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect(
+  "releases visible scene pins before optional CAD cleanup and preserves capture images",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* storageHarness();
+      const context = yield* h.service.resolveContext(threadId);
+      const turnId = TurnId.make("retained-capture");
+      yield* h.service.withActivation(
+        context,
+        (tools) => tools.context().pipe(Effect.andThen(tools.capture({ expectedRevision: 0 }))),
+        turnId,
+      );
+      assert.equal(
+        (yield* h.storage
+          .run({ kind: "remove", projectId, deleteCad: true, deleteWorkspace: true })
+          .pipe(Effect.exit))._tag,
+        "Failure",
+      );
+      assert.equal(h.snapshots.size, 1);
+      assert.deepEqual(h.removedWorkspaces, []);
+      yield* h.presentation.settle(threadId);
+      const capture = yield* readLatestCadCapture(threadId, turnId);
+      const ready = yield* Deferred.make<void>();
+      yield* h.panel.scene(threadId, snapshot.snapshotId).pipe(
+        Stream.tap(() => Deferred.succeed(ready, undefined)),
+        Stream.runDrain,
+        Effect.forkChild,
+      );
+      yield* Deferred.await(ready);
+      assert.equal(h.pins(), 1);
+      yield* h.storage.run({ kind: "remove", projectId, deleteCad: true, deleteWorkspace: false });
+      assert.equal(h.pins(), 0);
+      assert.equal(h.snapshots.size, 0);
+      assert.deepEqual(h.removedWorkspaces, []);
+      assert.isTrue(
+        yield* (yield* FileSystem.FileSystem).exists(capture!.record.capture.artifact.path),
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect(
+  "keeps failed cleanup durable and retryable, and refuses removal when native shutdown is unconfirmed",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* storageHarness();
+      h.failures.quiescence = true;
+      assert.equal(
+        (yield* h.storage
+          .run({ kind: "remove", projectId, deleteCad: true, deleteWorkspace: true })
+          .pipe(Effect.exit))._tag,
+        "Failure",
+      );
+      assert.equal(
+        (yield* (yield* ProjectionSnapshotQuery).getProjectShellById(projectId))._tag,
+        "Some",
+      );
+      h.failures.quiescence = false;
+      h.failures.cleanup = true;
+      yield* h.storage.run({ kind: "remove", projectId, deleteCad: true, deleteWorkspace: true });
+      const retained = yield* h.storage.watch.pipe(Stream.runHead);
+      if (retained._tag !== "Some") return yield* Effect.die("Missing retained project");
+      const entry = retained.value[0]!;
+      assert.isTrue(entry.cleanupPending);
+      assert.equal(
+        (yield* h.storage
+          .run({ kind: "restore", projectId, removedAt: entry.removedAt })
+          .pipe(Effect.exit))._tag,
+        "Failure",
+      );
+      h.failures.cleanup = false;
+      yield* h.storage.run({ kind: "retry", projectId, removedAt: entry.removedAt });
+      assert.deepEqual(h.removedWorkspaces, ["C:/cad-view-test"]);
+      yield* h.storage.run({ kind: "restore", projectId, removedAt: entry.removedAt });
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 
 it.effect(
   "shows only captured private edits in the owning thread and preserves the final view",

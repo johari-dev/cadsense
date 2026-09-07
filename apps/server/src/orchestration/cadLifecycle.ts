@@ -27,8 +27,12 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
   ) {
     yield* requireProjectCadIdle({ readModel, command, projectId: project.id, includeRuns: true });
     if (command.type === "project.cad.enabled.set") return { ...cad, enabled: command.enabled };
-    if (!cad.enabled) return yield* fail("Onshape is disabled for this project.");
-    if ((command.kind === "discover") !== (command.root === null))
+    if (!cad.enabled && command.kind !== "cleanup")
+      return yield* fail("Onshape is disabled for this project.");
+    if (
+      (command.kind === "sync" && command.root === null) ||
+      (command.kind === "discover" && command.root !== null)
+    )
       return yield* fail("This CAD operation has an invalid root target.");
     const existing = cad.roots.find((root) => root.rootId === command.root?.rootId);
     if (

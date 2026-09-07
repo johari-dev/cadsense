@@ -1,4 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// Removal needs lstat to reject a replaced workspace symlink before recursive deletion.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
 
 import type { ProjectId } from "@cadsense/contracts";
 import * as Context from "effect/Context";
@@ -7,18 +10,27 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import type * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 
 import { ServerConfig } from "../config.ts";
 
 const MANAGED_WORKSPACE_DIRECTORY_PATTERN = /^project-[0-9a-f]{64}$/;
 
 export interface ManagedWorkspaceAllocatorShape {
+  readonly remove: (input: {
+    readonly projectId: ProjectId;
+    readonly workspaceRoot: string;
+  }) => Effect.Effect<void, ManagedWorkspaceRemovalError>;
   readonly resolve: (projectId: ProjectId) => Effect.Effect<string>;
   readonly provision: (input: {
     readonly projectId: ProjectId;
     readonly workspaceRoot: string;
   }) => Effect.Effect<void, PlatformError.PlatformError>;
 }
+export class ManagedWorkspaceRemovalError extends Schema.TaggedErrorClass<ManagedWorkspaceRemovalError>()(
+  "ManagedWorkspaceRemovalError",
+  {},
+) {}
 
 export class ManagedWorkspaceAllocator extends Context.Service<
   ManagedWorkspaceAllocator,
@@ -61,7 +73,40 @@ export const make = Effect.gen(function* () {
     yield* fileSystem.makeDirectory(workspaceRoot, { recursive: true });
   });
 
-  return ManagedWorkspaceAllocator.of({ resolve, provision });
+  const remove = Effect.fn("ManagedWorkspaceAllocator.remove")(function* (input: {
+    projectId: ProjectId;
+    workspaceRoot: string;
+  }) {
+    const expected = yield* resolve(input.projectId);
+    if (
+      path.resolve(input.workspaceRoot) !== expected ||
+      !MANAGED_WORKSPACE_DIRECTORY_PATTERN.test(path.relative(managedRoot, expected))
+    )
+      return yield* new ManagedWorkspaceRemovalError();
+    yield* Effect.tryPromise({
+      try: async () => {
+        const stat = await NodeFSP.lstat(expected).catch((error: unknown) => {
+          if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+          throw error;
+        });
+        if (!stat) return;
+        if (!stat.isDirectory() || stat.isSymbolicLink())
+          throw new Error("Unexpected managed workspace");
+        const [canonicalRoot, canonicalTarget] = await Promise.all([
+          NodeFSP.realpath(managedRoot),
+          NodeFSP.realpath(expected),
+        ]);
+        if (
+          path.dirname(canonicalTarget) !== canonicalRoot ||
+          path.basename(canonicalTarget) !== path.basename(expected)
+        )
+          throw new Error("Managed workspace escaped its root");
+        await NodeFSP.rm(canonicalTarget, { recursive: true, force: false });
+      },
+      catch: () => new ManagedWorkspaceRemovalError(),
+    });
+  });
+  return ManagedWorkspaceAllocator.of({ resolve, provision, remove });
 });
 
 export const layer = Layer.effect(ManagedWorkspaceAllocator, make);

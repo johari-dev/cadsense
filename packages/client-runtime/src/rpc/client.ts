@@ -50,6 +50,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.previewAutomationConnect
   | typeof WS_METHODS.cadRenderConnect
   | typeof WS_METHODS.cadPanelWatch
+  | typeof WS_METHODS.cadStorageWatch
   | typeof WS_METHODS.cadPanelScene;
 
 export type EnvironmentStreamRpcTag = EnvironmentSubscriptionRpcTag;

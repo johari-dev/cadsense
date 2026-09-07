@@ -119,6 +119,20 @@ export function projectEvent(
   };
 
   switch (event.type) {
+    case "project.onshape.storage-set":
+      return Effect.succeed({
+        ...nextBase,
+        projects: nextBase.projects.map((project) =>
+          project.id === event.payload.projectId
+            ? {
+                ...project,
+                cad: event.payload.cad,
+                deletedAt: event.payload.deletedAt,
+                updatedAt: event.payload.updatedAt,
+              }
+            : project,
+        ),
+      });
     case "thread.cad-context-ensured":
       return Effect.succeed({
         ...nextBase,
