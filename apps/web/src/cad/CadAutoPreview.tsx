@@ -44,9 +44,9 @@ export function CadAutoPreview({
       useCadFloatingStore.getState().observe(threadRef, noticeRun, inPanel);
       // A fast first tool may finish before the floating renderer mounts.
       const key = scopedThreadKey(threadRef);
-      cadActivityIndicator.observe(key, true);
-      cadActivityIndicator.observe(key, !!data?.agentControlling);
-      return () => cadActivityIndicator.observe(key, false);
+      cadActivityIndicator.observe(key, true, "preview");
+      cadActivityIndicator.observe(key, !!data?.agentControlling, "preview");
+      return () => cadActivityIndicator.observe(key, false, "preview");
     }
   }, [activityTurn, noticeRun, runId, data?.agentControlling, inPanel, threadRef]);
   const close = () => useCadFloatingStore.getState().dismiss(threadRef, noticeRun);

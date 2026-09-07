@@ -5,9 +5,61 @@ import {
   deriveMessagesTimelineRows,
   computeMessageDurationStart,
   normalizeCompactToolLabel,
+  timelineShowsCadActivity,
   resolveAssistantMessageCopyState,
   shouldPreserveAssistantLineBreaks,
 } from "./MessagesTimeline.logic";
+
+it("keeps CAD activity tied to the live chat row, including completed tool gaps", () => {
+  const turnId = TurnId.make("cad-turn");
+  const createdAt = "2026-09-07T00:00:00Z";
+  for (const toolTitle of ["cad_capture", "cad_comments_publish", "mcp__cad__cad_update_view"]) {
+    for (const toolLifecycleStatus of ["inProgress", "completed"] as const) {
+      const timelineEntries: TimelineEntry[] = [
+        {
+          kind: "work",
+          id: "cad-work",
+          createdAt,
+          entry: {
+            id: "cad-work",
+            createdAt,
+            turnId,
+            tone: "info",
+            label: toolTitle,
+            toolTitle,
+            itemType: "dynamic_tool_call",
+            toolLifecycleStatus,
+          },
+        },
+      ];
+      const derive = (isWorking: boolean) =>
+        deriveMessagesTimelineRows({
+          timelineEntries,
+          isWorking,
+          runningTurnId: isWorking ? turnId : null,
+          activeTurnStartedAt: createdAt,
+        });
+      expect(timelineShowsCadActivity(derive(true))).toBe(true);
+      expect(timelineShowsCadActivity(derive(false))).toBe(false);
+      timelineEntries.push({
+        kind: "work",
+        id: "next-work",
+        createdAt,
+        entry: {
+          id: "next-work",
+          createdAt,
+          turnId,
+          tone: "info",
+          label: "Read File",
+          toolTitle: "Read File",
+          itemType: "dynamic_tool_call",
+          toolLifecycleStatus: "inProgress",
+        },
+      });
+      expect(timelineShowsCadActivity(derive(true))).toBe(false);
+    }
+  }
+});
 
 it("keeps captured images visible outside collapsed turn and work-log details", () => {
   const turnId = TurnId.make("captured-turn");

@@ -3,6 +3,18 @@ import { createCadActivityIndicator, CAD_ACTIVITY_GRACE_MS } from "./CadActivity
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
+it("keeps the border active while chat shows CAD work after capture finishes", () => {
+  const indicator = createCadActivityIndicator();
+  indicator.observe("thread", true, "chat");
+  indicator.observe("thread", true, "panel");
+  indicator.observe("thread", false, "panel");
+  vi.advanceTimersByTime(CAD_ACTIVITY_GRACE_MS * 10);
+  expect(indicator.visible("thread")).toBe(true);
+  indicator.observe("thread", false, "chat");
+  vi.advanceTimersByTime(CAD_ACTIVITY_GRACE_MS);
+  expect(indicator.visible("thread")).toBe(false);
+});
+
 it("appears immediately and stays on through short tool gaps", () => {
   const indicator = createCadActivityIndicator();
   indicator.observe("thread", true);

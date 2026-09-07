@@ -272,6 +272,45 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
+const toolActionLabels: Readonly<Record<string, string>> = {
+  cad_context: "Reading CAD context",
+  cad_hierarchy: "Exploring CAD structure",
+  cad_update_view: "Adjusting CAD view",
+  cad_capture: "Looking at CAD",
+  cad_comments_publish: "Publishing comments",
+};
+
+export function knownToolActionLabel(value: string): string | undefined {
+  const label = normalizeCompactToolLabel(value);
+  // Providers can qualify names as `server · tool`, `namespace.tool`, or `mcp__server__tool`.
+  const toolName =
+    label
+      .split(/\s*·\s*|\.|__/u)
+      .at(-1)
+      ?.toLowerCase() ?? "";
+  return Object.hasOwn(toolActionLabels, toolName) ? toolActionLabels[toolName] : undefined;
+}
+
+export function formatToolActionLabel(value: string): string {
+  const label = normalizeCompactToolLabel(value);
+  const action = knownToolActionLabel(label);
+  if (action) return action;
+  const readable = label.replace(/_/gu, " ");
+  return `${readable.charAt(0).toUpperCase()}${readable.slice(1)}`;
+}
+
+/** Follow the live row, including gaps after a tool completes, until chat moves on. */
+export function timelineShowsCadActivity(rows: readonly MessagesTimelineRow[]): boolean {
+  return rows.some((row) => {
+    if (row.kind !== "work-live") return false;
+    const label = normalizeCompactToolLabel(row.entry.toolTitle ?? row.entry.label);
+    return (
+      /(?:^|\s*·\s*|\.|__)cad_[a-z_]+$/iu.test(label) ||
+      Object.values(toolActionLabels).includes(label)
+    );
+  });
+}
+
 type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other";
 type ToolGroupSummaryKind = ToolGroupAction | "dynamic-tool" | "agent-tool" | "tone-tool" | "mixed";
 

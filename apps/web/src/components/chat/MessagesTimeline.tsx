@@ -48,6 +48,7 @@ import {
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { CadCaptureCard } from "../../cad/CadCaptureCard";
+import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
   BotIcon,
   CheckIcon,
@@ -78,7 +79,9 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
-  normalizeCompactToolLabel,
+  formatToolActionLabel,
+  knownToolActionLabel,
+  timelineShowsCadActivity,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -400,6 +403,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const cadActivityVisible = timelineShowsCadActivity(rows);
+  useLayoutEffect(() => {
+    cadActivityIndicator.observe(routeThreadKey, cadActivityVisible, "chat");
+    return () => cadActivityIndicator.observe(routeThreadKey, false, "chat");
+  }, [routeThreadKey, cadActivityVisible]);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
@@ -1917,9 +1925,11 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles" | "toolTitle" | "label">,
   workspaceRoot: string | undefined,
 ) {
+  const actionLabel = knownToolActionLabel(workEntry.toolTitle ?? workEntry.label);
+  if (actionLabel) return actionLabel;
   if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
@@ -2015,19 +2025,8 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   return workToneIcon(workEntry.tone).iconName;
 }
 
-function capitalizePhrase(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return value;
-  }
-  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
-}
-
 function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
-  if (!workEntry.toolTitle) {
-    return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
-  }
-  return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
+  return formatToolActionLabel(workEntry.toolTitle ?? workEntry.label);
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
