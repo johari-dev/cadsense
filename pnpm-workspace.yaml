@@ -85,6 +85,7 @@ patchedDependencies:
   "@effect/vitest@4.0.0-beta.103": patches/@effect__vitest@4.0.0-beta.103.patch
   "@ff-labs/fff-node@0.9.4": patches/@ff-labs__fff-node@0.9.4.patch
   effect@4.0.0-beta.103: patches/effect@4.0.0-beta.103.patch
+  three@0.185.1: patches/three@0.185.1.patch
 
 peerDependencyRules:
   allowAny:

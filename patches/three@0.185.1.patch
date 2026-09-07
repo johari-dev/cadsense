@@ -1,0 +1,108 @@
+diff --git a/build/three.cjs b/build/three.cjs
+index 8939a67dd76325ccd25ee8806fc4d22b1caea88a..c855b03fb1aa11101f36dbf2930277b332180a71 100644
+--- a/build/three.cjs
++++ b/build/three.cjs
+@@ -76281,6 +76281,7 @@ class WebGLRenderer {
+ 		let _currentMaterialId = -1;
+ 
+ 		let _currentCamera = null;
++		let _dfgLUT = null;
+ 
+ 		const _currentViewport = new Vector4();
+ 		const _currentScissor = new Vector4();
+@@ -77050,6 +77051,12 @@ class WebGLRenderer {
+ 			canvas.removeEventListener( 'webglcontextcreationerror', onContextCreationError, false );
+ 
+ 			background.dispose();
++			if ( _dfgLUT !== null ) {
++
++				_dfgLUT.dispose();
++				_dfgLUT = null;
++
++			}
+ 			renderLists.dispose();
+ 			renderStates.dispose();
+ 			properties.dispose();
+@@ -78672,7 +78679,9 @@ class WebGLRenderer {
+ 			// Set DFG LUT for physically-based materials
+ 			if ( m_uniforms.dfgLUT !== undefined ) {
+ 
+-				m_uniforms.dfgLUT.value = getDFGLUT();
++				// Own the GPU lifetime while sharing the immutable lookup data.
++				if ( _dfgLUT === null ) _dfgLUT = getDFGLUT().clone();
++				m_uniforms.dfgLUT.value = _dfgLUT;
+ 
+ 			}
+ 
+diff --git a/build/three.module.js b/build/three.module.js
+index ad13abf7d128bee607a7672646ca543327e258d3..397d0bf74d38397c5d96d781884bfa2d65816a75 100644
+--- a/build/three.module.js
++++ b/build/three.module.js
+@@ -16303,6 +16303,7 @@ class WebGLRenderer {
+ 		let _currentMaterialId = -1;
+ 
+ 		let _currentCamera = null;
++		let _dfgLUT = null;
+ 
+ 		const _currentViewport = new Vector4();
+ 		const _currentScissor = new Vector4();
+@@ -17072,6 +17073,12 @@ class WebGLRenderer {
+ 			canvas.removeEventListener( 'webglcontextcreationerror', onContextCreationError, false );
+ 
+ 			background.dispose();
++			if ( _dfgLUT !== null ) {
++
++				_dfgLUT.dispose();
++				_dfgLUT = null;
++
++			}
+ 			renderLists.dispose();
+ 			renderStates.dispose();
+ 			properties.dispose();
+@@ -18694,7 +18701,9 @@ class WebGLRenderer {
+ 			// Set DFG LUT for physically-based materials
+ 			if ( m_uniforms.dfgLUT !== undefined ) {
+ 
+-				m_uniforms.dfgLUT.value = getDFGLUT();
++				// Own the GPU lifetime while sharing the immutable lookup data.
++				if ( _dfgLUT === null ) _dfgLUT = getDFGLUT().clone();
++				m_uniforms.dfgLUT.value = _dfgLUT;
+ 
+ 			}
+ 
+diff --git a/src/renderers/WebGLRenderer.js b/src/renderers/WebGLRenderer.js
+index cc2f156939863f3ce3d524ea92bf206a740a6cdb..e1e28746436a6ce90bbd9c1153c1846761aa8011 100644
+--- a/src/renderers/WebGLRenderer.js
++++ b/src/renderers/WebGLRenderer.js
+@@ -309,6 +309,7 @@ class WebGLRenderer {
+ 		let _currentMaterialId = - 1;
+ 
+ 		let _currentCamera = null;
++		let _dfgLUT = null;
+ 
+ 		const _currentViewport = new Vector4();
+ 		const _currentScissor = new Vector4();
+@@ -1078,6 +1079,12 @@ class WebGLRenderer {
+ 			canvas.removeEventListener( 'webglcontextcreationerror', onContextCreationError, false );
+ 
+ 			background.dispose();
++			if ( _dfgLUT !== null ) {
++
++				_dfgLUT.dispose();
++				_dfgLUT = null;
++
++			}
+ 			renderLists.dispose();
+ 			renderStates.dispose();
+ 			properties.dispose();
+@@ -2700,7 +2707,9 @@ class WebGLRenderer {
+ 			// Set DFG LUT for physically-based materials
+ 			if ( m_uniforms.dfgLUT !== undefined ) {
+ 
+-				m_uniforms.dfgLUT.value = getDFGLUT();
++				// Own the GPU lifetime while sharing the immutable lookup data.
++				if ( _dfgLUT === null ) _dfgLUT = getDFGLUT().clone();
++				m_uniforms.dfgLUT.value = _dfgLUT;
+ 
+ 			}
+ 

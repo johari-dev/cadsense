@@ -208,14 +208,28 @@ try {
   try {
     await page.getByRole("button", { name: "Close CAD", exact: true }).click();
     const before = await documentKeyListeners();
+    await page.evaluate(() => {
+      window.__cadClosedCanvases = [];
+    });
     for (let cycle = 0; cycle < 3; cycle++) {
       await openCad(page);
+      await page.evaluate(() => {
+        window.__cadClosedCanvases.push(new WeakRef(document.querySelector("canvas")));
+      });
       await page.getByRole("button", { name: "Close CAD", exact: true }).click();
     }
     const after = await documentKeyListeners();
     report.documentKeyListeners = { before, after };
     NodeAssert.equal(after, before, "Closed CAD viewers must release document key listeners");
+    await cdp.send("HeapProfiler.collectGarbage");
+    report.retainedClosedCanvases = await page.evaluate(
+      () => window.__cadClosedCanvases.filter((reference) => reference.deref()).length,
+    );
+    NodeAssert.equal(report.retainedClosedCanvases, 0, "Closed CAD canvases must be collectable");
   } finally {
+    await page.evaluate(() => {
+      delete window.__cadClosedCanvases;
+    });
     await cdp.detach();
   }
   report.steps.push("repeated CAD close/reopen releases document listeners");
