@@ -12,6 +12,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
+  cadCommentsCatalog,
   type AuthEnvironmentScope,
   ClientDeviceType,
   ClientOs,
@@ -891,7 +892,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.cadRenderConnect]: () =>
           observeRpcStream(WS_METHODS.cadRenderConnect, cadRenderBroker.connect()),
         [WS_METHODS.cadCommentsWatch]: (input) =>
-          observeRpcStream(WS_METHODS.cadCommentsWatch, cadComments.watch(input.threadId)),
+          observeRpcStream(
+            WS_METHODS.cadCommentsWatch,
+            cadComments.watch(input.threadId).pipe(Stream.map(cadCommentsCatalog)),
+          ),
         [WS_METHODS.cadCommentReview]: (input) =>
           observeRpcEffect(WS_METHODS.cadCommentReview, cadComments.review(input)),
         [WS_METHODS.cadPanelWatch]: (input) =>

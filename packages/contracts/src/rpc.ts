@@ -1,5 +1,10 @@
 import { ThreadId } from "./baseSchemas.ts";
-import { CadComment, CadCommentError, CadCommentReviewInput } from "./cadComments.ts";
+import {
+  CadComment,
+  CadCommentsCatalog,
+  CadCommentError,
+  CadCommentReviewInput,
+} from "./cadComments.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -461,7 +466,7 @@ export const WsCadRenderConnectRpc = Rpc.make(WS_METHODS.cadRenderConnect, {
 });
 export const WsCadCommentsWatchRpc = Rpc.make(WS_METHODS.cadCommentsWatch, {
   payload: Schema.Struct({ threadId: ThreadId }),
-  success: Schema.Array(CadComment),
+  success: CadCommentsCatalog,
   error: Schema.Union([CadCommentError, EnvironmentAuthorizationError]),
   stream: true,
 });

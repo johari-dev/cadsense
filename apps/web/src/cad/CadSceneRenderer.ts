@@ -589,6 +589,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           ...from,
           position: [position.x, position.y, position.z],
           target: [aim.x, aim.y, aim.z],
+          up:
+            Math.abs(
+              position
+                .clone()
+                .sub(aim)
+                .normalize()
+                .dot(new THREE.Vector3(...from.up).normalize()),
+            ) > 0.99
+              ? cadCommentCameraUp(position.clone().sub(aim))
+              : from.up,
           zoom: 1,
         });
         applying = false;
@@ -637,8 +647,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       }));
       const bounds = new THREE.Box3();
       for (const [id, entry] of model.objects) {
-        entry.object.visible = targets.some((t) => t.occurrenceId === id);
-        if (entry.object.visible) bounds.union(new THREE.Box3().setFromObject(entry.object));
+        if (targets.some((t) => t.occurrenceId === id))
+          bounds.union(new THREE.Box3().setFromObject(entry.object));
       }
       if (bounds.isEmpty())
         return targets.map((t) => ({

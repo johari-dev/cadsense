@@ -22,6 +22,10 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as FileSystem from "effect/FileSystem";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Path from "effect/Path";
+import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
@@ -39,6 +43,11 @@ import { make as makeStore, CadDiskSpace, CadSnapshotStore } from "./CadSnapshot
 import { CadRenderBroker } from "./CadRenderBroker.ts";
 const now = "2026-09-05T00:00:00Z";
 const decodeSnapshot = Schema.decodeUnknownEffect(CadSnapshotManifest);
+const decodeReasons = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    results: Schema.Array(Schema.Struct({ reason: Schema.String })),
+  }),
+);
 const decodePublicationFailure = Schema.decodeUnknownEffect(
   Schema.Struct({
     results: Schema.Array(Schema.Struct({ reason: Schema.String, details: Schema.String })),
@@ -127,8 +136,29 @@ type TestCommand = {
     "commandId"
   >;
 }[OrchestrationCommand["type"]];
-const harness = Effect.fn(function* () {
-  const snapshot = yield* makeSnapshot;
+const harness = Effect.fn(function* ({
+  unavailable,
+  beforeCommit,
+  beforeInspect,
+}: {
+  unavailable?: "suppressed" | "geometryless";
+  beforeCommit?: Effect.Effect<void>;
+  beforeInspect?: Effect.Effect<void>;
+} = {}) {
+  const sourceSnapshot = yield* makeSnapshot;
+  const snapshot: CadSnapshotManifest = {
+    ...sourceSnapshot,
+    nodes: sourceSnapshot.nodes.map((node) =>
+      node.kind !== "part"
+        ? node
+        : {
+            ...node,
+            suppressed: unavailable !== undefined,
+            defaultVisible: unavailable === undefined,
+            sourcePartKey: unavailable === "geometryless" ? null : node.sourcePartKey,
+          },
+    ),
+  };
   const engine = yield* OrchestrationEngineService;
   let sequence = 0;
   const dispatch = (command: TestCommand) =>
@@ -228,8 +258,8 @@ const harness = Effect.fn(function* () {
                   pickKey: p.pickKey,
                   reason: "candidate",
                   occurrenceId: p.intendedOccurrenceId,
-                  point: [0, 0, 0],
-                  normal: [0, 0, 1],
+                  point: [0, 0, 0] as const,
+                  normal: [0, 0, 1] as const,
                 }))
               : input.commentWork?.kind === "inspect"
                 ? input.commentWork.targets.map((t) => ({
@@ -241,11 +271,23 @@ const harness = Effect.fn(function* () {
                   }))
                 : [],
         },
-      }),
+      } as const).pipe(
+        Effect.tap(() =>
+          input.commentWork?.kind === "inspect" ? (beforeInspect ?? Effect.void) : Effect.void,
+        ),
+      ),
   });
   const service = yield* makeComments.pipe(
     Effect.provideService(CadSnapshotStore, store),
     Effect.provideService(CadRenderBroker, broker),
+    Effect.provideService(OrchestrationEngineService, {
+      ...engine,
+      dispatch: (command) =>
+        (command.type === "thread.cad.comments.commit"
+          ? (beforeCommit ?? Effect.void)
+          : Effect.void
+        ).pipe(Effect.andThen(engine.dispatch(command))),
+    }),
   );
   const query = yield* ProjectionSnapshotQuery;
   return { service, store, dispatch, query, snapshot };
@@ -265,6 +307,21 @@ const makeFinding = (snapshot: CadSnapshotManifest) => ({
     },
   ],
 });
+for (const unavailable of ["suppressed", "geometryless"] as const) {
+  it.effect(`rejects whole-part publication for ${unavailable} occurrences`, () =>
+    Effect.gen(function* () {
+      const h = yield* harness({ unavailable });
+      const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+      const response = yield* a.invoke("cad_comments_publish", {
+        expectedCatalogVersion: 0,
+        items: [makeFinding(h.snapshot)],
+      });
+      const decoded = yield* decodeReasons(response.result);
+      assert.equal(decoded.results[0]?.reason, "occurrence-unavailable");
+      assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 0);
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+  );
+}
 it.effect("explains malformed publication fields so an agent can correct and retry", () =>
   Effect.gen(function* () {
     const h = yield* harness();
@@ -332,6 +389,11 @@ it.effect(
           }),
         );
       yield* publish();
+      yield* h.dispatch({ type: "thread.archive", threadId });
+      assert.equal(
+        (yield* Stream.runCollect(h.service.watch(threadId).pipe(Stream.take(1))))[0]?.length,
+        1,
+      );
       let model = yield* h.query.getCommandReadModel();
       assert.equal(model.cadComments?.length, 1);
       assert.equal(model.cadCommentReceipts?.length, 1);
@@ -343,8 +405,41 @@ it.effect(
         state: "resolved" as const,
         commandId: CommandId.make("review"),
       };
+      const engine = yield* OrchestrationEngineService;
+      yield* engine.dispatch({
+        type: "thread.cad.context.ensure",
+        threadId,
+        contextId: "00000000-0000-4000-8000-000000000099",
+        childKey: null,
+        commandId: CommandId.make("unrelated-command"),
+      });
+      const spoofed = yield* h.service
+        .review({ ...review, commandId: CommandId.make("unrelated-command") })
+        .pipe(Effect.flip);
+      assert.equal(spoofed.reason, "idempotency-conflict");
+      assert.equal((yield* h.query.getCommandReadModel()).cadComments?.[0]?.state, "open");
       yield* h.service.review(review);
       yield* h.service.review(review);
+      yield* h.service.review({
+        ...review,
+        expectedVersion: 1,
+        state: "open",
+        commandId: CommandId.make("reopen"),
+      });
+      const replay = yield* h.service.review(review);
+      assert.equal(replay.state, "resolved");
+      assert.equal(replay.version, 1);
+      const stale = yield* h.service
+        .review({ ...review, commandId: CommandId.make("stale-result") })
+        .pipe(Effect.flip);
+      assert.equal(stale.reason, "review-version-conflict");
+      assert.equal(stale.currentComment?.state, "open");
+      assert.equal(stale.currentComment?.version, 2);
+      yield* h.service.review({
+        ...review,
+        expectedVersion: 2,
+        commandId: CommandId.make("resolve-again"),
+      });
       assert.isTrue(
         Exit.isFailure(yield* Effect.exit(h.service.review({ ...review, state: "dismissed" }))),
       );
@@ -393,14 +488,151 @@ it.effect(
       yield* h.dispatch({ type: "thread.delete", threadId });
       yield* h.store.remove([snapshot.snapshotId], []);
       assert.isTrue(Exit.isFailure(yield* Effect.exit(h.store.load(snapshot.snapshotId))));
+      yield* h.dispatch({
+        type: "thread.create",
+        projectId,
+        threadId,
+        title: "Recreated",
+        createdAt: now,
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      });
+      const recreated = yield* h.query.getCommandReadModel();
+      assert.equal(recreated.cadComments?.length, 0);
+      assert.equal(recreated.cadCommentReceipts?.length, 0);
+      assert.equal(recreated.cadCommentReviews?.length, 0);
+      assert.equal(
+        (yield* Stream.runCollect(h.service.watch(threadId).pipe(Stream.take(1))))[0]?.length,
+        0,
+      );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
 const locateResult = Schema.decodeUnknownSync(
   Schema.Struct({ results: Schema.Array(Schema.Struct({ candidateId: Schema.String })) }),
 );
+it.effect("returns per-item catalog conflicts when two publications race at commit", () =>
+  Effect.gen(function* () {
+    const bothReady = yield* Deferred.make<void>();
+    let arrived = 0;
+    const h = yield* harness({
+      beforeCommit: Effect.gen(function* () {
+        if (++arrived === 2) yield* Deferred.succeed(bothReady, undefined);
+        yield* Deferred.await(bothReady);
+      }),
+    });
+    const activations = yield* Effect.all([
+      h.service.activate(threadId, "a", TurnId.make("a")),
+      h.service.activate(threadId, "b", TurnId.make("b")),
+    ]);
+    const responses = yield* Effect.all(
+      activations.map((a, i) =>
+        a.invoke("cad_comments_publish", {
+          expectedCatalogVersion: 0,
+          items: [{ ...makeFinding(h.snapshot), publicationKey: `race-${i}` }],
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+    const decodeResponse = Schema.decodeUnknownEffect(
+      Schema.Struct({
+        results: Schema.Array(
+          Schema.Struct({
+            reason: Schema.optionalKey(Schema.String),
+            commentId: Schema.optionalKey(Schema.String),
+          }),
+        ),
+      }),
+    );
+    const results = (yield* Effect.all(responses.map((r) => decodeResponse(r.result)))).flatMap(
+      (r) => r.results,
+    );
+    assert.equal(results.filter((r) => r.commentId).length, 1);
+    assert.equal(results.filter((r) => r.reason === "catalog-changed").length, 1);
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 1);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 const inspectResult = Schema.decodeUnknownSync(
   Schema.Struct({ inspectionId: Schema.String, artifact: Schema.Struct({ path: Schema.String }) }),
+);
+it.effect(
+  "cancels inspection when its chat is deleted and rejects the old activation after recreation",
+  () =>
+    Effect.gen(function* () {
+      const rendering = yield* Deferred.make<void>();
+      const h = yield* harness({
+        beforeInspect: Deferred.succeed(rendering, undefined).pipe(Effect.andThen(Effect.never)),
+      });
+      const contextId = "00000000-0000-4000-8000-000000000011";
+      const captureId = "00000000-0000-4000-8000-000000000012";
+      const turnId = TurnId.make("deleted-inspection");
+      yield* h.dispatch({ type: "thread.cad.context.ensure", threadId, contextId, childKey: null });
+      yield* h.dispatch({
+        type: "thread.cad.view.set",
+        threadId,
+        contextId,
+        expectedRevision: null,
+        view: initialCadView(h.snapshot, 0),
+      });
+      yield* h.dispatch({
+        type: "thread.cad.capture.record",
+        threadId,
+        contextId,
+        turnId,
+        capture: {
+          captureId,
+          rootId: h.snapshot.rootId,
+          snapshotId: h.snapshot.snapshotId,
+          revision: 0,
+          artifact: {
+            path: "capture.png",
+            mimeType: "image/png",
+            width: 1280,
+            height: 960,
+            byteLength: 3,
+            createdAt: now,
+          },
+          summary: "Source",
+        },
+        cameraPose: {
+          position: [1, 1, 1],
+          target: [0, 0, 0],
+          up: [0, 0, 1],
+          projection: "perspective",
+          zoom: 1,
+        },
+      });
+      const a = yield* h.service.activate(threadId, contextId, turnId);
+      const located = locateResult(
+        (yield* a.invoke("cad_comment_locate", {
+          captureId,
+          picks: [
+            { pickKey: "hole", intendedOccurrenceId: h.snapshot.nodes.at(-1)!.id, x: 640, y: 480 },
+          ],
+        })).result,
+      );
+      const pending = yield* a
+        .invoke("cad_comment_inspect", { candidateIds: [located.results[0]!.candidateId] })
+        .pipe(Effect.flip, Effect.forkChild);
+      yield* Deferred.await(rendering);
+      yield* h.dispatch({ type: "thread.delete", threadId });
+      assert.equal((yield* Fiber.join(pending)).reason, "comment-unavailable");
+      yield* h.dispatch({
+        type: "thread.create",
+        projectId,
+        threadId,
+        title: "Recreated",
+        createdAt: now,
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      });
+      assert.equal(
+        (yield* a.invoke("cad_comments_list", {}).pipe(Effect.flip)).reason,
+        "comment-unavailable",
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 it.effect(
   "requires alternate-view confirmation, binds historical publication, and retains evidence after scope release",
@@ -484,6 +716,8 @@ it.effect(
               .result,
           );
           evidence = inspection.artifact.path;
+          // Reviewing the same candidate again must not revoke earlier verified evidence.
+          yield* a.invoke("cad_comment_inspect", { candidateIds: [candidate.candidateId] });
           yield* h.dispatch({
             type: "thread.cad.presentation.settle",
             threadId,
@@ -546,6 +780,17 @@ it.effect(
       const fs = yield* FileSystem.FileSystem;
       assert.isTrue(yield* fs.exists(evidence));
       assert.isTrue(yield* fs.exists(evidence.replace(".png", ".json")));
+      const path = yield* Path.Path;
+      const root = path.dirname(path.dirname(evidence));
+      const orphan = path.join(path.dirname(evidence), "00000000-0000-4000-8000-000000000077.png");
+      const pendingId = "00000000-0000-4000-8000-000000000078";
+      const pending = path.join(path.dirname(evidence), `${pendingId}.png`);
+      yield* fs.writeFile(orphan, new Uint8Array([1]));
+      yield* fs.writeFile(pending, new Uint8Array([1]));
+      yield* pruneCadCommentEvidence(root, new Set([pendingId]));
+      assert.isTrue(yield* fs.exists(evidence));
+      assert.isFalse(yield* fs.exists(orphan));
+      assert.isTrue(yield* fs.exists(pending));
       yield* h.store.remove([snapshot.snapshotId], []);
       assert.equal((yield* h.store.load(snapshot.snapshotId)).snapshotId, snapshot.snapshotId);
       yield* Effect.scoped(

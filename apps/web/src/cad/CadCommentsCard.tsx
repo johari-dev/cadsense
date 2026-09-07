@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { CadComment, CadSnapshotManifest, ScopedThreadRef } from "@cadsense/contracts";
 import { newCommandId } from "../lib/utils";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
@@ -43,11 +43,15 @@ export function CadCommentsCard({
     historical ? "history" : "open",
   );
   const [notice, setNotice] = useState("");
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const card = useRef<HTMLDivElement>(null),
     markers = useRef<HTMLDivElement>(null),
     host = useRef<HTMLDivElement>(null);
   const review = useAtomCommand(cadPanelEnvironment.review, { reportFailure: false });
-  const descriptor = manifest ? cadCommentModelDescriptor(manifest) : null;
+  const descriptor = useMemo(
+    () => (manifest ? cadCommentModelDescriptor(manifest) : null),
+    [manifest],
+  );
   const displayed = comments.filter((c) =>
     descriptor ? c.modelDescriptor === descriptor : c.snapshotId === displayedSnapshotId,
   );
@@ -81,6 +85,22 @@ export function CadCommentsCard({
     return () => window.removeEventListener("keydown", key);
   }, [open, renderer, setOpen]);
   useEffect(() => {
+    if (!open || !host.current || !card.current) return;
+    let dimensions = "";
+    const observer = new ResizeObserver(() => {
+      const hostBox = host.current?.getBoundingClientRect();
+      const cardBox = card.current?.getBoundingClientRect();
+      const next = `${hostBox?.width}:${hostBox?.height}:${cardBox?.width}:${cardBox?.height}`;
+      if (next !== dimensions) {
+        dimensions = next;
+        setLayoutVersion((v) => v + 1);
+      }
+    });
+    observer.observe(host.current);
+    observer.observe(card.current);
+    return () => observer.disconnect();
+  }, [open]);
+  useEffect(() => {
     if (
       !open ||
       !selection ||
@@ -92,7 +112,7 @@ export function CadCommentsCard({
     const bounds = host.current.getBoundingClientRect(),
       occupied = card.current?.getBoundingClientRect();
     const width = occupied ? Math.max(120, occupied.left - bounds.left - 16) : bounds.width;
-    const below = occupied && width < 240;
+    const below = occupied && bounds.width <= 570;
     const safeHeight = below ? Math.max(120, occupied.top - bounds.top - 16) : bounds.height;
     const safeWidth = below ? bounds.width : width;
     const target = selected.targets[selection.target];
@@ -105,7 +125,7 @@ export function CadCommentsCard({
       ) ?? "Location unavailable",
     );
     card.current?.querySelector('[aria-expanded="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [selection, descriptor, open]);
+  }, [selection, descriptor, open, layoutVersion]);
   useEffect(() => {
     let frame = 0;
     const draw = () => {

@@ -3,6 +3,7 @@ import {
   CadCommentReceipt,
   CadCommentReviewed,
   type OrchestrationEvent,
+  type ThreadId,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -18,6 +19,14 @@ const decodeReviews = Schema.decodeUnknownEffect(
 const encodeComment = Schema.encodeEffect(Schema.fromJsonString(CadComment));
 const encodeReceipt = Schema.encodeEffect(Schema.fromJsonString(CadCommentReceipt));
 const encodeReview = Schema.encodeEffect(Schema.fromJsonString(CadCommentReviewed));
+export const readThreadCadComments = Effect.fn("readThreadCadComments")(function* (
+  threadId: ThreadId,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const rows =
+    yield* sql`SELECT record_json AS record FROM projection_cad_comments WHERE thread_id=${threadId} ORDER BY sequence, comment_id`;
+  return yield* decodeComments(rows.map((r) => r.record));
+});
 export const readCadComments = Effect.fn("readCadComments")(function* () {
   const sql = yield* SqlClient.SqlClient;
   const comments =
@@ -35,7 +44,12 @@ export const projectCadCommentEvent = Effect.fn("projectCadCommentEvent")(functi
   event: OrchestrationEvent,
 ) {
   const sql = yield* SqlClient.SqlClient;
-  if (event.type === "thread.cad-comments-committed") {
+  if (event.type === "thread.created") {
+    const id = event.payload.threadId;
+    yield* sql`DELETE FROM projection_cad_comments WHERE thread_id=${id}`;
+    yield* sql`DELETE FROM projection_cad_comment_receipts WHERE thread_id=${id}`;
+    yield* sql`DELETE FROM projection_cad_comment_reviews WHERE json_extract(record_json,'$.threadId')=${id}`;
+  } else if (event.type === "thread.cad-comments-committed") {
     for (const comment of event.payload.comments)
       yield* sql`INSERT INTO projection_cad_comments(comment_id, thread_id, snapshot_id, sequence, record_json) VALUES(${comment.id},${comment.threadId},${comment.snapshotId},${event.sequence},${yield* encodeComment(comment)}) ON CONFLICT(comment_id) DO NOTHING`;
     for (const receipt of event.payload.receipts)

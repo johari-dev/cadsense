@@ -1,8 +1,9 @@
-import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
+import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createCadSceneRenderer } from "./CadSceneRenderer";
-import { Camera, Matrix4, Quaternion, Vector3 } from "three";
+import { BoxGeometry, Camera, Matrix4, Mesh, MeshBasicMaterial, Quaternion, Vector3 } from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as CadBudget from "@cadsense/shared/cadSceneBudget";
 
 const calls = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() }));
@@ -19,6 +20,7 @@ vi.mock("three", async (importOriginal) => {
       setClearColor() {}
       setPixelRatio() {}
       setSize() {}
+      clearDepth() {}
       getContext() {
         return { isContextLost: () => false };
       }
@@ -44,6 +46,7 @@ vi.mock("three/addons/loaders/GLTFLoader.js", async () => {
 });
 
 const id = "1".repeat(64);
+const isCameraPose = Schema.is(CadCameraPose);
 // Valid empty GLB: lifecycle tests fake the graphics boundary, not asset admission.
 const geometry = () => {
   const json = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" }, nodes: [] }));
@@ -160,6 +163,95 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("does not verify a target through another visible component during inspection", async () => {
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext() {
+          return null;
+        }
+      },
+    );
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [
+            { ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey },
+            {
+              ...manifest.nodes[0]!,
+              id: "3".repeat(64),
+              kind: "part",
+              sourcePartKey: geometryKey,
+              transform: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1],
+            },
+          ],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(1280, 960);
+      renderer.apply(state);
+      const hits = renderer.commentWork({
+        kind: "inspect",
+        targets: [
+          {
+            candidateId: "inside",
+            occurrenceId: id,
+            point: [0, 0, 0.01],
+          },
+        ],
+      });
+      expect(hits[0]?.reason).toBe("occluded");
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+  it("can restore a comment camera after rotating to reveal the underside of a part", async () => {
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [{ ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey }],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(800, 600);
+      renderer.apply(state);
+      renderer.focusComment(
+        {
+          kind: "point",
+          label: "Underside",
+          occurrenceId: id,
+          point: [0, 0, -0.01],
+          normal: [0, 0, -1],
+          captureId: "capture",
+          inspectionId: "inspection",
+          confirmationReason: "Verified underside",
+        },
+        { width: 400, height: 600, centerX: 200, centerY: 300 },
+        true,
+      );
+      const pose = renderer.cameraPose();
+      expect(pose.position[2]).toBeLessThan(0);
+      expect(isCameraPose(pose)).toBe(true);
+      expect(() =>
+        renderer.apply({ ...state, camera: { kind: "pose", pose, fit: null } }),
+      ).not.toThrow();
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+    }
+  });
   it.each(["perspective", "orthographic"] as const)(
     "centers an arbitrary world point and scales magnification in %s captures",
     async (projection) => {

@@ -56,6 +56,18 @@ export const CadComment = Schema.Struct({
   turnId: TurnId,
 });
 export type CadComment = typeof CadComment.Type;
+const { modelDescriptor: _modelDescriptor, ...summaryFields } = CadComment.fields;
+export const CadCommentsCatalog = Schema.Struct({
+  comments: Schema.Array(Schema.Struct(summaryFields)),
+  modelDescriptors: Schema.Record(Schema.String, Schema.String),
+});
+/** A manifest descriptor is shared by every finding on that model, rather than repeated per item. */
+export const cadCommentsCatalog = (
+  comments: readonly CadComment[],
+): typeof CadCommentsCatalog.Type => ({
+  comments: comments.map(({ modelDescriptor: _descriptor, ...comment }) => comment),
+  modelDescriptors: Object.fromEntries(comments.map((c) => [c.modelKey, c.modelDescriptor])),
+});
 export const CadCommentPublication = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("new"),
@@ -166,6 +178,7 @@ export const CadCommentReviewed = Schema.Struct({
 export class CadCommentError extends Schema.TaggedErrorClass<CadCommentError>()("CadCommentError", {
   reason: Schema.String,
   details: Schema.optionalKey(Schema.String),
+  currentComment: Schema.optionalKey(CadComment),
 }) {}
 
 /** Optional renderer work runs against the capture's frozen view, never the user's later view. */

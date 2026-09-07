@@ -8,7 +8,7 @@ import {
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../components/ui/button";
 import { LoadingMark } from "../components/LoadingMark";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
@@ -397,7 +397,16 @@ export function CadPanel({
       input: { threadId: threadRef.threadId },
     }),
   );
-  const comments = AsyncResult.isSuccess(commentState) ? commentState.value : [];
+  const comments = useMemo(
+    () =>
+      AsyncResult.isSuccess(commentState)
+        ? commentState.value.comments.map((c) => ({
+            ...c,
+            modelDescriptor: commentState.value.modelDescriptors[c.modelKey] ?? "",
+          }))
+        : [],
+    [commentState],
+  );
   const renderer = useRef<CadSceneRenderer | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [selection, setSelection] = useState<CadCommentSelection | null>(null);
@@ -469,7 +478,9 @@ export function CadPanel({
       );
       const pose = renderer.current?.cameraPose();
       savedCurrent.current = {
-        view: pose ? { ...currentView, camera: { kind: "pose", pose, fit: null } } : currentView,
+        view: pose
+          ? { ...(view ?? currentView), camera: { kind: "pose", pose, fit: null } }
+          : (view ?? currentView),
         descriptor: currentManifest ? cadCommentModelDescriptor(currentManifest) : null,
         framing: renderer.current?.commentFraming() ?? { x: 0, y: 0 },
       };
@@ -610,6 +621,21 @@ export function CadPanel({
             "No CAD has been downloaded. Select and sync CAD in project settings."
           )}
         </div>
+      )}
+      {!view && comments.length > 0 && (
+        <CadCommentsCard
+          threadRef={threadRef}
+          comments={comments}
+          renderer={renderer}
+          manifest={null}
+          displayedSnapshotId=""
+          open={commentsOpen}
+          setOpen={setCommentsOpen}
+          selection={selection}
+          choose={choose}
+          historical={false}
+          back={back}
+        />
       )}
     </section>
   );

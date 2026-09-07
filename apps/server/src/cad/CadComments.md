@@ -24,7 +24,11 @@ Each activation pins inspected geometry through validation and an uninterruptibl
 
 Successful precise comments retain numbered PNG evidence and reconstruction metadata under `cad/comment-evidence/<hashed-chat-id>`. Activation cleanup removes unused inspection artifacts after checking durable references. Deleted-chat/project events remove that chat's evidence directory. Candidates expire with their activation; restart requires a new locate/inspect sequence unless replaying a successful publication receipt.
 
+After projection recovery, startup cleanup removes orphaned evidence while preserving durable references and active inspections. Deletion cancels outstanding inspection deliveries; activation ownership includes the chat creation event so a recreated chat cannot use an earlier activation. Recreating a chat clears its previous comment catalog and receipts. Archived chats retain access.
+
 Inspection searches nearby alternate directions (5, 10, and 20 degrees around the captured viewing direction) before broad assembly angles. Narrow bores may be visible from nearby directions while every broad angle is blocked by their walls. The captured direction itself is excluded; the agent must still visually verify the numbered alternate image. Camera up remains independent of the viewing direction, and generated poses are validated before rendering.
+
+Inspection preserves the captured effective scene, including other visible components, when checking occlusion. Re-inspecting a candidate does not revoke previously verified evidence. Whole-part publication rejects suppressed or geometry-less occurrences.
 
 ## Viewer behavior
 
@@ -34,6 +38,10 @@ Selecting a finding focuses its first location outside the card with surrounding
 
 Historical selection opens retained original geometry without rolling back project CAD. Back to current restores the saved current camera, framing, visibility, isolation, and explosion when its model still matches. If CAD changed during review, it opens the newest current view and explains the change.
 
+History saves the effective local view, including edits made while agent control is active. Focus tracks panel/card resizing, and pole-facing comment cameras keep a valid up direction for later restoration. Closing review intentionally preserves visual framing with the camera, avoiding a jump when the card disappears. History remains accessible when there is no current scene.
+
+Comment subscriptions query only the owning chat and refresh only on comment or ownership events. Model descriptors are shared once per model in a catalog update and memoized in the card. Review retries return the original state/version; conflicts include the current record. Unrelated command receipts cannot acknowledge a review, and commit races return per-item repair codes.
+
 ## Verification
 
 - Real SQLite/orchestration tests cover partial publication, receipt replay, review conflicts, cross-chat rejection, required inspection, publication against an older inspected snapshot, evidence retention, and stale deletion requests.
@@ -41,5 +49,6 @@ Historical selection opens retained original geometry without rolling back proje
 - Provider transport tests enumerate the eight CAD tools and preserve native image delivery.
 - Local browser checks cover selecting locations, resolving/reopening, history/back, and reload. A real imported spacer verifies rim picking and the numbered alternate view.
 - Kraken acceptance check (2026-09-07): two fresh chats using GPT-5.6-Luna / Low and the exact prompt `Add comments where I am missing screws` each produced five distinct precise comments, with no whole-part targets. All five marker selections focused visible locations and the comments survived reload. A replay of the earlier five-occluded-candidate failure now returns five visible candidates; a narrow-bore geometry regression checks the nearby-angle search.
+- Independent Sol and Opus adversarial reviews: regressions cover concurrent commit conflicts, unrelated/replayed review receipts, archived/recreated chats, deletion during inspection, evidence recovery, suppressed targets, repeated inspection, cross-part occlusion, and pole-facing camera restoration. The Kraken replay still verifies all five points with surrounding components preserved.
 
 These checks establish mechanics, not autonomous accuracy in deciding whether a screw is missing. Inspection relies on the agent's explicit visual confirmation and conservative whole-part fallback.

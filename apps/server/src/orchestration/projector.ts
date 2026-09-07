@@ -358,6 +358,13 @@ export function projectEvent(
         const existing = nextBase.threads.find((entry) => entry.id === thread.id);
         return {
           ...nextBase,
+          cadComments: (nextBase.cadComments ?? []).filter((c) => c.threadId !== thread.id),
+          cadCommentReceipts: (nextBase.cadCommentReceipts ?? []).filter(
+            (c) => c.threadId !== thread.id,
+          ),
+          cadCommentReviews: (nextBase.cadCommentReviews ?? []).filter(
+            (c) => c.threadId !== thread.id,
+          ),
           threads: existing
             ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
             : [...nextBase.threads, thread],

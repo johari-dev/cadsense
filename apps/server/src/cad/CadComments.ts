@@ -14,6 +14,7 @@ import {
   CadCaptureRecord,
   CadViewState,
   CommandId,
+  ProjectId,
   type CadComment,
   type CadCommentReceipt,
   type CadCommentTarget,
@@ -40,16 +41,22 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
 import { forkParked } from "../serverActivation.ts";
+import { readThreadCadComments } from "./CadCommentPersistence.ts";
+import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
+import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
 const isCommentError = Schema.is(CadCommentError);
 const isRenderError = Schema.is(CadRenderError);
+const isInvariantError = Schema.is(OrchestrationCommandInvariantError);
 const error = (cause: unknown) =>
   isCommentError(cause)
     ? cause
-    : isRenderError(cause)
-      ? fail(`render-${cause.reason}`)
-      : fail(cause instanceof Error && cause.message ? cause.message : "unavailable");
+    : isInvariantError(cause)
+      ? fail(cause.detail)
+      : isRenderError(cause)
+        ? fail(`render-${cause.reason}`)
+        : fail(cause instanceof Error && cause.message ? cause.message : "unavailable");
 const digest = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
 const uuid = () => NodeCrypto.randomUUID();
 // Include recovery guidance in responses: resumed providers can retain older descriptions.
@@ -103,6 +110,15 @@ export const make = Effect.gen(function* () {
     fs = yield* FileSystem.FileSystem,
     path = yield* Path.Path,
     config = yield* ServerConfig;
+  const activeEvidence = new Set<string>();
+  const evidenceRoot = path.join(config.stateDir, "cad", "comment-evidence");
+  yield* forkParked(
+    pruneCadCommentEvidence(evidenceRoot, activeEvidence).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("CAD comment evidence recovery remains pending", cause),
+      ),
+    ),
+  );
   const removeDeletedEvidence = Effect.gen(function* () {
     const model = yield* query.getCommandReadModel();
     for (const thread of model.threads)
@@ -127,16 +143,19 @@ export const make = Effect.gen(function* () {
     ),
   );
   const owner = Effect.fn("CadComments.owner")(function* (threadId: ThreadId) {
-    const thread = yield* query.getThreadShellById(threadId);
-    if (Option.isNone(thread)) return yield* fail("comment-unavailable");
-    const project = yield* query.getProjectShellById(thread.value.projectId);
+    const rows =
+      yield* sql`SELECT project_id FROM projection_threads WHERE thread_id=${threadId} AND deleted_at IS NULL`;
+    if (!rows[0]) return yield* fail("comment-unavailable");
+    const projectId = yield* decode(ProjectId, rows[0].project_id);
+    const project = yield* query.getProjectShellById(projectId);
     if (Option.isNone(project)) return yield* fail("comment-unavailable");
     return project.value;
   });
   const read = Effect.fn("CadComments.read")(function* (threadId: ThreadId) {
     yield* owner(threadId);
-    const model = yield* query.getCommandReadModel();
-    return (model.cadComments ?? []).filter((c) => c.threadId === threadId);
+    return yield* readThreadCadComments(threadId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
   });
   const watch = (threadId: ThreadId) =>
     Stream.unwrap(
@@ -145,7 +164,14 @@ export const make = Effect.gen(function* () {
         return Stream.concat(
           Stream.fromEffect(read(threadId)),
           Stream.fromSubscription(events).pipe(
-            Stream.filter((e) => e.aggregateId === threadId || e.type === "project.deleted"),
+            Stream.filter(
+              (e) =>
+                e.type === "project.deleted" ||
+                (e.aggregateId === threadId &&
+                  (e.type === "thread.cad-comments-committed" ||
+                    e.type === "thread.cad-comment-reviewed" ||
+                    e.type === "thread.deleted")),
+            ),
             Stream.mapEffect(() => read(threadId)),
           ),
         );
@@ -167,10 +193,25 @@ export const make = Effect.gen(function* () {
     if (prior && (prior.threadId !== input.threadId || prior.payloadHash !== hash))
       return yield* fail("idempotency-conflict");
     if (!prior)
-      yield* engine.dispatch({ ...input, type: "thread.cad.comment.review", payloadHash: hash });
+      yield* engine
+        .dispatch({ ...input, type: "thread.cad.comment.review", payloadHash: hash })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.gen(function* () {
+              const currentComment = (yield* read(input.threadId)).find(
+                (c) => c.id === input.commentId,
+              );
+              const failure = error(cause);
+              return yield* new CadCommentError({
+                ...failure,
+                ...(currentComment ? { currentComment } : {}),
+              });
+            }),
+          ),
+        );
     const result = (yield* read(input.threadId)).find((c) => c.id === input.commentId);
     if (!result) return yield* fail("comment-unavailable");
-    return result;
+    return prior ? { ...result, state: prior.state, version: prior.version } : result;
   }, Effect.mapError(error));
 
   const activate = Effect.fn("CadComments.activate")(function* (
@@ -180,6 +221,30 @@ export const make = Effect.gen(function* () {
   ) {
     yield* owner(threadId);
     const scope = yield* Scope.Scope;
+    const creationSequence = Effect.gen(function* () {
+      const rows =
+        yield* sql`SELECT MAX(sequence) AS sequence FROM orchestration_events WHERE stream_id=${threadId} AND event_type='thread.created'`;
+      return rows[0]?.sequence;
+    });
+    const incarnation = yield* creationSequence;
+    const checkOwner = Effect.gen(function* () {
+      yield* owner(threadId);
+      if ((yield* creationSequence) !== incarnation) return yield* fail("comment-unavailable");
+    });
+    const deleted = yield* Deferred.make<never, CadCommentError>();
+    const lifecycle = yield* engine.subscribeDomainEvents;
+    yield* Stream.fromSubscription(lifecycle).pipe(
+      Stream.filter(
+        (e) =>
+          (e.aggregateId === threadId &&
+            (e.type === "thread.deleted" || e.type === "thread.created")) ||
+          e.type === "project.deleted",
+      ),
+      Stream.runForEach(() =>
+        checkOwner.pipe(Effect.catch(() => Deferred.fail(deleted, fail("comment-unavailable")))),
+      ),
+      Effect.forkIn(scope),
+    );
     type Binding = {
       manifest: CadSnapshotManifest;
       readAsset: (hash: string) => Effect.Effect<Uint8Array, CadCommentError>;
@@ -193,7 +258,7 @@ export const make = Effect.gen(function* () {
       occurrenceId: string;
       point: readonly [number, number, number];
       normal: readonly [number, number, number] | null;
-      inspectionId?: string;
+      inspectionIds: Set<string>;
     };
     const candidates = new Map<string, Candidate>();
     const evidenceDirectory = path.join(
@@ -203,30 +268,34 @@ export const make = Effect.gen(function* () {
       digest(threadId),
     );
     const evidenceIds = new Set<string>();
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        const model = yield* query.getCommandReadModel();
-        const live = model.threads.some(
-          (t) =>
-            t.id === threadId &&
-            t.deletedAt === null &&
-            model.projects.some((p) => p.id === t.projectId && p.deletedAt === null),
-        );
-        const retained = new Set(
-          (model.cadComments ?? [])
-            .filter((c) => live && c.threadId === threadId)
-            .flatMap((c) => c.targets.flatMap((t) => (t.kind === "point" ? [t.inspectionId] : []))),
-        );
-        for (const id of evidenceIds)
-          if (!retained.has(id))
-            for (const extension of ["png", "json"])
-              yield* fs.remove(path.join(evidenceDirectory, `${id}.${extension}`), { force: true });
-      }).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("Could not clean unpublished CAD comment evidence", cause),
-        ),
+    const cleanupEvidence = Effect.gen(function* () {
+      const model = yield* query.getCommandReadModel();
+      const live = model.threads.some(
+        (t) =>
+          t.id === threadId &&
+          t.deletedAt === null &&
+          model.projects.some((p) => p.id === t.projectId && p.deletedAt === null),
+      );
+      const retained = new Set(
+        (model.cadComments ?? [])
+          .filter((c) => live && c.threadId === threadId)
+          .flatMap((c) => c.targets.flatMap((t) => (t.kind === "point" ? [t.inspectionId] : []))),
+      );
+      for (const id of evidenceIds)
+        if (!retained.has(id))
+          for (const extension of ["png", "json"])
+            yield* fs.remove(path.join(evidenceDirectory, `${id}.${extension}`), { force: true });
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not clean unpublished CAD comment evidence", cause),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          for (const id of evidenceIds) activeEvidence.delete(id);
+        }),
       ),
     );
+    yield* Effect.addFinalizer(() => cleanupEvidence);
     let active = true;
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
@@ -362,6 +431,7 @@ export const make = Effect.gen(function* () {
           occurrenceId: hit.occurrenceId,
           point: hit.point,
           normal: hit.normal,
+          inspectionIds: new Set(),
         });
         return { ...hit, candidateId: id };
       });
@@ -389,8 +459,10 @@ export const make = Effect.gen(function* () {
         })),
       });
       const inspectionId = uuid();
+      yield* checkOwner;
       const file = path.join(evidenceDirectory, `${inspectionId}.png`);
       evidenceIds.add(inspectionId);
+      activeEvidence.add(inspectionId);
       yield* fs.makeDirectory(evidenceDirectory, { recursive: true });
       yield* fs.writeFileString(
         path.join(evidenceDirectory, `${inspectionId}.json`),
@@ -414,9 +486,17 @@ export const make = Effect.gen(function* () {
         { flag: "wx" },
       );
       yield* fs.writeFile(file, rendered.png, { flag: "wx" });
+      yield* checkOwner.pipe(
+        Effect.onError(() =>
+          Effect.all([
+            fs.remove(file, { force: true }),
+            fs.remove(file.replace(/\.png$/, ".json"), { force: true }),
+          ]).pipe(Effect.ignore),
+        ),
+      );
       for (const c of selected)
         if (rendered.receipt.commentHits?.some((h) => h.pickKey === c.id && h.reason === "visible"))
-          c.inspectionId = inspectionId;
+          c.inspectionIds.add(inspectionId);
       return {
         result: {
           inspectionId,
@@ -498,7 +578,12 @@ export const make = Effect.gen(function* () {
               if (target.kind === "part") {
                 if (
                   !binding.manifest.nodes.some(
-                    (n) => n.id === target.occurrenceId && n.kind === "part",
+                    (n) =>
+                      n.id === target.occurrenceId &&
+                      n.kind === "part" &&
+                      !n.suppressed &&
+                      n.sourcePartKey !== null &&
+                      binding.manifest.assets.some((a) => a.geometryKey === n.sourcePartKey),
                   )
                 )
                   return yield* fail("occurrence-unavailable");
@@ -508,7 +593,7 @@ export const make = Effect.gen(function* () {
                 if (!c) return yield* fail("candidate-expired");
                 if (c.state.snapshotId !== item.inspectedSnapshotId)
                   return yield* fail("mixed-revision");
-                if (c.inspectionId !== target.inspectionId)
+                if (!c.inspectionIds.has(target.inspectionId))
                   return yield* fail("inspection-required");
                 targets.push({
                   kind: "point",
@@ -578,7 +663,21 @@ export const make = Effect.gen(function* () {
             comments,
             receipts,
           })
-          .pipe(Effect.uninterruptible);
+          .pipe(
+            Effect.uninterruptible,
+            Effect.catch((cause) =>
+              Effect.sync(() => {
+                const failure = error(cause);
+                for (const result of results) {
+                  if (result.replayed === false) {
+                    delete result.commentId;
+                    delete result.placement;
+                    result.reason = failure.reason;
+                  }
+                }
+              }),
+            ),
+          );
       const latest = yield* read(threadId);
       const currentProject = yield* owner(threadId);
       const delivered = [];
@@ -627,7 +726,17 @@ export const make = Effect.gen(function* () {
             default:
               return Effect.fail(fail("capability-unavailable"));
           }
-        }).pipe(Effect.mapError(error)),
+        }).pipe(
+          Effect.andThen((delivery) => checkOwner.pipe(Effect.as(delivery))),
+          Effect.raceFirst(Deferred.await(deleted)),
+          Effect.onError(() =>
+            checkOwner.pipe(
+              Effect.catch(() => cleanupEvidence),
+              Effect.ignore,
+            ),
+          ),
+          Effect.mapError(error),
+        ),
     };
   }, Effect.mapError(error));
   return CadComments.of({ activate, watch, review });
