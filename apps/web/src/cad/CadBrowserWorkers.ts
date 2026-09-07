@@ -2,6 +2,7 @@
 import * as Schema from "effect/Schema";
 import { createCadSceneRenderer, CadRendererError } from "./CadSceneRenderer";
 import { CadWorkerOutput } from "./CadWorkerProtocol";
+import type { CadDiagnosticEvent } from "./CadDiagnostics";
 import {
   createCadRendererPool,
   type CadRenderJob,
@@ -20,9 +21,11 @@ export interface CadBrowserPoolOptions {
   ) => Promise<ArrayBuffer>;
   readonly isCurrent: CadRendererPoolOptions["isCurrent"];
   readonly onDiagnostic?: CadRendererPoolOptions["onDiagnostic"];
+  readonly onRendererDiagnostic?: (event: CadDiagnosticEvent) => void;
 }
 const createOffscreenWorker = (
   readAsset: CadBrowserPoolOptions["readAsset"],
+  onDiagnostic?: CadBrowserPoolOptions["onRendererDiagnostic"],
 ): Promise<CadRenderWorker> =>
   new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./CadRenderer.worker.ts", import.meta.url), {
@@ -63,6 +66,10 @@ const createOffscreenWorker = (
         return;
       }
       if (disposed) return;
+      if (message.type === "frame" || message.type === "context-loss") {
+        onDiagnostic?.(message);
+        return;
+      }
       if (message.type === "ready") {
         clearTimer();
         resolve({
@@ -133,9 +140,16 @@ const createOffscreenWorker = (
     const canvas = new OffscreenCanvas(1, 1);
     worker.postMessage({ type: "initialize", canvas }, [canvas]);
   });
-const createMainThreadWorker = (readAsset: CadBrowserPoolOptions["readAsset"]): CadRenderWorker => {
+const createMainThreadWorker = (
+  readAsset: CadBrowserPoolOptions["readAsset"],
+  onDiagnostic?: CadBrowserPoolOptions["onRendererDiagnostic"],
+): CadRenderWorker => {
   const canvas = document.createElement("canvas");
-  const renderer = createCadSceneRenderer({ canvas });
+  const renderer = createCadSceneRenderer({
+    canvas,
+    onFrame: (milliseconds) => onDiagnostic?.({ type: "frame", milliseconds }),
+    onContextLost: () => onDiagnostic?.({ type: "context-loss" }),
+  });
   const controller = new AbortController();
   let snapshotId: string | null = null;
   return {
@@ -174,7 +188,10 @@ export const createCadBrowserPool = (options: CadBrowserPoolOptions) => {
     createWorker: async () => {
       if (supported) {
         try {
-          const worker = await createOffscreenWorker(options.readAsset);
+          const worker = await createOffscreenWorker(
+            options.readAsset,
+            options.onRendererDiagnostic,
+          );
           firstCreated = true;
           return worker;
         } catch {
@@ -182,7 +199,7 @@ export const createCadBrowserPool = (options: CadBrowserPoolOptions) => {
           supported = false;
         }
       }
-      return createMainThreadWorker(options.readAsset);
+      return createMainThreadWorker(options.readAsset, options.onRendererDiagnostic);
     },
   });
 };

@@ -30,6 +30,8 @@ export interface CadRendererPoolOptions {
     workers: number;
     snapshotId?: string;
     milliseconds?: number;
+    cold?: boolean;
+    snapshotIds?: readonly string[];
   }) => void;
   readonly clock?: {
     now(): number;
@@ -75,7 +77,12 @@ export const createCadRendererPool = (options: CadRendererPoolOptions) => {
     pressure = false,
     ceiling = 2;
   const diagnostic = (type: "worker-count" | "fallback" | "circuit-open", snapshotId?: string) =>
-    options.onDiagnostic?.({ type, workers: slots.size, ...(snapshotId ? { snapshotId } : {}) });
+    options.onDiagnostic?.({
+      type,
+      workers: slots.size,
+      snapshotIds: [...slots].flatMap((slot) => (slot.snapshotId ? [slot.snapshotId] : [])),
+      ...(snapshotId ? { snapshotId } : {}),
+    });
   const settle = (pending: Pending, result: CadRenderResult | CadRendererError) => {
     if (pending.settled) return;
     pending.settled = true;
@@ -138,6 +145,7 @@ export const createCadRendererPool = (options: CadRendererPoolOptions) => {
             pump();
           }
           creating = false;
+          const cold = slot.snapshotId !== job.state.snapshotId;
           const result = await slot.worker.capture(job);
           if (pending.settled || slot.removed || disposed) return;
           if (
@@ -155,6 +163,8 @@ export const createCadRendererPool = (options: CadRendererPoolOptions) => {
             workers: slots.size,
             snapshotId: job.state.snapshotId,
             milliseconds: clock.now() - start,
+            cold,
+            snapshotIds: [...slots].flatMap((slot) => (slot.snapshotId ? [slot.snapshotId] : [])),
           });
           return;
         } catch (error) {
@@ -172,6 +182,8 @@ export const createCadRendererPool = (options: CadRendererPoolOptions) => {
           }
           slot.worker?.dispose();
           slot.worker = null;
+          slot.snapshotId = null;
+          diagnostic("worker-count");
           if (pending.settled || disposed || slot.removed) return;
           if (
             error instanceof CadRendererError &&

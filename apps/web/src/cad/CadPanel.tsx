@@ -15,6 +15,7 @@ import type { Project } from "../types";
 import { createCadSceneRenderer, type CadSceneRenderer } from "./CadSceneRenderer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
+import { cadDiagnostics } from "./CadDiagnostics";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const presets = ["isometric", "front", "back", "left", "right", "top", "bottom"] as const;
@@ -83,9 +84,12 @@ function CadScene({
     node.className = "h-full w-full touch-none";
     canvas.current.append(node);
     let current: CadSceneRenderer;
+    const diagnostics = cadDiagnostics.register();
     try {
       current = createCadSceneRenderer({
         canvas: node,
+        onFrame: (milliseconds) => diagnostics.record({ type: "frame", milliseconds }),
+        onContextLost: () => diagnostics.record({ type: "context-loss" }),
         onInteractionEnd: (pose) => {
           const state = latest.current;
           if (!state.disabled)
@@ -97,11 +101,13 @@ function CadScene({
           ),
       });
     } catch {
+      diagnostics.dispose();
       node.remove();
       setError("A graphics renderer is not available on this device.");
       return;
     }
     renderer.current = current;
+    diagnostics.record({ type: "worker-count", workers: 1 });
     const resize = () => {
       try {
         const bounds = node.getBoundingClientRect();
@@ -137,6 +143,11 @@ function CadScene({
         const snapshot = decodeManifest(await (await request()).json());
         await current.load(snapshot, async (hash) => (await request(hash)).arrayBuffer());
         if (controller.signal.aborted) return;
+        diagnostics.record({
+          type: "worker-count",
+          workers: 1,
+          snapshotIds: [snapshot.snapshotId],
+        });
         current.apply(latest.current.view);
         current.setInteractive(!latest.current.disabled);
         setError(null);
@@ -153,6 +164,7 @@ function CadScene({
       observer.disconnect();
       renderer.current = null;
       current.dispose();
+      diagnostics.dispose();
       node.remove();
     };
   }, [baseUrl, ticket]);

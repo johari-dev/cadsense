@@ -7,6 +7,8 @@ import {
 import { CadWorkerInput, type CadWorkerOutput } from "./CadWorkerProtocol";
 
 const decode = Schema.decodeUnknownSync(CadWorkerInput);
+// Dedicated workers post to their owner; this API has no target origin argument.
+// eslint-disable-next-line unicorn/require-post-message-target-origin
 const post = (message: CadWorkerOutput) => globalThis.postMessage(message);
 let renderer: CadSceneRenderer | null = null;
 let snapshotId: string | null = null;
@@ -80,6 +82,8 @@ globalThis.addEventListener("message", (event: MessageEvent<unknown>) => {
     try {
       renderer = createCadSceneRenderer({
         canvas: message.canvas,
+        onFrame: (milliseconds) => post({ type: "frame", milliseconds }),
+        onContextLost: () => post({ type: "context-loss" }),
         onUnavailable: () => post({ type: "unavailable" }),
       });
       post({ type: "ready" });
