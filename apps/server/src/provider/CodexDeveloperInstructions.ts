@@ -189,12 +189,30 @@ export function buildCodexDeveloperInstructions(
    * setting, so the prompt cannot claim tools the turn doesn't have.
    */
   browserToolsAvailable = true,
+  cadToolsAvailable = false,
 ): string {
   const base =
     interactionMode === "plan"
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
-  return `${base}
+  const cad = cadToolsAvailable
+    ? `
+
+## Local CAD tools
+
+When using CAD tools through exec, cad_context, cad_hierarchy, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
+
+\`\`\`javascript
+const result = await tools.cad_capture({expectedRevision: revision});
+const start = result.indexOf("data:image/png;base64,");
+text(start < 0 ? result : result.slice(0, start));
+if (start >= 0) image(result.slice(start).trim());
+\`\`\`
+
+Never print the image data URL as text. Native subagents must emit their own capture images too.
+`
+    : "";
+  return `${base}${cad}
 
 <runtime_info>In case you're asked: you are running in Cadsense through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }
