@@ -43,8 +43,13 @@ import { forkParked } from "../serverActivation.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
 const isCommentError = Schema.is(CadCommentError);
+const isRenderError = Schema.is(CadRenderError);
 const error = (cause: unknown) =>
-  isCommentError(cause) ? cause : fail(cause instanceof Error ? cause.message : "unavailable");
+  isCommentError(cause)
+    ? cause
+    : isRenderError(cause)
+      ? fail(`render-${cause.reason}`)
+      : fail(cause instanceof Error && cause.message ? cause.message : "unavailable");
 const digest = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
 const uuid = () => NodeCrypto.randomUUID();
 // Include recovery guidance in responses: resumed providers can retain older descriptions.
@@ -418,7 +423,7 @@ export const make = Effect.gen(function* () {
           artifact: { path: file, mimeType: "image/png", width: 1280, height: 960 },
           results: rendered.receipt.commentHits?.map((h, i) => ({ ...h, marker: i + 1 })),
           summary:
-            "Yellow markers are visible candidate surfaces; red markers are occluded and cannot be confirmed. Verify the location, not just the part identity.",
+            "Verify each yellow marker's surface and depth. Publish verified holes as separate precise comments. Inspect remaining red/occluded candidates individually to choose a better angle; if still uncertain, capture a closer alternate view and locate a reliable rim. A render error is a technical failure: retry inspection before whole-part fallback. Previously verified candidates remain usable during this turn.",
         },
         png: rendered.png,
       };

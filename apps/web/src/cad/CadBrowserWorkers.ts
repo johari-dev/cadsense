@@ -63,6 +63,8 @@ const createOffscreenWorker = (
       try {
         message = decodeOutput(event.data);
       } catch {
+        // A rejected result must settle the pending capture, not wait for its watchdog.
+        fail();
         return;
       }
       if (disposed) return;

@@ -7,8 +7,12 @@ import {
   locateCadCommentPoints,
   cadCommentWorldPoint,
   cadCommentVisible,
+  cadCommentCameraUp,
 } from "./CadCommentGeometry";
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
+import { CadCameraPose } from "@cadsense/contracts";
+import * as Schema from "effect/Schema";
+const isCadCameraPose = Schema.is(CadCameraPose);
 import * as THREE from "three";
 import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -659,8 +663,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           directions.find((d) => Math.abs(d.clone().normalize().dot(originalDirection)) < 0.94) ??
           directions[0]!,
         score = -1;
-      const orient = (d: THREE.Vector3) =>
-        configureCamera({
+      const orient = (d: THREE.Vector3) => {
+        const inspectionPose = {
           ...pose(),
           position: center.clone().addScaledVector(d.clone().normalize(), distance).toArray() as [
             number,
@@ -668,9 +672,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
             number,
           ],
           target: center.toArray() as [number, number, number],
-          up: [0, 0, 1],
+          up: cadCommentCameraUp(d),
           zoom: 1,
-        });
+        };
+        if (!isCadCameraPose(inspectionPose)) throw new CadRendererError("invalid-view");
+        configureCamera(inspectionPose);
+      };
       for (const direction of directions) {
         if (direction.clone().normalize().dot(originalDirection) > 0.94) continue;
         orient(direction);

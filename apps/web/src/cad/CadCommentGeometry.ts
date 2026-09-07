@@ -2,6 +2,10 @@ import type { CadCommentRenderHit, CadCommentRenderWork } from "@cadsense/contra
 import * as THREE from "three";
 import type { CadSceneModel } from "./CadSceneModel";
 
+/** Keep camera roll well-defined even when an inspection looks along the Z axis. */
+export const cadCommentCameraUp = (direction: THREE.Vector3): [number, number, number] =>
+  Math.abs(direction.clone().normalize().z) > 0.99 ? [0, 1, 0] : [0, 0, 1];
+
 export const locateCadCommentPoints = (
   model: CadSceneModel,
   camera: THREE.Camera,

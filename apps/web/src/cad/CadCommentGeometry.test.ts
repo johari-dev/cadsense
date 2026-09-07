@@ -1,9 +1,10 @@
-import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
+import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import * as THREE from "three";
 import { describe, expect, it } from "vite-plus/test";
 import { buildCadSceneModel } from "./CadSceneModel";
 
+const isCadCameraPose = Schema.is(CadCameraPose);
 const id = (n: number) => n.toString(16).padStart(64, "0");
 const transform = (x: number, y = 0) => [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, 0, 0, 0, 0, 1];
 const node = (n: number, parent: number | null, x: number, overrides = {}) => ({
@@ -59,6 +60,7 @@ import {
   locateCadCommentPoints,
   cadCommentWorldPoint,
   cadCommentVisible,
+  cadCommentCameraUp,
 } from "./CadCommentGeometry";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 const setup = (explosion = 0) => {
@@ -171,4 +173,21 @@ describe("CAD comment anchors", () => {
       }),
     ).not.toBe(descriptor);
   });
+});
+
+it.each([
+  [0, 0, 1],
+  [0, 0, -1],
+  [0.001, 0, 1],
+  [-1, 1, 1],
+])("keeps inspection camera up independent of viewing direction %j", (x, y, z) => {
+  const direction = new THREE.Vector3(x, y, z);
+  const pose = {
+    position: direction.toArray(),
+    target: [0, 0, 0],
+    up: cadCommentCameraUp(direction),
+    projection: "perspective",
+    zoom: 1,
+  };
+  expect(isCadCameraPose(pose)).toBe(true);
 });
