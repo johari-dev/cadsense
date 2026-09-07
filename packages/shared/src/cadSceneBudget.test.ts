@@ -96,7 +96,12 @@ describe("whole-scene admission", () => {
     expect(() =>
       createCadSceneBudget(nodes).add(
         { geometryKey: "bearing", sha256: "hash" },
-        { decodedBytes: 1_000_000, triangles: 14872, drawCalls: 1, nodeCount: 1 },
+        {
+          decodedBytes: 1_000_000,
+          triangles: Math.floor(CAD_SCENE_LIMITS.triangles / nodes.length) + 1,
+          drawCalls: 1,
+          nodeCount: 1,
+        },
       ),
     ).toThrow("too-large");
     expect(() =>
@@ -107,12 +112,22 @@ describe("whole-scene admission", () => {
     const budget = createCadSceneBudget([node("1", "a"), node("2", "b")]);
     budget.add(
       { geometryKey: "a", sha256: "a" },
-      { decodedBytes: 150 * 1024 ** 2, triangles: 1, drawCalls: 1, nodeCount: 1 },
+      {
+        decodedBytes: CAD_SCENE_LIMITS.decodedBytes / 2 + 1,
+        triangles: 1,
+        drawCalls: 1,
+        nodeCount: 1,
+      },
     );
     expect(() =>
       budget.add(
         { geometryKey: "b", sha256: "b" },
-        { decodedBytes: 150 * 1024 ** 2, triangles: 1, drawCalls: 1, nodeCount: 1 },
+        {
+          decodedBytes: CAD_SCENE_LIMITS.decodedBytes / 2 + 1,
+          triangles: 1,
+          drawCalls: 1,
+          nodeCount: 1,
+        },
       ),
     ).toThrow("too-large");
   });
@@ -133,7 +148,12 @@ describe("whole-scene admission", () => {
     expect(() =>
       createCadSceneBudget(nodes).add(
         { geometryKey: "a", sha256: "a" },
-        { decodedBytes: 100, triangles: 10, drawCalls: 1, nodeCount: 40_000 },
+        {
+          decodedBytes: 100,
+          triangles: 10,
+          drawCalls: 1,
+          nodeCount: Math.ceil(CAD_SCENE_LIMITS.decodedBytes / 4096 / nodes.length),
+        },
       ),
     ).toThrow("too-large");
     expect(() =>

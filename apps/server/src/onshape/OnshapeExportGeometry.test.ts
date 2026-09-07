@@ -5,7 +5,11 @@ import * as Schema from "effect/Schema";
 import { normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import { normalizeOnshapeExport } from "./OnshapeExportBundle.ts";
 import { readOnshapeExportGeometry } from "./OnshapeExportGeometry.ts";
-import { parseAssemblySnapshotDraft, snapshotRootId } from "./OnshapeSnapshotManifest.ts";
+import {
+  parseAssemblySnapshotDraft,
+  snapshotRootId,
+  withAssemblyExportMetadata,
+} from "./OnshapeSnapshotManifest.ts";
 import {
   bulkFixture,
   bulkInput,
@@ -42,6 +46,36 @@ const glbDocument = (bytes: Uint8Array) =>
   );
 
 describe("Onshape export geometry", () => {
+  it.effect("retains every exported body of a composite instance", () =>
+    Effect.gen(function* () {
+      const fixture = bulkFixture(1);
+      const definition = {
+        ...fixture.definition,
+        parts: fixture.definition.parts.map((part) => ({ ...part, bodyType: "composite" })),
+      };
+      const draft = yield* withAssemblyExportMetadata(
+        yield* parseAssemblySnapshotDraft(context, definition),
+        definition,
+      );
+      const gltf = {
+        ...fixture.gltf,
+        nodes: [
+          fixture.gltf.nodes[0],
+          fixture.gltf.nodes[1],
+          { ...fixture.gltf.nodes[2], children: [1, 3] },
+          { ...fixture.gltf.nodes[1], children: [4] },
+          { ...fixture.gltf.nodes[0] },
+        ],
+      };
+      const input = yield* normalizeOnshapeExport(encode(gltf));
+      const output = readOnshapeExportGeometry(draft, input).extract(draft.parts[0]!.geometryKey);
+      yield* normalizeCadGeometry(output);
+      const value = glbDocument(output);
+      assert.deepEqual(value.scenes, [{ nodes: [0, 2] }]);
+      const ordinary = yield* parseAssemblySnapshotDraft(context, fixture.definition);
+      assert.throws(() => readOnshapeExportGeometry(ordinary, input));
+    }),
+  );
   it.effect(
     "extracts validated source geometry, retains color, and removes occurrence placement",
     () =>
@@ -130,6 +164,24 @@ describe("Onshape export geometry", () => {
         draft.parts[0]!.geometryKey,
       );
       yield* normalizeCadGeometry(bytes);
+      // Onshape can flatten the assembly group while preserving full leaf IDs
+      // and an internal grouping ID absent from the assembly definition.
+      const flattened = {
+        ...gltf,
+        nodes: [
+          gltf.nodes[0],
+          {
+            ...gltf.nodes[1],
+            extensions: { PTC_onshape_metadata: { id: [parent, "internal-group", child] } },
+            translation: [5, 0, 0],
+          },
+          { ...gltf.nodes[2], translation: [0, 0, 0] },
+        ],
+      };
+      const flatBytes = yield* normalizeOnshapeExport(encode(flattened));
+      yield* normalizeCadGeometry(
+        readOnshapeExportGeometry(draft, flatBytes).extract(draft.parts[0]!.geometryKey),
+      );
     }),
   );
 });

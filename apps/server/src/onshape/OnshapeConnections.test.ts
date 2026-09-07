@@ -38,6 +38,7 @@ interface HarnessState {
   status: number;
   retryAfter: string | null;
   failTransport: boolean;
+  failTransportReason?: "too-large" | "timeout";
   failRead: boolean;
   verificationStarted: Deferred.Deferred<void> | null;
   verificationRelease: Deferred.Deferred<void> | null;
@@ -153,7 +154,11 @@ const makeHarness = <E, R>(
           ),
           Effect.andThen(
             state.failTransport
-              ? Effect.fail(new OnshapeTransport.OnshapeTransportFailure())
+              ? Effect.fail(
+                  new OnshapeTransport.OnshapeTransportFailure({
+                    ...(state.failTransportReason ? { reason: state.failTransportReason } : {}),
+                  }),
+                )
               : Effect.succeed(
                   state.responses.shift() ?? {
                     status: state.status,
@@ -438,6 +443,23 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
       }).pipe(Effect.provide(harness.layer));
       assert.equal(networkError._tag, "OnshapeNetworkError");
       assert.equal(harness.state.requests.length, 1);
+    }),
+  );
+
+  it.effect("preserves size and timeout failures instead of reporting a network outage", () =>
+    Effect.gen(function* () {
+      for (const reason of ["too-large", "timeout"] as const) {
+        const harness = makeMemoryHarness();
+        harness.state.failTransport = true;
+        harness.state.failTransportReason = reason;
+        const error = yield* Effect.gen(function* () {
+          const connections = yield* OnshapeConnections.OnshapeConnections;
+          return yield* connections.create(createInput).pipe(Effect.flip);
+        }).pipe(Effect.provide(harness.layer));
+        assert.equal(error._tag, "OnshapeResponseError");
+        assert.equal("reason" in error ? error.reason : null, reason);
+        assert.equal(harness.state.requests.length, 1);
+      }
     }),
   );
 

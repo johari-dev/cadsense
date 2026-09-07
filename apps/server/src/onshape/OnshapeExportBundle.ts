@@ -145,5 +145,5 @@ export const normalizeOnshapeExport = Effect.fn("normalizeOnshapeExport")(functi
     },
     catch: (error) => (isGeometryError(error) ? error : invalid()),
   });
-  return yield* normalizeCadGeometry(embedded);
+  return yield* normalizeCadGeometry(embedded, "assembly");
 });

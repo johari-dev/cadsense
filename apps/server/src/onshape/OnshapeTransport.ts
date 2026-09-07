@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { MAX_ASSEMBLY_EXPORT_BYTES } from "../cad/CadGeometry.ts";
 
 export interface OnshapeTransportRequest<E = never, R = never> {
   readonly method: "GET" | "POST";
@@ -12,6 +13,7 @@ export interface OnshapeTransportRequest<E = never, R = never> {
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly responseType?: "json" | "binary";
+  readonly bulkExport?: boolean;
   readonly beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>;
 }
 
@@ -44,8 +46,9 @@ const responseContentType = (header: string | undefined): string | null => {
 /** Deliberately contains no underlying exception or request data. */
 export class OnshapeTransportFailure extends Schema.TaggedErrorClass<OnshapeTransportFailure>()(
   "OnshapeTransportFailure",
-  {},
+  { reason: Schema.optionalKey(Schema.Literals(["too-large", "timeout"])) },
 ) {}
+const isTransportFailure = Schema.is(OnshapeTransportFailure);
 
 export class OnshapeTransport extends Context.Service<
   OnshapeTransport,
@@ -96,12 +99,17 @@ export const layer = Layer.effect(
               }
               let bytes = 0;
               const maxBytes =
-                request.responseType === "binary" ? MAX_BINARY_BODY_BYTES : MAX_JSON_BODY_BYTES;
+                request.responseType === "binary"
+                  ? request.bulkExport
+                    ? MAX_ASSEMBLY_EXPORT_BYTES
+                    : MAX_BINARY_BODY_BYTES
+                  : MAX_JSON_BODY_BYTES;
               const chunks: Uint8Array[] = [];
               yield* response.stream.pipe(
                 Stream.runForEach((chunk) => {
                   bytes += chunk.byteLength;
-                  if (bytes > maxBytes) return Effect.fail(new OnshapeTransportFailure());
+                  if (bytes > maxBytes)
+                    return Effect.fail(new OnshapeTransportFailure({ reason: "too-large" }));
                   return (request.beforeChunk?.(bytes) ?? Effect.void).pipe(
                     Effect.mapError((error) => {
                       guardFailure = Option.some(error);
@@ -139,8 +147,14 @@ export const layer = Layer.effect(
                 : "15 seconds",
           ),
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.mapError(() =>
-            Option.isSome(guardFailure) ? guardFailure.value : new OnshapeTransportFailure(),
+          Effect.mapError((error) =>
+            Option.isSome(guardFailure)
+              ? guardFailure.value
+              : isTransportFailure(error)
+                ? error
+                : new OnshapeTransportFailure(
+                    error._tag === "TimeoutError" ? { reason: "timeout" } : {},
+                  ),
           ),
         );
       },

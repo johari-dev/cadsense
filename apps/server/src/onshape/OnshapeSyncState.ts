@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "../config.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
+import { MAX_ASSEMBLY_EXPORT_BYTES } from "../cad/CadGeometry.ts";
 
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{24}$/));
 export const OnshapeSyncCheckpoint = Schema.Union([
@@ -39,7 +40,7 @@ const decode = Schema.decodeUnknownSync(Schema.fromJsonString(OnshapeSyncCheckpo
 const encode = Schema.encodeSync(Schema.fromJsonString(OnshapeSyncCheckpoint));
 const decodeKey = Schema.decodeUnknownSync(CadHash);
 const MAX_CHECKPOINT_BYTES = 16 * 1024 ** 2;
-export const MAX_EXPORT_BYTES = 128 * 1024 ** 2;
+export const MAX_EXPORT_BYTES = MAX_ASSEMBLY_EXPORT_BYTES;
 const missing = (error: unknown) =>
   Predicate.isObject(error) && "code" in error && error.code === "ENOENT";
 const corrupt = () => new CadSnapshotStoreError({ reason: "corrupt" });

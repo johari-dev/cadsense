@@ -13,7 +13,8 @@ import {
 } from "@cadsense/shared/cadSceneBudget";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { CadGeometryError } from "../cad/CadGeometry.ts";
+import { CadGeometryError, normalizeCadGeometry } from "../cad/CadGeometry.ts";
+import { batchOnshapeGeometry } from "./OnshapeGeometryBatching.ts";
 import { CadSnapshotStore } from "../cad/CadSnapshotStore.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import {
@@ -229,6 +230,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             return yield* new OnshapeExportError({ reason: "revision-changed" });
           }
           const downloaded = yield* connections.readBinary({
+            bulkExport: true,
             connectionId: source.connectionId,
             host: root.host,
             path: `${ONSHAPE_API_BASE_PATH}/documents/d/${exported.documentId}/externaldata/${exported.externalId}`,
@@ -241,7 +243,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         const bytes = yield* entry.readDownload(checkpoint);
         const normalized = yield* normalizeOnshapeExport(bytes);
         const geometry = yield* Effect.try({
-          try: () => readOnshapeExportGeometry(checkpoint.draft, normalized),
+          try: () => readOnshapeExportGeometry(checkpoint.draft, normalized, true),
           catch: geometryFailure,
         });
         const draft = checkpoint.draft;
@@ -252,10 +254,42 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         const assets: CadGeometryAsset[] = [];
         for (const part of draft.parts) {
           if (!part.geometryRequired) continue;
-          const bytes = yield* Effect.try({
-            try: () => geometry.extract(part.geometryKey),
+          const extracted = geometry.has(part.geometryKey)
+            ? yield* Effect.try({
+                try: () => geometry.extract(part.geometryKey),
+                catch: geometryFailure,
+              })
+            : yield* Effect.gen(function* () {
+                // Bulk exports can omit bodies. Fetch only absent source geometry,
+                // pinned to its inspected revision; never publish an incomplete scene.
+                const linked = part.source.documentId !== draft.root.documentId;
+                if (linked && !part.source.documentVersion)
+                  return yield* new OnshapeExportError({ reason: "invalid-response" });
+                const query = new URLSearchParams({
+                  configuration:
+                    part.source.fullConfiguration || part.source.configuration || "default",
+                  angleTolerance: "0.1",
+                  chordTolerance: "0.0005",
+                  rollbackBarIndex: "-1",
+                  outputSeparateFaceNodes: "false",
+                  outputFaceAppearances: "true",
+                });
+                if (linked) query.set("linkDocumentId", draft.root.documentId);
+                const response = yield* connections.readBinary({
+                  connectionId: source.connectionId,
+                  host: part.source.host,
+                  path: `${ONSHAPE_API_BASE_PATH}/parts/d/${part.source.documentId}/${linked ? "v" : "m"}/${linked ? part.source.documentVersion : part.source.documentMicroversion}/e/${part.source.elementId}/partid/${encodeURIComponent(part.source.partId)}/gltf`,
+                  query: query.toString(),
+                  beforeRequest: store.checkReserve(),
+                  beforeChunk: (bytes) => store.checkReserve(bytes),
+                });
+                return yield* normalizeCadGeometry(response.bytes);
+              });
+          const batched = yield* Effect.try({
+            try: () => batchOnshapeGeometry(extracted),
             catch: geometryFailure,
           });
+          const bytes = yield* normalizeCadGeometry(batched);
           const complexity = yield* Effect.try({
             try: () => measureCadGeometry(bytes),
             catch: geometryFailure,

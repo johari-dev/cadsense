@@ -109,6 +109,9 @@ const failureReason = (error: unknown): string => {
       case "OnshapeNetworkError":
         detail = "Could not reach Onshape. Check your network connection.";
         break;
+      case "OnshapeResponseError":
+        detail = error.message;
+        break;
     }
   } else if (isCadUserOperationError(error) && error.reason === "busy")
     detail = "Native agent shutdown could not be confirmed. Stop active runs before trying again.";

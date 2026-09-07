@@ -4,8 +4,8 @@ import * as Schema from "effect/Schema";
 // A scene's CPU/GPU geometry copies fit within this budget independently of compressed file size.
 export const CAD_SCENE_LIMITS = {
   occurrences: 2_000,
-  decodedBytes: 256 * 1024 ** 2,
-  triangles: 6_000_000,
+  decodedBytes: 1536 * 1024 ** 2,
+  triangles: 32_000_000,
   drawCalls: 4_000,
 } as const;
 export class CadSceneBudgetError extends Error {

@@ -68,7 +68,11 @@ const equalTransform = (columnMajor: readonly number[], rowMajor: readonly numbe
   });
 
 /** Read one validated bulk GLB and split only the resources each source part actually uses. */
-export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8Array) {
+export function readOnshapeExportGeometry(
+  draft: CadSnapshotDraft,
+  bytes: Uint8Array,
+  allowMissing = false,
+) {
   try {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (bytes.length < 20 || view.getUint32(0, true) !== 0x46546c67) throw invalid();
@@ -86,7 +90,10 @@ export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8A
     const parts = new Map(draft.parts.map((part) => [part.geometryKey, part]));
     const studioParts = new Map(draft.parts.map((part) => [part.source.partId, part.geometryKey]));
     const matched = new Set<string>();
-    const roots = new Map<string, { node: number; stripTransform: boolean; name: string }>();
+    const roots = new Map<
+      string,
+      { nodes: number[]; occurrenceId?: string; stripTransform: boolean; name: string }
+    >();
     const stack = scene.nodes.map((node: unknown) => ({
       node: index(node),
       matrix: identity,
@@ -106,25 +113,42 @@ export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8A
         const occurrence =
           ids.length === 0
             ? undefined
-            : (byPath.get(pathKey([...frame.path, ...ids])) ?? byPath.get(pathKey(ids)));
+            : (byPath.get(pathKey([...frame.path, ...ids])) ??
+              byPath.get(pathKey(ids)) ??
+              // Export IDs may retain an internal grouping instance omitted by the
+              // assembly definition. Resolve only a direct child of the known parent,
+              // with the exact leaf ID; its world transform is still checked below.
+              (ids.length > frame.path.length + 1 && frame.path.every((id, i) => ids[i] === id)
+                ? byPath.get(pathKey([...frame.path, ids[ids.length - 1]!]))
+                : undefined));
         if (occurrence) {
+          const part =
+            occurrence.sourcePartKey === null ? undefined : parts.get(occurrence.sourcePartKey);
           if (
             occurrence.suppressed ||
-            matched.has(occurrence.id) ||
-            !equalTransform(matrix, occurrence.transform)
-          )
+            (matched.has(occurrence.id) && part?.metadata?.bodyType !== "composite") ||
+            // Export assembly groups can be identity containers; leaf instances carry
+            // the world placement. Only source geometry must agree with the manifest.
+            (occurrence.sourcePartKey !== null && !equalTransform(matrix, occurrence.transform))
+          ) {
             throw invalid();
+          }
           matched.add(occurrence.id);
           path = occurrence.occurrencePath;
           if (occurrence.sourcePartKey !== null) {
-            const part = parts.get(occurrence.sourcePartKey);
             if (!part) throw invalid();
-            if (!roots.has(occurrence.sourcePartKey))
+            const existing = roots.get(occurrence.sourcePartKey);
+            if (!existing)
               roots.set(occurrence.sourcePartKey, {
-                node: frame.node,
+                nodes: [frame.node],
+                occurrenceId: occurrence.id,
                 stripTransform: true,
                 name: occurrence.name,
               });
+            else if (existing.occurrenceId === occurrence.id) {
+              if (existing.nodes.includes(frame.node)) throw invalid();
+              existing.nodes.push(frame.node);
+            }
             // The subtree is in source-part coordinates. The manifest owns occurrence placement.
             continue;
           }
@@ -134,7 +158,7 @@ export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8A
         if (key !== undefined) {
           if (roots.has(key)) throw invalid();
           roots.set(key, {
-            node: frame.node,
+            nodes: [frame.node],
             stripTransform: false,
             name: typeof node.name === "string" ? node.name : "Part",
           });
@@ -153,9 +177,14 @@ export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8A
           ancestors: new Set([...frame.ancestors, frame.node]),
         });
     }
-    if (draft.parts.some((part) => part.geometryRequired && !roots.has(part.geometryKey)))
-      throw invalid();
     if (
+      !allowMissing &&
+      draft.parts.some((part) => part.geometryRequired && !roots.has(part.geometryKey))
+    ) {
+      throw invalid();
+    }
+    if (
+      !allowMissing &&
       draft.root.kind === "assembly" &&
       draft.nodes.some(
         (node) => !node.suppressed && node.sourcePartKey !== null && !matched.has(node.id),
@@ -284,14 +313,16 @@ export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8A
           result.bufferView = copy("bufferViews", row.bufferView);
         return mapped;
       };
-      const rootIndex = copy("nodes", root.node);
+      const rootIndices = root.nodes.map((node) => copy("nodes", node));
       if (root.stripTransform) {
         const outputNodes = decodeObjects(output.nodes).map((node) => ({ ...node }));
-        const result = outputNodes[rootIndex]!;
-        for (const field of ["matrix", "rotation", "translation", "scale"]) delete result[field];
+        for (const rootIndex of rootIndices) {
+          const result = outputNodes[rootIndex]!;
+          for (const field of ["matrix", "rotation", "translation", "scale"]) delete result[field];
+        }
         output.nodes = outputNodes;
       }
-      output.scenes = [{ nodes: [rootIndex] }];
+      output.scenes = [{ nodes: rootIndices }];
       if (binLength > 0) output.buffers = [{ byteLength: binLength }];
       const json = new TextEncoder().encode(encodeJson(output));
       const jsonLength = Math.ceil(json.length / 4) * 4;
@@ -315,7 +346,7 @@ export function readOnshapeExportGeometry(draft: CadSnapshotDraft, bytes: Uint8A
       }
       return result;
     };
-    return { extract };
+    return { extract, has: (key: string) => roots.has(key) };
   } catch (error) {
     if (isGeometryError(error)) throw error;
     throw invalid();

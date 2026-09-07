@@ -3,6 +3,7 @@ import * as NodeZlib from "node:zlib";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { normalizeOnshapeExport } from "./OnshapeExportBundle.ts";
+import { normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import { bulkFixture, encodeFixture } from "./testFixtures/bulkExport.ts";
 
 function zip(entries: Array<{ name: string; bytes: Uint8Array }>, corruptCrc = false) {
@@ -57,6 +58,17 @@ const fixtureArchive = (uri = "mesh.bin") => {
   ];
 };
 describe("Onshape export bundle", () => {
+  it.effect("normalizes a bulk response above the per-part input limit", () =>
+    Effect.gen(function* () {
+      const fixture = bulkFixture(1);
+      const input = new TextEncoder().encode(
+        " ".repeat(129 * 1024 * 1024) + encodeFixture(fixture.gltf),
+      );
+      assert.equal((yield* normalizeCadGeometry(input).pipe(Effect.flip)).reason, "too-large");
+      const normalized = yield* normalizeOnshapeExport(input);
+      assert.isBelow(normalized.byteLength, 4096);
+    }),
+  );
   it.effect("resolves a compressed glTF and its binary into a self-contained GLB", () =>
     Effect.gen(function* () {
       const bytes = yield* normalizeOnshapeExport(zip(fixtureArchive()));

@@ -29,6 +29,36 @@ const layer = (fetch: FetchHandler) =>
   );
 
 describe("bounded Onshape JSON transport", () => {
+  it.effect(
+    "accepts an assembly export above the per-part limit without changing the default limit",
+    () => {
+      const chunk = new Uint8Array(1024 * 1024);
+      const fetch: FetchHandler = async () => {
+        let remaining = 129;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (remaining-- > 0) controller.enqueue(chunk);
+              else controller.close();
+            },
+          }),
+        );
+      };
+      return Effect.gen(function* () {
+        const transport = yield* OnshapeTransport.OnshapeTransport;
+        const failure = yield* transport
+          .execute({ ...request, responseType: "binary" })
+          .pipe(Effect.flip);
+        assert.equal(failure.reason, "too-large");
+        const result = yield* transport.execute({
+          ...request,
+          responseType: "binary",
+          bulkExport: true,
+        });
+        assert.equal(result.bytes?.length, 129 * 1024 * 1024);
+      }).pipe(Effect.provide(layer(fetch)));
+    },
+  );
   it.effect("allows export submission two minutes before aborting without retry", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();

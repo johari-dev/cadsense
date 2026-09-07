@@ -19,6 +19,7 @@ import {
   OnshapeInvalidCredentialsError,
   OnshapeInvalidHostError,
   OnshapeNetworkError,
+  OnshapeResponseError,
   OnshapeRateLimitError,
   OnshapeRedirectError,
   OnshapeVerificationThrottledError,
@@ -93,6 +94,7 @@ export type OnshapeJsonMethod =
 export type OnshapeJsonRequest = OnshapeReadRequest & OnshapeJsonMethod;
 
 export interface OnshapeBinaryReadRequest<E = never, R = never> extends OnshapeReadRequest {
+  readonly bulkExport?: boolean;
   readonly beforeRequest?: Effect.Effect<void, E, R>;
   readonly beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>;
 }
@@ -422,6 +424,7 @@ export const make = Effect.gen(function* () {
     responseType?: "json" | "binary",
     beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>,
     body?: string,
+    bulkExport?: boolean,
   ) {
     let guardFailure: Option.Option<E> = Option.none();
     yield* checkRemoteCooldown();
@@ -453,6 +456,7 @@ export const make = Effect.gen(function* () {
               : "application/json",
         },
         ...(responseType ? { responseType } : {}),
+        ...(bulkExport ? { bulkExport } : {}),
         ...(beforeChunk
           ? {
               beforeChunk: (receivedBytes: number) =>
@@ -466,8 +470,12 @@ export const make = Effect.gen(function* () {
           : {}),
       })
       .pipe(
-        Effect.mapError(() =>
-          Option.isSome(guardFailure) ? guardFailure.value : new OnshapeNetworkError(),
+        Effect.mapError((error) =>
+          Option.isSome(guardFailure)
+            ? guardFailure.value
+            : error.reason
+              ? new OnshapeResponseError({ reason: error.reason })
+              : new OnshapeNetworkError(),
         ),
       );
     if (responseType !== "binary" || response.status !== 307) yield* checkResponse(response);
@@ -584,6 +592,8 @@ export const make = Effect.gen(function* () {
         url.search.slice(1),
         "binary",
         input.beforeChunk,
+        undefined,
+        input.bulkExport,
       );
       if (response.status !== 307) {
         if (response.status !== 200 || response.bytes === undefined)
