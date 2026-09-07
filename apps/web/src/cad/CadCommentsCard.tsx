@@ -22,6 +22,7 @@ export interface CadCommentsCardProps {
   open: boolean;
   setOpen: (open: boolean) => void;
   selection: CadCommentSelection | null;
+  clearSelection: (id?: string) => void;
   choose: (comment: CadComment, target: number) => void;
   historical: boolean;
   back: () => void;
@@ -35,6 +36,7 @@ export function CadCommentsCard({
   open,
   setOpen,
   selection,
+  clearSelection,
   choose,
   historical,
   back,
@@ -56,6 +58,7 @@ export function CadCommentsCard({
     descriptor ? c.modelDescriptor === descriptor : c.snapshotId === displayedSnapshotId,
   );
   const selected = comments.find((c) => c.id === selection?.id);
+  const openCount = displayed.filter((c) => c.state === "open").length;
   const visible =
     filter === "history"
       ? comments.filter((c) => c.modelDescriptor !== descriptor || historical)
@@ -76,6 +79,7 @@ export function CadCommentsCard({
   useEffect(() => {
     if (!open) {
       renderer.current?.endCommentReview();
+      setNotice("");
       return;
     }
     const key = (e: KeyboardEvent) => {
@@ -84,6 +88,9 @@ export function CadCommentsCard({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [open, renderer, setOpen]);
+  useEffect(() => {
+    if (open && !selection) renderer.current?.endCommentReview();
+  }, [open, selection, renderer]);
   useEffect(() => {
     if (!open || !host.current || !card.current) return;
     let dimensions = "";
@@ -112,15 +119,21 @@ export function CadCommentsCard({
     const bounds = host.current.getBoundingClientRect(),
       occupied = card.current?.getBoundingClientRect();
     const width = occupied ? Math.max(120, occupied.left - bounds.left - 16) : bounds.width;
-    const below = occupied && bounds.width <= 570;
-    const safeHeight = below ? Math.max(120, occupied.top - bounds.top - 16) : bounds.height;
+    const below = occupied && width < 240;
+    const belowTop = occupied ? occupied.bottom - bounds.top + 16 : 0;
+    const safeHeight = below ? Math.max(120, bounds.height - belowTop) : bounds.height;
     const safeWidth = below ? bounds.width : width;
     const target = selected.targets[selection.target];
     if (!target) return;
     setNotice(
       renderer.current?.focusComment(
         target,
-        { width: safeWidth, height: safeHeight, centerX: safeWidth / 2, centerY: safeHeight / 2 },
+        {
+          width: safeWidth,
+          height: safeHeight,
+          centerX: safeWidth / 2,
+          centerY: (below ? belowTop : 0) + safeHeight / 2,
+        },
         window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       ) ?? "Location unavailable",
     );
@@ -138,7 +151,8 @@ export function CadCommentsCard({
         if (point) {
           button.style.left = `${point.x}px`;
           button.style.top = `${point.y}px`;
-          button.style.borderStyle = point.occluded ? "dashed" : "solid";
+          button.dataset.occluded = String(point.occluded);
+          button.style.borderStyle = "solid";
         }
       });
     };
@@ -156,6 +170,7 @@ export function CadCommentsCard({
         commandId: newCommandId(),
       },
     });
+    if (result._tag !== "Failure" && state !== "open") clearSelection(c.id);
     setNotice(
       result._tag === "Failure"
         ? "Could not update this finding. Reload its latest review state and try again."
@@ -170,7 +185,9 @@ export function CadCommentsCard({
     >
       <div ref={markers} className="absolute inset-0 overflow-hidden">
         {displayed
-          .filter((c) => c.state === "open" || c.id === selection?.id)
+          .filter(
+            (c) => c.state === "open" || (open && filter === "reviewed" && c.id === selection?.id),
+          )
           .flatMap((c) =>
             c.targets.map((t, i) => (
               <button
@@ -179,27 +196,13 @@ export function CadCommentsCard({
                 data-target={i}
                 aria-label={`Comment ${c.number}: ${t.label}`}
                 onClick={() => choose(c, i)}
-                className={`pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border-2 bg-amber-200 px-1.5 py-1 text-[11px] font-semibold text-neutral-950 shadow ${c.id === selection?.id ? "ring-2 ring-foreground" : ""}`}
+                className={`pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border-2 border-solid border-neutral-800 bg-amber-200 px-1.5 py-1 text-[11px] font-semibold text-neutral-950 shadow ${open && c.id === selection?.id ? "ring-2 ring-foreground" : ""}`}
               >
                 {t.kind === "part" && <Box size={12} />} {c.number}
                 {c.targets.length > 1 ? String.fromCharCode(97 + i) : ""}
               </button>
             )),
           )}
-      </div>
-      <div className="pointer-events-auto absolute right-3 top-3">
-        <Button
-          size="compact"
-          variant={open ? "secondary" : "outline"}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          <MessageSquare />
-          Comments{" "}
-          <span aria-label="open comments">
-            {displayed.filter((c) => c.state === "open").length}
-          </span>
-        </Button>
       </div>
       {historical && (
         <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-md border bg-popover px-2 py-1 text-xs">
@@ -209,173 +212,211 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
-      {open && (
-        <div
-          ref={card}
-          aria-label="CAD comments"
-          className="pointer-events-auto absolute right-3 top-12 flex max-h-[calc(100%-6rem)] w-[304px] max-w-[calc(100%-24px)] flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl [@container(max-width:570px)]:bottom-12 [@container(max-width:570px)]:top-auto [@container(max-width:570px)]:max-h-[40%]"
-        >
-          <div className="flex items-center justify-between border-b px-3 py-2 text-sm">
-            <strong>Comments</strong>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Close comments"
-              onClick={() => setOpen(false)}
-            >
-              <X />
-            </Button>
-          </div>
-          <div className="flex gap-1 border-b p-1">
-            {(["open", "reviewed", "history"] as const).map((tab) => (
+      <div
+        ref={card}
+        data-comments-surface
+        data-open={open}
+        className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-popover-foreground shadow-lg"
+      >
+        {!open && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="absolute right-0 top-0 size-8"
+            aria-label={`Comments (${openCount} unresolved)`}
+            aria-expanded={false}
+            onClick={() => setOpen(true)}
+          >
+            <MessageSquare size={16} />
+            {openCount > 0 && (
+              <span className="absolute -right-1 -top-1">
+                <CommentBadge number={openCount} />
+              </span>
+            )}
+          </Button>
+        )}
+        {open && (
+          <div
+            aria-label="CAD comments"
+            className="cad-comments-content flex h-full min-h-0 flex-col"
+          >
+            <div className="flex h-9 shrink-0 items-center justify-between border-b px-3 text-sm">
+              <span className="flex items-center gap-2">
+                <MessageSquare size={16} />
+                <strong>Comments</strong>
+                {openCount > 0 && <CommentBadge number={openCount} />}
+              </span>
               <Button
-                key={tab}
-                size="compact"
-                variant={filter === tab ? "secondary" : "ghost"}
-                onClick={() => setFilter(tab)}
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Close comments"
+                onClick={() => setOpen(false)}
               >
-                {tab === "open" ? "Open" : tab === "reviewed" ? "Reviewed" : "Previous revisions"}
+                <X />
               </Button>
-            ))}
-          </div>
-          <div className="min-h-0 overflow-y-auto">
-            {visible.length ? (
-              visible.map((c) => (
-                <article key={c.id} className="border-b px-3 py-2 text-xs">
-                  <button
-                    className="flex w-full gap-2 text-left"
-                    aria-expanded={selection?.id === c.id}
-                    onClick={() => choose(c, 0)}
-                  >
-                    <span className="text-muted-foreground">{c.number}</span>
-                    <span>
-                      <strong>{c.title}</strong>
-                      <span className="mt-1 block text-muted-foreground">
-                        {c.targets.length} locations · {c.state}
-                        {c.modelDescriptor !== descriptor ? " · previous revision" : ""}
+            </div>
+            <div className="flex gap-1 border-b p-1">
+              {(["open", "reviewed", "history"] as const).map((tab) => (
+                <Button
+                  key={tab}
+                  size="compact"
+                  variant={filter === tab ? "secondary" : "ghost"}
+                  onClick={() => setFilter(tab)}
+                >
+                  {tab === "open" ? "Open" : tab === "reviewed" ? "Reviewed" : "Previous revisions"}
+                </Button>
+              ))}
+            </div>
+            {notice && (
+              <p
+                role="status"
+                className="shrink-0 border-b px-3 py-2 text-xs text-muted-foreground"
+              >
+                {notice}
+              </p>
+            )}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {visible.length ? (
+                visible.map((c) => (
+                  <article key={c.id} className="border-b px-3 py-2 text-xs">
+                    <button
+                      className="flex w-full gap-2 text-left"
+                      aria-expanded={selection?.id === c.id}
+                      onClick={() => choose(c, 0)}
+                    >
+                      <CommentBadge number={c.number} reviewed={c.state !== "open"} />
+                      <span>
+                        <strong>{c.title}</strong>
+                        <span className="mt-1 block text-muted-foreground">
+                          {c.targets.length} locations · {c.state}
+                          {c.modelDescriptor !== descriptor ? " · previous revision" : ""}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                  {selection?.id === c.id && (
-                    <div className="mt-3 space-y-3">
-                      <p className="whitespace-pre-wrap leading-relaxed">{c.body}</p>
-                      {c.targets.map((t, i) => (
-                        <div key={i}>
-                          <Button
-                            size="compact"
-                            variant={selection.target === i ? "secondary" : "ghost"}
-                            onClick={() => choose(c, i)}
-                          >
-                            <LocateFixed />
-                            {t.label}
-                          </Button>
-                          {t.kind === "part" && (
-                            <p className="mt-1 text-muted-foreground">
-                              Whole part · {t.preciseLocationLimitation}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                      {c.targets.length > 1 && (
-                        <div className="flex items-center justify-between">
-                          <Button
-                            size="compact"
-                            variant="ghost"
-                            disabled={selection.target === 0}
-                            onClick={() => choose(c, selection.target - 1)}
-                          >
-                            Previous
-                          </Button>
-                          <span>
-                            {selection.target + 1} / {c.targets.length}
-                          </span>
-                          <Button
-                            size="compact"
-                            variant="ghost"
-                            disabled={selection.target === c.targets.length - 1}
-                            onClick={() => choose(c, selection.target + 1)}
-                          >
-                            Next
-                          </Button>
-                        </div>
-                      )}
-                      {c.link && (
-                        <button
-                          className="text-left underline"
-                          onClick={() => {
-                            const old = comments.find((x) => x.id === c.link?.commentId);
-                            if (old) choose(old, 0);
-                          }}
-                        >
-                          {c.link.kind}: {c.link.explanation}
-                        </button>
-                      )}
-                      {comments
-                        .filter((x) => x.link?.commentId === c.id)
-                        .map((x) => (
-                          <button
-                            key={x.id}
-                            className="block text-left underline"
-                            onClick={() => choose(x, 0)}
-                          >
-                            See {x.link?.kind}: {x.title}
-                          </button>
-                        ))}
-                      <div className="flex gap-1">
-                        {c.state === "open" ? (
-                          <>
+                    </button>
+                    {selection?.id === c.id && (
+                      <div className="mt-3 space-y-3">
+                        <p className="whitespace-pre-wrap leading-relaxed">{c.body}</p>
+                        {c.targets.map((t, i) => (
+                          <div key={i}>
                             <Button
                               size="compact"
-                              variant="outline"
-                              onClick={() => void change(c, "resolved")}
+                              variant={selection.target === i ? "secondary" : "ghost"}
+                              onClick={() => choose(c, i)}
                             >
-                              <Check />
-                              Resolve · {c.targets.length}
+                              <LocateFixed />
+                              {t.label}
                             </Button>
+                            {t.kind === "part" && (
+                              <p className="mt-1 text-muted-foreground">
+                                Whole part · {t.preciseLocationLimitation}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                        {c.targets.length > 1 && (
+                          <div className="flex items-center justify-between">
                             <Button
                               size="compact"
                               variant="ghost"
-                              onClick={() => void change(c, "dismissed")}
+                              disabled={selection.target === 0}
+                              onClick={() => choose(c, selection.target - 1)}
                             >
-                              Dismiss
+                              Previous
                             </Button>
-                          </>
-                        ) : (
-                          <Button
-                            size="compact"
-                            variant="outline"
-                            onClick={() => void change(c, "open")}
-                          >
-                            <RotateCcw />
-                            Reopen
-                          </Button>
+                            <span>
+                              {selection.target + 1} / {c.targets.length}
+                            </span>
+                            <Button
+                              size="compact"
+                              variant="ghost"
+                              disabled={selection.target === c.targets.length - 1}
+                              onClick={() => choose(c, selection.target + 1)}
+                            >
+                              Next
+                            </Button>
+                          </div>
                         )}
+                        {c.link && (
+                          <button
+                            className="text-left underline"
+                            onClick={() => {
+                              const old = comments.find((x) => x.id === c.link?.commentId);
+                              if (old) choose(old, 0);
+                            }}
+                          >
+                            {c.link.kind}: {c.link.explanation}
+                          </button>
+                        )}
+                        {comments
+                          .filter((x) => x.link?.commentId === c.id)
+                          .map((x) => (
+                            <button
+                              key={x.id}
+                              className="block text-left underline"
+                              onClick={() => choose(x, 0)}
+                            >
+                              See {x.link?.kind}: {x.title}
+                            </button>
+                          ))}
+                        <div className="flex gap-1">
+                          {c.state === "open" ? (
+                            <>
+                              <Button
+                                size="compact"
+                                variant="outline"
+                                onClick={() => void change(c, "resolved")}
+                              >
+                                <Check />
+                                Resolve · {c.targets.length}
+                              </Button>
+                              <Button
+                                size="compact"
+                                variant="ghost"
+                                onClick={() => void change(c, "dismissed")}
+                              >
+                                Dismiss
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="compact"
+                              variant="outline"
+                              onClick={() => void change(c, "open")}
+                            >
+                              <RotateCcw />
+                              Reopen
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </article>
-              ))
-            ) : (
-              <p className="p-4 text-xs text-muted-foreground">
-                {filter === "open"
-                  ? "No open comments. Reviewed findings remain in Reviewed."
-                  : "No findings in this group."}
-              </p>
-            )}
+                    )}
+                  </article>
+                ))
+              ) : (
+                <p className="p-4 text-xs text-muted-foreground">
+                  {filter === "open"
+                    ? "No open comments. Reviewed findings remain in Reviewed."
+                    : "No findings in this group."}
+                </p>
+              )}
+            </div>
+            <p className="border-t p-2 text-[11px] text-muted-foreground">
+              Resolve = addressed. Dismiss = no action needed.
+            </p>
           </div>
-          <p className="border-t p-2 text-[11px] text-muted-foreground">
-            Resolve = addressed. Dismiss = no action needed.
-          </p>
-        </div>
-      )}
-      {notice && (
-        <p
-          role="status"
-          className="absolute bottom-2 left-2 right-2 rounded bg-popover/95 px-2 py-1 text-xs text-muted-foreground"
-        >
-          {notice}
-        </p>
-      )}
+        )}
+      </div>
     </div>
+  );
+}
+
+function CommentBadge({ number, reviewed = false }: { number: number; reviewed?: boolean }) {
+  return (
+    <span
+      data-comment-badge
+      className={`inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${reviewed ? "bg-muted text-muted-foreground" : "bg-amber-200 text-neutral-950"}`}
+    >
+      {number}
+    </span>
   );
 }

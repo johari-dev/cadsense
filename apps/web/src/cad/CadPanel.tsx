@@ -8,7 +8,14 @@ import {
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Button } from "../components/ui/button";
 import { LoadingMark } from "../components/LoadingMark";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
@@ -30,6 +37,7 @@ import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import "./CadPanel.css";
+import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import {
   CadCommentsCard,
@@ -379,11 +387,13 @@ export function CadPanel({
   threadRef,
   fullscreen = false,
   compact = false,
+  onOpenComments,
 }: {
   project: Project;
   threadRef: ScopedThreadRef;
   fullscreen?: boolean;
   compact?: boolean;
+  onOpenComments?: (target?: { id: string; target: number }) => void;
 }) {
   const state = useAtomValue(
     cadPanelEnvironment.watch({
@@ -408,8 +418,29 @@ export function CadPanel({
     [commentState],
   );
   const renderer = useRef<CadSceneRenderer | null>(null);
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsOpen, updateCommentsOpen] = useState(false);
   const [selection, setSelection] = useState<CadCommentSelection | null>(null);
+  const clearSelection = useCallback((id?: string) => {
+    setSelection((current) => (!id || current?.id === id ? null : current));
+  }, []);
+  const setCommentsOpen = useCallback(
+    (open: boolean) => {
+      if (open && onOpenComments) {
+        onOpenComments();
+        return;
+      }
+      updateCommentsOpen(open);
+      if (!open) clearSelection();
+    },
+    [onOpenComments, clearSelection],
+  );
+  const pendingReview = useCadCommentReviewStore((s) => s.pending[scopedThreadKey(threadRef)]);
+  useLayoutEffect(() => {
+    if (compact || pendingReview === undefined) return;
+    updateCommentsOpen(true);
+    setSelection(pendingReview ? { ...pendingReview, request: 1 } : null);
+    useCadCommentReviewStore.getState().consume(threadRef);
+  }, [compact, pendingReview, threadRef]);
   const [historicalView, setHistoricalView] = useState<CadViewState | null>(null);
   const savedCurrent = useRef<{
     view: CadViewState;
@@ -467,6 +498,10 @@ export function CadPanel({
     edits.select(next);
   };
   const choose = (comment: CadComment, target: number) => {
+    if (onOpenComments) {
+      onOpenComments({ id: comment.id, target });
+      return;
+    }
     setCommentsOpen(true);
     setSelection((previous) => ({ id: comment.id, target, request: (previous?.request ?? 0) + 1 }));
     const manifest = view ? cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId) : null;
@@ -591,6 +626,7 @@ export function CadPanel({
               open: commentsOpen,
               setOpen: setCommentsOpen,
               selection,
+              clearSelection,
               choose,
               historical: !!historicalView,
               back,
@@ -632,6 +668,7 @@ export function CadPanel({
           open={commentsOpen}
           setOpen={setCommentsOpen}
           selection={selection}
+          clearSelection={clearSelection}
           choose={choose}
           historical={false}
           back={back}

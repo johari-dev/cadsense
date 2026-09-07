@@ -1,4 +1,41 @@
 /* Keep a solid perimeter above both the header and content; pulse only its glow. */
+.cad-comments-surface {
+  width: 34px;
+  height: 34px;
+  transition:
+    width 200ms ease,
+    height 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.cad-comments-surface[data-open="true"] {
+  width: min(304px, calc(100% - 24px));
+  height: min(440px, 60%);
+  overflow: hidden;
+}
+
+.cad-comments-content {
+  animation: cad-comments-appear 200ms ease both;
+}
+
+@keyframes cad-comments-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cad-comments-surface {
+    transition: none;
+  }
+  .cad-comments-content {
+    animation: none;
+  }
+}
+
 :is(.cad-floating-preview, [data-preview-panel-mode]):has(
   [data-cad-agent-controlling="true"]
 )::before,

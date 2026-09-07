@@ -34,6 +34,8 @@ Inspection preserves the captured effective scene, including other visible compo
 
 The Comments button immediately counts open findings on the displayed model, with one count per comment. The themed floating card stays closed until opened. It offers a compact title list, one expanded finding, named locations, Previous/Next controls, and shared review state across a finding's targets. Numbered point markers remain visible while the card is closed. Whole-part findings have an explicit location limitation.
 
+The icon-only control and expanded header share a yellow count badge. The control expands into the card from the same top-right corner, including narrow panels. In PiP, opening comments docks CAD and opens the card there. Resolving or dismissing clears the selected marker immediately; closing clears the selection ring. Markers have smooth outlines, with occlusion explained in the open card instead of a dashed outline.
+
 Selecting a finding focuses its first location outside the card with surrounding geometry. Selecting the location again refocuses. The viewer tries alternate angles before temporarily hiding blockers and reveals a hidden/isolated target. Manual orbit input cancels animation. Review visibility is layered over the user's visibility settings; closing restores visibility while keeping the camera. Self-occlusion is reported instead of hiding the target itself.
 
 Historical selection opens retained original geometry without rolling back project CAD. Back to current restores the saved current camera, framing, visibility, isolation, and explosion when its model still matches. If CAD changed during review, it opens the newest current view and explains the change.
