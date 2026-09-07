@@ -20,6 +20,16 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("Default typography", () => {
+  it("defaults interface and composer text to 15px without replacing explicit preferences", () => {
+    expect(decodeClientSettings({})).toMatchObject({ fontSizeInterface: 15, fontSizePrompt: 15 });
+    expect(decodeClientSettings({ fontSizeInterface: 17, fontSizePrompt: 18 })).toMatchObject({
+      fontSizeInterface: 17,
+      fontSizePrompt: 18,
+    });
+  });
+});
+
 describe("Appearance visibility", () => {
   it("hides optional composer controls for existing and new settings", () => {
     expect(decodeClientSettings({})).toMatchObject({
