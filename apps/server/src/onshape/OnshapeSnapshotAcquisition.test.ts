@@ -14,13 +14,14 @@ import { CAD_SCENE_LIMITS } from "@cadsense/shared/cadSceneBudget";
 import { CadSnapshotStore, CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
 import { OnshapeConnections, type OnshapeReadRequest } from "./OnshapeConnections.ts";
 import * as Acquisition from "./OnshapeSnapshotAcquisition.ts";
+import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
 const source = Schema.decodeUnknownSync(OnshapeProjectSource)({
   connectionId: "00000000-0000-4000-8000-000000000001",
   host: "https://cad.onshape.com",
   documentId: "111111111111111111111111",
-  workspaceType: "w",
-  workspaceId: "222222222222222222222222",
+  workspaceType: "m",
+  workspaceId: "333333333333333333333333",
   configuration: "ignored",
 });
 const mid = "333333333333333333333333";
@@ -185,12 +186,13 @@ const harness = Effect.fn(function* (options?: {
   });
   const service = yield* Acquisition.make.pipe(
     Effect.provideService(CadSnapshotStore, store),
+    Effect.provideService(OnshapeSyncState, { withEntry: unused }),
     Effect.provideService(OnshapeConnections, connections),
   );
   return { service, requests, published, events, active: () => active };
 });
 
-it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
+it.layer(NodeServices.layer)("Microversion snapshot acquisition", (it) => {
   it.effect(
     "rejects an oversized tree before metadata or geometry requests and preserves the last snapshot",
     () =>
@@ -213,33 +215,31 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         const failure = yield* h.service.acquire({ ...input, root }).pipe(Effect.flip);
         assert.equal(failure._tag, "CadGeometryError");
         assert.equal("reason" in failure ? failure.reason : null, "too-large");
-        assert.equal(h.requests.length - previousRequests, 2);
+        assert.equal(h.requests.length - previousRequests, 1);
         assert.deepEqual(h.published, [first]);
         assert.isFalse(h.active());
       }),
   );
-  it.effect(
-    "pins each workspace sync, preserves selected configuration, and reuses validated geometry",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* harness();
-        assert.deepEqual(h.requests, []);
-        const first = yield* h.service.acquire(input);
-        assert.lengthOf(h.requests, 3);
-        assert.include(h.requests[1]!.path, `/m/${mid}/`);
-        assert.strictEqual(
-          new URLSearchParams(h.requests[2]!.query).get("configuration"),
-          input.root.configuration,
-        );
-        assert.include(h.requests[2]!.path, "/partid/part%2B1/gltf");
-        assert.isFalse(first.nodes[1]!.defaultVisible);
-        assert.lengthOf(first.assets, 1);
-        const second = yield* h.service.acquire(input);
-        assert.notStrictEqual(second.snapshotId, first.snapshotId);
-        assert.lengthOf(h.requests, 5);
-        assert.deepEqual(second.assets, first.assets);
-        assert.isFalse(h.active());
-      }),
+  it.effect("preserves selected configuration and reuses validated microversion geometry", () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      assert.deepEqual(h.requests, []);
+      const first = yield* h.service.acquire(input);
+      assert.lengthOf(h.requests, 2);
+      assert.include(h.requests[0]!.path, `/m/${mid}/`);
+      assert.strictEqual(
+        new URLSearchParams(h.requests[1]!.query).get("configuration"),
+        input.root.configuration,
+      );
+      assert.include(h.requests[1]!.path, "/partid/part%2B1/gltf");
+      assert.isFalse(first.nodes[1]!.defaultVisible);
+      assert.lengthOf(first.assets, 1);
+      const second = yield* h.service.acquire(input);
+      assert.notStrictEqual(second.snapshotId, first.snapshotId);
+      assert.lengthOf(h.requests, 3);
+      assert.deepEqual(second.assets, first.assets);
+      assert.isFalse(h.active());
+    }),
   );
   it.effect("does not resolve an immutable microversion", () =>
     Effect.gen(function* () {
@@ -249,7 +249,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
       assert.include(h.requests[0]!.path, `/m/${source.workspaceId}/`);
     }),
   );
-  it.effect.each([1, 2, 3, 4, 5])(
+  it.effect.each([1, 2, 3, 4])(
     "disk reserve failure at check %s prevents publication",
     (failReserve) =>
       Effect.gen(function* () {
@@ -258,7 +258,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         assert.strictEqual(error._tag, "CadSnapshotStoreError");
         assert.lengthOf(h.published, 0);
         assert.isFalse(h.active());
-        assert.lengthOf(h.requests, Math.min(failReserve - 1, 3));
+        assert.lengthOf(h.requests, Math.min(failReserve - 1, 2));
       }),
   );
   it.effect("quota failure does not retry or publish", () =>
@@ -268,7 +268,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         .acquire({ ...input, root: { ...input.root, configuration: "Length=20" } })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "OnshapeRateLimitError");
-      assert.lengthOf(h.requests, 3);
+      assert.lengthOf(h.requests, 2);
       assert.lengthOf(h.published, 0);
       assert.isFalse(h.active());
     }),
@@ -290,7 +290,9 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
   it.effect("invalid pin response prevents downstream requests", () =>
     Effect.gen(function* () {
       const h = yield* harness({ invalidPin: true });
-      const error = yield* h.service.acquire(input).pipe(Effect.flip);
+      const error = yield* h.service
+        .acquire({ ...input, source: { ...source, workspaceType: "w" } })
+        .pipe(Effect.flip);
       assert.strictEqual(error._tag, "OnshapeSnapshotAcquisitionError");
       assert.lengthOf(h.requests, 1);
       assert.lengthOf(h.published, 0);
@@ -308,7 +310,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         assert.lengthOf(result.nodes, 3);
         assert.lengthOf(result.parts, 1);
         assert.lengthOf(result.assets, 1);
-        assert.lengthOf(h.requests, 5);
+        assert.lengthOf(h.requests, 4);
         assert.lengthOf(
           h.requests.filter(
             (request) =>
@@ -318,7 +320,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
           1,
         );
         for (const request of h.requests
-          .slice(2)
+          .slice(1)
           .filter((request) => !request.path.endsWith("currentmicroversion"))) {
           assert.include(
             request.path,
@@ -328,7 +330,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
           assert.strictEqual(query.get("configuration"), linked.fullConfiguration);
           assert.strictEqual(query.get("linkDocumentId"), source.documentId);
         }
-        const definitionQuery = new URLSearchParams(h.requests[1]!.query);
+        const definitionQuery = new URLSearchParams(h.requests[0]!.query);
         assert.strictEqual(definitionQuery.get("excludeSuppressed"), "false");
         assert.strictEqual(definitionQuery.get("includeNonSolids"), "true");
         assert.strictEqual(definitionQuery.get("includeMateFeatures"), "false");
@@ -341,7 +343,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         .acquire({ ...input, root: { ...input.root, kind: "assembly" } })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "OnshapeSnapshotAcquisitionError");
-      assert.lengthOf(h.requests, 2);
+      assert.lengthOf(h.requests, 1);
       assert.lengthOf(h.published, 0);
     }),
   );
@@ -352,7 +354,7 @@ it.layer(NodeServices.layer)("Snapshot acquisition", (it) => {
         .acquire({ ...input, root: { ...input.root, kind: "assembly" } })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "OnshapeSnapshotAcquisitionError");
-      assert.lengthOf(h.requests, 4);
+      assert.lengthOf(h.requests, 3);
       assert.lengthOf(h.published, 0);
     }),
   );

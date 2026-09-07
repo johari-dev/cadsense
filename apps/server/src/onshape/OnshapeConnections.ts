@@ -53,6 +53,9 @@ const StoredCredentials = Schema.Struct({
 });
 type StoredCredentials = typeof StoredCredentials.Type;
 const decodeOnshapeConnectionSummary = Schema.decodeUnknownEffect(OnshapeConnectionSummary);
+const encodeRequestBody = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
 const encodeStoredCredentials = Schema.encodeSync(Schema.fromJsonString(StoredCredentials));
 const decodeStoredCredentials = Schema.decodeUnknownEffect(
   Schema.fromJsonString(StoredCredentials),
@@ -84,6 +87,11 @@ export interface OnshapeReadRequest {
   readonly query: string;
 }
 
+export type OnshapeJsonMethod =
+  | { readonly method?: "GET"; readonly body?: never }
+  | { readonly method: "POST"; readonly body: Readonly<Record<string, unknown>> };
+export type OnshapeJsonRequest = OnshapeReadRequest & OnshapeJsonMethod;
+
 export interface OnshapeBinaryReadRequest<E = never, R = never> extends OnshapeReadRequest {
   readonly beforeRequest?: Effect.Effect<void, E, R>;
   readonly beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>;
@@ -98,7 +106,7 @@ export interface OnshapeConnectionsShape {
   readonly readBinary: <E = never, R = never>(
     input: OnshapeBinaryReadRequest<E, R>,
   ) => Effect.Effect<OnshapeBinaryReadResult, OnshapeConnectionError | E, R>;
-  readonly readJson: (input: OnshapeReadRequest) => Effect.Effect<unknown, OnshapeConnectionError>;
+  readonly readJson: (input: OnshapeJsonRequest) => Effect.Effect<unknown, OnshapeConnectionError>;
   readonly list: () => Effect.Effect<OnshapeConnectionListResult, OnshapeConnectionError>;
   readonly create: (
     input: OnshapeConnectionCreateInput,
@@ -413,6 +421,7 @@ export const make = Effect.gen(function* () {
     query: string,
     responseType?: "json" | "binary",
     beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>,
+    body?: string,
   ) {
     let guardFailure: Option.Option<E> = Option.none();
     yield* checkRemoteCooldown();
@@ -424,7 +433,7 @@ export const make = Effect.gen(function* () {
     const headers = yield* signer.sign({
       accessKeyId: credentials.accessKeyId,
       secretKey: credentials.secretKey,
-      method: "GET",
+      method: body === undefined ? "GET" : "POST",
       nonce,
       date,
       contentType: VERIFY_CONTENT_TYPE,
@@ -433,11 +442,15 @@ export const make = Effect.gen(function* () {
     });
     const response = yield* transport
       .execute({
-        method: "GET",
+        method: body === undefined ? "GET" : "POST",
+        ...(body === undefined ? {} : { body }),
         url: `${host}${path}${query ? `?${query}` : ""}`,
         headers: {
           ...headers,
-          Accept: responseType === "binary" ? "model/gltf-binary" : "application/json",
+          Accept:
+            responseType === "binary"
+              ? "application/octet-stream, model/gltf-binary, model/gltf+json"
+              : "application/json",
         },
         ...(responseType ? { responseType } : {}),
         ...(beforeChunk
@@ -533,8 +546,25 @@ export const make = Effect.gen(function* () {
 
   const readJson: OnshapeConnectionsShape["readJson"] = Effect.fn("OnshapeConnections.readJson")(
     function* (input) {
+      // Export jobs create external files only; this adapter never edits the source document.
+      if (
+        input.method === "POST" &&
+        (!/^\/api\/v17\/(?:assemblies|partstudios)\/d\/[a-f0-9]{24}\/[wv]\/[a-f0-9]{24}\/e\/[a-f0-9]{24}\/export\/gltf$/.test(
+          input.path,
+        ) ||
+          input.body.storeInDocument !== false ||
+          input.body.notifyUser !== false)
+      )
+        return yield* new OnshapeNetworkError();
       const { host, credentials } = yield* readCredentials(input);
-      return (yield* request(host, credentials, input.path, input.query, "json")).body;
+      const body =
+        input.method === "POST"
+          ? yield* encodeRequestBody(input.body).pipe(
+              Effect.mapError(() => new OnshapeNetworkError()),
+            )
+          : undefined;
+      return (yield* request(host, credentials, input.path, input.query, "json", undefined, body))
+        .body;
     },
   );
 

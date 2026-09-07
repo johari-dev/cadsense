@@ -29,6 +29,59 @@ const layer = (fetch: FetchHandler) =>
   );
 
 describe("bounded Onshape JSON transport", () => {
+  it.effect("sends the JSON export body and counts actual HTTP attempts", () => {
+    const metrics = { requests: 0 };
+    const body = '{"storeInDocument":false,"notifyUser":false}';
+    const fetch: FetchHandler = async (_input, init) => {
+      assert.equal(init?.method, "POST");
+      assert.equal(await new Response(init?.body).text(), body);
+      assert.equal(init?.redirect, "manual");
+      return new Response('{"id":"export-job"}', { status: 200 });
+    };
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      yield* transport.execute({ ...request, method: "POST", body });
+      assert.equal(metrics.requests, 1);
+    }).pipe(
+      Effect.provide(layer(fetch)),
+      Effect.provideService(OnshapeTransport.OnshapeRequestMetrics, metrics),
+    );
+  });
+  it.effect(
+    "allows binary downloads past the JSON deadline but still cancels at three minutes",
+    () => {
+      let cancelled = false;
+      return Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const fetch: FetchHandler = async () =>
+          new Response(
+            new ReadableStream<Uint8Array>(
+              {
+                pull() {
+                  Deferred.doneUnsafe(started, Effect.void);
+                },
+                cancel() {
+                  cancelled = true;
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+          );
+        yield* Effect.gen(function* () {
+          const transport = yield* OnshapeTransport.OnshapeTransport;
+          const fiber = yield* transport
+            .execute({ ...request, responseType: "binary" })
+            .pipe(Effect.flip, Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("16 seconds");
+          assert.isFalse(cancelled);
+          yield* TestClock.adjust("164 seconds");
+          assert.equal((yield* Fiber.join(fiber))._tag, "OnshapeTransportFailure");
+          assert.isTrue(cancelled);
+        }).pipe(Effect.provide(layer(fetch)));
+      });
+    },
+  );
   it.effect("checks cumulative bytes and cancels immediately on a typed reserve failure", () => {
     let reads = 0;
     let cancelled = false;
