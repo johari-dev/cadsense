@@ -189,6 +189,36 @@ try {
   await waitValue(page.getByLabel("Explode CAD", { exact: true }), "0.5");
   await page.screenshot({ path: NodePath.join(output, "reopened.png") });
   report.steps.push("offline application restart retained thread CAD view");
+  const cdp = await page.context().newCDPSession(page);
+  const documentKeyListeners = async () => {
+    const { result } = await cdp.send("Runtime.evaluate", {
+      expression: "document",
+      objectGroup: "cad-cleanup-check",
+    });
+    try {
+      const { listeners } = await cdp.send("DOMDebugger.getEventListeners", {
+        objectId: result.objectId,
+      });
+      return listeners.filter((listener) => listener.type === "keydown" && listener.useCapture)
+        .length;
+    } finally {
+      await cdp.send("Runtime.releaseObjectGroup", { objectGroup: "cad-cleanup-check" });
+    }
+  };
+  try {
+    await page.getByRole("button", { name: "Close CAD", exact: true }).click();
+    const before = await documentKeyListeners();
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await openCad(page);
+      await page.getByRole("button", { name: "Close CAD", exact: true }).click();
+    }
+    const after = await documentKeyListeners();
+    report.documentKeyListeners = { before, after };
+    NodeAssert.equal(after, before, "Closed CAD viewers must release document key listeners");
+  } finally {
+    await cdp.detach();
+  }
+  report.steps.push("repeated CAD close/reopen releases document listeners");
   NodeAssert.deepEqual(errors, [], "Renderer must not raise page errors");
   report.passed = true;
 } catch (error) {
