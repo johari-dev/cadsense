@@ -2,24 +2,12 @@ import { CadCameraPose, CadViewState, type CadSnapshotManifest } from "@cadsense
 import { indexCadSnapshot } from "@cadsense/shared/cadScene";
 import * as Schema from "effect/Schema";
 import * as THREE from "three";
+import { CadRendererError } from "./CadRendererError";
+export { CadRendererError } from "./CadRendererError";
 
 export type ResolvedCadCamera = typeof CadCameraPose.Type;
 export const CAD_CAMERA_FOV = 45;
 const decodeView = Schema.decodeUnknownSync(CadViewState);
-export class CadRendererError extends Error {
-  readonly _tag = "CadRendererError";
-  constructor(
-    readonly reason:
-      | "renderer-unavailable"
-      | "invalid-view"
-      | "invalid-snapshot"
-      | "superseded"
-      | "renderer-busy"
-      | "capture-failed",
-  ) {
-    super(`CAD ${reason}`);
-  }
-}
 
 /** GLTF hierarchy clones share immutable geometry, materials, and texture buffers. */
 export const buildCadSceneModel = (
