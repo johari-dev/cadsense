@@ -52,6 +52,8 @@ export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: 
 export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
+  open?: boolean;
+  onExited?: () => void;
   /**
    * Overrides the localStorage key used to persist the panel width. Embedded
    * surfaces can pass their own key so resizing one panel does not clobber
@@ -65,6 +67,49 @@ export function PreviewPanelShell(props: {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const animationRef = useRef<Animation | null>(null);
+  const exitRef = useRef(props.onExited);
+  exitRef.current = props.onExited;
+  const open = props.open ?? true;
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host || props.open === undefined || !isInline) return;
+    const prior = animationRef.current;
+    const currentWidth = host.getBoundingClientRect().width;
+    prior?.cancel();
+    const naturalWidth = host.getBoundingClientRect().width;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      animationRef.current = null;
+      if (!open) exitRef.current?.();
+      return;
+    }
+    const animation = host.animate(
+      [
+        {
+          width: `${prior ? currentWidth : open ? 0 : naturalWidth}px`,
+          flex: "0 0 auto",
+          overflow: "hidden",
+        },
+        { width: `${open ? naturalWidth : 0}px`, flex: "0 0 auto", overflow: "hidden" },
+      ],
+      { duration: 150, easing: "ease-out", fill: "both" },
+    );
+    animationRef.current = animation;
+    animation.onfinish = () => {
+      if (animationRef.current !== animation) return;
+      if (open) {
+        animation.cancel();
+        animationRef.current = null;
+      } else exitRef.current?.();
+    };
+  }, [open, isInline, props.open]);
+  useLayoutEffect(
+    () => () => {
+      animationRef.current?.cancel();
+      animationRef.current = null;
+    },
+    [],
+  );
   // Only inline non-maximized mode applies `width`/`maxWidth`; skip the
   // container measurement (and its re-renders) everywhere else.
   const maxWidth = useClampedMaxWidth(hostRef, isInline && !props.maximized);
@@ -90,6 +135,7 @@ export function PreviewPanelShell(props: {
       style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
+      inert={!open}
     >
       {isInline && !props.maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
       {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}

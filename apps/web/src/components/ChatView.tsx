@@ -264,6 +264,7 @@ import {
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { usePanelPresence } from "~/hooks/usePanelPresence";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
   awaitAttachmentUploads,
@@ -882,6 +883,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
+  const rightPanelPresence = usePanelPresence(rightPanelOpen);
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
@@ -4367,8 +4369,10 @@ function ChatViewContent(props: ChatViewProps) {
         {/* end horizontal flex container */}
       </div>
 
-      {!shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {!shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
         <RightPanelTabs
+          open={rightPanelOpen}
+          onExited={rightPanelPresence.onExited}
           onAddCad={addCadSurface}
           cadAvailable={cadAvailable}
           mode="inline"
@@ -4396,8 +4400,12 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
-        <RightPanelSheet open onClose={closePreviewPanel}>
+      {shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
+        <RightPanelSheet
+          open={rightPanelOpen}
+          onClose={closePreviewPanel}
+          onExited={rightPanelPresence.onExited}
+        >
           <RightPanelTabs
             onAddCad={addCadSurface}
             cadAvailable={cadAvailable}

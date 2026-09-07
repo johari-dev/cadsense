@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import { Box, ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../components/ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
 import { cadPanelEnvironment } from "../state/cadPanel";
@@ -235,25 +236,29 @@ function CadScene({
         )}
       </div>
       {manifest && (
-        <>
-          <Button
-            variant="ghost"
-            className="w-full justify-start rounded-none border-t px-3 text-xs disabled:pointer-events-auto disabled:opacity-100"
+        <Collapsible open={treeOpen} onOpenChange={setTreeOpen} className="shrink-0">
+          <CollapsibleTrigger
+            render={
+              <Button
+                variant="ghost"
+                className="w-full justify-start rounded-none border-t px-3 text-xs disabled:pointer-events-auto disabled:opacity-100"
+                disabled={disabled}
+              />
+            }
             disabled={disabled}
-            onClick={() => setTreeOpen(!treeOpen)}
           >
             {treeOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Components{" "}
             <span className="ml-auto text-muted-foreground">{manifest.nodes.length}</span>
-          </Button>
-          {treeOpen && (
+          </CollapsibleTrigger>
+          <CollapsiblePanel>
             <CadHierarchyTree
               manifest={manifest}
               view={view}
               disabled={disabled}
               onChange={onChange}
             />
-          )}
-        </>
+          </CollapsiblePanel>
+        </Collapsible>
       )}
     </>
   );
