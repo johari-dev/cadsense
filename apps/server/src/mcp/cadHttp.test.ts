@@ -108,6 +108,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_hierarchy",
       "cad_search",
       "cad_memory",
+      "cad_inspection",
       "cad_update_view",
       "cad_capture",
     ]);

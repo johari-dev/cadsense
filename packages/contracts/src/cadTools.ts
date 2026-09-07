@@ -3,6 +3,7 @@ import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
 import { CadMemoryInput, CadMemoryBrief } from "./cadMemory.ts";
+import { CadInspectionInput, CadInspectionIndex, CadInspectionRecall } from "./cadInspections.ts";
 
 export const CadSearchInput = Schema.Struct({
   query: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
@@ -32,6 +33,7 @@ export const CadHierarchyResult = Schema.Struct({
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
 export const CadSearchResult = Schema.Struct({
+  inspections: CadInspectionRecall,
   revision: Schema.Int,
   snapshotId: CadSnapshotId,
   totalMatches: Schema.Int,
@@ -44,6 +46,7 @@ export const CadSearchResult = Schema.Struct({
 });
 export type CadSearchResult = typeof CadSearchResult.Type;
 export const CadContextResult = Schema.Struct({
+  inspections: CadInspectionIndex,
   memory: CadMemoryBrief,
   overview: Schema.NullOr(
     Schema.Struct({
@@ -93,6 +96,7 @@ export const CAD_TOOL_INPUTS = {
   cad_hierarchy: CadHierarchyInput,
   cad_search: CadSearchInput,
   cad_memory: CadMemoryInput,
+  cad_inspection: CadInspectionInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;

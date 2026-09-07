@@ -99,6 +99,9 @@ export const make = Effect.gen(function* () {
       yield* sql`DELETE FROM cad_project_memory WHERE project_id=${projectId}`.pipe(
         Effect.mapError(failed),
       );
+      yield* sql`DELETE FROM cad_inspection_memory WHERE project_id=${projectId}`.pipe(
+        Effect.mapError(failed),
+      );
     }
     yield* dispatch({ type: "project.onshape.cleanup.complete", projectId, removedAt });
   });

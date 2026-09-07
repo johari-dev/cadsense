@@ -15,7 +15,7 @@ export const searchCadSnapshot = Effect.fn("searchCadSnapshot")(function* (
   snapshot: CadSnapshotManifest,
   state: CadViewState,
   rawInput: unknown,
-): Effect.fn.Return<CadSearchResult, CadViewError> {
+): Effect.fn.Return<Omit<CadSearchResult, "inspections">, CadViewError> {
   const input = yield* decodeInput(rawInput).pipe(
     Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
   );

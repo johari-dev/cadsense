@@ -224,6 +224,7 @@ it.effect(
           "cad_hierarchy",
           "cad_search",
           "cad_memory",
+          "cad_inspection",
           "cad_update_view",
           "cad_capture",
         ],

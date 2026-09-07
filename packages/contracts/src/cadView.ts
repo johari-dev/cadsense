@@ -87,5 +87,7 @@ export class CadViewError extends Schema.TaggedErrorClass<CadViewError>()("CadVi
     "capability-unavailable",
     "memory-full",
     "memory-source-invalid",
+    "memory-evidence-invalid",
+    "memory-write-limit",
   ]),
 }) {}
