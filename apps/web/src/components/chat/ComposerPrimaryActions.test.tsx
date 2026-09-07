@@ -216,9 +216,9 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("keeps stop and send at the same size across running states", () => {
-    expect(renderPendingActions(true)).toContain("size-7");
-    expect(renderStandaloneStop()).toContain("size-7");
-    expect(renderSendButton()).toContain("size-7");
+    expect(renderPendingActions(true)).toContain("size-8");
+    expect(renderStandaloneStop()).toContain("size-8");
+    expect(renderSendButton()).toContain("size-8");
   });
 
   it("renders stage artwork inside the send button when artwork identification is active", () => {
@@ -254,7 +254,7 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Stop generation"');
     expect(markup).toContain('aria-label="Send message"');
     expect(markup).toContain('type="submit"');
-    expect(markup).toContain("size-7");
+    expect(markup).toContain("size-8");
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {
