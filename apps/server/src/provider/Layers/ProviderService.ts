@@ -36,6 +36,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { CadViewing } from "../../cad/CadViewing.ts";
 import * as ServerConfig from "../../config.ts";
 import {
   increment,
@@ -226,6 +227,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const backgroundLiveness = yield* Effect.serviceOption(ThreadBackgroundLivenessService);
+  const cadViewing = yield* Effect.serviceOption(CadViewing);
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const issueMcpCredential =
     options?.issueMcpCredential ?? McpSessionRegistry.issueActiveMcpCredential;
@@ -796,7 +798,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // rather than issuing a new one: sessions that go a long time between
       // browser tool calls used to lose the toolkit outright.
       yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
-      const turn = yield* routed.adapter.sendTurn(input);
+      const brief = yield* Effect.gen(function* () {
+        if (Option.isNone(cadViewing)) return "";
+        const sessions = yield* routed.adapter.listSessions();
+        // Steers belong to a turn that already received its project context.
+        if (sessions.some((session) => session.threadId === input.threadId && session.activeTurnId))
+          return "";
+        return yield* cadViewing.value
+          .projectBrief(input.threadId)
+          .pipe(Effect.orElseSucceed(() => ""));
+      });
+      const turn = yield* routed.adapter.sendTurn(
+        brief
+          ? {
+              ...input,
+              input: input.input ? `${brief}\n\nCurrent user request:\n${input.input}` : brief,
+            }
+          : input,
+      );
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,

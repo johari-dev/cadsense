@@ -4,6 +4,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
+  OnshapeWorkspaceId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -54,12 +55,503 @@ import { CadUserOperationError } from "@cadsense/contracts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Option from "effect/Option";
 import { make as makeRenderBroker } from "./CadRenderBroker.ts";
 import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
+import { readCadInspectionMemory } from "./CadInspectionMemory.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+it.effect.each(["entries", "bytes"] as const)(
+  "bounds inspection storage by %s and bounds recall separately",
+  (budget) =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      assert.equal(yield* h.service.projectBrief(threadId), "");
+      const contextId = yield* h.service.resolveContext(threadId);
+      const captured = yield* h.service.withActivation(
+        contextId,
+        (tools) => tools.capture({ expectedRevision: 0 }),
+        TurnId.make("evidence"),
+      );
+      let stored = 0;
+      for (let i = 0; i <= 24; i++) {
+        const result = yield* h.service
+          .withActivation(
+            contextId,
+            (tools) =>
+              tools.inspection({
+                operation: {
+                  type: "remember",
+                  expectedRevision: i,
+                  key: `question-${i}`,
+                  question: `Question ${i}?`,
+                  finding: budget === "bytes" ? `${i}${"界".repeat(790)}` : `Finding ${i}.`,
+                  kind: "observation",
+                  occurrenceIds: [snapshot.nodes[0]!.id],
+                  captureId: captured.result.captureId,
+                },
+              }),
+            TurnId.make(`budget-${i}`),
+          )
+          .pipe(Effect.result);
+        if (result._tag === "Failure") {
+          assert.equal(result.failure.reason, "memory-full");
+          break;
+        }
+        stored++;
+      }
+      assert.isTrue(budget === "entries" ? stored === 24 : stored > 3 && stored < 24);
+      yield* h.service.withActivation(contextId, (tools) =>
+        Effect.gen(function* () {
+          const recalled = yield* tools.inspection({ operation: { type: "recall" } });
+          assert.equal(recalled.totalMatches, stored);
+          assert.equal(recalled.entries.length, 3);
+          const specific = yield* tools.inspection({
+            operation: { type: "recall", key: "question-0" },
+          });
+          assert.equal(specific.totalMatches, 1);
+          assert.equal(specific.entries[0]?.key, "question-0");
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("rejects a competing inspection writer without losing the first discovery", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const contexts = [
+      yield* h.service.resolveContext(threadId),
+      yield* h.service.resolveContext(otherThreadId),
+    ];
+    const results = yield* Effect.all(
+      contexts.map((contextId, i) =>
+        h.service
+          .withActivation(
+            contextId,
+            (tools) =>
+              Effect.gen(function* () {
+                const captured = yield* tools.capture({ expectedRevision: 0 });
+                return yield* tools.inspection({
+                  operation: {
+                    type: "remember",
+                    expectedRevision: 0,
+                    key: `concurrent-${i}`,
+                    question: `Question ${i}?`,
+                    finding: `Finding ${i}.`,
+                    kind: "hypothesis",
+                    occurrenceIds: [snapshot.nodes[0]!.id],
+                    captureId: captured.result.captureId,
+                  },
+                });
+              }),
+            TurnId.make(`concurrent-${i}`),
+          )
+          .pipe(Effect.result),
+      ),
+      { concurrency: "unbounded" },
+    );
+    assert.equal(results.filter((result) => result._tag === "Success").length, 1);
+    const failure = results.find((result) => result._tag === "Failure");
+    assert.equal(failure?.failure.reason, "revision-conflict");
+    assert.equal((yield* readCadInspectionMemory(projectId)).entries.length, 1);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect(
+  "reuses capture-backed discoveries across threads without rendering again, and invalidates them on sync",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const contextId = yield* h.service.resolveContext(threadId);
+      const capture = yield* h.service.withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            const captured = yield* tools.capture({ expectedRevision: 0 });
+            const saved = yield* tools.inspection({
+              operation: {
+                type: "remember",
+                expectedRevision: 0,
+                key: "rear-access",
+                question: "Where is rear access?",
+                finding:
+                  "The opening faces the rear; inspect the original capture before planning access.",
+                kind: "observation",
+                occurrenceIds: [snapshot.nodes[0]!.id],
+                captureId: captured.result.captureId,
+              },
+            });
+            assert.equal(saved.entries[0]?.imagePath, captured.result.artifact.path);
+            assert.deepEqual(saved.entries[0]?.cameraPose, captured.result.cameraPose);
+            yield* tools.updateView({
+              expectedRevision: 0,
+              operations: [{ type: "explode", amount: 0.4 }],
+            });
+            assert.equal(
+              (yield* tools.inspection({ operation: { type: "recall", key: "rear-access" } }))
+                .totalMatches,
+              1,
+            );
+            return captured.result;
+          }),
+        TurnId.make("inspect-rear"),
+      );
+      assert.equal(h.renderRequests.length, 1);
+      const recreated = yield* h.recreate;
+      const brief = yield* recreated.projectBrief(otherThreadId);
+      assert.include(brief, "Where is rear access?");
+      assert.notInclude(brief, "The opening faces the rear");
+      const other = yield* recreated.resolveContext(otherThreadId);
+      yield* recreated.withActivation(other, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.equal(context.inspections.entries[0]?.key, "rear-access");
+          const recalled = yield* tools.inspection({
+            operation: { type: "recall", query: "rear access" },
+          });
+          assert.equal(recalled.entries[0]?.sourceThreadId, threadId);
+          assert.equal(recalled.entries[0]?.captureId, capture.captureId);
+          assert.equal((yield* tools.search({ query: "Intake" })).inspections.totalMatches, 1);
+          assert.equal((yield* tools.search({ query: "missing" })).inspections.totalMatches, 0);
+          assert.equal(
+            (yield* tools.inspection({ operation: { type: "recall", query: "unrelated" } }))
+              .totalMatches,
+            0,
+          );
+        }),
+      );
+      assert.equal(h.renderRequests.length, 1);
+      assert.equal(h.pins(), 0);
+      yield* h.presentation.settle(threadId);
+      const next = { ...snapshot, snapshotId: "00000000-0000-4000-8000-000000000099" };
+      h.snapshots.set(next.snapshotId, next);
+      const operationId = "00000000-0000-4000-8000-000000000098";
+      yield* h.dispatch({
+        type: "project.cad.operation.reserve",
+        projectId,
+        operationId,
+        kind: "sync",
+        root: {
+          rootId: snapshot.rootId,
+          elementId: snapshot.root.elementId,
+          kind: "assembly",
+          configuration: "default",
+        },
+      });
+      yield* h.dispatch({
+        type: "project.cad.operation.complete",
+        projectId,
+        operationId,
+        result: {
+          kind: "sync",
+          snapshot: {
+            snapshotId: next.snapshotId,
+            microversionId: source.workspaceId,
+            createdAt: now,
+            manifestBytes: 1,
+            assetBytes: 0,
+          },
+        },
+      });
+      assert.notInclude(yield* recreated.projectBrief(otherThreadId), "Where is rear access?");
+      yield* h.service.withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            assert.equal((yield* tools.context()).inspections.entries.length, 0);
+            assert.equal(
+              (yield* tools.inspection({ operation: { type: "recall" } })).totalMatches,
+              0,
+            );
+            const rejected = yield* tools
+              .inspection({
+                operation: {
+                  type: "remember",
+                  expectedRevision: 1,
+                  key: "rear-access",
+                  question: "Where is rear access?",
+                  finding: "Old claim.",
+                  kind: "observation",
+                  occurrenceIds: [snapshot.nodes[0]!.id],
+                  captureId: capture.captureId,
+                },
+              })
+              .pipe(Effect.flip);
+            assert.equal(rejected.reason, "memory-evidence-invalid");
+            const fresh = yield* tools.capture({
+              expectedRevision: (yield* tools.context()).revision,
+            });
+            yield* tools.inspection({
+              operation: {
+                type: "remember",
+                expectedRevision: 1,
+                key: "new-access",
+                question: "Where is new access?",
+                finding: "The opening moved.",
+                kind: "hypothesis",
+                occurrenceIds: [snapshot.nodes[0]!.id],
+                captureId: fresh.result.captureId,
+              },
+            });
+          }),
+        TurnId.make("new-inspection"),
+      );
+      const stored = yield* readCadInspectionMemory(projectId);
+      assert.equal(stored.entries.length, 1);
+      assert.equal(stored.entries[0]?.snapshotId, next.snapshotId);
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect(
+  "requires visible subjects and an owned capture, limits new findings, and replaces or forgets by key",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const contextId = yield* h.service.resolveContext(threadId);
+      const captured = yield* h.service.withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            const capture = yield* tools.capture({ expectedRevision: 0 });
+            const operation = {
+              type: "remember",
+              expectedRevision: 0,
+              key: "access",
+              question: "Where is access?",
+              finding: "Access seems to be at the rear.",
+              kind: "hypothesis",
+              occurrenceIds: [snapshot.nodes[0]!.id],
+              captureId: capture.result.captureId,
+            };
+            assert.equal(
+              (yield* tools
+                .inspection({ operation: { ...operation, occurrenceIds: ["f".repeat(64)] } })
+                .pipe(Effect.flip)).reason,
+              "memory-evidence-invalid",
+            );
+            yield* tools.updateView({
+              expectedRevision: 0,
+              operations: [{ type: "hide", occurrenceIds: [snapshot.nodes[0]!.id] }],
+            });
+            const hidden = yield* tools.capture({ expectedRevision: 1 });
+            assert.equal(
+              (yield* tools
+                .inspection({ operation: { ...operation, captureId: hidden.result.captureId } })
+                .pipe(Effect.flip)).reason,
+              "memory-evidence-invalid",
+            );
+            yield* tools.inspection({ operation });
+            assert.equal(
+              (yield* tools.inspection({ operation: { ...operation, expectedRevision: 1 } }))
+                .revision,
+              1,
+            );
+            assert.equal(
+              (yield* tools
+                .inspection({
+                  operation: {
+                    ...operation,
+                    key: "duplicate",
+                    expectedRevision: 1,
+                    question: " WHERE is access? ",
+                  },
+                })
+                .pipe(Effect.flip)).reason,
+              "invalid-operation",
+            );
+            for (const i of [1, 2])
+              yield* tools.inspection({
+                operation: {
+                  ...operation,
+                  key: `detail-${i}`,
+                  question: `Detail ${i}?`,
+                  finding: `Finding ${i}.`,
+                  expectedRevision: i,
+                },
+              });
+            assert.equal(
+              (yield* tools
+                .inspection({
+                  operation: {
+                    ...operation,
+                    key: "fourth",
+                    question: "Fourth question?",
+                    finding: "Fourth finding.",
+                    expectedRevision: 3,
+                  },
+                })
+                .pipe(Effect.flip)).reason,
+              "memory-write-limit",
+            );
+            yield* tools.inspection({
+              operation: {
+                ...operation,
+                expectedRevision: 3,
+                finding: "Access is visible from the rear.",
+              },
+            });
+            assert.equal(
+              (yield* tools.inspection({ operation: { type: "recall" } })).totalMatches,
+              3,
+            );
+            assert.equal(
+              (yield* tools
+                .inspection({ operation: { ...operation, expectedRevision: 3 } })
+                .pipe(Effect.flip)).reason,
+              "revision-conflict",
+            );
+            yield* tools.inspection({
+              operation: { type: "forget", expectedRevision: 4, key: "access" },
+            });
+            assert.equal(
+              (yield* tools
+                .inspection({ operation: { type: "forget", expectedRevision: 5, key: "access" } })
+                .pipe(Effect.flip)).reason,
+              "invalid-operation",
+            );
+            assert.equal(
+              (yield* tools.inspection({ operation: { type: "recall", key: "access" } }))
+                .totalMatches,
+              0,
+            );
+            return capture.result;
+          }),
+        TurnId.make("inspection-limits"),
+      );
+      for (const context of [
+        yield* h.service.resolveContext(threadId, "child"),
+        yield* h.service.resolveContext(otherThreadId),
+      ]) {
+        yield* h.service.withActivation(
+          context,
+          (tools) =>
+            Effect.gen(function* () {
+              assert.equal(
+                (yield* tools
+                  .inspection({
+                    operation: {
+                      type: "remember",
+                      expectedRevision: 5,
+                      key: "foreign",
+                      question: "Foreign?",
+                      finding: "Foreign capture.",
+                      kind: "observation",
+                      occurrenceIds: [snapshot.nodes[0]!.id],
+                      captureId: captured.captureId,
+                    },
+                  })
+                  .pipe(Effect.flip)).reason,
+                "memory-evidence-invalid",
+              );
+            }),
+          TurnId.make("foreign-inspection"),
+        );
+      }
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect(
+  "recalls project facts in a fresh thread and withholds obsolete component bindings after sync",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO projection_thread_messages(message_id,thread_id,turn_id,role,text,is_streaming,created_at,updated_at)
+      VALUES('memory-source',${threadId},NULL,'user','We call this assembly the carriage.',0,${now},${now})`;
+      const contextId = yield* h.service.resolveContext(threadId);
+      yield* h.service.withActivation(contextId, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.deepEqual(context.overview, { occurrences: 1, parts: 0, assemblies: 1 });
+          const found = yield* tools.search({ query: "intake" });
+          const target = {
+            rootId: snapshot.rootId,
+            snapshotId: found.snapshotId,
+            occurrenceId: found.entries[0]!.occurrenceId,
+          };
+          const input = {
+            key: "carriage",
+            quote: "We call this assembly the carriage.",
+            expectedRevision: 0,
+            change: { type: "remember", kind: "name", target },
+          };
+          assert.equal(
+            (yield* tools
+              .memory({
+                ...input,
+                change: { ...input.change, target: { ...target, occurrenceId: "f".repeat(64) } },
+              })
+              .pipe(Effect.flip)).reason,
+            "invalid-operation",
+          );
+          const saved = yield* tools.memory(input);
+          assert.equal(saved.entries[0]?.targetStatus, "current");
+          yield* tools.updateView({
+            expectedRevision: context.revision,
+            operations: [{ type: "explode", amount: 0.5 }],
+          });
+          assert.equal((yield* tools.context()).memory.entries[0]?.targetStatus, "current");
+        }),
+      );
+      const recreated = yield* h.recreate;
+      const brief = yield* recreated.projectBrief(otherThreadId);
+      assert.include(brief, "We call this assembly the carriage.");
+      assert.notInclude(brief, snapshot.nodes[0]!.id);
+      assert.equal(h.pins(), 0);
+      const fresh = yield* recreated.resolveContext(otherThreadId);
+      yield* recreated.withActivation(fresh, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.equal(context.memory.entries[0]?.targetStatus, "current");
+          assert.equal(context.memory.entries[0]?.sourceThreadId, threadId);
+        }),
+      );
+      const next = {
+        ...snapshot,
+        snapshotId: "00000000-0000-4000-8000-000000000099",
+        root: { ...snapshot.root, microversionId: OnshapeWorkspaceId.make("e".repeat(24)) },
+      };
+      h.snapshots.set(next.snapshotId, next);
+      const operationId = "00000000-0000-4000-8000-000000000098";
+      yield* h.dispatch({
+        type: "project.cad.operation.reserve",
+        projectId,
+        operationId,
+        kind: "sync",
+        root: {
+          rootId: snapshot.rootId,
+          elementId: snapshot.root.elementId,
+          kind: "assembly",
+          configuration: "default",
+        },
+      });
+      yield* h.dispatch({
+        type: "project.cad.operation.complete",
+        projectId,
+        operationId,
+        result: {
+          kind: "sync",
+          snapshot: {
+            snapshotId: next.snapshotId,
+            microversionId: next.root.microversionId,
+            createdAt: now,
+            manifestBytes: 1,
+            assetBytes: 0,
+          },
+        },
+      });
+      yield* recreated.withActivation(fresh, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.equal(context.state?.snapshotId, next.snapshotId);
+          assert.equal(context.memory.entries[0]?.quote, "We call this assembly the carriage.");
+          assert.equal(context.memory.entries[0]?.targetStatus, "stale");
+          assert.equal(context.memory.entries[0]?.targetName, "Intake");
+          assert.isNull(context.memory.entries[0]?.target);
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 it.effect(
   "returns a fitted capture pose that the agent can recenter and zoom without changing angle",
   () =>

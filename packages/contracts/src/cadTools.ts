@@ -2,6 +2,13 @@ import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
+import { CadMemoryInput, CadMemoryBrief } from "./cadMemory.ts";
+import { CadInspectionInput, CadInspectionIndex, CadInspectionRecall } from "./cadInspections.ts";
+
+export const CadSearchInput = Schema.Struct({
+  query: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
+});
 
 export const CadHierarchyInput = Schema.Struct({
   parentOccurrenceId: Schema.optionalKey(CadHash),
@@ -25,7 +32,29 @@ export const CadHierarchyResult = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
+export const CadSearchResult = Schema.Struct({
+  inspections: CadInspectionRecall,
+  revision: Schema.Int,
+  snapshotId: CadSnapshotId,
+  totalMatches: Schema.Int,
+  entries: Schema.Array(
+    Schema.Struct({
+      ...CadHierarchyEntry.fields,
+      path: Schema.Array(Schema.String),
+    }),
+  ),
+});
+export type CadSearchResult = typeof CadSearchResult.Type;
 export const CadContextResult = Schema.Struct({
+  inspections: CadInspectionIndex,
+  memory: CadMemoryBrief,
+  overview: Schema.NullOr(
+    Schema.Struct({
+      occurrences: Schema.Int,
+      parts: Schema.Int,
+      assemblies: Schema.Int,
+    }),
+  ),
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   state: Schema.NullOr(CadViewState),
   roots: Schema.Array(
@@ -65,6 +94,9 @@ export const CadCaptureToolResult = Schema.Struct({
 export const CAD_TOOL_INPUTS = {
   cad_context: Schema.Struct({}),
   cad_hierarchy: CadHierarchyInput,
+  cad_search: CadSearchInput,
+  cad_memory: CadMemoryInput,
+  cad_inspection: CadInspectionInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;

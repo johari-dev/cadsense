@@ -28,6 +28,8 @@ export * from "./rpc.ts";
 export * from "./cadLifecycle.ts";
 export * from "./cadView.ts";
 export * from "./cadTools.ts";
+export * from "./cadMemory.ts";
+export * from "./cadInspections.ts";
 export * from "./cadRender.ts";
 export * from "./cadCaptures.ts";
 export * from "./cadUser.ts";
