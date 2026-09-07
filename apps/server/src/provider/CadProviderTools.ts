@@ -24,7 +24,8 @@ export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, sc
     type: "function" as const,
     name,
     description: descriptions[name as keyof typeof descriptions],
-    inputSchema: { ...document.schema, $defs: document.definitions },
+    // Tool arguments are objects; Effect's empty Struct also encodes arrays unless narrowed.
+    inputSchema: { ...document.schema, type: "object" as const, $defs: document.definitions },
   };
 });
 export interface CadToolDelivery {
