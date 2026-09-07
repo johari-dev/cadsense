@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  formatAppDisplayName,
   resolveServerBackedAppDisplayName,
   resolveServerBackedAppStageLabel,
 } from "./branding.logic";
@@ -8,6 +9,7 @@ const originalWindow = globalThis.window;
 
 afterEach(() => {
   vi.resetModules();
+  vi.unstubAllEnvs();
 
   if (originalWindow === undefined) {
     Reflect.deleteProperty(globalThis, "window");
@@ -18,29 +20,52 @@ afterEach(() => {
 });
 
 describe("branding", () => {
-  it("uses injected desktop branding when available", async () => {
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: {
-        desktopBridge: {
-          getAppBranding: () => ({
-            baseName: "Cadsense",
-            stageLabel: "Nightly",
-            displayName: "Cadsense (Nightly)",
-          }),
-        },
-      },
-    });
-
+  it("uses an unlabelled web release name", async () => {
+    Reflect.deleteProperty(globalThis, "window");
+    vi.stubEnv("DEV", false);
     const branding = await import("./branding");
-
-    expect(branding.APP_BASE_NAME).toBe("Cadsense");
-    expect(branding.APP_STAGE_LABEL).toBe("Nightly");
-    expect(branding.APP_DISPLAY_NAME).toBe("Cadsense (Nightly)");
+    expect(branding.APP_STAGE_LABEL).toBe("");
+    expect(branding.APP_DISPLAY_NAME).toBe("Cadsense");
   });
+  it.each([
+    ["Nightly", "Nightly", "Cadsense (Nightly)"],
+    ["Dev", "Dev", "Cadsense (Dev)"],
+    ["", "", "Cadsense"],
+    ["Alpha", "", "Cadsense"],
+  ])(
+    "uses injected desktop branding without obsolete %s labels",
+    async (stageLabel, expectedStage, displayName) => {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: {
+          desktopBridge: {
+            getAppBranding: () => ({
+              baseName: "Cadsense",
+              stageLabel,
+              displayName: stageLabel ? `Cadsense (${stageLabel})` : "Cadsense",
+            }),
+          },
+        },
+      });
+
+      const branding = await import("./branding");
+
+      expect(branding.APP_BASE_NAME).toBe("Cadsense");
+      expect(branding.APP_STAGE_LABEL).toBe(expectedStage);
+      expect(branding.APP_DISPLAY_NAME).toBe(displayName);
+    },
+  );
 });
 
 describe("branding logic", () => {
+  it.each(["", "Latest", "Alpha"])("omits release stage %s from the display name", (stageLabel) => {
+    expect(formatAppDisplayName({ baseName: "Cadsense", stageLabel })).toBe("Cadsense");
+  });
+  it.each(["Dev", "Nightly"])("preserves the %s stage", (stageLabel) => {
+    expect(formatAppDisplayName({ baseName: "Cadsense", stageLabel })).toBe(
+      `Cadsense (${stageLabel})`,
+    );
+  });
   it("returns Nightly for nightly primary server versions", () => {
     expect(
       resolveServerBackedAppStageLabel({
@@ -69,7 +94,7 @@ describe("branding logic", () => {
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.27",
       }),
-    ).toBe("Cadsense (Alpha)");
+    ).toBe("Cadsense");
   });
 
   it("keeps the fallback display name for malformed nightly primary server versions", () => {
@@ -80,6 +105,6 @@ describe("branding logic", () => {
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616",
       }),
-    ).toBe("Cadsense (Alpha)");
+    ).toBe("Cadsense");
   });
 });

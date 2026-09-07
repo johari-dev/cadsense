@@ -35,6 +35,31 @@ const makeEnvironment = (
   DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect("labels only development and nightly builds", () =>
+    Effect.gen(function* () {
+      const release = yield* makeEnvironment();
+      const nightly = yield* makeEnvironment({ appVersion: "0.0.36-nightly.20260906.1" });
+      const development = yield* makeEnvironment(
+        {},
+        { VITE_DEV_SERVER_URL: "http://localhost:5173" },
+      );
+      assert.deepEqual(release.branding, {
+        baseName: "Cadsense",
+        stageLabel: "",
+        displayName: "Cadsense",
+      });
+      assert.deepEqual(nightly.branding, {
+        baseName: "Cadsense",
+        stageLabel: "Nightly",
+        displayName: "Cadsense (Nightly)",
+      });
+      assert.deepEqual(development.branding, {
+        baseName: "Cadsense",
+        stageLabel: "Dev",
+        displayName: "Cadsense (Dev)",
+      });
+    }),
+  );
   it.effect("derives state paths and development identity inside Effect", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
@@ -50,6 +75,11 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, true);
+      assert.deepEqual(environment.branding, {
+        baseName: "Cadsense",
+        stageLabel: "Dev",
+        displayName: "Cadsense (Dev)",
+      });
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
       assert.equal(environment.baseDir, "/tmp/cadsense");
       assert.equal(environment.stateDir, "/tmp/cadsense/userdata");
@@ -86,6 +116,11 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, false);
+      assert.deepEqual(environment.branding, {
+        baseName: "Cadsense",
+        stageLabel: "",
+        displayName: "Cadsense",
+      });
       assert.equal(environment.stateDir, "/tmp/cadsense/userdata");
       assert.equal(environment.logDir, "/tmp/cadsense/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/cadsense/userdata/browser-artifacts");

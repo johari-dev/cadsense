@@ -1,0 +1,85 @@
+/* Spring motion from AadiJo/frc-rag-frontend's spinning-loader:
+   stiffness 50, damping 8, mass 1.5, sampled over three seconds. Shared by
+   the pre-JavaScript boot shell and React splash, with no per-frame JS. */
+.loading-logo {
+  animation: loading-logo-spin 3s
+    linear(
+      0,
+      0.03794,
+      0.13688,
+      0.27536,
+      0.43407,
+      0.59674,
+      0.75062,
+      0.8866,
+      0.99899,
+      1.08514,
+      1.14495,
+      1.18022,
+      1.19415,
+      1.19072,
+      1.17423,
+      1.14895,
+      1.11876,
+      1.08702,
+      1.05638,
+      1.02882,
+      1.00562,
+      0.98744,
+      0.97442,
+      0.96632,
+      0.96255,
+      0.96239,
+      0.965,
+      0.96954,
+      0.97523,
+      0.98139,
+      0.98745,
+      0.99301,
+      0.99778,
+      1.00159,
+      1.00439,
+      1.00622,
+      1.00717,
+      1.00738,
+      1.007,
+      1.0062,
+      1.00514,
+      1.00395,
+      1.00276,
+      1.00164,
+      1.00067,
+      0.99987,
+      0.99927,
+      0.99887,
+      0.99864,
+      0.99856,
+      0.99861,
+      0.99874,
+      0.99894,
+      0.99917,
+      0.9994,
+      0.99962,
+      0.99982,
+      0.99999,
+      1.00011,
+      1.0002,
+      1
+    )
+    infinite;
+}
+
+@keyframes loading-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-logo {
+    animation: none;
+  }
+}
