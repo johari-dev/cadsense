@@ -30,7 +30,6 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
   { key: "mod+p", command: "filePicker.toggle" },
   { key: "mod+shift+f", command: "projectSearch.toggle" },
-  { key: "mod+s", command: "composer.stash" },
   { key: "mod+n", command: "chat.new" },
   { key: "mod+shift+o", command: "chat.new" },
   { key: "mod+shift+m", command: "modelPicker.toggle" },

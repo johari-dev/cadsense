@@ -1,24 +1,10 @@
-/**
- * Downscale + re-encode for image attachments that are too big for where
- * they're headed. Two consumers share the same pipeline:
- *
- * - The prompt stash persists images as base64 in localStorage (~5MB origin
- *   quota), so `compressImageForStash` targets a per-image character budget.
- * - The composer accepts pasted/dropped images larger than the provider's
- *   `PROVIDER_SEND_TURN_MAX_IMAGE_BYTES` wire cap and shrinks them to fit
- *   via `compressImageToByteLimit` instead of rejecting the paste.
- *
- * Supported images already within budget pass through untouched. HEIC/HEIF
- * photos are decoded to JPEG first because providers cannot consume them.
- */
+/** Shrinks oversized composer attachments to the provider wire limit. */
 
 /**
  * Longest edge kept when an image has to be re-encoded. Sized so a typical
  * retina screenshot (3024px wide) stays legible rather than being halved.
  */
 const MAX_DIMENSION = 2048;
-/** Base64 budget for a single stashed image (~975KB of binary). */
-export const MAX_STASH_IMAGE_DATA_URL_CHARS = 1_300_000;
 /**
  * Ceiling on the *source* file handed to the re-encoder. File size is a
  * proxy for pixel count, and decoding hundreds of megapixels into an
@@ -38,23 +24,11 @@ const FALLBACK_SCALE_STEPS = [0.75, 0.55] as const;
 const HEIC_IMAGE_MIME_TYPE = /^image\/hei(?:c|f)$/i;
 const HEIC_IMAGE_EXTENSION = /\.(?:heic|heif)$/i;
 
-export interface CompressedStashImage {
-  dataUrl: string;
-  mimeType: string;
-  sizeBytes: number;
-  /** True when the payload was re-encoded rather than stored verbatim. */
-  recompressed: boolean;
-}
-
 /**
  * Why an image could not be compressed. Callers report these differently:
  * "too large" is a budget outcome, "unreadable" is a decode failure.
  */
 export type ImageCompressionFailureReason = "too-large" | "unreadable";
-
-export type CompressStashImageResult =
-  | { ok: true; image: CompressedStashImage }
-  | { ok: false; reason: ImageCompressionFailureReason };
 
 export type CompressImageFileResult =
   | { ok: true; file: File; recompressed: boolean }
@@ -161,15 +135,6 @@ async function blobToDataUrl(blob: File | Blob, mimeTypeOverride?: string): Prom
   return `data:${mimeType};base64,${bytesToBase64(new Uint8Array(buffer))}`;
 }
 
-/** Approximate decoded byte count for a base64 data URL. */
-function dataUrlByteLength(dataUrl: string): number {
-  const commaIndex = dataUrl.indexOf(",");
-  const payload = commaIndex === -1 ? dataUrl : dataUrl.slice(commaIndex + 1);
-  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
-}
-
-/** Base64 payload of a data URL decoded back into a `File`. */
 function dataUrlToFile(dataUrl: string, name: string, mimeType: string): File {
   const payload = dataUrl.slice(dataUrl.indexOf(",") + 1);
   const binary = atob(payload);
@@ -329,7 +294,7 @@ async function reencodeWithinBudget(
         // Keep trying the smaller fallback scales rather than giving up: a
         // reduced pass may well succeed. The exception must never escape,
         // though, since callers finalize state after this returns and a
-        // throw would strand it (e.g. a stash entry stuck "still saving").
+        // throw would strand an attachment waiting for compression.
         encodeFailed = true;
         continue;
       }
@@ -342,50 +307,6 @@ async function reencodeWithinBudget(
   } finally {
     bitmap.close();
   }
-}
-
-/**
- * Produces the payload to persist for a stashed image.
- *
- * Small images are stored verbatim (preserving PNG transparency and exact
- * pixels). Anything over budget is downscaled and re-encoded; if it still
- * doesn't fit after the fallback passes, reports a failure so the caller
- * can record it as dropped.
- */
-export async function compressImageForStash(
-  file: File,
-  budgetChars: number = MAX_STASH_IMAGE_DATA_URL_CHARS,
-): Promise<CompressStashImageResult> {
-  let originalDataUrl: string;
-  try {
-    originalDataUrl = await blobToDataUrl(file);
-  } catch {
-    return { ok: false, reason: "unreadable" };
-  }
-  if (originalDataUrl.length <= budgetChars) {
-    return {
-      ok: true,
-      image: {
-        dataUrl: originalDataUrl,
-        mimeType: file.type,
-        sizeBytes: file.size,
-        recompressed: false,
-      },
-    };
-  }
-  const reencoded = await reencodeWithinBudget(file, budgetChars);
-  if (!reencoded.ok) {
-    return reencoded;
-  }
-  return {
-    ok: true,
-    image: {
-      dataUrl: reencoded.dataUrl,
-      mimeType: reencoded.mimeType,
-      sizeBytes: dataUrlByteLength(reencoded.dataUrl),
-      recompressed: true,
-    },
-  };
 }
 
 /**

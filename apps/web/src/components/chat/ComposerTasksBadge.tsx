@@ -58,7 +58,6 @@ function TaskSegments({
 
 export const ComposerTasksBadge = memo(function ComposerTasksBadge({
   expanded,
-  hasTrailingShoulder = false,
   onDismiss,
   onToggle,
   placement = "tab",
@@ -66,7 +65,6 @@ export const ComposerTasksBadge = memo(function ComposerTasksBadge({
   steps,
 }: {
   readonly expanded: boolean;
-  readonly hasTrailingShoulder?: boolean;
   readonly onDismiss: () => void;
   readonly onToggle: () => void;
   readonly placement?: "inline" | "tab";
@@ -119,7 +117,7 @@ export const ComposerTasksBadge = memo(function ComposerTasksBadge({
     <div
       className={cn(
         "chat-composer-shoulder-tab chat-composer-tasks-tab absolute -top-7 left-5.5 z-0 flex h-8 items-center gap-1 rounded-t-xl border border-b-0 px-2 pb-1 text-xs leading-none text-muted-foreground",
-        hasTrailingShoulder ? "right-30" : "right-5.5",
+        "right-5.5",
         allDone && "text-foreground",
       )}
       data-composer-tasks-badge="true"

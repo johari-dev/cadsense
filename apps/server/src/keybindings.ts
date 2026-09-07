@@ -177,6 +177,7 @@ const decodeRawKeybindingsEntriesExit = Schema.decodeUnknownExit(RawKeybindingsE
 const decodeLegacyKeybindingEntryExit = Schema.decodeUnknownExit(LegacyKeybindingEntry);
 const encodeKeybindingsConfigPrettyJson = Schema.encodeEffect(KeybindingsConfigPrettyJson);
 const REMOVED_KEYBINDING_COMMANDS = new Set([
+  "composer.stash",
   "thread.settle",
   "themeEditor.toggle",
   "diff.toggle",

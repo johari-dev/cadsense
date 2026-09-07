@@ -106,19 +106,8 @@ export function composerFileNeedsReattach(file: ComposerFileAttachment): boolean
   return file.file === null && file.uploadedAttachmentId === undefined;
 }
 
-export const PersistedComposerFileAttachment = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  mimeType: Schema.String,
-  sizeBytes: Schema.Number,
-  attachmentId: Schema.String,
-  environmentId: EnvironmentId,
-});
-export type PersistedComposerFileAttachment = typeof PersistedComposerFileAttachment.Type;
-
 /**
- * Draft-persisted file. Unlike a stash entry (which requires a finished
- * upload), a draft may hold a file whose upload never completed. Its `File`
+ * A draft may hold a file whose upload never completed. Its `File`
  * handle cannot serialize, so it persists as a metadata-only marker (no
  * `attachmentId`) and hydrates as a needs-reattach row instead of vanishing.
  */
@@ -535,12 +524,6 @@ interface ComposerDraftStoreState {
     attachments: PersistedComposerImageAttachment[],
   ) => void;
   clearComposerContent: (threadRef: ComposerThreadTarget) => void;
-  /**
-   * Clears the prompt text and attachments, preserving element contexts and
-   * preview annotations. Used by the
-   * prompt stash. Session-bound context stays in the source draft.
-   */
-  clearComposerPromptAndImages: (threadRef: ComposerThreadTarget) => void;
   /**
    * Moves prompt text and transferable attachments into another composer.
    * Attachments over the destination limit and uploaded files that belong to
@@ -3261,36 +3244,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
-        clearComposerPromptAndImages: (threadRef) => {
-          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
-          if (threadKey.length === 0) {
-            return;
-          }
-          set((state) => {
-            const current = state.draftsByThreadKey[threadKey];
-            if (!current) {
-              return state;
-            }
-            for (const image of current.images) {
-              revokeObjectPreviewUrl(image.previewUrl);
-            }
-            const nextDraft: ComposerThreadDraftState = {
-              ...current,
-              prompt: "",
-              images: [],
-              files: [],
-              nonPersistedImageIds: [],
-              persistedAttachments: [],
-            };
-            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
-            if (shouldRemoveDraft(nextDraft)) {
-              delete nextDraftsByThreadKey[threadKey];
-            } else {
-              nextDraftsByThreadKey[threadKey] = nextDraft;
-            }
-            return { draftsByThreadKey: nextDraftsByThreadKey };
-          });
-        },
         moveComposerPromptAndImages: (from, to) => {
           const fromKey = resolveComposerDraftKey(get(), from) ?? "";
           const toKey = resolveComposerDraftKey(get(), to) ?? "";
@@ -3366,8 +3319,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 ),
               ],
             };
-            // Same clearing shape as clearComposerPromptAndImages, but the
-            // preview URLs are NOT revoked: the images moved and their blobs
+            // Preview URLs are not revoked: the images moved and their blobs
             // are still referenced from the destination.
             const nextSource: ComposerThreadDraftState = {
               ...source,
