@@ -7,7 +7,8 @@ import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 export interface OnshapeTransportRequest<E = never, R = never> {
-  readonly method: "GET";
+  readonly method: "GET" | "POST";
+  readonly body?: string;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly responseType?: "json" | "binary";
@@ -25,6 +26,11 @@ export interface OnshapeTransportResponse {
 
 export const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_BINARY_BODY_BYTES = 128 * 1024 * 1024;
+/** Scoped to one sync, including separately signed redirect hops. */
+export const OnshapeRequestMetrics = Context.Reference<{ requests: number } | undefined>(
+  "@cadsense/server/onshape/OnshapeRequestMetrics",
+  { defaultValue: () => undefined },
+);
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const responseContentType = (header: string | undefined): string | null => {
   const mediaType = header?.split(";")[0]?.trim().toLowerCase();
@@ -58,9 +64,17 @@ export const layer = Layer.effect(
     const execute: OnshapeTransport["Service"]["execute"] = Effect.fn("OnshapeTransport.execute")(
       function* <E = never, R = never>(request: OnshapeTransportRequest<E, R>) {
         let guardFailure: Option.Option<E> = Option.none();
-        return yield* HttpClientRequest.get(request.url).pipe(
+        const metrics = yield* OnshapeRequestMetrics;
+        return yield* HttpClientRequest.make(request.method)(request.url).pipe(
+          (req) =>
+            request.body === undefined
+              ? req
+              : HttpClientRequest.bodyText(req, request.body, "application/json"),
           HttpClientRequest.setHeaders(request.headers),
-          client.execute,
+          (request) =>
+            Effect.sync(() => {
+              if (metrics) metrics.requests++;
+            }).pipe(Effect.andThen(client.execute(request))),
           Effect.flatMap(
             Effect.fn(function* (response) {
               const result = {
@@ -116,7 +130,8 @@ export const layer = Layer.effect(
             }),
           ),
           Effect.scoped,
-          Effect.timeout("15 seconds"),
+          // Translation jobs are polled separately. Large export bodies need time to download.
+          Effect.timeout(request.responseType === "binary" ? "3 minutes" : "15 seconds"),
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
           Effect.mapError(() =>
             Option.isSome(guardFailure) ? guardFailure.value : new OnshapeTransportFailure(),

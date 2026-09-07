@@ -23,6 +23,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
+import { OnshapeExportError } from "../onshape/OnshapeBulkAcquisition.ts";
 import { snapshotRootId } from "../onshape/OnshapeSnapshotManifest.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
@@ -60,11 +61,29 @@ const isOnshapeConnectionError = Schema.is(OnshapeConnectionError);
 const isCadSnapshotStoreError = Schema.is(CadSnapshotStoreError);
 const isCadUserOperationError = Schema.is(CadUserOperationError);
 const isCadGeometryError = Schema.is(CadGeometryError);
+const isOnshapeExportError = Schema.is(OnshapeExportError);
 const failureReason = (error: unknown): string => {
   let detail = "CAD operation failed.";
   if (isCadGeometryError(error) && error.reason === "too-large")
     detail = "This CAD exceeds the supported scene size. Choose a smaller assembly or part studio.";
-  else if (isCadSnapshotStoreError(error))
+  else if (isOnshapeExportError(error)) {
+    switch (error.reason) {
+      case "translation-pending":
+        detail = "Onshape is still preparing this export. Sync again to resume it.";
+        break;
+      case "revision-changed":
+        detail =
+          "The Onshape workspace changed during export. Sync again to download the new revision.";
+        break;
+      case "translation-failed":
+        detail =
+          "Onshape could not export this CAD. Check the assembly in Onshape before syncing again.";
+        break;
+      case "invalid-response":
+        detail = "Onshape returned an incomplete export response.";
+        break;
+    }
+  } else if (isCadSnapshotStoreError(error))
     detail =
       error.reason === "disk-space"
         ? "Not enough free disk space. Free space to keep at least 2 GiB available."

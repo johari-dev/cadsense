@@ -10,9 +10,11 @@ import {
   type ProjectId,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
@@ -24,6 +26,13 @@ import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshot
 import { normalizeCadGeometry, CadGeometryError } from "../cad/CadGeometry.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
+import {
+  makeBulkAcquisition,
+  ONSHAPE_BULK_TESSELLATION_PROFILE,
+  type OnshapeExportError,
+} from "./OnshapeBulkAcquisition.ts";
+import * as OnshapeSyncState from "./OnshapeSyncState.ts";
+import { OnshapeRequestMetrics } from "./OnshapeTransport.ts";
 import {
   completeSnapshotManifest,
   enrichSnapshotMetadata,
@@ -67,6 +76,7 @@ type AcquisitionError =
   | OnshapeSnapshotManifestError
   | CadSnapshotStoreError
   | CadGeometryError
+  | OnshapeExportError
   | OnshapeSnapshotAcquisitionError;
 export class OnshapeSnapshotAcquisition extends Context.Service<
   OnshapeSnapshotAcquisition,
@@ -82,6 +92,7 @@ export const make = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
   const store = yield* CadSnapshotStore;
   const crypto = yield* Crypto.Crypto;
+  const acquireBulk = yield* makeBulkAcquisition;
   const run = Effect.fn("OnshapeSnapshotAcquisition.acquire")(function* (
     input: OnshapeSnapshotAcquisitionInput,
   ) {
@@ -114,7 +125,10 @@ export const make = Effect.gen(function* () {
       configuration: input.root.configuration || "default",
       originalRevision: { kind: source.workspaceType, id: source.workspaceId },
       microversionId,
-      tessellationProfile: ONSHAPE_TESSELLATION_PROFILE,
+      tessellationProfile:
+        source.workspaceType === "m"
+          ? ONSHAPE_TESSELLATION_PROFILE
+          : ONSHAPE_BULK_TESSELLATION_PROFILE,
     };
     const context = {
       root,
@@ -127,6 +141,7 @@ export const make = Effect.gen(function* () {
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
+    if (source.workspaceType !== "m") return yield* acquireBulk(context, source);
     const base = `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${microversionId}/e/${root.elementId}`;
     const query = new URLSearchParams({ configuration: root.configuration });
     if (root.kind === "assembly") {
@@ -249,6 +264,27 @@ export const make = Effect.gen(function* () {
     yield* store.publish(manifest);
     return manifest;
   });
-  return OnshapeSnapshotAcquisition.of({ acquire: (input) => store.withAcquisition(run(input)) });
+  return OnshapeSnapshotAcquisition.of({
+    acquire: (input) =>
+      Effect.gen(function* () {
+        const metrics = { requests: 0 };
+        const start = yield* Clock.currentTimeMillis;
+        return yield* store.withAcquisition(run(input)).pipe(
+          Effect.provideService(OnshapeRequestMetrics, metrics),
+          Effect.onExit((exit) =>
+            Effect.gen(function* () {
+              yield* Effect.logInfo("Onshape CAD sync finished", {
+                projectId: input.projectId,
+                apiRequests: metrics.requests,
+                elapsedMs: (yield* Clock.currentTimeMillis) - start,
+                result: Exit.isSuccess(exit) ? "complete" : "failed",
+              });
+            }),
+          ),
+        );
+      }),
+  });
 });
-export const layer = Layer.effect(OnshapeSnapshotAcquisition, make);
+export const layer = Layer.effect(OnshapeSnapshotAcquisition, make).pipe(
+  Layer.provide(OnshapeSyncState.layer),
+);
