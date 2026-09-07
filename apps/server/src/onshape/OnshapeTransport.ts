@@ -130,8 +130,14 @@ export const layer = Layer.effect(
             }),
           ),
           Effect.scoped,
-          // Translation jobs are polled separately. Large export bodies need time to download.
-          Effect.timeout(request.responseType === "binary" ? "3 minutes" : "15 seconds"),
+          // Export submission can take time before returning a resumable translation job ID.
+          Effect.timeout(
+            request.responseType === "binary"
+              ? "3 minutes"
+              : request.method === "POST"
+                ? "2 minutes"
+                : "15 seconds",
+          ),
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
           Effect.mapError(() =>
             Option.isSome(guardFailure) ? guardFailure.value : new OnshapeTransportFailure(),

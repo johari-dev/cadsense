@@ -29,6 +29,36 @@ const layer = (fetch: FetchHandler) =>
   );
 
 describe("bounded Onshape JSON transport", () => {
+  it.effect("allows export submission two minutes before aborting without retry", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let aborted = false;
+      let calls = 0;
+      const fetch: FetchHandler = (_input, init) => {
+        calls++;
+        Deferred.doneUnsafe(started, Effect.void);
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          });
+        });
+      };
+      yield* Effect.gen(function* () {
+        const transport = yield* OnshapeTransport.OnshapeTransport;
+        const pending = yield* transport
+          .execute({ ...request, method: "POST", body: "{}" })
+          .pipe(Effect.flip, Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("119 seconds");
+        assert.isFalse(aborted);
+        yield* TestClock.adjust("1 second");
+        assert.equal((yield* Fiber.join(pending))._tag, "OnshapeTransportFailure");
+        assert.isTrue(aborted);
+        assert.equal(calls, 1);
+      }).pipe(Effect.provide(layer(fetch)));
+    }),
+  );
   it.effect("sends the JSON export body and counts actual HTTP attempts", () => {
     const metrics = { requests: 0 };
     const body = '{"storeInDocument":false,"notifyUser":false}';
