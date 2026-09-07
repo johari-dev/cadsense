@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { createCadBrowserPool } from "./CadBrowserWorkers";
 import { CadRendererError } from "./CadRendererError";
 import { cadDiagnostics } from "./CadDiagnostics";
+import { isCadMemoryConstrained } from "./CadMemoryPolicy";
 const decodePayload = Schema.decodeUnknownSync(CadRenderPayload);
 
 /** The host outlives routed threads. Only two jobs may load manifests or render at once. */
@@ -47,7 +48,13 @@ export const createCadRenderHost = (baseUrl: string) => {
     },
   });
   const updatePolicy = () =>
-    pool.setPolicy({ backgrounded: document.hidden, memoryPressure: false });
+    pool.setPolicy({
+      backgrounded: document.hidden,
+      memoryPressure: isCadMemoryConstrained(
+        typeof navigator === "undefined" ? undefined : Reflect.get(navigator, "deviceMemory"),
+        Reflect.get(performance, "memory"),
+      ),
+    });
   document.addEventListener("visibilitychange", updatePolicy);
   updatePolicy();
   const run = async (ticket: CadRenderTicket) => {
@@ -101,6 +108,7 @@ export const createCadRenderHost = (baseUrl: string) => {
   return {
     accept: (event: CadRenderEvent) => {
       if (disposed || event.type === "ready") return;
+      updatePolicy();
       if (event.type === "run-ended") {
         for (const [id, item] of jobs) {
           if (item.runId !== event.runId) continue;
