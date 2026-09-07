@@ -61,11 +61,7 @@ export function useNewThreadHandler() {
           : null) ??
         carrySourceShell?.modelSelection ??
         null;
-      const carryRuntimeMode =
-        carrySourceComposer?.runtimeMode ??
-        carrySourceShell?.runtimeMode ??
-        carrySourceDraft?.runtimeMode ??
-        DEFAULT_RUNTIME_MODE;
+      const carryRuntimeMode = DEFAULT_RUNTIME_MODE;
       const carryInteractionMode =
         carrySourceComposer?.interactionMode ??
         carrySourceShell?.interactionMode ??
@@ -109,6 +105,7 @@ export function useNewThreadHandler() {
         runtimeMode: carryRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
       });
+      store.setRuntimeMode(draftId, DEFAULT_RUNTIME_MODE);
 
       const draft = store.getComposerDraft(draftId);
       const activeSelection = draft?.activeProvider

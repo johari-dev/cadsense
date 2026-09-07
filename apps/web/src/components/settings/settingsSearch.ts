@@ -19,7 +19,7 @@ export interface SettingsSearchItem {
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/general": "General",
-  "/settings/appearance": "Fonts",
+  "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
@@ -35,9 +35,13 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   { id: "interface-font", title: "Interface font", to: "/settings/appearance" },
   { id: "prompt-font", title: "Prompt font", to: "/settings/appearance" },
-  { id: "code-font", title: "Code font", to: "/settings/appearance" },
   { id: "font-smoothing", title: "Font smoothing", to: "/settings/appearance" },
-  { id: "word-wrap", title: "Word wrap", to: "/settings/appearance" },
+  { id: "show-permission-settings", title: "Show permission settings", to: "/settings/appearance" },
+  {
+    id: "show-context-window-indicator",
+    title: "Show context window indicator",
+    to: "/settings/appearance",
+  },
   {
     id: "provider-update-checks",
     title: "Provider update checks",

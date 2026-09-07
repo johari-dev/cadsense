@@ -972,7 +972,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       environmentId: TEST_ENVIRONMENT_ID,
       projectId,
       logicalProjectKey: scopedProjectKey(projectRef),
-      runtimeMode: "full-access",
+      runtimeMode: "auto-accept-edits",
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -980,7 +980,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       environmentId: TEST_ENVIRONMENT_ID,
       projectId,
       logicalProjectKey: scopedProjectKey(projectRef),
-      runtimeMode: "full-access",
+      runtimeMode: "auto-accept-edits",
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });

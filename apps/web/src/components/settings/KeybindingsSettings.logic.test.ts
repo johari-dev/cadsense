@@ -140,6 +140,25 @@ describe("KeybindingsSettings.logic", () => {
     const options = buildKeybindingCommandOptions([]);
 
     expect(options).toEqual(expect.arrayContaining(["chat.new", "rightPanel.toggleMaximized"]));
+    expect(options).not.toContain("commandPalette.toggle");
+  });
+
+  it("omits retired command search bindings from settings", () => {
+    const bindings: ResolvedKeybindingsConfig = [
+      {
+        command: "commandPalette.toggle",
+        shortcut: {
+          key: "k",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+    ];
+    expect(buildKeybindingRows(bindings, "")).toEqual([]);
+    expect(buildKeybindingCommandOptions(bindings)).not.toContain("commandPalette.toggle");
   });
 
   it("reports unknown when variables without rejecting parseable expressions", () => {
