@@ -1,8 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CadSnapshotManifest, type CadViewState, type ScopedThreadRef } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { Link } from "@tanstack/react-router";
-import { scopeProjectRef, scopedProjectKey } from "@cadsense/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import { Box, ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -337,17 +335,6 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
             </option>
           ))}
         </select>
-      </div>
-      <div className="flex justify-end border-b px-3 py-1 text-xs">
-        <Link
-          to="/projects/$projectKey"
-          params={{
-            projectKey: scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
-          }}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          Project settings
-        </Link>
       </div>
       {runActive && (
         <div
