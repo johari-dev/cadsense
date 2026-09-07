@@ -18,6 +18,51 @@ const readJson = (glb: Uint8Array) => {
 
 describe("CAD geometry normalization", () => {
   it.effect(
+    "accepts repeated optional buffer-target hints without masking later geometry errors",
+    () =>
+      Effect.gen(function* () {
+        const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+        const value = {
+          asset: { version: "2.0" },
+          buffers: [
+            {
+              byteLength: positions.byteLength,
+              uri: `data:application/octet-stream;base64,${Buffer.from(positions.buffer).toString("base64")}`,
+            },
+          ],
+          bufferViews: Array.from({ length: 40 }, () => ({
+            buffer: 0,
+            byteLength: positions.byteLength,
+          })),
+          accessors: Array.from({ length: 40 }, (_, bufferView) => ({
+            bufferView,
+            componentType: 5126,
+            count: 3,
+            type: "VEC3",
+            min: [0, 0, 0],
+            max: [1, 1, 0],
+          })),
+          meshes: [
+            {
+              primitives: Array.from({ length: 40 }, (_, POSITION) => ({
+                attributes: { POSITION },
+              })),
+            },
+          ],
+          nodes: [{ mesh: 0 }],
+          scenes: [{ nodes: [0] }],
+          scene: 0,
+        };
+        const normalized = yield* normalizeCadGeometry(bytes(value));
+        assert.deepEqual(readJson(normalized).meshes, value.meshes);
+        value.meshes[0]!.primitives[39]!.attributes.POSITION = 999;
+        assert.equal(
+          (yield* normalizeCadGeometry(bytes(value)).pipe(Effect.flip)).reason,
+          "invalid-geometry",
+        );
+      }),
+  );
+  it.effect(
     "preserves optional Onshape metadata without accepting unknown required extensions",
     () =>
       Effect.gen(function* () {
