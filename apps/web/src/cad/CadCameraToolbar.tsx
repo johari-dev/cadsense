@@ -1,5 +1,5 @@
 import type { CadViewState } from "@cadsense/contracts";
-import { Scan } from "lucide-react";
+import { Boxes } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -80,18 +80,19 @@ export function CadCameraToolbar({
           <TooltipTrigger
             render={
               <Button
-                aria-label="Fit CAD view"
+                aria-label="Exploded view"
+                aria-pressed={view.explosion > 0}
                 disabled={disabled}
                 variant="ghost"
                 size="icon-sm"
-                className="size-8 rounded-sm"
-                onClick={() => onChange({ ...view, camera: { ...view.camera, fit: [] } })}
+                className="size-8 rounded-sm aria-pressed:bg-accent"
+                onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
               >
-                <Scan size={16} />
+                <Boxes size={16} />
               </Button>
             }
           />
-          <TooltipPopup>Fit CAD view</TooltipPopup>
+          <TooltipPopup>{view.explosion > 0 ? "Collapse CAD" : "Explode CAD"}</TooltipPopup>
         </Tooltip>
       </div>
     </div>

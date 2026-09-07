@@ -125,20 +125,16 @@ const openCad = async (page) => {
     .click();
   await page.getByRole("toolbar", { name: "CAD camera views", exact: true }).waitFor();
   await page.locator("canvas").waitFor();
-  await page.getByLabel("Explode CAD", { exact: true }).waitFor({ state: "visible" });
+  await page
+    .getByRole("button", { name: "Exploded view", exact: true })
+    .waitFor({ state: "visible" });
   await page.getByRole("button", { name: /^Components/ }).waitFor();
 };
-const waitValue = async (locator, value) => {
-  const label = await locator.getAttribute("aria-label");
-  NodeAssert.ok(label, "Smoke inputs must have accessible labels");
-  await locator
-    .page()
-    .waitForFunction(
-      ({ label, expected }) =>
-        document.querySelector(`[aria-label=${JSON.stringify(label)}]`)?.value === expected,
-      { label, expected: value },
-    );
-};
+const waitExplosion = (page, pressed) =>
+  page
+    .getByRole("button", { name: "Exploded view", exact: true })
+    .and(page.locator(`[aria-pressed="${pressed}"]`))
+    .waitFor();
 const waitHidden = async (page, name) => {
   await page
     .getByRole("checkbox", { name, exact: true })
@@ -181,9 +177,9 @@ try {
   }
   report.steps.push("CAD follows the app palette without changing its camera");
   await page.getByRole("button", { name: "Front CAD view", exact: true }).click();
-  const explosion = page.getByLabel("Explode CAD", { exact: true });
-  await explosion.fill("0.5");
-  await explosion.press("Tab");
+  const explosion = page.getByRole("button", { name: "Exploded view", exact: true });
+  await explosion.click();
+  await waitExplosion(page, true);
   await page.getByRole("button", { name: /^Components/ }).click();
   await page.getByRole("button", { name: "Collapse Nested assembly", exact: true }).click();
   await page.getByRole("button", { name: "Expand Nested assembly", exact: true }).click();
@@ -193,7 +189,7 @@ try {
   report.steps.push("assembly camera, explosion, nested component visibility");
   await page.getByTestId(`thread-row-${cadSmokeThreads[1]}`).click();
   await openCad(page);
-  await waitValue(explosion, "0");
+  await waitExplosion(page, false);
   await page.getByLabel("CAD scene", { exact: true }).selectOption(fixture.roots[1]);
   await page.getByRole("button", { name: /^Components/ }).click();
   await page.getByRole("checkbox", { name: "Show Studio body A", exact: true }).waitFor();
@@ -202,7 +198,7 @@ try {
   await page.screenshot({ path: NodePath.join(output, "multipart.png") });
   report.steps.push("multipart root, per-body visibility, independent thread state");
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
-  await waitValue(explosion, "0.5");
+  await waitExplosion(page, true);
   NodeAssert.equal(
     await page.getByLabel("CAD scene", { exact: true }).inputValue(),
     fixture.roots[0],
@@ -213,7 +209,7 @@ try {
   if ((await page.getByRole("button", { name: "Close CAD", exact: true }).count()) === 0)
     await openCad(page);
   await page.locator("canvas").waitFor();
-  await waitValue(page.getByLabel("Explode CAD", { exact: true }), "0.5");
+  await waitExplosion(page, true);
   await page.screenshot({ path: NodePath.join(output, "reopened.png") });
   report.steps.push("offline application restart retained thread CAD view");
   const cdp = await page.context().newCDPSession(page);

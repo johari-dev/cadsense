@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { scopeProjectRef, scopedProjectKey } from "@cadsense/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import { Box, ChevronDown, ChevronRight, LockKeyhole } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -244,15 +244,6 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
   const view = data?.view ?? null;
-  const [explosionDraft, setExplosionDraft] = useState<{
-    base: CadViewState;
-    amount: number;
-  } | null>(null);
-  const previewAmount = !runActive && explosionDraft?.base === view ? explosionDraft.amount : null;
-  const displayedView = useMemo(
-    () => (view && previewAmount !== null ? { ...view, explosion: previewAmount } : view),
-    [view, previewAmount],
-  );
   const locked = runActive || !!project.cad?.operation || pending || !data;
   const latest = useRef({ locked, data });
   useLayoutEffect(() => {
@@ -283,10 +274,6 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
     }
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
-  const commitExplosion = () => {
-    if (!view || previewAmount === null) return;
-    void change({ ...view, explosion: previewAmount }).finally(() => setExplosionDraft(null));
-  };
   return (
     <section aria-label="CAD panel" className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b p-2">
@@ -350,35 +337,11 @@ export function CadPanel({ project, threadRef }: { project: Project; threadRef: 
       )}
       {view ? (
         <>
-          <div className="flex items-center gap-3 border-b px-3 py-2 text-xs">
-            <label htmlFor="cad-explode">Explode</label>
-            <input
-              id="cad-explode"
-              aria-label="Explode CAD"
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={previewAmount ?? view.explosion}
-              disabled={locked}
-              className="min-w-0 flex-1"
-              onChange={(event) =>
-                setExplosionDraft({ base: view, amount: Number(event.target.value) })
-              }
-              onPointerUp={commitExplosion}
-              onPointerCancel={() => setExplosionDraft(null)}
-              onKeyUp={commitExplosion}
-              onBlur={commitExplosion}
-            />
-            <span className="w-8 text-right tabular-nums text-muted-foreground">
-              {Math.round((previewAmount ?? view.explosion) * 100)}%
-            </span>
-          </div>
           <CadScene
             captureId={data?.captureId ?? null}
             key={`${threadRef.threadId}:${view.snapshotId}`}
             threadRef={threadRef}
-            view={displayedView ?? view}
+            view={view}
             disabled={locked}
             onChange={(next) => void change(next)}
           />
