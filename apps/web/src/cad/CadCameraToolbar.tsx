@@ -62,7 +62,7 @@ export function CadCameraToolbar({
                     disabled={disabled}
                     variant="ghost"
                     size="icon-sm"
-                    className="size-8 rounded-sm aria-pressed:bg-accent"
+                    className="size-8 rounded-sm aria-pressed:bg-accent disabled:pointer-events-auto disabled:opacity-100"
                     onClick={() =>
                       onChange({ ...view, camera: { kind: "preset", preset, fit: [] } })
                     }
@@ -85,7 +85,7 @@ export function CadCameraToolbar({
                 disabled={disabled}
                 variant="ghost"
                 size="icon-sm"
-                className="size-8 rounded-sm aria-pressed:bg-accent"
+                className="size-8 rounded-sm aria-pressed:bg-accent disabled:pointer-events-auto disabled:opacity-100"
                 onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
               >
                 <Boxes size={16} />
