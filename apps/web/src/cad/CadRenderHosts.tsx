@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironments, useEnvironmentHttpBaseUrl } from "../state/environments";
 import { createCadRenderHost } from "./CadRenderHost";
+import { connectCadRenderHost } from "./CadRenderConnection";
 
 function CadRenderHost({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const baseUrl = useEnvironmentHttpBaseUrl(environmentId);
@@ -31,19 +32,10 @@ function CadRenderHost({ environmentId }: { readonly environmentId: EnvironmentI
                         Option.match({
                           onNone: () => Stream.empty,
                           onSome: (session) =>
-                            Stream.unwrap(
-                              Effect.acquireRelease(
-                                Effect.sync(() => createCadRenderHost(baseUrl)),
-                                (host) => Effect.sync(() => host.dispose()),
-                              ).pipe(
-                                Effect.map((host) =>
-                                  session.client[WS_METHODS.cadRenderConnect]({}).pipe(
-                                    Stream.tap((event) => Effect.sync(() => host.accept(event))),
-                                    Stream.catch(() => Stream.empty),
-                                  ),
-                                ),
-                              ),
-                            ),
+                            connectCadRenderHost(
+                              () => session.client[WS_METHODS.cadRenderConnect]({}),
+                              () => createCadRenderHost(baseUrl),
+                            ).pipe(Stream.catch(() => Stream.empty)),
                         }),
                       ),
                     );
