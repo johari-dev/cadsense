@@ -51,22 +51,6 @@ describe("ComposerTasksBadge", () => {
     expect(markup).toContain("bg-muted-foreground/25");
   });
 
-  it("leaves room for the stash tab when both shoulders are present", () => {
-    const markup = renderToStaticMarkup(
-      <ComposerTasksBadge
-        expanded={false}
-        hasTrailingShoulder
-        onDismiss={() => undefined}
-        onToggle={() => undefined}
-        progress={progress}
-        steps={steps}
-      />,
-    );
-
-    expect(markup).toContain("right-30");
-    expect(markup).not.toContain("right-5.5");
-  });
-
   it("has a compact inline fallback for occupied composer shoulders", () => {
     const markup = renderToStaticMarkup(
       <ComposerTasksBadge

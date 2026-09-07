@@ -305,7 +305,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
-  it.effect("removes retired terminal keybindings during startup sync", () =>
+  it.effect("removes retired keybindings during startup sync", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
@@ -314,6 +314,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify([
           { key: "mod+j", command: "terminal.toggle" },
+          { key: "mod+s", command: "composer.stash" },
           { key: "mod+g", command: "diff.toggle" },
           { key: "mod+k", command: "script.dev.run" },
           { key: "mod+shift+r", command: "preview.toggle" },
@@ -330,6 +331,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.deepEqual(state.issues, []);
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.isFalse(persisted.some((entry) => String(entry.command).startsWith("terminal.")));
+      assert.isFalse(persisted.some((entry) => String(entry.command) === "composer.stash"));
+      assert.isFalse(state.keybindings.some((entry) => String(entry.command) === "composer.stash"));
       assert.isTrue(persisted.some((entry) => entry.command === "preview.toggle"));
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );

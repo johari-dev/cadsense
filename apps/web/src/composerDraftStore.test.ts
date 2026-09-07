@@ -440,16 +440,6 @@ describe("composerDraftStore file attachments", () => {
     expect(store.getComposerDraft(threadRef)).toBeNull();
   });
 
-  it("removes generic files when a prompt is moved into the stash", () => {
-    const store = useComposerDraftStore.getState();
-    store.setPrompt(threadRef, "Review the report");
-    store.addFiles(threadRef, [makeFile("file-stash")]);
-
-    store.clearComposerPromptAndImages(threadRef);
-
-    expect(store.getComposerDraft(threadRef)).toBeNull();
-  });
-
   it("enforces the combined file and image limit across separate updates", () => {
     const store = useComposerDraftStore.getState();
     const images = Array.from({ length: PROVIDER_SEND_TURN_MAX_ATTACHMENTS - 1 }, (_, index) =>
@@ -520,27 +510,27 @@ describe("composerDraftStore file attachments", () => {
     expect(files?.some(composerFileNeedsReattach)).toBe(false);
   });
 
-  it("replaces a needs-reattach marker with a stash-restored uploaded file", () => {
+  it("replaces a needs-reattach marker with a restored uploaded file", () => {
     const store = useComposerDraftStore.getState();
     const marker: ComposerFileAttachment = { ...makeFile("file-marker"), file: null };
     store.addFiles(threadRef, [marker]);
     expect(store.getComposerDraft(threadRef)?.files.every(composerFileNeedsReattach)).toBe(true);
 
-    // A stash restore carries a finished server-side upload instead of bytes.
+    // A restored draft carries a finished server-side upload instead of bytes.
     // Matching metadata must replace the marker, not be dropped as a
     // duplicate: the marker cannot send, and the restored ids are the only
     // valid copy.
     const restored: ComposerFileAttachment = {
       ...makeFile("file-restored"),
       file: null,
-      uploadedAttachmentId: "pending-stash-pdf",
+      uploadedAttachmentId: "pending-restored-pdf",
       uploadEnvironmentId: TEST_ENVIRONMENT_ID,
     };
     store.addFiles(threadRef, [restored]);
 
     const files = store.getComposerDraft(threadRef)?.files;
     expect(files?.map((file) => file.id)).toEqual(["file-restored"]);
-    expect(files?.[0]?.uploadedAttachmentId).toBe("pending-stash-pdf");
+    expect(files?.[0]?.uploadedAttachmentId).toBe("pending-restored-pdf");
     expect(files?.[0]?.uploadEnvironmentId).toBe(TEST_ENVIRONMENT_ID);
     expect(files?.some(composerFileNeedsReattach)).toBe(false);
   });
