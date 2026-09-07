@@ -17,7 +17,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { Button } from "../components/ui/button";
-import { LoadingMark } from "../components/LoadingMark";
+import { CadLoadingProgress, type CadLoadProgress } from "./CadLoadingProgress";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -25,6 +25,7 @@ import { cadPanelEnvironment } from "../state/cadPanel";
 import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
+import { readCadAssetResponse } from "./readCadAssetResponse";
 import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
@@ -108,6 +109,7 @@ function CadScene({
     cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId),
   );
   const [error, setError] = useState<string | null>(null);
+  const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const sceneContainer = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
@@ -176,6 +178,7 @@ function CadScene({
   useLayoutEffect(() => {
     if (!baseUrl || !canvas.current) return;
     setError(null);
+    setLoadProgress(null);
     const controller = new AbortController();
     let attachment: ReturnType<typeof cadVisibleViewer.acquire>;
     try {
@@ -241,8 +244,21 @@ function CadScene({
         if (!ticket && !current.cachedManifest(view.snapshotId)) return;
         const snapshot =
           current.cachedManifest(view.snapshotId) ?? decodeManifest(await (await request()).json());
+        if (controller.signal.aborted) return;
+        const assets = new Map(snapshot.assets.map((asset) => [asset.sha256, asset]));
+        const total = [...assets.values()].reduce((sum, asset) => sum + asset.byteLength, 0);
+        let received = 0;
+        let lastUpdate = 0;
+        setLoadProgress({ received, total });
         const sameScene = await current.load(snapshot, async (hash) =>
-          (await request(hash)).arrayBuffer(),
+          readCadAssetResponse(await request(hash), assets.get(hash)!.byteLength, (count) => {
+            received += count;
+            const now = performance.now();
+            if (!controller.signal.aborted && (now - lastUpdate >= 100 || received === total)) {
+              lastUpdate = now;
+              setLoadProgress({ received, total });
+            }
+          }),
         );
         if (controller.signal.aborted) return;
         diagnostics.record({
@@ -292,7 +308,7 @@ function CadScene({
             className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
             role="status"
           >
-            {unavailable ?? <LoadingMark kind="cad" />}
+            {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
           </div>
         )}
         <CadCommentsCard
@@ -648,7 +664,7 @@ export function CadPanel({
           {AsyncResult.isFailure(state) ? (
             "CAD is unavailable for this thread."
           ) : !data ? (
-            <LoadingMark kind="cad" />
+            <CadLoadingProgress />
           ) : data.unavailableRootId ? (
             "This downloaded CAD is unavailable. You can select another cached scene."
           ) : roots.length ? (
