@@ -1,5 +1,6 @@
 import { CadCameraPose, CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
+import { CadAppearance } from "./CadAppearance";
 
 export const CadWorkerInput = Schema.Union([
   Schema.Struct({ type: Schema.Literal("initialize"), canvas: Schema.Unknown }),
@@ -10,6 +11,7 @@ export const CadWorkerInput = Schema.Union([
     manifest: Schema.optionalKey(CadSnapshotManifest),
     width: Schema.Number,
     height: Schema.Number,
+    appearance: Schema.optionalKey(CadAppearance),
   }),
   Schema.Struct({
     type: Schema.Literal("asset"),

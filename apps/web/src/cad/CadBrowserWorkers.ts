@@ -92,6 +92,7 @@ const createOffscreenWorker = (
                 state: job.state,
                 width: job.width,
                 height: job.height,
+                ...(job.appearance ? { appearance: job.appearance } : {}),
                 ...(snapshotId === job.state.snapshotId ? {} : { manifest: job.manifest }),
               });
             });
@@ -167,6 +168,7 @@ const createMainThreadWorker = async (
         snapshotId = job.state.snapshotId;
       }
       renderer.resize(job.width, job.height, 1);
+      if (job.appearance) renderer.setAppearance(job.appearance);
       const pose = renderer.apply(job.state);
       return {
         jobId: job.jobId,

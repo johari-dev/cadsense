@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
 import {
   buildCadSceneModel,
   CAD_CAMERA_FOV,
@@ -32,13 +33,15 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     throw new CadRendererError("renderer-unavailable");
   }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0xf1f3f5);
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.setClearColor(DEFAULT_CAD_APPEARANCE.background);
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x89939f, 2.2));
-  const key = new THREE.DirectionalLight(0xffffff, 3);
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x89939f, 1.5);
+  scene.add(ambient);
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
   key.position.set(3, -4, 5);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xffffff, 1.2);
+  const fill = new THREE.DirectionalLight(0xffffff, 1);
   fill.position.set(-3, 2, 1);
   scene.add(fill);
   let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = new THREE.PerspectiveCamera(
@@ -68,6 +71,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let width = 1,
     height = 1;
   let view: CadViewState | null = null;
+  let appearance = DEFAULT_CAD_APPEARANCE;
   let animationFrame: number | null = null;
   const cancelTransition = () => {
     if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -307,6 +311,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     apply,
     transition,
     capture,
+    setAppearance: (next: CadAppearance) => {
+      assertAvailable();
+      if (next.background === appearance.background && next.dark === appearance.dark) return;
+      appearance = next;
+      renderer.setClearColor(next.background);
+      ambient.intensity = next.dark ? 1.5 : 1.25;
+      fill.intensity = next.dark ? 1 : 0.8;
+      frameRevision++;
+      if (view) render();
+    },
     resize: (nextWidth: number, nextHeight: number, pixelRatio = 1) => {
       assertAvailable();
       if (

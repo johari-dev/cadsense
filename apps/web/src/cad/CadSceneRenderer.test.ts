@@ -160,6 +160,26 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("redraws changed appearance without changing the view or accepting a stale capture", async () => {
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas });
+    try {
+      await renderer.load(manifest, async () => geometry());
+      const pose = renderer.apply(state);
+      const before = calls.render.mock.calls.length;
+      renderer.setAppearance({ background: 0xfafafa, dark: false });
+      expect(calls.render.mock.calls.length).toBe(before + 1);
+      renderer.setAppearance({ background: 0xfafafa, dark: false });
+      expect(calls.render.mock.calls.length).toBe(before + 1);
+      expect(renderer.apply(state)).toEqual(pose);
+      const capture = renderer.capture();
+      renderer.setAppearance({ background: 0x18212b, dark: true });
+      h.completeCapture();
+      await expect(capture).rejects.toMatchObject({ reason: "superseded" });
+    } finally {
+      renderer.dispose();
+    }
+  });
   it("coalesces camera transitions and stops scheduling when settled, snapped, or disposed", async () => {
     const frames = new Map<number, FrameRequestCallback>();
     let id = 0;

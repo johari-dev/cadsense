@@ -153,6 +153,31 @@ try {
   let page = await launch(true);
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
   await openCad(page);
+  const originalBackground = await page.evaluate(() => ({
+    value: document.documentElement.style.getPropertyValue("--background"),
+    priority: document.documentElement.style.getPropertyPriority("--background"),
+  }));
+  try {
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty("--background", "#223344"),
+    );
+    await page.waitForFunction(() => {
+      const gl = document.querySelector('canvas[aria-label="CAD viewer"]')?.getContext("webgl2");
+      if (!gl) return false;
+      const clear = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+      return [34, 51, 68].every((channel, index) => Math.abs(clear[index] * 255 - channel) < 1);
+    });
+    NodeAssert.equal(
+      await page.getByLabel("Camera view", { exact: true }).inputValue(),
+      "isometric",
+    );
+  } finally {
+    await page.evaluate(({ value, priority }) => {
+      if (value) document.documentElement.style.setProperty("--background", value, priority);
+      else document.documentElement.style.removeProperty("--background");
+    }, originalBackground);
+  }
+  report.steps.push("CAD follows the app palette without changing its camera");
   await page.getByLabel("Camera view", { exact: true }).selectOption("front");
   const explosion = page.getByLabel("Explode CAD", { exact: true });
   await explosion.fill("0.5");
