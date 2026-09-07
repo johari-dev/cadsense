@@ -68,7 +68,7 @@ jobs:
           targets: aarch64-apple-darwin
 
       - id: version
-        name: Set preview version and public configuration
+        name: Set preview version
         shell: bash
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -78,7 +78,6 @@ jobs:
           base_version="$(node -p "require('./apps/desktop/package.json').version")"
           preview_version="${base_version}-pr.${PR_NUMBER}.${GITHUB_RUN_NUMBER}"
           node scripts/update-release-package-versions.ts "$preview_version"
-          cp .env.example .env
 
           echo "version=$preview_version" >> "$GITHUB_OUTPUT"
 
