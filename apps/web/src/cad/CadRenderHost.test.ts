@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { createCadRenderHost } from "./CadRenderHost";
 
-const pool = vi.hoisted(() => ({ capture: vi.fn(), dispose: vi.fn(), setPolicy: vi.fn() }));
+const pool = vi.hoisted(() => ({
+  capture: vi.fn(),
+  dispose: vi.fn(),
+  setPolicy: vi.fn(),
+  endRun: vi.fn(),
+}));
 vi.mock("./CadBrowserWorkers", () => ({ createCadBrowserPool: () => pool }));
 afterEach(() => {
   vi.unstubAllGlobals();

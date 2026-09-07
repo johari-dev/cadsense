@@ -22,6 +22,7 @@ export const CadRenderEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("ready") }),
   Schema.Struct({ type: Schema.Literal("capture"), ticket: CadRenderTicket }),
   Schema.Struct({ type: Schema.Literal("cancel"), jobId: Schema.String.check(Schema.isUUID(4)) }),
+  Schema.Struct({ type: Schema.Literal("run-ended"), runId: Schema.String }),
 ]);
 export type CadRenderEvent = typeof CadRenderEvent.Type;
 export const CadRenderReceipt = Schema.Struct({

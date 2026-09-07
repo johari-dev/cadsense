@@ -79,6 +79,7 @@ import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
 import * as CadStorage from "./cad/CadStorage.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
+import * as CadRenderLifecycle from "./cad/CadRenderLifecycle.ts";
 import * as CadCaptureArtifacts from "./cad/CadCaptureArtifacts.ts";
 import * as CadViewing from "./cad/CadViewing.ts";
 import * as CadPanel from "./cad/CadPanel.ts";
@@ -269,6 +270,7 @@ const AgentRuntimeLayerLive = Layer.mergeAll(
   CadUserOperations.layer,
   CadStorage.layer,
   CadPresentation.reactorLayer,
+  CadRenderLifecycle.layer,
 ).pipe(
   Layer.provideMerge(CadPresentation.layer),
   Layer.provideMerge(CadViewingLayerLive),

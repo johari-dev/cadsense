@@ -15,6 +15,8 @@ describe("CAD binary routes", () => {
   it("validates tickets before reading binary bodies and serves assets without caching", async () => {
     const assetReads: string[] = [];
     const broker = CadRenderBroker.of({
+      runsForThread: () => Effect.succeed([]),
+      endRun: () => Effect.void,
       connect: () => Stream.empty,
       capture: unavailable,
       readJob: unavailable,
