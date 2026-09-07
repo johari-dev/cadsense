@@ -1,5 +1,6 @@
 import type { CadCaptureCard as Capture, ScopedThreadRef } from "@cadsense/contracts";
 import { useState } from "react";
+import { LoadingMark } from "../components/LoadingMark";
 import { useAssetUrlState } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 
@@ -50,7 +51,7 @@ export function CadCaptureCard({
           className="flex aspect-[4/3] items-center justify-center p-4 text-xs text-muted-foreground"
           role="status"
         >
-          {unavailable ? "This capture image is unavailable." : "Loading CAD capture…"}
+          {unavailable ? "This capture image is unavailable." : <LoadingMark kind="cad" />}
         </div>
       )}
       <figcaption className="border-t px-3 py-2 text-xs text-muted-foreground">

@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "../components/ui/button";
+import { LoadingMark } from "../components/LoadingMark";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -267,7 +268,7 @@ function CadScene({
             className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
             role="status"
           >
-            {unavailable ?? "Opening downloaded CAD…"}
+            {unavailable ?? <LoadingMark kind="cad" />}
           </div>
         )}
         {manifest && !unavailable && !compact && (
@@ -484,15 +485,17 @@ export function CadPanel({
           role="status"
           className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground"
         >
-          {AsyncResult.isFailure(state)
-            ? "CAD is unavailable for this thread."
-            : !data
-              ? "Loading CAD view…"
-              : data.unavailableRootId
-                ? "This downloaded CAD is unavailable. You can select another cached scene."
-                : roots.length
-                  ? "Select a CAD scene above."
-                  : "No CAD has been downloaded. Select and sync CAD in project settings."}
+          {AsyncResult.isFailure(state) ? (
+            "CAD is unavailable for this thread."
+          ) : !data ? (
+            <LoadingMark kind="cad" />
+          ) : data.unavailableRootId ? (
+            "This downloaded CAD is unavailable. You can select another cached scene."
+          ) : roots.length ? (
+            "Select a CAD scene above."
+          ) : (
+            "No CAD has been downloaded. Select and sync CAD in project settings."
+          )}
         </div>
       )}
     </section>

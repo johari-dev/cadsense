@@ -1,72 +1,132 @@
 /* Spring motion from AadiJo/frc-rag-frontend's spinning-loader:
    stiffness 50, damping 8, mass 1.5, sampled over three seconds. Shared by
    the pre-JavaScript boot shell and React splash, with no per-frame JS. */
+.loading-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  isolation: isolate;
+}
+
+.loading-mark--app {
+  width: 64px;
+  height: 64px;
+}
+.loading-mark--cad {
+  width: 32px;
+  height: 32px;
+}
+
+.loading-mark > * {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: 50% 50%;
+}
+
+.loading-mark {
+  --loading-spin-ease: linear(
+    0,
+    0.03794,
+    0.13688,
+    0.27536,
+    0.43407,
+    0.59674,
+    0.75062,
+    0.8866,
+    0.99899,
+    1.08514,
+    1.14495,
+    1.18022,
+    1.19415,
+    1.19072,
+    1.17423,
+    1.14895,
+    1.11876,
+    1.08702,
+    1.05638,
+    1.02882,
+    1.00562,
+    0.98744,
+    0.97442,
+    0.96632,
+    0.96255,
+    0.96239,
+    0.965,
+    0.96954,
+    0.97523,
+    0.98139,
+    0.98745,
+    0.99301,
+    0.99778,
+    1.00159,
+    1.00439,
+    1.00622,
+    1.00717,
+    1.00738,
+    1.007,
+    1.0062,
+    1.00514,
+    1.00395,
+    1.00276,
+    1.00164,
+    1.00067,
+    0.99987,
+    0.99927,
+    0.99887,
+    0.99864,
+    0.99856,
+    0.99861,
+    0.99874,
+    0.99894,
+    0.99917,
+    0.9994,
+    0.99962,
+    0.99982,
+    0.99999,
+    1.00011,
+    1.0002,
+    1
+  );
+}
+
 .loading-logo {
-  animation: loading-logo-spin 3s
-    linear(
-      0,
-      0.03794,
-      0.13688,
-      0.27536,
-      0.43407,
-      0.59674,
-      0.75062,
-      0.8866,
-      0.99899,
-      1.08514,
-      1.14495,
-      1.18022,
-      1.19415,
-      1.19072,
-      1.17423,
-      1.14895,
-      1.11876,
-      1.08702,
-      1.05638,
-      1.02882,
-      1.00562,
-      0.98744,
-      0.97442,
-      0.96632,
-      0.96255,
-      0.96239,
-      0.965,
-      0.96954,
-      0.97523,
-      0.98139,
-      0.98745,
-      0.99301,
-      0.99778,
-      1.00159,
-      1.00439,
-      1.00622,
-      1.00717,
-      1.00738,
-      1.007,
-      1.0062,
-      1.00514,
-      1.00395,
-      1.00276,
-      1.00164,
-      1.00067,
-      0.99987,
-      0.99927,
-      0.99887,
-      0.99864,
-      0.99856,
-      0.99861,
-      0.99874,
-      0.99894,
-      0.99917,
-      0.9994,
-      0.99962,
-      0.99982,
-      0.99999,
-      1.00011,
-      1.0002,
-      1
-    )
-    infinite;
+  animation: loading-logo-spin 3s var(--loading-spin-ease) infinite;
+}
+
+.loading-motion-trail {
+  filter: blur(1px);
+  opacity: 0;
+  animation-delay: 35ms;
+  /* Blur is static and confined to the icon; only transform and opacity animate. */
+  will-change: transform, opacity;
+}
+
+.loading-mark > .loading-motion-trail {
+  animation-name: loading-logo-spin, loading-motion-fade;
+  animation-duration: 3s, 3s;
+  animation-timing-function: var(--loading-spin-ease), linear;
+}
+
+.loading-motion-trail--far {
+  filter: blur(1.8px);
+  animation-delay: 70ms;
+}
+
+@keyframes loading-motion-fade {
+  0%,
+  50%,
+  100% {
+    opacity: 0;
+  }
+  8%,
+  22% {
+    opacity: 0.22;
+  }
+  35% {
+    opacity: 0.1;
+  }
 }
 
 @keyframes loading-logo-spin {
@@ -80,6 +140,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .loading-logo {
+    animation: none;
+  }
+  .loading-mark > .loading-motion-trail {
+    display: none;
     animation: none;
   }
 }
