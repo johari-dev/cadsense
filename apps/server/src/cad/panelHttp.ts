@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { CadPanel } from "./CadPanel.ts";
+import { compressCadResponse } from "./CadHttpCompression.ts";
 
 const decodeTicket = Schema.decodeUnknownEffect(CadPanelSceneTicket);
 const headers = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
@@ -22,5 +23,8 @@ const handle = Effect.gen(function* () {
       contentType: "model/gltf-binary",
     });
   return yield* HttpServerResponse.json(scene.manifest, { headers });
-}).pipe(Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 410, headers })));
+}).pipe(
+  Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 410, headers })),
+  compressCadResponse,
+);
 export const routeLayer = HttpRouter.add("GET", "/api/cad-panel/*", handle);

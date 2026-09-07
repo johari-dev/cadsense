@@ -163,6 +163,34 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("overlaps bounded asset downloads and does not expose a partial scene", async () => {
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas });
+    const assets = Array.from({ length: 12 }, (_, i) => ({
+      ...manifest.assets[0]!,
+      geometryKey: i.toString(16).padStart(64, "0"),
+      sha256: i.toString(16).padStart(64, "0"),
+    }));
+    const large = { ...manifest, assets };
+    const releases: Array<() => void> = [];
+    const read = vi.fn(
+      () => new Promise<ArrayBuffer>((resolve) => releases.push(() => resolve(geometry()))),
+    );
+    const loading = renderer.load(large, read);
+    try {
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(6));
+      expect(renderer.cachedManifest(large.snapshotId)).toBeNull();
+      while (releases.length) releases.shift()!();
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(12));
+      while (releases.length) releases.shift()!();
+      await loading;
+      expect(renderer.cachedManifest(large.snapshotId)).toBe(large);
+    } finally {
+      renderer.dispose();
+      while (releases.length) releases.shift()!();
+      await loading.catch(() => {});
+    }
+  });
   it("does not verify a target through another visible component during inspection", async () => {
     vi.stubGlobal(
       "OffscreenCanvas",

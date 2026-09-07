@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { CadRenderBroker } from "./CadRenderBroker.ts";
+import { compressCadResponse } from "./CadHttpCompression.ts";
 
 const invalid = () => new CadRenderError({ reason: "invalid-result" });
 const decodeTicket = Schema.decodeUnknownEffect(CadRenderTicket);
@@ -57,6 +58,7 @@ const handle = Effect.gen(function* () {
       }),
     ),
   ),
+  compressCadResponse,
 );
 
 export const routeLayer = Layer.mergeAll(

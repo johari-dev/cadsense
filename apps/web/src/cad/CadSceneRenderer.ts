@@ -17,6 +17,7 @@ const isCadCameraPose = Schema.is(CadCameraPose);
 import * as THREE from "three";
 import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { prefetchCadAssets } from "./CadAssetPrefetch";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
 import { prepareCadMaterials } from "./CadMaterials";
@@ -387,6 +388,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       appearances.push(partsByKey.get(asset.geometryKey)?.metadata?.appearance ?? null);
       appearancesByHash.set(asset.sha256, appearances);
     }
+    const prefetched = prefetchCadAssets(
+      manifest.assets,
+      readAsset,
+      () => token === generation && !disposed && !lost,
+    );
     try {
       const budget = createCadSceneBudget(manifest.nodes);
       for (const asset of manifest.assets) {
@@ -394,12 +400,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         if (token !== generation) throw new CadRendererError("superseded");
         let prototype = assetsByHash.get(asset.sha256);
         if (!prototype) {
-          const bytes = await readAsset(asset.sha256);
+          const bytes = await prefetched.read(asset.sha256);
+          assertAvailable();
+          if (token !== generation) throw new CadRendererError("superseded");
           const complexity = measureCadGeometry(new Uint8Array(bytes));
           decodedBytes = budget.add(asset, complexity).decodedBytes;
           complexities.set(asset.sha256, complexity);
-          assertAvailable();
-          if (token !== generation) throw new CadRendererError("superseded");
           const parsed = await loader.parseAsync(bytes, "");
           ownedScenes.push(...parsed.scenes);
           prototype = parsed.scene;
@@ -456,6 +462,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       disposeCadObjects(ownedScenes);
       if (error instanceof CadRendererError) throw error;
       throw new CadRendererError("invalid-snapshot");
+    } finally {
+      prefetched.dispose();
     }
   };
   const capture = async (): Promise<Blob> => {
