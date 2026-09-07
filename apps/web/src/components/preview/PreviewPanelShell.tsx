@@ -67,22 +67,28 @@ export function PreviewPanelShell(props: {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const animationRef = useRef<Animation | null>(null);
   const exitRef = useRef(props.onExited);
   exitRef.current = props.onExited;
   const open = props.open ?? true;
   useLayoutEffect(() => {
     const host = hostRef.current;
-    if (!host || props.open === undefined || !isInline) return;
+    const content = contentRef.current;
+    if (!host || !content || props.open === undefined || !isInline) return;
     const prior = animationRef.current;
     const currentWidth = host.getBoundingClientRect().width;
     prior?.cancel();
     const naturalWidth = host.getBoundingClientRect().width;
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
       animationRef.current = null;
+      content.style.removeProperty("width");
       if (!open) exitRef.current?.();
       return;
     }
+    // Slide a full-size surface through the shrinking viewport without reflowing its contents.
+    const style = getComputedStyle(host);
+    content.style.width = `${naturalWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth)}px`;
     const animation = host.animate(
       [
         {
@@ -100,6 +106,7 @@ export function PreviewPanelShell(props: {
       if (open) {
         animation.cancel();
         animationRef.current = null;
+        content.style.removeProperty("width");
       } else exitRef.current?.();
     };
   }, [open, isInline, props.open]);
@@ -107,6 +114,7 @@ export function PreviewPanelShell(props: {
     () => () => {
       animationRef.current?.cancel();
       animationRef.current = null;
+      contentRef.current?.style.removeProperty("width");
     },
     [],
   );
@@ -138,8 +146,14 @@ export function PreviewPanelShell(props: {
       inert={!open}
     >
       {isInline && !props.maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
-      {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}
-      {props.children}
+      <div
+        ref={contentRef}
+        className="flex h-full min-h-0 w-full shrink-0 flex-col"
+        data-panel-slide-content
+      >
+        {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}
+        {props.children}
+      </div>
     </div>
   );
 }

@@ -867,6 +867,9 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
+  const displayedRightPanelSurface =
+    rightPanelState.surfaces.find((surface) => surface.id === rightPanelState.activeSurfaceId) ??
+    null;
   const activeFileSurface =
     activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
   const activePreviewState = useThreadPreviewState(activeThreadRef);
@@ -884,9 +887,16 @@ function ChatViewContent(props: ChatViewProps) {
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
   const rightPanelPresence = usePanelPresence(rightPanelOpen);
+  useEffect(() => {
+    if (!rightPanelPresence.present) {
+      setMaximizedRightPanelThreadKey((key) => (key === routeThreadKey ? null : key));
+    }
+  }, [rightPanelPresence.present, routeThreadKey]);
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
-    canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
+    rightPanelPresence.present &&
+    !shouldUseRightPanelSheet &&
+    maximizedRightPanelThreadKey === routeThreadKey;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
@@ -1835,7 +1845,6 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activePreviewState.activeTabId, activeThreadRef, createBrowserSurface, previewPanelOpen]);
   const closePreviewPanel = useCallback(() => {
     if (activeThreadRef) {
-      setMaximizedRightPanelThreadKey(null);
       useRightPanelStore.getState().close(activeThreadRef);
     }
   }, [activeThreadRef]);
@@ -4027,7 +4036,7 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    activeRightPanelSurface?.kind === "cad" && activeProject ? (
+    displayedRightPanelSurface?.kind === "cad" && activeProject ? (
       <Suspense fallback={null}>
         {cadAvailable && isServerThread ? (
           <CadPanel key={activeThreadKey} project={activeProject} threadRef={activeThreadRef} />
@@ -4039,12 +4048,12 @@ function ChatViewContent(props: ChatViewProps) {
           </div>
         )}
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "preview" ? (
+    ) : displayedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
           threadRef={activeThreadRef}
-          tabId={activeRightPanelSurface.resourceId}
+          tabId={displayedRightPanelSurface.resourceId}
           configuredUrls={configuredPreviewUrls}
           visible
           onSendAnnotation={(annotation, image) => {
@@ -4052,13 +4061,14 @@ function ChatViewContent(props: ChatViewProps) {
           }}
         />
       </Suspense>
-    ) : activeRightPanelSurface?.kind === "agents" ? (
+    ) : displayedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
-    ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
+    ) : (displayedRightPanelSurface?.kind === "files" ||
+        displayedRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
       <Suspense fallback={null}>
@@ -4069,7 +4079,9 @@ function ChatViewContent(props: ChatViewProps) {
           projectName={activeProject.title}
           threadRef={activeThreadRef}
           relativePath={
-            activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
+            displayedRightPanelSurface.kind === "file"
+              ? displayedRightPanelSurface.relativePath
+              : null
           }
           revealLine={activeFileSurface?.revealLine ?? null}
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
@@ -4372,7 +4384,7 @@ function ChatViewContent(props: ChatViewProps) {
           mode="inline"
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
-          activeSurfaceId={activeRightPanelSurface?.id ?? null}
+          activeSurfaceId={displayedRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           desktopByTabId={activePreviewState.desktopByTabId}
@@ -4410,7 +4422,7 @@ function ChatViewContent(props: ChatViewProps) {
             // the sheet opens.
             layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
             surfaces={rightPanelState.surfaces}
-            activeSurfaceId={activeRightPanelSurface?.id ?? null}
+            activeSurfaceId={displayedRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             desktopByTabId={activePreviewState.desktopByTabId}
