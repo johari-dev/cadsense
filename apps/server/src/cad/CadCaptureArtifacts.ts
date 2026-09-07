@@ -2,7 +2,7 @@ import {
   CAD_CAPTURE_SIZE,
   CadViewError,
   CommandId,
-  type CadCaptureResult,
+  type CadCaptureToolResult,
   type ThreadId,
   type TurnId,
 } from "@cadsense/contracts";
@@ -18,7 +18,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { CadRenderBroker, type CadRenderRequest } from "./CadRenderBroker.ts";
 
 export interface CadCaptureDelivery {
-  readonly result: typeof CadCaptureResult.Type;
+  readonly result: typeof CadCaptureToolResult.Type;
   readonly png: Uint8Array;
 }
 export class CadCaptureArtifacts extends Context.Service<
@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
           );
       }),
     ).pipe(Effect.mapError(unavailable));
-    return { result, png: rendered.png };
+    return { result: { ...result, cameraPose: rendered.receipt.pose }, png: rendered.png };
   });
   return CadCaptureArtifacts.of({ capture });
 });

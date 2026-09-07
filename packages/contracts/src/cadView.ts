@@ -18,15 +18,27 @@ export const CadCameraPreset = Schema.Literals([
   "bottom",
 ]);
 export const CadCameraPose = Schema.Struct({
-  position: Vector,
-  target: Vector,
-  up: Vector,
-  projection: Schema.Literals(["perspective", "orthographic"]),
+  position: Vector.annotate({
+    description: "Camera eye/origin [x,y,z] in CAD world coordinates (meters, Z-up).",
+  }),
+  target: Vector.annotate({
+    description: "World-space point [x,y,z] at the center of the image and the orbit pivot.",
+  }),
+  up: Vector.annotate({
+    description:
+      "Image up direction, usually [0,0,1]. Must be nonzero and not parallel to target-position; use [0,1,0] when looking along Z.",
+  }),
+  projection: Schema.Literals(["perspective", "orthographic"]).annotate({
+    description: "Perspective for depth; orthographic for parallel projection without perspective.",
+  }),
   zoom: Schema.Number.check(
     Schema.isFinite(),
     Schema.isGreaterThan(0),
     Schema.isLessThanOrEqualTo(100_000),
-  ),
+  ).annotate({
+    description:
+      "Absolute magnification: 1 is baseline, 2 doubles apparent size, 0.5 halves it. Multiply the current zoom to zoom relatively.",
+  }),
 }).check(
   Schema.makeFilter((pose) => {
     const direction = pose.target.map((value, index) => value - pose.position[index]!);

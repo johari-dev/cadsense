@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
-import { CadUpdateViewInput, CadViewState } from "./cadView.ts";
+import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
 
 export const CadHierarchyInput = Schema.Struct({
@@ -53,6 +53,12 @@ export const CadCaptureResult = Schema.Struct({
     createdAt: IsoDateTime,
   }),
   summary: Schema.String,
+});
+
+/** Live tool feedback includes the rendered pose; historical capture records keep their own pose. */
+export const CadCaptureToolResult = Schema.Struct({
+  ...CadCaptureResult.fields,
+  cameraPose: CadCameraPose,
 });
 
 /** Provider adapters share this closed set. Remote CAD operations are deliberately absent. */

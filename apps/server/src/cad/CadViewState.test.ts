@@ -51,6 +51,42 @@ const snapshot = Schema.decodeUnknownSync(CadSnapshotManifest)({
 const snapshots = new Map([[rootId, snapshot]]);
 
 describe("private CAD semantic state", () => {
+  it.effect("rejects invalid camera geometry and zoom without applying earlier operations", () =>
+    Effect.gen(function* () {
+      const before = initialCadView(snapshot);
+      const pose = {
+        position: [1, -2, 3],
+        target: [0, 0, 0],
+        up: [0, 0, 1],
+        projection: "perspective",
+        zoom: 1,
+      };
+      for (const change of [
+        { position: [0, 0, 0] },
+        { up: [0, 0, 0] },
+        { up: [1, -2, 3] },
+        { target: [Infinity, 0, 0] },
+        { zoom: 0 },
+        { zoom: -1 },
+        { zoom: 100_001 },
+      ]) {
+        const error = yield* updateCadView(
+          before,
+          {
+            expectedRevision: 0,
+            operations: [
+              { type: "hide", occurrenceIds: [id(2)] },
+              { type: "camera-pose", pose: { ...pose, ...change } },
+            ],
+          },
+          snapshots,
+        ).pipe(Effect.flip);
+        assert.equal(error.reason, "invalid-operation");
+        assert.deepEqual(before, initialCadView(snapshot));
+      }
+    }),
+  );
+
   it.effect(
     "pages direct occurrence children and rejects cursors from another parent or snapshot",
     () =>

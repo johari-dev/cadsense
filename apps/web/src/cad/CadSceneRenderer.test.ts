@@ -160,6 +160,50 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it.each(["perspective", "orthographic"] as const)(
+    "centers an arbitrary world point and scales magnification in %s captures",
+    async (projection) => {
+      const h = canvasHarness();
+      const renderer = createCadSceneRenderer({ canvas: h.canvas });
+      const pose = {
+        position: [0.2, -0.3, 0.15] as const,
+        target: [0.02, 0, 0.01] as const,
+        up: [0, 1, 1] as const,
+        projection,
+        zoom: 1,
+      };
+      try {
+        await renderer.load(manifest, async () => geometry());
+        renderer.resize(800, 600);
+        let baseline = 0;
+        for (const zoom of [1, 2, 0.5]) {
+          const custom = { ...pose, zoom };
+          expect(
+            renderer.apply({ ...state, camera: { kind: "pose", pose: custom, fit: null } }),
+          ).toEqual(custom);
+          const camera: Camera = calls.render.mock.calls.at(-1)![1];
+          const center = new Vector3(...pose.target).project(camera);
+          expect(center.x).toBeCloseTo(0, 10);
+          expect(center.y).toBeCloseTo(0, 10);
+          const point = new Vector3(...pose.target)
+            .addScaledVector(new Vector3().setFromMatrixColumn(camera.matrixWorld, 0), 0.01)
+            .project(camera);
+          if (zoom === 1) baseline = point.x;
+          expect(point.x).toBeCloseTo(baseline * zoom, 10);
+          const captured = renderer.capture();
+          h.completeCapture();
+          expect((await captured).type).toBe("image/png");
+          renderer.resize(800, 900);
+          const resized: Camera = calls.render.mock.calls.at(-1)![1];
+          expect(new Vector3(...pose.target).project(resized).x).toBeCloseTo(0, 10);
+          renderer.resize(800, 600);
+        }
+      } finally {
+        renderer.dispose();
+      }
+    },
+  );
+
   it("reuses warm scenes without reading assets and preserves the same-scene transition origin", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
