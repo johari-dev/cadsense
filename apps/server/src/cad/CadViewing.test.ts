@@ -513,6 +513,21 @@ it.effect(
       assert.equal(final.view?.explosion, 0.4);
       assert.isNull(final.captureId);
       assert.equal(final.userRevision, 1);
+      const thread = yield* (yield* ProjectionSnapshotQuery).getThreadDetailById(threadId);
+      assert.equal(thread._tag, "Some");
+      if (thread._tag === "Some") {
+        const cards = thread.value.activities.filter(
+          (activity) => activity.kind === "cad.captured",
+        );
+        assert.equal(cards.length, 1);
+        const capture = yield* readLatestCadCapture(threadId, turnId);
+        assert.deepEqual(cards[0]?.payload, {
+          captureId: capture!.record.capture.captureId,
+          snapshotId: snapshot.snapshotId,
+          revision: capture!.record.capture.revision,
+        });
+        assert.equal(cards[0]?.turnId, turnId);
+      }
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 

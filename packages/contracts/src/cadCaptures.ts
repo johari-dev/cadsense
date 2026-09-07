@@ -3,6 +3,15 @@ import { CommandId, ThreadId, TurnId } from "./baseSchemas.ts";
 import { CadAgentContextId } from "./cadSessions.ts";
 import { CadCaptureResult } from "./cadTools.ts";
 import { CadCameraPose, CadViewState } from "./cadView.ts";
+import { CadSnapshotId } from "./cad.ts";
+
+/** Compact durable timeline metadata; image bytes remain in the attachment store. */
+export const CadCaptureCard = Schema.Struct({
+  captureId: CadSnapshotId,
+  snapshotId: CadCaptureResult.fields.snapshotId,
+  revision: CadCaptureResult.fields.revision,
+});
+export type CadCaptureCard = typeof CadCaptureCard.Type;
 
 export const CadCaptureRecord = Schema.Struct({
   threadId: ThreadId,

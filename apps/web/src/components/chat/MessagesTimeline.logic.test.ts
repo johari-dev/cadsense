@@ -1,10 +1,50 @@
 import { describe, expect, it } from "vite-plus/test";
+import { TurnId } from "@cadsense/contracts";
+import type { TimelineEntry } from "../../session-logic";
 import {
+  deriveMessagesTimelineRows,
   computeMessageDurationStart,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   shouldPreserveAssistantLineBreaks,
 } from "./MessagesTimeline.logic";
+
+it("keeps captured images visible outside collapsed turn and work-log details", () => {
+  const turnId = TurnId.make("captured-turn");
+  const capture = {
+    captureId: "00000000-0000-4000-8000-000000000001",
+    snapshotId: "00000000-0000-4000-8000-000000000002",
+    revision: 1,
+  };
+  const entries: TimelineEntry[] = [0, 1, 2].map((index) => ({
+    kind: "work",
+    id: `work-${index}`,
+    createdAt: `2026-09-06T00:00:0${index}Z`,
+    entry: {
+      id: `work-${index}`,
+      createdAt: `2026-09-06T00:00:0${index}Z`,
+      turnId,
+      tone: "info",
+      label: index === 1 ? "CAD view captured" : "Other work",
+      ...(index === 1 ? { cadCapture: capture } : {}),
+    },
+  }));
+  for (const isWorking of [true, false]) {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: entries,
+      isWorking,
+      runningTurnId: isWorking ? turnId : null,
+      activeTurnStartedAt: isWorking ? entries[0]!.createdAt : null,
+    });
+    expect(
+      rows.some(
+        (row) =>
+          row.kind === "work" &&
+          row.groupedEntries.some((entry) => entry.cadCapture?.captureId === capture.captureId),
+      ),
+    ).toBe(true);
+  }
+});
 
 describe("shouldPreserveAssistantLineBreaks", () => {
   it("preserves insight blocks without changing ordinary markdown", () => {

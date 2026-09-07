@@ -47,6 +47,7 @@ import {
   isVideoAttachment,
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
+import { CadCaptureCard } from "../../cad/CadCaptureCard";
 import {
   BotIcon,
   CheckIcon,
@@ -2131,6 +2132,15 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  const { threadRef, onImageExpand } = use(TimelineRowCtx);
+  if (workEntry.cadCapture && threadRef)
+    return (
+      <CadCaptureCard
+        capture={workEntry.cadCapture}
+        threadRef={threadRef}
+        onImageExpand={onImageExpand}
+      />
+    );
   // Before any hooks: spawn CTA rows render their own component.
   if (workEntry.agentSpawn) {
     return <AgentSpawnCtaRow workEntry={workEntry} />;

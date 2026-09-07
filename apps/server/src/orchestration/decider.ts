@@ -200,6 +200,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         },
         event,
+        {
+          ...(yield* withEventBase({
+            commandId: command.commandId,
+            aggregateKind: "thread",
+            aggregateId: thread.id,
+            occurredAt,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: thread.id,
+            activity: {
+              id: EventId.make(`cad-${command.capture.captureId}`),
+              tone: "info",
+              kind: "cad.captured",
+              summary: "CAD view captured",
+              payload: {
+                captureId: command.capture.captureId,
+                snapshotId: command.capture.snapshotId,
+                revision: command.capture.revision,
+              },
+              turnId: command.turnId,
+              createdAt: occurredAt,
+            },
+          },
+        },
       ];
     }
     case "project.create":
