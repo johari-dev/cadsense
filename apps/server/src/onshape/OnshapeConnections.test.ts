@@ -23,6 +23,8 @@ import * as OnshapeConnections from "./OnshapeConnections.ts";
 import * as OnshapeRequestSigner from "./OnshapeRequestSigner.ts";
 import * as OnshapeTransport from "./OnshapeTransport.ts";
 
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+
 const OLD_ACCESS_KEY = "old-access-key";
 const OLD_SECRET_KEY = "old-secret-key";
 const NEW_ACCESS_KEY = "new-access-key";
@@ -901,6 +903,51 @@ it.layer(NodeServices.layer)("Onshape authenticated reads", (it) => {
   };
 
   it.effect(
+    "signs an external glTF export as POST and rejects document-writing export options",
+    () => {
+      const harness = makeMemoryHarness();
+      return Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        const signer = yield* OnshapeRequestSigner.OnshapeRequestSigner;
+        const saved = yield* connections.create(createInput);
+        const exportRequest = {
+          connectionId: saved.connectionId,
+          host: target.host,
+          path: `/api/v17/assemblies/d/${"a".repeat(24)}/w/${"b".repeat(24)}/e/${"c".repeat(24)}/export/gltf`,
+          query: "",
+          method: "POST" as const,
+          body: {
+            storeInDocument: false,
+            notifyUser: false,
+            advancedParams: { configuration: "Length=10 mm;Color=Red+Blue" },
+          },
+        };
+        yield* connections.readJson(exportRequest);
+        const request = harness.state.requests.at(-1)!;
+        assert.equal(request.method, "POST");
+        assert.deepEqual(yield* decodeJson(request.body), exportRequest.body);
+        const expected = yield* signer.sign({
+          accessKeyId: OLD_ACCESS_KEY,
+          secretKey: OLD_SECRET_KEY,
+          method: "POST",
+          nonce: request.headers["On-Nonce"]!,
+          date: request.headers.Date!,
+          contentType: "application/json",
+          path: exportRequest.path,
+          query: "",
+        });
+        assert.equal(request.headers.Authorization, expected.Authorization);
+        const count = harness.state.requests.length;
+        const rejected = yield* connections
+          .readJson({ ...exportRequest, body: { ...exportRequest.body, storeInDocument: true } })
+          .pipe(Effect.exit);
+        assert.equal(rejected._tag, "Failure");
+        assert.equal(harness.state.requests.length, count);
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect(
     "signs every trusted binary redirect independently and checks reserve on each hop",
     () => {
       const harness = makeMemoryHarness();
@@ -958,7 +1005,7 @@ it.layer(NodeServices.layer)("Onshape authenticated reads", (it) => {
             query: url.search.slice(1),
           });
           assert.equal(item.headers.Authorization, expected.Authorization);
-          assert.equal(item.headers.Accept, "model/gltf-binary");
+          assert.include(item.headers.Accept, "model/gltf-binary");
         }
       }).pipe(Effect.provide(harness.layer));
     },

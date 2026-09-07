@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 export interface OnshapeSigningInput {
   readonly accessKeyId: string;
   readonly secretKey: string;
-  readonly method: "GET";
+  readonly method: "GET" | "POST";
   readonly nonce: string;
   readonly date: string;
   readonly contentType: string;
