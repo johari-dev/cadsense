@@ -1032,7 +1032,7 @@ function ChatViewContent(props: ChatViewProps) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not reconnect environment",
+            title: "Could not reconnect to the backend",
             description: error instanceof Error ? error.message : "Failed to reconnect.",
           }),
         );
@@ -1078,10 +1078,10 @@ function ChatViewContent(props: ChatViewProps) {
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: unavailableConnection.phase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusTitle(unavailableConnection)}`,
+        title: connectionStatusTitle(unavailableConnection),
         description:
           unavailableConnection.error ??
-          "Reconnect this environment before sending messages or running actions.",
+          "Reconnect the backend before sending messages or running actions.",
         actions: (
           <Button
             size="xs"

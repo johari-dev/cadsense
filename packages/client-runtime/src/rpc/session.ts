@@ -84,8 +84,8 @@ export const make = Effect.gen(function* () {
             new ConnectionTransientErrorClass({
               reason: "transport",
               detail: wasConnected
-                ? `${connection.label} disconnected.`
-                : `${connection.label} could not establish a WebSocket connection.`,
+                ? "Backend disconnected."
+                : "Backend could not establish a WebSocket connection.",
             }),
           ),
         ),
