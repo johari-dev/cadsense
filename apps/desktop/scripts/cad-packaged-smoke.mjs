@@ -144,7 +144,7 @@ const waitExplosion = (page, pressed) =>
 try {
   await launch();
   await close();
-  const fixture = await seedCadSmokeFixture(baseDir);
+  await seedCadSmokeFixture(baseDir);
   report.steps.push("initialized isolated backend and seeded offline assembly/multipart fixtures");
   let page = await launch(true);
   let sceneReads = 0;
@@ -212,7 +212,8 @@ try {
     delete window.__cadWarmCanvas;
   });
   report.steps.push("thread switching reuses the same warm renderer without asset reads");
-  await page.getByLabel("CAD scene", { exact: true }).selectOption(fixture.roots[1]);
+  await page.getByRole("combobox", { name: "CAD scene", exact: true }).click();
+  await page.getByRole("option", { name: "Offline multipart", exact: true }).click();
   await page.getByRole("button", { name: /^Components/ }).click();
   await page.getByRole("checkbox", { name: "Show Studio body A", exact: true }).waitFor();
   await page.getByRole("checkbox", { name: "Show Studio body B", exact: true }).click();
@@ -227,10 +228,11 @@ try {
     readsBeforeReturn,
     "Returning to a cached scene must not read assets again",
   );
-  NodeAssert.equal(
-    await page.getByLabel("CAD scene", { exact: true }).inputValue(),
-    fixture.roots[0],
-  );
+  await page.getByRole("combobox", { name: "CAD scene", exact: true }).click();
+  await page
+    .getByRole("option", { name: "Offline assembly", exact: true, selected: true })
+    .waitFor();
+  await page.keyboard.press("Escape");
   await close();
   page = await launch();
   await page.getByTestId(`thread-row-${cadSmokeThreads[0]}`).click();
