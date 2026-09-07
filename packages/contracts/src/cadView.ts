@@ -81,5 +81,11 @@ export const CadUpdateViewInput = Schema.Struct({
 });
 export type CadUpdateViewInput = typeof CadUpdateViewInput.Type;
 export class CadViewError extends Schema.TaggedErrorClass<CadViewError>()("CadViewError", {
-  reason: Schema.Literals(["revision-conflict", "invalid-operation", "capability-unavailable"]),
+  reason: Schema.Literals([
+    "revision-conflict",
+    "invalid-operation",
+    "capability-unavailable",
+    "memory-full",
+    "memory-source-invalid",
+  ]),
 }) {}

@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
@@ -35,6 +36,7 @@ type Command = {
 }[OrchestrationCommand["type"]];
 
 export const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const engine = yield* OrchestrationEngineService;
   const query = yield* ProjectionSnapshotQuery;
   const store = yield* CadSnapshotStore;
@@ -90,10 +92,14 @@ export const make = Effect.gen(function* () {
         );
       yield* store.remove([...targets], protectedIds).pipe(Effect.mapError(failed));
     }
-    if (storage.deleteWorkspace)
+    if (storage.deleteWorkspace) {
       yield* allocator
         .remove({ projectId, workspaceRoot: project.workspaceRoot })
         .pipe(Effect.mapError(failed));
+      yield* sql`DELETE FROM cad_project_memory WHERE project_id=${projectId}`.pipe(
+        Effect.mapError(failed),
+      );
+    }
     yield* dispatch({ type: "project.onshape.cleanup.complete", projectId, removedAt });
   });
   const run = Effect.fn("CadStorage.run")(

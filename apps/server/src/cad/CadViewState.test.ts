@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { indexCadSnapshot, initialCadView, rebaseCadView, updateCadView } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import { searchCadSnapshot } from "./CadSearch.ts";
 
 const id = (value: number) => value.toString(16).padStart(64, "0");
 const rootId = id(20);
@@ -51,6 +52,32 @@ const snapshot = Schema.decodeUnknownSync(CadSnapshotManifest)({
 const snapshots = new Map([[rootId, snapshot]]);
 
 describe("private CAD semantic state", () => {
+  it.effect("finds repeated names by ancestor path and includes hidden or suppressed matches", () =>
+    Effect.gen(function* () {
+      const state = { ...initialCadView(snapshot), visibility: { [id(4)]: false } };
+      const found = yield* searchCadSnapshot(snapshot, state, { query: "RIGHT/bolt" });
+      assert.equal(found.totalMatches, 2);
+      assert.deepEqual(
+        found.entries.map((entry) => entry.occurrenceId),
+        [id(5), id(6)],
+      );
+      assert.deepEqual(found.entries[0]?.path, ["Root", "Intake right", "Bolt"]);
+      assert.isTrue(found.entries.every((entry) => !entry.visible));
+      assert.isTrue(found.entries[1]!.suppressed);
+      const limited = yield* searchCadSnapshot(snapshot, state, { query: "bolt", limit: 1 });
+      assert.equal(limited.entries.length, 1);
+      assert.equal(limited.totalMatches, 3);
+      assert.equal(limited.snapshotId, snapshot.snapshotId);
+      assert.equal(
+        (yield* searchCadSnapshot(snapshot, state, { query: "missing" })).entries.length,
+        0,
+      );
+      assert.equal(
+        (yield* searchCadSnapshot(snapshot, state, { query: " / " }).pipe(Effect.flip)).reason,
+        "invalid-operation",
+      );
+    }),
+  );
   it.effect("rejects invalid camera geometry and zoom without applying earlier operations", () =>
     Effect.gen(function* () {
       const before = initialCadView(snapshot);

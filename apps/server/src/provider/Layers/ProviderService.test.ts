@@ -65,6 +65,8 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
 import * as ThreadBackgroundLiveness from "../../orchestration/ThreadBackgroundLiveness.ts";
+import { CadViewing, type CadViewingShape } from "../../cad/CadViewing.ts";
+import { CadViewError } from "@cadsense/contracts";
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
 const serverConfigTestLayer = ServerConfig.layerTest(process.cwd(), process.cwd()).pipe(
@@ -288,7 +290,7 @@ const hasMetricSnapshot = (
       Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
   );
 
-function makeProviderServiceLayer() {
+function makeProviderServiceLayer(cadViewing?: CadViewingShape) {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
   const testProvider = makeFakeCodexAdapter(TEST_DRIVER);
@@ -310,6 +312,7 @@ function makeProviderServiceLayer() {
   const layer = it.layer(
     Layer.mergeAll(
       makeProviderServiceLive().pipe(
+        Layer.provide(cadViewing ? Layer.succeed(CadViewing, cadViewing) : Layer.empty),
         Layer.provideMerge(ThreadBackgroundLiveness.layer),
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
@@ -611,6 +614,56 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
 );
 
 const routing = makeProviderServiceLayer();
+
+const memoryRouting = makeProviderServiceLayer({
+  projectBrief: (threadId) =>
+    threadId === "non-cad"
+      ? Effect.fail(new CadViewError({ reason: "capability-unavailable" }))
+      : Effect.succeed(
+          'Saved project facts: [{"key":"opening","quote":"Leave space for gloves."}]',
+        ),
+  watchActivity: () => Stream.empty,
+  resolveContext: () => Effect.die("Unexpected CAD activation"),
+  withActivation: () => Effect.die("Unexpected CAD activation"),
+  saveUserView: () => Effect.die("Unexpected CAD activation"),
+  getUserView: () => Effect.die("Unexpected CAD activation"),
+});
+memoryRouting.layer("CAD project context delivery", (it) => {
+  it.effect(
+    "supplies saved facts to both providers without loading geometry or changing the request",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        for (const [driver, instanceId, adapter] of [
+          [CODEX_DRIVER, codexInstanceId, memoryRouting.codex],
+          [CLAUDE_AGENT_DRIVER, claudeAgentInstanceId, memoryRouting.claude],
+        ] as const) {
+          const threadId = asThreadId(`memory-${driver}`);
+          yield* provider.startSession(threadId, {
+            provider: driver,
+            providerInstanceId: instanceId,
+            threadId,
+            runtimeMode: "full-access",
+          });
+          adapter.sendTurn.mockClear();
+          yield* provider.sendTurn({ threadId, input: "Inspect the opening." });
+          const sent = adapter.sendTurn.mock.calls[0]?.[0];
+          assert.include(sent?.input ?? "", "Leave space for gloves.");
+          assert.isTrue(sent?.input?.endsWith("Current user request:\nInspect the opening."));
+        }
+        const threadId = asThreadId("non-cad");
+        yield* provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        });
+        memoryRouting.codex.sendTurn.mockClear();
+        yield* provider.sendTurn({ threadId, input: "Ordinary request." });
+        assert.equal(memoryRouting.codex.sendTurn.mock.calls[0]?.[0].input, "Ordinary request.");
+      }),
+  );
+});
 
 const quiescence = makeProviderServiceLayer();
 quiescence.layer("ProviderService confirmed idle shutdown", (it) => {

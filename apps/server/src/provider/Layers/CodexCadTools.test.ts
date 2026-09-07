@@ -219,7 +219,14 @@ it.effect(
       );
       assert.deepEqual(
         start.params.dynamicTools.map((tool) => tool.name),
-        ["cad_context", "cad_hierarchy", "cad_update_view", "cad_capture"],
+        [
+          "cad_context",
+          "cad_hierarchy",
+          "cad_search",
+          "cad_memory",
+          "cad_update_view",
+          "cad_capture",
+        ],
       );
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

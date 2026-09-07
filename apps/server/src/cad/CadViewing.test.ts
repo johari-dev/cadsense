@@ -4,6 +4,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
+  OnshapeWorkspaceId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -54,12 +55,115 @@ import { CadUserOperationError } from "@cadsense/contracts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Option from "effect/Option";
 import { make as makeRenderBroker } from "./CadRenderBroker.ts";
 import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+it.effect(
+  "recalls project facts in a fresh thread and withholds obsolete component bindings after sync",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO projection_thread_messages(message_id,thread_id,turn_id,role,text,is_streaming,created_at,updated_at)
+      VALUES('memory-source',${threadId},NULL,'user','We call this assembly the carriage.',0,${now},${now})`;
+      const contextId = yield* h.service.resolveContext(threadId);
+      yield* h.service.withActivation(contextId, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.deepEqual(context.overview, { occurrences: 1, parts: 0, assemblies: 1 });
+          const found = yield* tools.search({ query: "intake" });
+          const target = {
+            rootId: snapshot.rootId,
+            snapshotId: found.snapshotId,
+            occurrenceId: found.entries[0]!.occurrenceId,
+          };
+          const input = {
+            key: "carriage",
+            quote: "We call this assembly the carriage.",
+            expectedRevision: 0,
+            change: { type: "remember", kind: "name", target },
+          };
+          assert.equal(
+            (yield* tools
+              .memory({
+                ...input,
+                change: { ...input.change, target: { ...target, occurrenceId: "f".repeat(64) } },
+              })
+              .pipe(Effect.flip)).reason,
+            "invalid-operation",
+          );
+          const saved = yield* tools.memory(input);
+          assert.equal(saved.entries[0]?.targetStatus, "current");
+          yield* tools.updateView({
+            expectedRevision: context.revision,
+            operations: [{ type: "explode", amount: 0.5 }],
+          });
+          assert.equal((yield* tools.context()).memory.entries[0]?.targetStatus, "current");
+        }),
+      );
+      const recreated = yield* h.recreate;
+      const brief = yield* recreated.projectBrief(otherThreadId);
+      assert.include(brief, "We call this assembly the carriage.");
+      assert.notInclude(brief, snapshot.nodes[0]!.id);
+      assert.equal(h.pins(), 0);
+      const fresh = yield* recreated.resolveContext(otherThreadId);
+      yield* recreated.withActivation(fresh, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.equal(context.memory.entries[0]?.targetStatus, "current");
+          assert.equal(context.memory.entries[0]?.sourceThreadId, threadId);
+        }),
+      );
+      const next = {
+        ...snapshot,
+        snapshotId: "00000000-0000-4000-8000-000000000099",
+        root: { ...snapshot.root, microversionId: OnshapeWorkspaceId.make("e".repeat(24)) },
+      };
+      h.snapshots.set(next.snapshotId, next);
+      const operationId = "00000000-0000-4000-8000-000000000098";
+      yield* h.dispatch({
+        type: "project.cad.operation.reserve",
+        projectId,
+        operationId,
+        kind: "sync",
+        root: {
+          rootId: snapshot.rootId,
+          elementId: snapshot.root.elementId,
+          kind: "assembly",
+          configuration: "default",
+        },
+      });
+      yield* h.dispatch({
+        type: "project.cad.operation.complete",
+        projectId,
+        operationId,
+        result: {
+          kind: "sync",
+          snapshot: {
+            snapshotId: next.snapshotId,
+            microversionId: next.root.microversionId,
+            createdAt: now,
+            manifestBytes: 1,
+            assetBytes: 0,
+          },
+        },
+      });
+      yield* recreated.withActivation(fresh, (tools) =>
+        Effect.gen(function* () {
+          const context = yield* tools.context();
+          assert.equal(context.state?.snapshotId, next.snapshotId);
+          assert.equal(context.memory.entries[0]?.quote, "We call this assembly the carriage.");
+          assert.equal(context.memory.entries[0]?.targetStatus, "stale");
+          assert.equal(context.memory.entries[0]?.targetName, "Intake");
+          assert.isNull(context.memory.entries[0]?.target);
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 it.effect(
   "returns a fitted capture pose that the agent can recenter and zoom without changing angle",
   () =>
