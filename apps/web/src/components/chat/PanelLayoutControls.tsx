@@ -1,7 +1,8 @@
-import { Maximize2Icon, Minimize2Icon, PanelRightIcon } from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, PanelRightCloseIcon, PanelRightIcon } from "lucide-react";
 import { memo } from "react";
 
 import { Toggle } from "../ui/toggle";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PanelLayoutControlsProps {
@@ -29,20 +30,20 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
     >
       <Tooltip>
         <TooltipTrigger render={<span className="flex shrink-0" />}>
-          <Toggle
-            className="shrink-0 [-webkit-app-region:no-drag]"
-            pressed={rightPanelOpen}
-            onPressedChange={onToggleRightPanel}
+          <Button
+            className="size-[var(--workspace-titlebar-control-size)]! shrink-0 [-webkit-app-region:no-drag]"
+            aria-pressed={rightPanelOpen}
+            onClick={onToggleRightPanel}
             aria-label={
               liveAgentCount > 0
                 ? `Toggle right panel, ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working`
                 : "Toggle right panel"
             }
             variant="ghost"
-            size="sm"
+            size="icon"
             disabled={!rightPanelAvailable}
           >
-            <PanelRightIcon className="size-4" />
+            {rightPanelOpen ? <PanelRightCloseIcon /> : <PanelRightIcon />}
             {liveAgentCount > 0 ? (
               <span
                 aria-hidden
@@ -51,7 +52,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
                 {liveAgentCount}
               </span>
             ) : null}
-          </Toggle>
+          </Button>
         </TooltipTrigger>
         <TooltipPopup side="bottom">
           {rightPanelAvailable
