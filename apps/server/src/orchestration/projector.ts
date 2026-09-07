@@ -11,6 +11,10 @@ import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "
 import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
+  ProjectCadStateSetPayload,
+  ThreadTurnStartRequestedPayload,
+  ThreadTurnStartSettledPayload,
+  ThreadTurnLifecycleSettledPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
@@ -27,6 +31,11 @@ import {
   ThreadUnarchivedPayload,
   ThreadSessionSetPayload,
 } from "./Schemas.ts";
+import {
+  requestTurnAdmission,
+  settleTurnAdmission,
+  completeTurnAdmission,
+} from "./turnAdmission.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
@@ -110,6 +119,70 @@ export function projectEvent(
   };
 
   switch (event.type) {
+    case "project.cad-state-set":
+      return decodeForEvent(ProjectCadStateSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? { ...project, cad: payload.cad, updatedAt: payload.updatedAt }
+              : project,
+          ),
+        })),
+      );
+    case "thread.turn-start-requested":
+    case "thread.turn-start-settled":
+    case "thread.turn-lifecycle-settled":
+      if (event.type === "thread.turn-start-requested" && !event.payload.admissionTracked)
+        return Effect.succeed(nextBase);
+      return (
+        event.type === "thread.turn-start-requested"
+          ? decodeForEvent(
+              ThreadTurnStartRequestedPayload,
+              event.payload,
+              event.type,
+              "payload",
+            ).pipe(Effect.asVoid)
+          : event.type === "thread.turn-start-settled"
+            ? decodeForEvent(
+                ThreadTurnStartSettledPayload,
+                event.payload,
+                event.type,
+                "payload",
+              ).pipe(Effect.asVoid)
+            : decodeForEvent(
+                ThreadTurnLifecycleSettledPayload,
+                event.payload,
+                event.type,
+                "payload",
+              ).pipe(Effect.asVoid)
+      ).pipe(
+        Effect.map(() => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id !== event.payload.threadId
+              ? thread
+              : {
+                  ...thread,
+                  turnAdmission:
+                    event.type === "thread.turn-start-requested"
+                      ? requestTurnAdmission(
+                          thread.turnAdmission,
+                          event.payload.messageId,
+                          event.payload.createdAt,
+                        )
+                      : event.type === "thread.turn-start-settled"
+                        ? settleTurnAdmission(
+                            thread.turnAdmission,
+                            event.payload.messageId,
+                            event.payload.turnId,
+                          )
+                        : completeTurnAdmission(thread.turnAdmission, event.payload.turnId),
+                  updatedAt: event.occurredAt,
+                },
+          ),
+        })),
+      );
     case "project.created":
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {

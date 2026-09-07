@@ -2,6 +2,8 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeEvents from "node:events";
+import * as NodeStream from "node:stream";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type {
@@ -44,8 +46,60 @@ import {
 } from "../ClaudeModelCatalog.testFixtures.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  makeClaudeAdapter as makeNativeClaudeAdapter,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+
+class FakeClaudeProcess extends NodeEvents.EventEmitter {
+  readonly stdin = new NodeStream.PassThrough();
+  readonly stdout = new NodeStream.PassThrough();
+  killed = false;
+  exitCode: number | null = null;
+  kill() {
+    this.killed = true;
+    return true;
+  }
+  exit() {
+    this.exitCode = 0;
+    this.emit("exit", 0, null);
+  }
+}
+
+// Existing SDK fixtures simulate the child exit separately from closing their message stream.
+const makeClaudeAdapter: typeof makeNativeClaudeAdapter = (settings, options) => {
+  if (!options?.createQuery) return makeNativeClaudeAdapter(settings, options);
+  const createQuery = options.createQuery;
+  let process: FakeClaudeProcess;
+  return makeNativeClaudeAdapter(settings, {
+    ...options,
+    spawnClaudeCodeProcess: () => {
+      process = new FakeClaudeProcess();
+      return process;
+    },
+    createQuery: (input) => {
+      const query = createQuery(input);
+      input.options.spawnClaudeCodeProcess?.({
+        command: "test-claude",
+        args: [],
+        env: {},
+        signal: new AbortController().signal,
+      });
+      const child = process;
+      return {
+        setModel: query.setModel.bind(query),
+        setPermissionMode: query.setPermissionMode.bind(query),
+        setMaxThinkingTokens: query.setMaxThinkingTokens.bind(query),
+        [Symbol.asyncIterator]: query[Symbol.asyncIterator].bind(query),
+        close: () => {
+          query.close();
+          child.exit();
+        },
+      };
+    },
+  });
+};
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(

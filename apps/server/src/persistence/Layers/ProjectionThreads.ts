@@ -14,11 +14,12 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@cadsense/contracts";
+import { ModelSelection, ThreadTurnAdmission } from "@cadsense/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    turnAdmission: Schema.optionalKey(Schema.NullOr(Schema.fromJsonString(ThreadTurnAdmission))),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -38,6 +39,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           runtime_mode,
           interaction_mode,
           latest_turn_id,
+          turn_admission_json,
           created_at,
           updated_at,
           archived_at,
@@ -59,6 +61,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.runtimeMode},
           ${row.interactionMode},
           ${row.latestTurnId},
+          ${row.turnAdmission ? JSON.stringify(row.turnAdmission) : null},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt},
@@ -80,6 +83,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           latest_turn_id = excluded.latest_turn_id,
+          turn_admission_json = excluded.turn_admission_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at,
@@ -108,6 +112,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           latest_turn_id AS "latestTurnId",
+          turn_admission_json AS "turnAdmission",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -138,6 +143,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           latest_turn_id AS "latestTurnId",
+          turn_admission_json AS "turnAdmission",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",

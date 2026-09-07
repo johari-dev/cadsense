@@ -80,6 +80,10 @@ export interface ProviderServiceShape {
   readonly stopSession: (
     input: ProviderStopSessionInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+  /** Server-only CAD admission fence; ordinary stopSession is not an exit receipt. */
+  readonly stopIdleSession: (
+    input: ProviderStopSessionInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * List active provider sessions.

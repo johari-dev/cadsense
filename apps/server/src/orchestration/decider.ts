@@ -21,8 +21,10 @@ import {
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
+  requireProjectCadIdle,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+import { decideCadState } from "./cadLifecycle.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -197,7 +199,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.cad.enabled.set":
+    case "project.cad.operation.reserve":
+    case "project.cad.operation.complete":
+    case "project.cad.operation.end": {
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const occurredAt = yield* nowIso;
+      const cad = yield* decideCadState(project, command, readModel, occurredAt);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.cad-state-set",
+        payload: { projectId: project.id, cad, updatedAt: occurredAt },
+      };
+    }
+
     case "project.onshape.connection.set": {
+      yield* requireProjectCadIdle({ readModel, command, projectId: command.projectId });
       const project = yield* requireActiveProject({
         readModel,
         command,
@@ -256,6 +282,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.delete": {
+      yield* requireProjectCadIdle({
+        readModel,
+        command,
+        projectId: command.projectId,
+        includeRuns: true,
+      });
       yield* requireProject({
         readModel,
         command,
@@ -617,12 +649,52 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.turn.start.settle":
+    case "thread.turn.lifecycle.settle": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      const occurredAt = yield* nowIso;
+      const base = yield* withEventBase({
+        aggregateKind: "thread",
+        aggregateId: command.threadId,
+        occurredAt,
+        commandId: command.commandId,
+      });
+      return command.type === "thread.turn.start.settle"
+        ? {
+            ...base,
+            type: "thread.turn-start-settled",
+            payload: {
+              threadId: command.threadId,
+              messageId: command.messageId,
+              turnId: command.turnId,
+              updatedAt: occurredAt,
+            },
+          }
+        : {
+            ...base,
+            type: "thread.turn-lifecycle-settled",
+            payload: { threadId: command.threadId, turnId: command.turnId, updatedAt: occurredAt },
+          };
+    }
+
     case "thread.turn.start": {
       const targetThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      yield* requireProjectCadIdle({ readModel, command, projectId: targetThread.projectId });
+      yield* requireActiveProject({ readModel, command, projectId: targetThread.projectId });
+      if (targetThread.deletedAt !== null)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A removed thread cannot start an agent run.",
+        });
+      if ((targetThread.turnAdmission?.pending.length ?? 0) >= 1000)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Too many pending turn starts.",
+        });
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -677,6 +749,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         causationEventId: userMessageEvent.eventId,
         type: "thread.turn-start-requested",
         payload: {
+          admissionTracked: true,
           threadId: command.threadId,
           messageId: command.message.messageId,
           ...(command.modelSelection !== undefined

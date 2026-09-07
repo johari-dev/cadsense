@@ -61,6 +61,7 @@ import {
   makeCodexSessionRuntime,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
+  type CodexProcessReceipt,
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1614,6 +1615,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
+  const stoppingSessions = new Set<CodexAdapterSessionContext>();
+  const startingProcesses = new Set<CodexProcessReceipt>();
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -1636,7 +1639,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        let processReceipt: CodexProcessReceipt | undefined;
         const runtimeInput: CodexSessionRuntimeOptions = {
+          onProcessSpawned: (receipt) => {
+            processReceipt = receipt;
+            startingProcesses.add(receipt);
+          },
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
@@ -1739,6 +1747,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           stopped: false,
         });
         sessionScopeTransferred = true;
+        if (processReceipt) startingProcesses.delete(processReceipt);
 
         return started;
       }),
@@ -1897,6 +1906,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     session.stopped = true;
+    stoppingSessions.add(session);
     sessions.delete(session.threadId);
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
@@ -1913,14 +1923,73 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     });
 
   const listSessions: CodexAdapterShape["listSessions"] = () =>
-    Effect.forEach(
-      Array.from(sessions.values()).filter((session) => !session.stopped),
-      (session) => session.runtime.getSession,
-      { concurrency: 1 },
+    Effect.gen(function* () {
+      for (const receipt of startingProcesses)
+        if (yield* receipt.processExited) startingProcesses.delete(receipt);
+      for (const session of stoppingSessions) {
+        if (yield* session.runtime.processExited) stoppingSessions.delete(session);
+      }
+      const registered = yield* Effect.forEach(
+        [...sessions.values(), ...stoppingSessions],
+        (session) =>
+          session.runtime.getSession.pipe(
+            Effect.map((value) =>
+              session.stopped
+                ? { ...value, status: "closed" as const, activeTurnId: undefined }
+                : value,
+            ),
+          ),
+        { concurrency: 1 },
+      );
+      return [...registered, ...[...startingProcesses].map((receipt) => receipt.session)];
+    });
+
+  const stopIdleSession = Effect.fn("stopIdleSession")(function* (threadId: ThreadId) {
+    const session = sessions.get(threadId);
+    const pending = [...stoppingSessions].filter((session) => session.threadId === threadId);
+    const starting = [...startingProcesses].filter(
+      (receipt) => receipt.session.threadId === threadId,
     );
+    if (!session && pending.length === 0 && starting.length === 0)
+      return yield* new ProviderAdapterProcessError({
+        provider: PROVIDER,
+        threadId,
+        detail: "Codex session shutdown cannot be confirmed.",
+      });
+    for (const receipt of starting) {
+      yield* receipt.awaitProcessExit.pipe(
+        Effect.mapError((error) => mapCodexRuntimeError(threadId, "stopIdleSession", error)),
+      );
+      startingProcesses.delete(receipt);
+    }
+    for (const stopped of pending) {
+      yield* stopped.runtime.awaitProcessExit.pipe(
+        Effect.mapError((error) => mapCodexRuntimeError(threadId, "stopIdleSession", error)),
+      );
+      stoppingSessions.delete(stopped);
+    }
+    if (session) {
+      if (!(yield* session.runtime.processExited))
+        yield* session.runtime.closeIdleConfirmed.pipe(
+          Effect.mapError((error) => mapCodexRuntimeError(threadId, "stopIdleSession", error)),
+        );
+      yield* stopSessionInternal(session);
+      stoppingSessions.delete(session);
+    }
+  });
 
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
-    Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
+    Effect.gen(function* () {
+      for (const receipt of startingProcesses)
+        if (yield* receipt.processExited) startingProcesses.delete(receipt);
+      for (const session of stoppingSessions)
+        if (yield* session.runtime.processExited) stoppingSessions.delete(session);
+      return (
+        Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped) ||
+        [...startingProcesses].some((receipt) => receipt.session.threadId === threadId) ||
+        [...stoppingSessions].some((session) => session.threadId === threadId)
+      );
+    });
 
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
@@ -1949,6 +2018,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    stopIdleSession,
     listSessions,
     hasSession,
     stopAll,

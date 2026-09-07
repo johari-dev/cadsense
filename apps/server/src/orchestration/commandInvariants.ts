@@ -20,6 +20,37 @@ function invariantError(commandType: string, detail: string): OrchestrationComma
   });
 }
 
+export function requireProjectCadIdle(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+  readonly includeRuns?: boolean;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const project = findProjectById(input.readModel, input.projectId);
+  if (!project?.onshapeSource) return Effect.void;
+  if (project.cad?.operation)
+    return Effect.fail(
+      invariantError(input.command.type, "A CAD operation is active for this project."),
+    );
+  if (
+    input.includeRuns &&
+    input.readModel.threads.some(
+      (thread) =>
+        thread.projectId === input.projectId &&
+        ((thread.turnAdmission?.pending.length ?? 0) > 0 ||
+          thread.session?.status === "starting" ||
+          thread.session?.status === "running" ||
+          thread.session?.activeTurnId != null ||
+          thread.latestTurn?.state === "running" ||
+          thread.backgroundLiveness === "working"),
+    )
+  )
+    return Effect.fail(
+      invariantError(input.command.type, "An agent run is active for this project."),
+    );
+  return Effect.void;
+}
+
 export function findThreadById(
   readModel: OrchestrationReadModel,
   threadId: ThreadId,

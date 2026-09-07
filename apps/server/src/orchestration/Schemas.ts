@@ -1,4 +1,7 @@
 import {
+  ProjectCadStateSetPayload as ContractsProjectCadStateSetPayload,
+  ThreadTurnStartSettledPayload as ContractsThreadTurnStartSettledPayload,
+  ThreadTurnLifecycleSettledPayload as ContractsThreadTurnLifecycleSettledPayload,
   ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
@@ -23,6 +26,9 @@ import {
 } from "@cadsense/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
+export const ProjectCadStateSetPayload = ContractsProjectCadStateSetPayload;
+export const ThreadTurnStartSettledPayload = ContractsThreadTurnStartSettledPayload;
+export const ThreadTurnLifecycleSettledPayload = ContractsThreadTurnLifecycleSettledPayload;
 export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema;
 export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;

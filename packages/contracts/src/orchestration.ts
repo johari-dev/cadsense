@@ -20,6 +20,13 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { OnshapeConnectionId, OnshapeProjectSource } from "./onshape.ts";
+import {
+  CadProjectState,
+  CadOperationId,
+  CadOperationKind,
+  CadRootIdentity,
+  CadOperationResult,
+} from "./cadLifecycle.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -248,6 +255,7 @@ export const OrchestrationProject = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   // Optional for wire compatibility. Absence means a regular filesystem project.
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -358,6 +366,18 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+export const ThreadTurnAdmission = Schema.Struct({
+  pending: Schema.Array(
+    Schema.Struct({
+      messageId: MessageId,
+      requestedAt: IsoDateTime,
+      turnId: Schema.NullOr(TurnId),
+    }),
+  ).check(Schema.isMaxLength(1000)),
+  completedTurnIds: Schema.Array(TurnId).check(Schema.isMaxLength(1000)),
+});
+export type ThreadTurnAdmission = typeof ThreadTurnAdmission.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -368,6 +388,8 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  turnAdmission: Schema.optionalKey(ThreadTurnAdmission),
+  backgroundLiveness: Schema.optionalKey(Schema.NullOr(Schema.Literals(["working", "monitoring"]))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -404,6 +426,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -419,6 +442,7 @@ export const OrchestrationThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  turnAdmission: Schema.optionalKey(ThreadTurnAdmission),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -917,7 +941,56 @@ export const OnshapeProjectWorkspaceReadyCommand = Schema.Struct({
   projectId: ProjectId,
 });
 
+const CadEnabledSetCommand = Schema.Struct({
+  type: Schema.Literal("project.cad.enabled.set"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  enabled: Schema.Boolean,
+});
+const CadOperationReserveCommand = Schema.Struct({
+  type: Schema.Literal("project.cad.operation.reserve"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  operationId: CadOperationId,
+  kind: CadOperationKind,
+  root: Schema.NullOr(CadRootIdentity),
+});
+const CadOperationCompleteCommand = Schema.Struct({
+  type: Schema.Literal("project.cad.operation.complete"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  operationId: CadOperationId,
+  result: CadOperationResult,
+});
+const CadOperationEndCommand = Schema.Struct({
+  type: Schema.Literal("project.cad.operation.end"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  operationId: CadOperationId,
+  status: Schema.Literals(["failed", "cancelled", "interrupted"]),
+  reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+});
+const ThreadTurnStartSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.start.settle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  turnId: Schema.NullOr(TurnId),
+});
+const ThreadTurnLifecycleSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.lifecycle.settle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  CadEnabledSetCommand,
+  CadOperationReserveCommand,
+  CadOperationCompleteCommand,
+  CadOperationEndCommand,
+  ThreadTurnStartSettleCommand,
+  ThreadTurnLifecycleSettleCommand,
   OnshapeProjectCreateCommand,
   OnshapeProjectSetConnectionCommand,
   OnshapeProjectWorkspaceReadyCommand,
@@ -937,6 +1010,9 @@ export const OrchestrationCommand = Schema.Union([
 export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 
 export const OrchestrationEventType = Schema.Literals([
+  "project.cad-state-set",
+  "thread.turn-start-settled",
+  "thread.turn-lifecycle-settled",
   "project.created",
   "project.meta-updated",
   "project.deleted",
@@ -965,6 +1041,23 @@ export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
+
+export const ProjectCadStateSetPayload = Schema.Struct({
+  projectId: ProjectId,
+  cad: CadProjectState,
+  updatedAt: IsoDateTime,
+});
+export const ThreadTurnStartSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  turnId: Schema.NullOr(TurnId),
+  updatedAt: IsoDateTime,
+});
+export const ThreadTurnLifecycleSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  turnId: TurnId,
+  updatedAt: IsoDateTime,
+});
 
 export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
@@ -1081,6 +1174,8 @@ export const ThreadMessageSentPayload = Schema.Struct({
 });
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
+  // Legacy events have no matching settlement receipts; only new starts enter admission tracking.
+  admissionTracked: Schema.optionalKey(Schema.Literal(true)),
   threadId: ThreadId,
   messageId: MessageId,
   modelSelection: Schema.optional(ModelSelection),
@@ -1168,6 +1263,21 @@ const EventBaseFields = {
 } as const;
 
 export const OrchestrationEvent = Schema.Union([
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.cad-state-set"),
+    payload: ProjectCadStateSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-start-settled"),
+    payload: ThreadTurnStartSettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-lifecycle-settled"),
+    payload: ThreadTurnLifecycleSettledPayload,
+  }),
   Schema.Struct({
     ...EventBaseFields,
     type: Schema.Literal("project.created"),

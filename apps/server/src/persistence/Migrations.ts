@@ -50,6 +50,7 @@ import Migration0046 from "./Migrations/046_RemoveProjectFaviconOverride.ts";
 import Migration0047 from "./Migrations/047_OnshapeConnections.ts";
 import Migration0048 from "./Migrations/048_OnshapeProjectSources.ts";
 import Migration0049 from "./Migrations/049_OnshapeConnectionCatalogState.ts";
+import Migration0050 from "./Migrations/050_CadLifecycle.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -99,6 +100,7 @@ export const migrationEntries = [
   [47, "OnshapeConnections", Migration0047],
   [48, "OnshapeProjectSources", Migration0048],
   [49, "OnshapeConnectionCatalogState", Migration0049],
+  [50, "CadLifecycle", Migration0050],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

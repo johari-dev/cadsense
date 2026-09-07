@@ -6,7 +6,13 @@
  *
  * @module ProjectionProjectRepository
  */
-import { IsoDateTime, ModelSelection, OnshapeProjectSource, ProjectId } from "@cadsense/contracts";
+import {
+  CadProjectState,
+  IsoDateTime,
+  ModelSelection,
+  OnshapeProjectSource,
+  ProjectId,
+} from "@cadsense/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -20,6 +26,7 @@ export const ProjectionProject = Schema.Struct({
   workspaceRoot: Schema.String,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   onshapeSource: Schema.NullOr(OnshapeProjectSource),
+  cad: Schema.optionalKey(Schema.NullOr(CadProjectState)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
