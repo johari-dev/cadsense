@@ -128,6 +128,14 @@ export const CadGeometryAsset = Schema.Struct({
   byteLength: PositiveInt,
   format: Schema.Literal("glb"),
   relativePath: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}\.glb$/)),
+  complexity: Schema.optionalKey(
+    Schema.Struct({
+      decodedBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      triangles: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      drawCalls: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      nodeCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
 });
 export type CadGeometryAsset = typeof CadGeometryAsset.Type;
 /** A completed manifest still requires content/hash verification by the snapshot store. */

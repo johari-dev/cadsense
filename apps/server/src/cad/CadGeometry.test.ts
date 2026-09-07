@@ -116,6 +116,15 @@ describe("CAD geometry normalization", () => {
         { ...triangle, meshes: [{ primitives: [{ attributes: { POSITION: 999 } }] }] },
         {
           ...triangle,
+          nodes: [
+            {
+              mesh: 0,
+              extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 0 } } },
+            },
+          ],
+        },
+        {
+          ...triangle,
           bufferViews: [
             {
               ...triangle.bufferViews[0],
