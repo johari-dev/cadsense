@@ -8,6 +8,7 @@ import {
   cadCommentWorldPoint,
   cadCommentVisible,
   cadCommentCameraUp,
+  cadCommentInspectionDirections,
 } from "./CadCommentGeometry";
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import { CadCameraPose } from "@cadsense/contracts";
@@ -651,17 +652,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         radius = Math.max(bounds.getBoundingSphere(new THREE.Sphere()).radius, 1e-6);
       const distance =
         (radius / Math.sin(Math.atan(Math.tan(Math.PI / 8) * Math.min(1, width / height)))) * 1.2;
-      const directions = [
-        new THREE.Vector3(-1, 1, 1),
-        new THREE.Vector3(1, 1, 1),
-        new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(-1, -1, 0.4),
-        new THREE.Vector3(1, -1, -1),
-      ];
       const originalDirection = camera.position.clone().sub(target).normalize();
-      let best =
-          directions.find((d) => Math.abs(d.clone().normalize().dot(originalDirection)) < 0.94) ??
-          directions[0]!,
+      const directions = cadCommentInspectionDirections(originalDirection);
+      let best = directions[0]!,
         score = -1;
       const orient = (d: THREE.Vector3) => {
         const inspectionPose = {
@@ -679,7 +672,6 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         configureCamera(inspectionPose);
       };
       for (const direction of directions) {
-        if (direction.clone().normalize().dot(originalDirection) > 0.94) continue;
         orient(direction);
         const n = targets.filter(
           (t) => t.world && cadCommentVisible(currentModel, camera, t.world),

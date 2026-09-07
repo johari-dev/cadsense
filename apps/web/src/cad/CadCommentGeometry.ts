@@ -6,6 +6,30 @@ import type { CadSceneModel } from "./CadSceneModel";
 export const cadCommentCameraUp = (direction: THREE.Vector3): [number, number, number] =>
   Math.abs(direction.clone().normalize().z) > 0.99 ? [0, 1, 0] : [0, 0, 1];
 
+/** Narrow openings need a nearby alternate view before trying broad assembly angles. */
+export const cadCommentInspectionDirections = (original: THREE.Vector3): THREE.Vector3[] => {
+  const direction = original.clone().normalize();
+  const tangent = new THREE.Vector3(...cadCommentCameraUp(direction)).cross(direction).normalize();
+  const other = direction.clone().cross(tangent).normalize();
+  const nearby = [5, 10, 20].flatMap((degrees) =>
+    [tangent, other, tangent.clone().negate(), other.clone().negate()].map((axis) =>
+      direction.clone().applyAxisAngle(axis, THREE.MathUtils.degToRad(degrees)),
+    ),
+  );
+  return [
+    ...nearby,
+    ...[
+      new THREE.Vector3(-1, 1, 1),
+      new THREE.Vector3(1, 1, 1),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(-1, -1, 0.4),
+      new THREE.Vector3(1, -1, -1),
+    ]
+      .map((d) => d.normalize())
+      .filter((d) => d.dot(direction) < Math.cos(THREE.MathUtils.degToRad(5))),
+  ];
+};
+
 export const locateCadCommentPoints = (
   model: CadSceneModel,
   camera: THREE.Camera,

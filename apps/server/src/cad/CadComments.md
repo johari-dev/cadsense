@@ -24,6 +24,8 @@ Each activation pins inspected geometry through validation and an uninterruptibl
 
 Successful precise comments retain numbered PNG evidence and reconstruction metadata under `cad/comment-evidence/<hashed-chat-id>`. Activation cleanup removes unused inspection artifacts after checking durable references. Deleted-chat/project events remove that chat's evidence directory. Candidates expire with their activation; restart requires a new locate/inspect sequence unless replaying a successful publication receipt.
 
+Inspection searches nearby alternate directions (5, 10, and 20 degrees around the captured viewing direction) before broad assembly angles. Narrow bores may be visible from nearby directions while every broad angle is blocked by their walls. The captured direction itself is excluded; the agent must still visually verify the numbered alternate image. Camera up remains independent of the viewing direction, and generated poses are validated before rendering.
+
 ## Viewer behavior
 
 The Comments button immediately counts open findings on the displayed model, with one count per comment. The themed floating card stays closed until opened. It offers a compact title list, one expanded finding, named locations, Previous/Next controls, and shared review state across a finding's targets. Numbered point markers remain visible while the card is closed. Whole-part findings have an explicit location limitation.
@@ -38,5 +40,6 @@ Historical selection opens retained original geometry without rolling back proje
 - Geometry tests exercise source/GLTF/explosion transforms, repeated instances, opening misses, nearest occluders, image bounds, orthographic visibility, and model identity.
 - Provider transport tests enumerate the eight CAD tools and preserve native image delivery.
 - Local browser checks cover selecting locations, resolving/reopening, history/back, and reload. A real imported spacer verifies rim picking and the numbered alternate view.
+- Kraken acceptance check (2026-09-07): two fresh chats using GPT-5.6-Luna / Low and the exact prompt `Add comments where I am missing screws` each produced five distinct precise comments, with no whole-part targets. All five marker selections focused visible locations and the comments survived reload. A replay of the earlier five-occluded-candidate failure now returns five visible candidates; a narrow-bore geometry regression checks the nearby-angle search.
 
 These checks establish mechanics, not autonomous accuracy in deciding whether a screw is missing. Inspection relies on the agent's explicit visual confirmation and conservative whole-part fallback.
