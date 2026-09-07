@@ -256,7 +256,7 @@ describe("RpcSessionFactory", () => {
       expect(error).toBeInstanceOf(ConnectionTransientError);
       expect(error).toMatchObject({
         reason: "transport",
-        message: "Test environment disconnected.",
+        message: "Backend disconnected.",
       });
       yield* Effect.yieldNow;
       expect(sockets).toHaveLength(1);
@@ -398,7 +398,7 @@ describe("RpcSessionFactory", () => {
       expect(error).toBeInstanceOf(ConnectionTransientError);
       expect(error).toMatchObject({
         reason: "transport",
-        message: "Test environment could not establish a WebSocket connection.",
+        message: "Backend could not establish a WebSocket connection.",
       });
       expect(sockets[0]?.readyState).toBe(TestWebSocket.CLOSED);
     }).pipe(Effect.provide(TestClock.layer())),
