@@ -34,6 +34,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Option from "effect/Option";
+import { CadViewing } from "../../cad/CadViewing.ts";
+import { makeCadProviderTools } from "../CadProviderTools.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -244,6 +248,7 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
   if (itemType === "mcp_tool_call" && item?.type === "mcpToolCall") {
     return `${item.server} · ${item.tool}`;
   }
+  if (itemType === "dynamic_tool_call" && item?.type === "dynamicToolCall") return item.tool;
   switch (itemType) {
     case "assistant_message":
       return "Assistant message";
@@ -1604,6 +1609,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* Effect.service(ServerConfig);
+  const cadViewing = yield* Effect.serviceOption(CadViewing);
+  const cadQuery = yield* Effect.serviceOption(ProjectionSnapshotQuery);
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -1684,7 +1691,24 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
-        const runtime = yield* createRuntime(runtimeInput).pipe(
+        const cad = yield* Effect.gen(function* () {
+          if (Option.isNone(cadViewing) || Option.isNone(cadQuery)) return undefined;
+          const thread = yield* cadQuery.value.getThreadShellById(input.threadId);
+          if (Option.isNone(thread)) return undefined;
+          const project = yield* cadQuery.value.getProjectShellById(thread.value.projectId);
+          if (
+            Option.isNone(project) ||
+            !project.value.onshapeSource ||
+            project.value.cad?.enabled === false ||
+            !project.value.cad?.roots.some((root) => root.current !== null)
+          )
+            return undefined;
+          return yield* makeCadProviderTools(input.threadId).pipe(
+            Effect.provideService(CadViewing, cadViewing.value),
+            Effect.provideService(Scope.Scope, sessionScope),
+          );
+        }).pipe(Effect.orElseSucceed(() => undefined));
+        const runtime = yield* createRuntime({ ...runtimeInput, ...(cad ? { cad } : {}) }).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
           Effect.provideService(Crypto.Crypto, crypto),

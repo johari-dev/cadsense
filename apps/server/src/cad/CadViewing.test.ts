@@ -31,7 +31,17 @@ import { OrchestrationEventStoreLive } from "../persistence/Layers/Orchestration
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { initialCadView } from "./CadViewState.ts";
-import { make } from "./CadViewing.ts";
+import { CadViewing, make } from "./CadViewing.ts";
+import { makeCadProviderTools } from "../provider/CadProviderTools.ts";
+import * as Scope from "effect/Scope";
+import * as Exit from "effect/Exit";
+import type { Options as ClaudeOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { ClaudeSettings, EnvironmentId } from "@cadsense/contracts";
+import { makeClaudeAdapter } from "../provider/Layers/ClaudeAdapter.ts";
+import { SYNTHETIC_CLAUDE_MODEL_CATALOG } from "../provider/ClaudeModelCatalog.testFixtures.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import * as ClaudeCadCapabilities from "../provider/ClaudeCadCapabilities.ts";
+import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { CadRenderBroker, type CadRenderRequest } from "./CadRenderBroker.ts";
 import { CadCaptureArtifacts, make as makeArtifacts } from "./CadCaptureArtifacts.ts";
 import { readLatestCadCapture, readCadUserView } from "./CadSessionPersistence.ts";
@@ -39,6 +49,166 @@ import { make as makePresentation } from "./CadPresentation.ts";
 import * as Stream from "effect/Stream";
 
 const now = "2026-09-05T00:00:00Z";
+const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+it.effect("cancels a native in-flight capture before releasing its snapshot pin", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const h = yield* harness(false, false, false, { started, release });
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("interrupted-native-capture");
+    yield* tools.invoke(null, turnId, "cad_context", {});
+    const capture = yield* tools
+      .invoke(null, turnId, "cad_capture", { expectedRevision: 0 })
+      .pipe(Effect.exit, Effect.forkChild);
+    yield* Deferred.await(started);
+    assert.equal(h.pins(), 1);
+    yield* tools.end(null, turnId);
+    assert.equal((yield* Fiber.join(capture))._tag, "Failure");
+    assert.equal(h.pins(), 0);
+    assert.isNull(yield* readLatestCadCapture(threadId, turnId));
+    assert.equal(
+      (yield* tools.invoke(null, turnId, "cad_context", {}).pipe(Effect.exit))._tag,
+      "Failure",
+    );
+    assert.equal(h.pins(), 0);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect(
+  "binds two Claude SDK agent identities through one-use capabilities without approval prompts",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const capabilities = yield* ClaudeCadCapabilities.ClaudeCadCapabilities;
+      const providerSessionId = "claude-cad-session";
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          McpProviderSession.setMcpProviderSession({
+            environmentId: EnvironmentId.make("cad-test"),
+            threadId,
+            providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+            providerSessionId,
+            endpoint: "http://localhost/mcp",
+            authorizationHeader: "Bearer test-only",
+          }),
+        ),
+        () => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+      );
+      let sdkOptions: ClaudeOptions | undefined;
+      const stopped = Promise.withResolvers<void>();
+      const adapter = yield* makeClaudeAdapter(claudeSettings, {
+        modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+        createQuery: ({ options }) => {
+          sdkOptions = options;
+          return {
+            setModel: async () => {},
+            setPermissionMode: async () => {},
+            setMaxThinkingTokens: async () => {},
+            close: () => stopped.resolve(),
+            [Symbol.asyncIterator]: () => ({
+              next: async (): Promise<IteratorResult<SDKMessage>> => {
+                await stopped.promise;
+                return { done: true, value: undefined };
+              },
+            }),
+          };
+        },
+      }).pipe(Effect.provideService(CadViewing, h.service));
+      yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+      yield* adapter.sendTurn({ threadId, input: "look at CAD" });
+      assert.ok(sdkOptions?.canUseTool);
+      const canUseTool = sdkOptions!.canUseTool!;
+      const permit = (agentID: string, tool: string, input: Record<string, unknown>) =>
+        Effect.promise(() =>
+          canUseTool(`mcp__cadsense_cad__${tool}`, input, {
+            signal: new AbortController().signal,
+            toolUseID: `${agentID}-${tool}`,
+            agentID,
+          }),
+        );
+      const permits = yield* Effect.all(
+        ["child-a", "child-b"].map((id) => permit(id, "cad_context", { agentID: "forged" })),
+        { concurrency: "unbounded" },
+      );
+      const tokens: string[] = [];
+      for (const permission of permits) {
+        assert.equal(permission.behavior, "allow");
+        if (permission.behavior !== "allow") return yield* Effect.die("CAD permission denied");
+        const token = permission.updatedInput?.[ClaudeCadCapabilities.CLAUDE_CAD_CAPABILITY_FIELD];
+        assert.isString(token);
+        tokens.push(String(token));
+      }
+      assert.notEqual(tokens[0], tokens[1]);
+      yield* Effect.all(
+        tokens.map((token) => capabilities.consume(providerSessionId, token, "cad_context")),
+        { concurrency: "unbounded" },
+      );
+      assert.equal(h.pins(), 2);
+      const contexts =
+        (yield* (yield* ProjectionSnapshotQuery).getCommandReadModel()).cadSessions ?? [];
+      assert.deepEqual(
+        new Set(contexts.map((context) => context.childKey)),
+        new Set(["claude:child-a", "claude:child-b"]),
+      );
+      yield* capabilities.consume(providerSessionId, tokens[0]!, "cad_context").pipe(Effect.flip);
+      const late = yield* permit("child-a", "cad_capture", { expectedRevision: 0 });
+      assert.equal(late.behavior, "allow");
+      yield* adapter.stopSession(threadId);
+      assert.equal(h.pins(), 0);
+      assert.isFalse(yield* capabilities.available(providerSessionId));
+      assert.deepEqual(sdkOptions!.settings, { permissions: { ask: ["mcp__cadsense_cad__*"] } });
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          dependencies,
+          ServerSettingsService.layerTest(),
+          ClaudeCadCapabilities.layer.pipe(Layer.provide(NodeServices.layer)),
+        ).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
+    ),
+);
+it.effect(
+  "binds concurrent provider children to private viewers and revokes native session tools",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const scope = yield* Scope.make();
+      const tools = yield* makeCadProviderTools(threadId).pipe(
+        Effect.provideService(CadViewing, h.service),
+        Effect.provideService(Scope.Scope, scope),
+      );
+      const turnId = TurnId.make("native-parent-turn");
+      yield* Effect.all(
+        [null, "child-a", "child-b"].map((key) => tools.invoke(key, turnId, "cad_context", {})),
+        { concurrency: "unbounded" },
+      );
+      assert.equal(h.pins(), 3);
+      yield* tools.invoke("child-a", turnId, "cad_update_view", {
+        expectedRevision: 0,
+        operations: [{ type: "explode", amount: 0.8 }],
+        childKey: "child-b",
+      });
+      const untouched = yield* tools.invoke("child-b", turnId, "cad_capture", {
+        expectedRevision: 0,
+      });
+      assert.isDefined(untouched.png);
+      assert.equal(h.renderRequests[0]?.state.explosion, 0);
+      yield* tools.end("child-a", TurnId.make("wrong-turn"));
+      assert.equal(h.pins(), 3);
+      yield* tools.end("child-a", turnId);
+      assert.equal(h.pins(), 2);
+      yield* tools.invoke(null, turnId, "cad_sync", {}).pipe(Effect.flip);
+      yield* Scope.close(scope, Exit.void);
+      assert.equal(h.pins(), 0);
+      assert.equal(
+        (yield* tools.invoke(null, turnId, "cad_context", {}).pipe(Effect.flip)).reason,
+        "capability-unavailable",
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 const decodeSnapshot = Schema.decodeUnknownEffect(CadSnapshotManifest);
 const projectId = ProjectId.make("cad-viewing-project");
 const threadId = ThreadId.make("cad-viewing-thread");
@@ -111,6 +281,7 @@ const harness = Effect.fn(function* (
   multiple = false,
   advanceDuringCapture = false,
   loseCaptureReceipt = false,
+  renderGate?: { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> },
 ) {
   const engine = yield* OrchestrationEngineService;
   let sequence = 0;
@@ -237,6 +408,10 @@ const harness = Effect.fn(function* (
         capture: (input) =>
           Effect.gen(function* () {
             renderRequests.push(input);
+            if (renderGate) {
+              yield* Deferred.succeed(renderGate.started, undefined);
+              yield* Deferred.await(renderGate.release);
+            }
             if (advanceDuringCapture)
               yield* dispatch({
                 type: "thread.cad.view.set",
