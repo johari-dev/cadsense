@@ -1,5 +1,12 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  TrimmedNonEmptyString,
+  ThreadId,
+  TurnId,
+} from "./baseSchemas.ts";
+import type { OrchestrationThread } from "./orchestration.ts";
 import { CadHash, CadRootKind, CadSnapshotId } from "./cad.ts";
 import { OnshapeElementId, OnshapeWorkspaceId } from "./onshape.ts";
 
@@ -59,6 +66,16 @@ export const CadOperation = Schema.Struct({
   startedAt: IsoDateTime,
 });
 export const CadProjectState = Schema.Struct({
+  pendingPresentations: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        threadId: ThreadId,
+        turnId: TurnId,
+        captureId: CadSnapshotId,
+        rootId: CadHash,
+      }),
+    ).check(Schema.isMaxLength(10_000)),
+  ),
   enabled: Schema.Boolean,
   catalog: Schema.NullOr(CadCatalog),
   roots: Schema.Array(CadRootLineage).check(Schema.isMaxLength(10_000)),
@@ -66,6 +83,17 @@ export const CadProjectState = Schema.Struct({
   lastOutcome: Schema.NullOr(CadOperationOutcome),
 });
 export type CadProjectState = typeof CadProjectState.Type;
+export const isCadThreadRunActive = (
+  thread: Pick<OrchestrationThread, "turnAdmission" | "session" | "latestTurn"> & {
+    readonly backgroundLiveness?: OrchestrationThread["backgroundLiveness"] | undefined;
+  },
+): boolean =>
+  (thread.turnAdmission?.pending.length ?? 0) > 0 ||
+  thread.session?.status === "starting" ||
+  thread.session?.status === "running" ||
+  thread.session?.activeTurnId != null ||
+  thread.latestTurn?.state === "running" ||
+  thread.backgroundLiveness === "working";
 export const initialCadProjectState = (): CadProjectState => ({
   enabled: true,
   catalog: null,

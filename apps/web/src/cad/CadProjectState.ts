@@ -1,18 +1,17 @@
 import type { Project, ThreadShell } from "../types";
+import { isCadThreadRunActive } from "@cadsense/contracts";
 
 export function isCadProjectRunActive(
-  project: Pick<Project, "id" | "environmentId">,
+  project: Pick<Project, "id" | "environmentId" | "cad">,
   threads: readonly ThreadShell[],
 ): boolean {
-  return threads.some(
-    (thread) =>
-      thread.environmentId === project.environmentId &&
-      thread.projectId === project.id &&
-      ((thread.turnAdmission?.pending.length ?? 0) > 0 ||
-        thread.session?.status === "starting" ||
-        thread.session?.status === "running" ||
-        thread.session?.activeTurnId != null ||
-        thread.latestTurn?.state === "running" ||
-        thread.backgroundLiveness === "working"),
+  return (
+    (project.cad?.pendingPresentations?.length ?? 0) > 0 ||
+    threads.some(
+      (thread) =>
+        thread.environmentId === project.environmentId &&
+        thread.projectId === project.id &&
+        isCadThreadRunActive(thread),
+    )
   );
 }

@@ -1,9 +1,56 @@
-import type { OrchestrationCommand, OrchestrationReadModel } from "@cadsense/contracts";
+import {
+  isCadThreadRunActive,
+  type OrchestrationCommand,
+  type OrchestrationReadModel,
+} from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { requireThread, requireActiveProject, requireProjectCadIdle } from "./commandInvariants.ts";
 
-type CadCommand = Extract<OrchestrationCommand, { type: `thread.cad.${string}` }>;
+type CadCommand = Exclude<
+  Extract<OrchestrationCommand, { type: `thread.cad.${string}` }>,
+  { type: "thread.cad.presentation.settle" }
+>;
+export const decideCadPresentation = Effect.fn("decideCadPresentation")(function* (
+  command: Extract<OrchestrationCommand, { type: "thread.cad.presentation.settle" }>,
+  readModel: OrchestrationReadModel,
+) {
+  const fail = (detail: string) =>
+    new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+  const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+  const project = yield* requireActiveProject({ readModel, command, projectId: thread.projectId });
+  const pending = project.cad?.pendingPresentations?.find((item) => item.threadId === thread.id);
+  if (
+    !pending ||
+    pending.captureId !== command.captureId ||
+    !project.cad ||
+    isCadThreadRunActive(thread)
+  )
+    return yield* fail("CAD presentation is not ready to settle.");
+  if (command.view) {
+    const revision =
+      readModel.cadUserViews?.find((item) => item.threadId === thread.id)?.revision ?? null;
+    if (
+      revision !== command.expectedUserRevision ||
+      command.view.revision !== (revision === null ? 0 : revision + 1)
+    )
+      return yield* fail("CAD revision conflict.");
+    const root = project.cad.roots.find((item) => item.rootId === command.view?.rootId);
+    if (
+      command.view.rootId !== pending.rootId ||
+      root?.current?.snapshotId !== command.view.snapshotId
+    )
+      return yield* fail("CAD capability unavailable.");
+  }
+  return {
+    project,
+    cad: {
+      ...project.cad,
+      pendingPresentations:
+        project.cad.pendingPresentations?.filter((item) => item.threadId !== thread.id) ?? [],
+    },
+  };
+});
 export const decideCadSession = Effect.fn("decideCadSession")(function* (
   command: CadCommand,
   readModel: OrchestrationReadModel,
@@ -37,6 +84,29 @@ export const decideCadSession = Effect.fn("decideCadSession")(function* (
           childKey: command.childKey,
           revision: null,
         },
+      },
+    };
+  }
+  if (command.type === "thread.cad.capture.record") {
+    const session = readModel.cadSessions?.find(
+      (item) => item.contextId === command.contextId && item.threadId === thread.id,
+    );
+    if (!session || session.revision !== command.capture.revision)
+      return yield* fail("CAD revision conflict.");
+    const root = project.cad?.roots.find((item) => item.rootId === command.capture.rootId);
+    if (
+      !root ||
+      ![root.current?.snapshotId, root.rollback?.snapshotId].includes(command.capture.snapshotId)
+    )
+      return yield* fail("CAD capability unavailable.");
+    return {
+      type: "thread.cad-capture-recorded" as const,
+      payload: {
+        threadId: thread.id,
+        contextId: command.contextId,
+        turnId: command.turnId,
+        capture: command.capture,
+        cameraPose: command.cameraPose,
       },
     };
   }

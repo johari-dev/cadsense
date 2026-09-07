@@ -146,6 +146,9 @@ export function projectEvent(
           { threadId: event.payload.threadId, revision: event.payload.view.revision },
         ],
       });
+    case "thread.cad-capture-recorded":
+    case "thread.cad-presentation-settled":
+      return Effect.succeed(nextBase);
     case "project.cad-state-set":
       return decodeForEvent(ProjectCadStateSetPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({

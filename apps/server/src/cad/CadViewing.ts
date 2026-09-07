@@ -2,6 +2,8 @@ import {
   CadViewError,
   CadViewState,
   CadUpdateViewInput,
+  CadCaptureInput,
+  CadRenderError,
   CommandId,
   type CadViewerSession,
   type CadContextResult,
@@ -9,6 +11,7 @@ import {
   type CadSnapshotManifest,
   type OrchestrationCommand,
   type ThreadId,
+  type TurnId,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -22,6 +25,7 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
+import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
 import { initialCadView, rebaseCadView, updateCadView, indexCadSnapshot } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
@@ -32,10 +36,12 @@ const unavailable = () => new CadViewError({ reason: "capability-unavailable" })
 const conflict = () => new CadViewError({ reason: "revision-conflict" });
 const decodeView = Schema.decodeUnknownEffect(CadViewState);
 const decodeUpdate = Schema.decodeUnknownEffect(CadUpdateViewInput);
+const decodeCapture = Schema.decodeUnknownEffect(CadCaptureInput);
 export interface CadAgentTools {
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
+  readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
 export interface CadViewingShape {
   /** childKey is issued by the trusted app adapter, never a model-authored argument. */
@@ -47,6 +53,7 @@ export interface CadViewingShape {
   readonly withActivation: <A, E, R>(
     contextId: string,
     use: (tools: CadAgentTools) => Effect.Effect<A, E, R>,
+    turnId?: TurnId,
   ) => Effect.Effect<A, E | CadViewError, R>;
   readonly saveUserView: (
     threadId: ThreadId,
@@ -65,6 +72,7 @@ export const make = Effect.gen(function* () {
   const query = yield* ProjectionSnapshotQuery;
   const store = yield* CadSnapshotStore;
   const crypto = yield* Crypto.Crypto;
+  const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
   const active = new Set<string>();
   const db = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
     effect.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.mapError(unavailable));
@@ -153,7 +161,7 @@ export const make = Effect.gen(function* () {
       .pipe(Effect.mapError((error) => (error._tag === "CadViewError" ? error : unavailable())));
     return view;
   });
-  const withActivation: CadViewingShape["withActivation"] = (contextId, use) =>
+  const withActivation: CadViewingShape["withActivation"] = (contextId, use, turnId) =>
     Effect.scoped(
       Effect.gen(function* () {
         const activationScope = yield* Scope.Scope;
@@ -177,22 +185,32 @@ export const make = Effect.gen(function* () {
             open = false;
           }),
         );
-        type Binding = { snapshot: CadSnapshotManifest; scope: Scope.Closeable };
+        type Binding = {
+          snapshot: CadSnapshotManifest;
+          scope: Scope.Closeable;
+          readAsset: (sha256: string) => Effect.Effect<Uint8Array, CadRenderError>;
+        };
         let binding: Binding | null = null;
         const bind = Effect.fn("CadViewing.bind")(function* (snapshotId: string) {
           if (binding?.snapshot.snapshotId === snapshotId) return binding;
           const scope = yield* Scope.make();
           yield* Scope.addFinalizer(activationScope, Scope.close(scope, Exit.void));
-          const ready = yield* Deferred.make<CadSnapshotManifest, CadViewError>();
+          const ready = yield* Deferred.make<Omit<Binding, "scope">, CadViewError>();
           yield* store
-            .withPinned(snapshotId, (snapshot) =>
-              Deferred.succeed(ready, snapshot).pipe(Effect.andThen(Effect.never)),
+            .withPinned(snapshotId, (snapshot, readAsset) =>
+              Deferred.succeed(ready, {
+                snapshot,
+                readAsset: (hash) =>
+                  readAsset(hash).pipe(
+                    Effect.mapError(() => new CadRenderError({ reason: "unavailable" })),
+                  ),
+              }).pipe(Effect.andThen(Effect.never)),
             )
             .pipe(
               Effect.catch(() => Deferred.fail(ready, unavailable())),
               Effect.forkIn(scope),
             );
-          return { snapshot: yield* Deferred.await(ready), scope };
+          return { ...(yield* Deferred.await(ready)), scope };
         });
         const persist = Effect.fn("CadViewing.persist")(function* (view: CadViewState) {
           yield* dispatch({
@@ -323,7 +341,29 @@ export const make = Effect.gen(function* () {
               return yield* result;
             }),
           );
-        return yield* use({ context, hierarchy, updateView });
+        const capture: CadAgentTools["capture"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const requested = yield* decodeCapture(input).pipe(
+                Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
+              );
+              const initialized = yield* initialize();
+              if (!initialized || turnId === undefined || Option.isNone(artifacts))
+                return yield* unavailable();
+              if (initialized.state.revision !== requested.expectedRevision)
+                return yield* conflict();
+              return yield* artifacts.value.capture({
+                sessionId: contextId,
+                runId: turnId,
+                threadId: session.threadId,
+                turnId,
+                manifest: initialized.binding.snapshot,
+                state: initialized.state,
+                readAsset: initialized.binding.readAsset,
+              });
+            }),
+          );
+        return yield* use({ context, hierarchy, updateView, capture });
       }),
     );
   return CadViewing.of({ resolveContext, withActivation, saveUserView, getUserView });

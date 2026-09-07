@@ -1,5 +1,6 @@
 import {
   onshapeProjectSourceIdentity,
+  isCadThreadRunActive,
   type OnshapeProjectSource,
   type OrchestrationCommand,
   type OrchestrationProject,
@@ -34,16 +35,10 @@ export function requireProjectCadIdle(input: {
     );
   if (
     input.includeRuns &&
-    input.readModel.threads.some(
-      (thread) =>
-        thread.projectId === input.projectId &&
-        ((thread.turnAdmission?.pending.length ?? 0) > 0 ||
-          thread.session?.status === "starting" ||
-          thread.session?.status === "running" ||
-          thread.session?.activeTurnId != null ||
-          thread.latestTurn?.state === "running" ||
-          thread.backgroundLiveness === "working"),
-    )
+    ((project.cad?.pendingPresentations?.length ?? 0) > 0 ||
+      input.readModel.threads.some(
+        (thread) => thread.projectId === input.projectId && isCadThreadRunActive(thread),
+      ))
   )
     return Effect.fail(
       invariantError(input.command.type, "An agent run is active for this project."),
