@@ -3,6 +3,7 @@ import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeURL from "node:url";
 
 const require = NodeModule.createRequire(import.meta.url);
 // oxlint-disable-next-line cadsense/no-global-process-runtime -- Standalone repair script has no Effect runtime.
@@ -115,6 +116,22 @@ function runChecked(command, args) {
   );
 }
 
+export function extractElectronArchive(zipPath, destination) {
+  if (hostPlatform === "darwin") {
+    runChecked("ditto", ["-x", "-k", zipPath, destination]);
+    return;
+  }
+  // Electron already depends on this extractor; do not require a separate Python installation.
+  const electronRequire = NodeModule.createRequire(require.resolve("electron/package.json"));
+  runChecked(process.execPath, [
+    "-e",
+    "require(process.argv[1])(process.argv[2], { dir: process.argv[3] }).catch(error => { console.error(error); process.exitCode = 1; });",
+    electronRequire.resolve("extract-zip"),
+    zipPath,
+    destination,
+  ]);
+}
+
 function installElectronRuntime(electronDir, version) {
   const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cadsense-electron-"));
   const zipPath = NodePath.join(tempDir, `electron-v${version}-${hostPlatform}-${hostArch}.zip`);
@@ -126,16 +143,7 @@ function installElectronRuntime(electronDir, version) {
       "-o",
       zipPath,
     ]);
-    if (hostPlatform === "darwin") {
-      runChecked("ditto", ["-x", "-k", zipPath, NodePath.join(electronDir, "dist")]);
-    } else {
-      runChecked("python3", [
-        "-c",
-        "import os, sys, zipfile; os.makedirs(sys.argv[2], exist_ok=True); zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])",
-        zipPath,
-        NodePath.join(electronDir, "dist"),
-      ]);
-    }
+    extractElectronArchive(zipPath, NodePath.join(electronDir, "dist"));
   } finally {
     NodeFS.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -176,7 +184,7 @@ export function ensureElectronRuntime() {
   return electronPath;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   const electronPath = ensureElectronRuntime();
   process.stdout.write(`${electronPath}\n`);
 }
