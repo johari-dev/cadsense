@@ -3826,7 +3826,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       instanceEntries={providerInstanceEntries}
                       keybindings={keybindings}
                       modelOptionsByInstance={modelOptionsByInstance}
-                      triggerClassName="-ms-2.5"
+                      triggerClassName="-ms-[calc(--spacing(2.5)-1px)]"
                       open={isComposerModelPickerOpen}
                       {...(composerProviderState.modelPickerIconClassName
                         ? {
