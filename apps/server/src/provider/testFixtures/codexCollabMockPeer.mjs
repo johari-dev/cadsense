@@ -122,6 +122,12 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "turn/start") {
+    if (script.recordTurnRequests) {
+      NodeFS.appendFileSync(
+        `${process.env.CADSENSE_CODEX_COLLAB_SCRIPT}.requests`,
+        `${JSON.stringify({ method, params: message.params })}\n`,
+      );
+    }
     const turnId = script.turnIds?.[turnStartCount];
     const turn = turnId
       ? { ...fixture.responses.turnStart.turn, id: turnId }

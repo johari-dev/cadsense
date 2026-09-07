@@ -4437,6 +4437,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         processExit,
         session: {
           threadId,
+          cadToolsAttached: cad !== undefined,
           provider: PROVIDER,
           providerInstanceId: boundInstanceId,
           status: "connecting",
@@ -4546,6 +4547,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }).pipe(Effect.onError(() => (cad ? Scope.close(cad.scope, Exit.void) : Effect.void)));
 
       const session: ProviderSession = {
+        cadToolsAttached: cad !== undefined,
         threadId,
         provider: PROVIDER,
         providerInstanceId: boundInstanceId,

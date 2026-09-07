@@ -629,6 +629,12 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
+      const wantsCadTools =
+        (preferredProvider === "codex" || preferredProvider === "claudeAgent") &&
+        !!project?.onshapeSource &&
+        project.cad?.enabled !== false &&
+        (project.cad?.roots.some((root) => root.current !== null) ?? false);
+      const cadAttachmentChanged = (activeSession?.cadToolsAttached ?? false) !== wantsCadTools;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
       const modelChanged =
@@ -647,6 +653,7 @@ const make = Effect.gen(function* () {
       if (
         !runtimeModeChanged &&
         !cwdChanged &&
+        !cadAttachmentChanged &&
         !instanceChanged &&
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange
@@ -670,6 +677,7 @@ const make = Effect.gen(function* () {
         previousCwd: activeSession?.cwd,
         desiredCwd: effectiveCwd,
         cwdChanged,
+        cadAttachmentChanged,
         modelChanged,
         instanceChanged,
         shouldRestartForModelChange,

@@ -1511,6 +1511,16 @@ function mapToRuntimeEvents(
     ];
   }
 
+  if (event.method === "session/cad-unavailable") {
+    return [
+      {
+        type: "runtime.warning",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: { message: event.message ?? "CAD tools are unavailable in this Codex thread." },
+      },
+    ];
+  }
+
   if (event.method === "process/stderr") {
     const message = event.message ?? "Codex process stderr";
     const isFatal = isFatalCodexProcessStderrMessage(message);
