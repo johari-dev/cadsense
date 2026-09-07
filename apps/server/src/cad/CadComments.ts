@@ -47,8 +47,23 @@ const error = (cause: unknown) =>
   isCommentError(cause) ? cause : fail(cause instanceof Error ? cause.message : "unavailable");
 const digest = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
 const uuid = () => NodeCrypto.randomUUID();
+// Include recovery guidance in responses: resumed providers can retain older descriptions.
+const inputGuidance = (schema: Schema.Top) =>
+  schema === CadCommentPublication
+    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
+    : schema === CadCommentLocateInput
+      ? "Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original 1280 by 960 image pixels, not pixelX/pixelY."
+      : "";
 const decode = <S extends Schema.Top>(schema: S, input: unknown) =>
-  Schema.decodeUnknownEffect(schema)(input).pipe(Effect.mapError(() => fail("invalid-input")));
+  Schema.decodeUnknownEffect(schema)(input, { errors: "all" }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new CadCommentError({
+          reason: "invalid-input",
+          details: [cause.message.slice(0, 6000), inputGuidance(schema)].filter(Boolean).join("\n"),
+        }),
+    ),
+  );
 export interface CadCommentDelivery {
   readonly result: unknown;
   readonly png?: Uint8Array;
@@ -535,12 +550,14 @@ export const make = Effect.gen(function* () {
         }).pipe(
           Effect.catch((cause) =>
             Effect.sync(() => {
+              const failure = error(cause);
               results.push({
                 publicationKey:
                   typeof raw === "object" && raw !== null && "publicationKey" in raw
                     ? String(raw.publicationKey)
                     : "invalid",
-                reason: error(cause).reason,
+                reason: failure.reason,
+                ...(failure.details === undefined ? {} : { details: failure.details }),
               });
             }),
           ),

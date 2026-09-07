@@ -39,6 +39,11 @@ import { make as makeStore, CadDiskSpace, CadSnapshotStore } from "./CadSnapshot
 import { CadRenderBroker } from "./CadRenderBroker.ts";
 const now = "2026-09-05T00:00:00Z";
 const decodeSnapshot = Schema.decodeUnknownEffect(CadSnapshotManifest);
+const decodePublicationFailure = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    results: Schema.Array(Schema.Struct({ reason: Schema.String, details: Schema.String })),
+  }),
+);
 const projectId = ProjectId.make("cad-viewing-project");
 const threadId = ThreadId.make("cad-viewing-thread");
 const otherThreadId = ThreadId.make("cad-other-thread");
@@ -260,6 +265,48 @@ const makeFinding = (snapshot: CadSnapshotManifest) => ({
     },
   ],
 });
+it.effect("explains malformed publication fields so an agent can correct and retry", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+    // Shape captured from the failed Kraken motor review.
+    const rejected = yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [
+        {
+          publicationKey: "missing-screws-top-flange",
+          title: "Missing screws",
+          body: "Several mounting holes appear empty.",
+          severity: "warning",
+          target: { type: "whole-part", occurrenceId: h.snapshot.nodes.at(-1)!.id },
+          preciseLocationLimitation: "Exact hole locations could not be verified.",
+        },
+      ],
+    });
+    const result = yield* decodePublicationFailure(rejected.result);
+    assert.equal(result.results[0]!.reason, "invalid-input");
+    assert.include(result.results[0]!.details, "kind");
+    assert.include(result.results[0]!.details, "inspectedSnapshotId");
+    assert.include(result.results[0]!.details, "targets");
+    assert.include(result.results[0]!.details, "preciseLocationLimitation");
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 0);
+    const locationFailure = yield* a
+      .invoke("cad_comment_locate", {
+        captureId: "fb82f184-01ea-4abc-9a14-576e63b4b9f4",
+        picks: [{ pixelX: 530, pixelY: 456, intendedOccurrenceId: h.snapshot.nodes.at(-1)!.id }],
+      })
+      .pipe(Effect.flip);
+    assert.equal(locationFailure.reason, "invalid-input");
+    for (const field of ['["pickKey"]', '["x"]', '["y"]']) {
+      assert.include(locationFailure.details!, field);
+    }
+    yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [{ ...makeFinding(h.snapshot), publicationKey: "missing-screws-top-flange" }],
+    });
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 1);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 it.effect(
   "persists a valid subset, fences stale catalogs and reviews, and reuses reviewed findings after activation ends",
   () =>

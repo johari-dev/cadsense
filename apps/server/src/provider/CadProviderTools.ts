@@ -12,11 +12,15 @@ const descriptions = {
   cad_comments_list:
     "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them.",
   cad_comment_locate:
-    "Pick candidate surface locations from a specific retained capture. Use original-image pixels with top-left origin and explicit intended occurrence IDs. A hit is not semantic verification: an opening may hit an inner wall.",
+    'Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (1280 by 960), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.',
   cad_comment_inspect:
     "Receive an annotated alternate view of candidate locations. Visually verify the actual surface and depth. Red/occluded candidates require another view or whole-part fallback. This does not move the user view.",
-  cad_comments_publish:
-    "Publish complete verified findings incrementally using stable publicationKey values and expectedCatalogVersion from list. Precise targets require candidateId, inspectionId and your confirmationReason after inspecting the alternate image. Otherwise use a whole-part target with preciseLocationLimitation. Published content and review state cannot be edited by the agent. Reuse existing comments, or add a linked correction/follow-up for new evidence.",
+  cad_comments_publish: [
+    'Publish complete verified findings incrementally. Input: {expectedCatalogVersion,items:[{kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}]}. Each new item requires all six fields shown. Use expectedCatalogVersion from cad_comments_list and inspectedSnapshotId from the inspected cad_capture.snapshotId (or cad_context.state.snapshotId for a whole-part finding).',
+    'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
+    'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
+    "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
+  ].join(" "),
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",

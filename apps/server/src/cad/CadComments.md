@@ -12,6 +12,8 @@ Agent findings belong to the originating chat and the exact downloaded CAD they 
 
 Retry identical publications with the same keys. Receipts are checked before transient candidate handles, so a lost response can be retried after activation ends. Changing a successful key's payload conflicts. Responses include the current review state, placement, original event sequence, and current creation catalog version.
 
+Malformed input returns `invalid-input` with `details` identifying invalid or missing fields. Publication items and location picks also include a compact expected shape so resumed provider sessions can recover without guessing field names. A successful tool transport response can contain rejected items: agents must check each result, correct rejected inputs, and retry. Rejected items create no comments or receipts.
+
 ## Persistence and ownership
 
 `cadComments.ts` defines the schemas. The comments service validates ownership, candidates, images, geometry, and model equivalence. Internal orchestration commands serialize publication and review; the existing CAD projection transaction writes comments and receipts. Only the user-facing review RPC can resolve, dismiss, or reopen a published finding, using an expected review version and idempotent command ID. Published text and targets are immutable.

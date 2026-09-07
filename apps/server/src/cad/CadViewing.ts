@@ -395,11 +395,16 @@ export const make = Effect.gen(function* () {
           ...(commentActivation
             ? {
                 comments: (name: string, input: unknown) =>
-                  commentActivation
-                    .invoke(name, input)
-                    .pipe(
-                      Effect.catch((cause) => Effect.succeed({ result: { error: cause.reason } })),
+                  commentActivation.invoke(name, input).pipe(
+                    Effect.catch((cause) =>
+                      Effect.succeed({
+                        result: {
+                          error: cause.reason,
+                          ...(cause.details === undefined ? {} : { details: cause.details }),
+                        },
+                      }),
                     ),
+                  ),
               }
             : {}),
           context: () => activity.track(session.threadId, turnId, context()),

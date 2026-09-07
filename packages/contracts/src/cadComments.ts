@@ -165,6 +165,7 @@ export const CadCommentReviewed = Schema.Struct({
 });
 export class CadCommentError extends Schema.TaggedErrorClass<CadCommentError>()("CadCommentError", {
   reason: Schema.String,
+  details: Schema.optionalKey(Schema.String),
 }) {}
 
 /** Optional renderer work runs against the capture's frozen view, never the user's later view. */
