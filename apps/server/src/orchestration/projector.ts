@@ -119,6 +119,33 @@ export function projectEvent(
   };
 
   switch (event.type) {
+    case "thread.cad-context-ensured":
+      return Effect.succeed({
+        ...nextBase,
+        cadSessions: [
+          ...(model.cadSessions ?? []).filter(
+            (session) => session.contextId !== event.payload.session.contextId,
+          ),
+          event.payload.session,
+        ],
+      });
+    case "thread.cad-view-set":
+      return Effect.succeed({
+        ...nextBase,
+        cadSessions: (model.cadSessions ?? []).map((session) =>
+          session.contextId === event.payload.contextId
+            ? { ...session, revision: event.payload.view.revision }
+            : session,
+        ),
+      });
+    case "thread.cad-user-view-set":
+      return Effect.succeed({
+        ...nextBase,
+        cadUserViews: [
+          ...(model.cadUserViews ?? []).filter((view) => view.threadId !== event.payload.threadId),
+          { threadId: event.payload.threadId, revision: event.payload.view.revision },
+        ],
+      });
     case "project.cad-state-set":
       return decodeForEvent(ProjectCadStateSetPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({

@@ -6,6 +6,7 @@ import {
   ThreadId,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
+import { projectCadSessionEvent } from "../../cad/CadSessionPersistence.ts";
 import {
   requestTurnAdmission,
   settleTurnAdmission,
@@ -61,6 +62,7 @@ import {
 } from "../../attachmentStore.ts";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
+  cadSessions: "projection.cad-sessions",
   projects: "projection.projects",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
@@ -1293,6 +1295,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     });
 
     const projectors: ReadonlyArray<ProjectorDefinition> = [
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.cadSessions,
+        apply: (event) =>
+          projectCadSessionEvent(event).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
         apply: applyProjectsProjection,

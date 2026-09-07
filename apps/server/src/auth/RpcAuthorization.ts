@@ -60,6 +60,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.cadUserStart]: AuthOrchestrationOperateScope,
   [WS_METHODS.cadUserCancel]: AuthOrchestrationOperateScope,
   [WS_METHODS.cadUserSetEnabled]: AuthOrchestrationOperateScope,
+  [WS_METHODS.cadRenderConnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
   [WS_METHODS.previewOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewNavigate]: AuthOrchestrationOperateScope,

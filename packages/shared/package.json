@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./cadScene": {
+      "types": "./src/cadScene.ts",
+      "import": "./src/cadScene.ts"
+    },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"
