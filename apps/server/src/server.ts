@@ -258,7 +258,8 @@ const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
   Layer.provideMerge(CadSnapshotStore.layer),
   Layer.provideMerge(OnshapeCadRoots.layer),
 );
-const CadViewingLayerLive = Layer.merge(CadViewing.layer, CadPanel.layer).pipe(
+const CadViewingLayerLive = CadPanel.layer.pipe(
+  Layer.provideMerge(CadViewing.layer),
   Layer.provideMerge(ClaudeCadCapabilities.layer),
   Layer.provideMerge(CadCaptureArtifacts.layer),
   Layer.provideMerge(CadRenderBroker.layer),

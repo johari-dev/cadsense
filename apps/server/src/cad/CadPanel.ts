@@ -19,6 +19,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { readCadUserView, readLatestCadCapture } from "./CadSessionPersistence.ts";
 import { initialCadView, rebaseCadView } from "./CadViewState.ts";
+import { CadViewing } from "./CadViewing.ts";
 
 interface Scene {
   readonly cancel: Deferred.Deferred<void>;
@@ -47,6 +48,7 @@ export const make = Effect.gen(function* () {
   const store = yield* CadSnapshotStore;
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
+  const viewing = yield* CadViewing;
   const scenes = new Map<string, Scene>();
   let sceneCount = 0;
   const projectFor = Effect.fn("CadPanel.projectFor")(function* (threadId: ThreadId) {
@@ -65,7 +67,10 @@ export const make = Effect.gen(function* () {
   });
   const state = Effect.fn("CadPanel.state")(function* (
     threadId: ThreadId,
-  ): Effect.fn.Return<CadPanelState, CadViewError> {
+  ): Effect.fn.Return<
+    Omit<CadPanelState, "agentControlling" | "agentActivityTurnId">,
+    CadViewError
+  > {
     const project = yield* projectFor(threadId);
     const saved = yield* readCadUserView(threadId).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
@@ -128,8 +133,14 @@ export const make = Effect.gen(function* () {
             Stream.mapEffect(() => state(threadId)),
           ),
         ).pipe(
+          Stream.zipLatestWith(viewing.watchActivity(threadId), (panel, activity) => ({
+            ...panel,
+            ...activity,
+          })),
           Stream.changesWith(
             (left, right) =>
+              left.agentControlling === right.agentControlling &&
+              left.agentActivityTurnId === right.agentActivityTurnId &&
               left.userRevision === right.userRevision &&
               left.captureId === right.captureId &&
               left.unavailableRootId === right.unavailableRootId &&

@@ -23,6 +23,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import type * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
@@ -31,6 +32,7 @@ import { initialCadView, rebaseCadView, updateCadView, indexCadSnapshot } from "
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
 
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
 const conflict = () => new CadViewError({ reason: "revision-conflict" });
@@ -44,6 +46,7 @@ export interface CadAgentTools {
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
 export interface CadViewingShape {
+  readonly watchActivity: (threadId: ThreadId) => Stream.Stream<CadToolActivityState>;
   /** childKey is issued by the trusted app adapter, never a model-authored argument. */
   readonly resolveContext: (
     threadId: ThreadId,
@@ -74,6 +77,7 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
   const active = new Set<string>();
+  const activity = yield* makeCadToolActivity;
   const db = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
     effect.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.mapError(unavailable));
   const commandId = crypto.randomUUIDv4.pipe(
@@ -375,9 +379,20 @@ export const make = Effect.gen(function* () {
               });
             }),
           );
-        return yield* use({ context, hierarchy, updateView, capture });
+        return yield* use({
+          context: () => activity.track(session.threadId, turnId, context()),
+          hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
+          updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
+          capture: (input) => activity.track(session.threadId, turnId, capture(input)),
+        });
       }),
     );
-  return CadViewing.of({ resolveContext, withActivation, saveUserView, getUserView });
+  return CadViewing.of({
+    resolveContext,
+    withActivation,
+    saveUserView,
+    getUserView,
+    watchActivity: activity.watch,
+  });
 });
 export const layer = Layer.effect(CadViewing, make);
