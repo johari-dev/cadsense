@@ -12,10 +12,15 @@ const descriptions = {
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
-  cad_update_view:
-    'Atomically update your private CAD view at expectedRevision. operations is an array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}. For example, hide a component with {expectedRevision:0,operations:[{type:"hide",occurrenceIds:["id from cad_hierarchy"]}]}. Use the returned revision for the next update or capture. Changes remain private until captured.',
+  cad_update_view: [
+    'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
+    'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
+    "For relative adjustments, use state.camera.pose only when camera.kind is pose and camera.fit is null; otherwise capture first and use the returned cameraPose. To center on a point while preserving angle and distance, translate position by newTarget-oldTarget and set target to newTarget. To look at a point from a fixed eye, change only target. To zoom in/out, multiply/divide zoom (positive, at most 100000).",
+    'For example: {expectedRevision:0,operations:[{type:"camera-pose",pose:{position:[0.2,-0.3,0.15],target:[0.02,0,0.01],up:[0,0,1],projection:"perspective",zoom:2}}]}. A camera-pose disables automatic fitting. A later fit recenters on the requested visible components (or all visible geometry for []) and resets zoom to 1, preserving the viewing direction and projection.',
+    "Use the returned revision for the next update or capture. Changes remain private until captured.",
+  ].join(" "),
   cad_capture:
-    "Capture exactly expectedRevision as a PNG image and managed artifact. The captured view is eligible for display to the user.",
+    "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {

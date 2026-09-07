@@ -60,6 +60,50 @@ import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+it.effect(
+  "returns a fitted capture pose that the agent can recenter and zoom without changing angle",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const contextId = yield* h.service.resolveContext(threadId);
+      const turnId = TurnId.make("custom-camera");
+      yield* h.service.withActivation(
+        contextId,
+        (tools) =>
+          Effect.gen(function* () {
+            const initial = yield* tools.context();
+            const first = yield* tools.capture({ expectedRevision: initial.revision });
+            assert.deepEqual(first.result.cameraPose, {
+              position: [1, 1, 1],
+              target: [0, 0, 0],
+              up: [0, 0, 1],
+              projection: "perspective",
+              zoom: 1,
+            });
+            assert.equal((yield* tools.context()).revision, initial.revision);
+            const pose: typeof first.result.cameraPose = {
+              ...first.result.cameraPose,
+              position: [1.2, 0.9, 1.05],
+              target: [0.2, -0.1, 0.05],
+              zoom: first.result.cameraPose.zoom * 2,
+            };
+            const updated = yield* tools.updateView({
+              expectedRevision: initial.revision,
+              operations: [{ type: "camera-pose", pose }],
+            });
+            assert.deepEqual(updated.camera, { kind: "pose", pose, fit: null });
+            const second = yield* tools.capture({ expectedRevision: updated.revision });
+            assert.deepEqual(second.result.cameraPose, pose);
+            assert.deepEqual(h.renderRequests.at(-1)?.state.camera, updated.camera);
+            const saved = yield* readLatestCadCapture(threadId, turnId);
+            assert.deepEqual(saved?.record.cameraPose, second.result.cameraPose);
+            assert.deepEqual(saved?.view.camera, updated.camera);
+          }),
+        turnId,
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
 it.effect("cancels a native in-flight capture before releasing its snapshot pin", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();
@@ -437,13 +481,16 @@ const harness = Effect.fn(function* (
               receipt: {
                 snapshotId: input.state.snapshotId,
                 revision: input.state.revision,
-                pose: {
-                  position: [1, 1, 1] as const,
-                  target: [0, 0, 0] as const,
-                  up: [0, 0, 1] as const,
-                  projection: "perspective" as const,
-                  zoom: 1,
-                },
+                pose:
+                  input.state.camera.kind === "pose" && input.state.camera.fit === null
+                    ? input.state.camera.pose
+                    : {
+                        position: [1, 1, 1] as const,
+                        target: [0, 0, 0] as const,
+                        up: [0, 0, 1] as const,
+                        projection: "perspective" as const,
+                        zoom: 1,
+                      },
               },
             };
           }),
