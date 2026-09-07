@@ -97,6 +97,8 @@ import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
+import { CadPanel } from "./cad/CadPanel.ts";
+import { CadViewing } from "./cad/CadViewing.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -386,6 +388,8 @@ const makeWsRpcLayer = (
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
       const cadUserOperations = yield* CadUserOperations;
       const cadRenderBroker = yield* CadRenderBroker;
+      const cadPanel = yield* CadPanel;
+      const cadViewing = yield* CadViewing;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -872,6 +876,18 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.cadRenderConnect]: () =>
           observeRpcStream(WS_METHODS.cadRenderConnect, cadRenderBroker.connect()),
+        [WS_METHODS.cadPanelWatch]: (input) =>
+          observeRpcStream(WS_METHODS.cadPanelWatch, cadPanel.watch(input.threadId)),
+        [WS_METHODS.cadPanelScene]: (input) =>
+          observeRpcStream(
+            WS_METHODS.cadPanelScene,
+            cadPanel.scene(input.threadId, input.snapshotId),
+          ),
+        [WS_METHODS.cadPanelSave]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cadPanelSave,
+            cadViewing.saveUserView(input.threadId, input.expectedRevision, input.view),
+          ),
         [WS_METHODS.cadUserCancel]: (input) =>
           observeRpcEffect(
             WS_METHODS.cadUserCancel,

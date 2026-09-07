@@ -43,3 +43,21 @@ export const indexCadSnapshot = (snapshot: CadSnapshotManifest) => {
   };
   return { nodes, children, subtree, visible };
 };
+
+/** Reveal selected subtrees through hidden ancestors without changing sibling overrides. */
+export function revealCadOccurrences(
+  index: ReturnType<typeof indexCadSnapshot>,
+  state: CadViewState,
+  ids: readonly string[],
+) {
+  const visibility = { ...state.visibility };
+  for (const id of index.subtree(ids)) visibility[id] = true;
+  for (const id of ids) {
+    let parent = index.nodes.get(id)?.parentId;
+    while (parent) {
+      visibility[parent] = true;
+      parent = index.nodes.get(parent)?.parentId;
+    }
+  }
+  return visibility;
+}

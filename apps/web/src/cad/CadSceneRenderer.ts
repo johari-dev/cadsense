@@ -65,6 +65,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let width = 1,
     height = 1;
   let view: CadViewState | null = null;
+  let animationFrame: number | null = null;
+  const cancelTransition = () => {
+    if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+  };
   const assertAvailable = () => {
     if (disposed || lost || renderer.getContext().isContextLost())
       throw new CadRendererError("renderer-unavailable");
@@ -92,6 +97,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   controls?.addEventListener("change", changed);
   controls?.addEventListener("end", ended);
   const contextLost = (event: Event) => {
+    cancelTransition();
     event.preventDefault();
     lost = true;
     if (controls) controls.enabled = false;
@@ -136,7 +142,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       controls.update();
     }
   };
-  const apply = (state: CadViewState): ResolvedCadCamera => {
+  const applyFrame = (state: CadViewState): ResolvedCadCamera => {
     assertAvailable();
     if (!model) throw new CadRendererError("invalid-view");
     const bounds = model.apply(state);
@@ -151,6 +157,68 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       applying = false;
     }
     return pose();
+  };
+  const apply = (state: CadViewState) => {
+    cancelTransition();
+    return applyFrame(state);
+  };
+  const transition = (state: CadViewState, duration = 240) => {
+    cancelTransition();
+    assertAvailable();
+    if (!model || !view || duration <= 0) {
+      applyFrame(state);
+      return;
+    }
+    const from = pose();
+    const explosion = view.explosion;
+    const to = resolveCadCamera(state.camera, model.apply(state), width / height);
+    const fromTarget = new THREE.Vector3(...from.target);
+    const toTarget = new THREE.Vector3(...to.target);
+    const fromDistance = new THREE.Vector3(...from.position).distanceTo(fromTarget);
+    const toDistance = new THREE.Vector3(...to.position).distanceTo(toTarget);
+    const fromRotation = camera.quaternion.clone();
+    const toRotation = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(
+        new THREE.Vector3(...to.position),
+        toTarget,
+        new THREE.Vector3(...to.up),
+      ),
+    );
+    const started = performance.now();
+    const frame = (now: number) => {
+      animationFrame = null;
+      if (disposed || lost) return;
+      const progress = Math.min(1, Math.max(0, (now - started) / duration));
+      if (progress === 1) {
+        applyFrame(state);
+        return;
+      }
+      const eased = progress * progress * (3 - 2 * progress);
+      const target = fromTarget.clone().lerp(toTarget, eased);
+      const rotation = fromRotation.clone().slerp(toRotation, eased);
+      const position = new THREE.Vector3(0, 0, 1)
+        .applyQuaternion(rotation)
+        .multiplyScalar(THREE.MathUtils.lerp(fromDistance, toDistance, eased))
+        .add(target);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation);
+      applyFrame({
+        ...state,
+        explosion: THREE.MathUtils.lerp(explosion, state.explosion, eased),
+        camera: {
+          kind: "pose",
+          fit: null,
+          pose: {
+            position: [position.x, position.y, position.z],
+            target: [target.x, target.y, target.z],
+            up: [up.x, up.y, up.z],
+            projection: to.projection,
+            zoom: THREE.MathUtils.lerp(from.zoom, to.zoom, eased),
+          },
+        },
+      });
+      animationFrame = requestAnimationFrame(frame);
+    };
+    animationFrame = requestAnimationFrame(frame);
   };
   const load = async (
     manifest: CadSnapshotManifest,
@@ -226,6 +294,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   return {
     load,
     apply,
+    transition,
     capture,
     resize: (nextWidth: number, nextHeight: number, pixelRatio = 1) => {
       assertAvailable();
@@ -253,6 +322,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       else if (enabled) throw new CadRendererError("invalid-view");
     },
     dispose: () => {
+      cancelTransition();
       if (disposed) return;
       disposed = true;
       generation++;

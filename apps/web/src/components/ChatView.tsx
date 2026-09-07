@@ -362,6 +362,9 @@ const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const CadPanel = lazy(() =>
+  import("../cad/CadPanel").then((module) => ({ default: module.CadPanel })),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -1748,6 +1751,66 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
+  const cadAvailable = !!activeProject?.onshapeSource && activeProject.cad?.enabled !== false;
+  const cadOpeningRef = useRef(false);
+  const [cadOpening, setCadOpening] = useState(false);
+  const addCadSurface = useCallback(() => {
+    if (
+      !activeThreadRef ||
+      !activeThread ||
+      !activeProject ||
+      !cadAvailable ||
+      cadOpeningRef.current ||
+      sendInFlightRef.current ||
+      isSendBusy
+    )
+      return;
+    if (isServerThread) {
+      useRightPanelStore.getState().open(activeThreadRef, "cad");
+      return;
+    }
+    cadOpeningRef.current = true;
+    setCadOpening(true);
+    void createThread({
+      environmentId: activeThreadRef.environmentId,
+      input: {
+        threadId: activeThreadRef.threadId,
+        projectId: activeProject.id,
+        title: activeThread.title,
+        modelSelection: activeThread.modelSelection,
+        runtimeMode,
+        interactionMode: "default",
+        createdAt: new Date().toISOString(),
+      },
+    })
+      .then((result) => {
+        if (result._tag === "Success") {
+          markPromotedDraftThreadByRef(activeThreadRef);
+          useRightPanelStore.getState().open(activeThreadRef, "cad");
+        } else if (!isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not open CAD",
+              description: "The thread could not be created. Your draft is preserved.",
+            }),
+          );
+        }
+      })
+      .finally(() => {
+        cadOpeningRef.current = false;
+        setCadOpening(false);
+      });
+  }, [
+    activeThreadRef,
+    activeThread,
+    activeProject,
+    cadAvailable,
+    isServerThread,
+    createThread,
+    runtimeMode,
+    isSendBusy,
+  ]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -2715,6 +2778,7 @@ function ChatViewContent(props: ChatViewProps) {
       isSendBusy ||
       isConnecting ||
       threadDetailLoading ||
+      cadOpeningRef.current ||
       sendInFlightRef.current ||
       feedbackUploadsInFlightRef.current.has(routeThreadKey)
     ) {
@@ -3966,7 +4030,19 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    activeRightPanelSurface?.kind === "preview" ? (
+    activeRightPanelSurface?.kind === "cad" && activeProject ? (
+      <Suspense fallback={null}>
+        {cadAvailable && isServerThread ? (
+          <CadPanel key={activeThreadKey} project={activeProject} threadRef={activeThreadRef} />
+        ) : (
+          <div className="p-4 text-sm text-muted-foreground">
+            {cadAvailable
+              ? "Start a thread to open its CAD view."
+              : "CAD is not available for this project."}
+          </div>
+        )}
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
@@ -4201,7 +4277,7 @@ function ChatViewContent(props: ChatViewProps) {
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
                             isConnecting={isConnecting}
-                            isSendBusy={isSendBusy}
+                            isSendBusy={isSendBusy || cadOpening}
                             sendDisabledReason={
                               feedbackUploading
                                 ? "Sending feedback"
@@ -4293,6 +4369,8 @@ function ChatViewContent(props: ChatViewProps) {
 
       {!shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelTabs
+          onAddCad={addCadSurface}
+          cadAvailable={cadAvailable}
           mode="inline"
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
@@ -4321,6 +4399,8 @@ function ChatViewContent(props: ChatViewProps) {
       {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelSheet open onClose={closePreviewPanel}>
           <RightPanelTabs
+            onAddCad={addCadSurface}
+            cadAvailable={cadAvailable}
             mode="sheet"
             // Same effective inset as the closed-state titlebar controls
             // (pr-3 in the tab bar plus this pixel equals the absolute

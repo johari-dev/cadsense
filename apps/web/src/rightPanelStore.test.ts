@@ -11,6 +11,26 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("keeps CAD panel selection independent per thread and supports closing and reopening", () => {
+    const other = scopeThreadRef(threadRef.environmentId, ThreadId.make("thread-2"));
+    useRightPanelStore.getState().open(threadRef, "cad");
+    useRightPanelStore.getState().open(other, "agents");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef)
+        .activeSurfaceId,
+    ).toBe("cad");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, other).activeSurfaceId,
+    ).toBe("agents");
+    useRightPanelStore.getState().closeSurface(threadRef, "cad");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
+    ).toBe(false);
+    useRightPanelStore.getState().open(threadRef, "cad");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).surfaces,
+    ).toEqual([{ id: "cad", kind: "cad" }]);
+  });
   it("opens the empty panel so the first surface can be selected", () => {
     useRightPanelStore.getState().toggleVisibility(threadRef);
 

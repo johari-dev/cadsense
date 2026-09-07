@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-export const RIGHT_PANEL_KINDS = ["files", "file", "preview", "agents"] as const;
+export const RIGHT_PANEL_KINDS = ["files", "file", "preview", "agents", "cad"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -19,7 +19,8 @@ export type RightPanelSurface =
       revealLine: number | null;
       revealRequestId: number;
     }
-  | { id: "agents"; kind: "agents" };
+  | { id: "agents"; kind: "agents" }
+  | { id: "cad"; kind: "cad" };
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -57,8 +58,12 @@ const browserSurface = (tabId: string | null): RightPanelSurface =>
     ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
     : { id: "browser:new", kind: "preview", resourceId: null };
 
-const singletonSurface = (kind: "files" | "agents"): RightPanelSurface =>
-  kind === "files" ? { id: "files", kind } : { id: "agents", kind };
+const singletonSurface = (kind: "files" | "agents" | "cad"): RightPanelSurface =>
+  kind === "files"
+    ? { id: "files", kind }
+    : kind === "cad"
+      ? { id: "cad", kind }
+      : { id: "agents", kind };
 
 const normalizeRevealLine = (line: number | undefined): number | null =>
   line === undefined || !Number.isFinite(line) ? null : Math.max(1, Math.trunc(line));
