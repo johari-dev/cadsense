@@ -133,6 +133,22 @@ export function projectEvent(
             : project,
         ),
       });
+    case "thread.cad-comments-committed":
+      return Effect.succeed({
+        ...nextBase,
+        cadComments: [...(model.cadComments ?? []), ...event.payload.comments],
+        cadCommentReceipts: [...(model.cadCommentReceipts ?? []), ...event.payload.receipts],
+      });
+    case "thread.cad-comment-reviewed":
+      return Effect.succeed({
+        ...nextBase,
+        cadComments: (model.cadComments ?? []).map((c) =>
+          c.id === event.payload.commentId
+            ? { ...c, state: event.payload.state, version: event.payload.version }
+            : c,
+        ),
+        cadCommentReviews: [...(model.cadCommentReviews ?? []), event.payload],
+      });
     case "thread.cad-context-ensured":
       return Effect.succeed({
         ...nextBase,

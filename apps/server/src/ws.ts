@@ -1,3 +1,4 @@
+import { CadComments } from "./cad/CadComments.ts";
 import * as Cause from "effect/Cause";
 import { coalesceShellDomainEvents } from "./orchestration/shellEventCoalescing.ts";
 import * as Crypto from "effect/Crypto";
@@ -392,6 +393,7 @@ const makeWsRpcLayer = (
       const cadStorage = yield* CadStorage;
       const cadRenderBroker = yield* CadRenderBroker;
       const cadPanel = yield* CadPanel;
+      const cadComments = yield* CadComments;
       const cadViewing = yield* CadViewing;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -477,6 +479,8 @@ const makeWsRpcLayer = (
         event: OrchestrationEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
         switch (event.type) {
+          case "thread.cad-comments-committed":
+          case "thread.cad-comment-reviewed":
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":
@@ -886,6 +890,10 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.cadRenderConnect]: () =>
           observeRpcStream(WS_METHODS.cadRenderConnect, cadRenderBroker.connect()),
+        [WS_METHODS.cadCommentsWatch]: (input) =>
+          observeRpcStream(WS_METHODS.cadCommentsWatch, cadComments.watch(input.threadId)),
+        [WS_METHODS.cadCommentReview]: (input) =>
+          observeRpcEffect(WS_METHODS.cadCommentReview, cadComments.review(input)),
         [WS_METHODS.cadPanelWatch]: (input) =>
           observeRpcStream(WS_METHODS.cadPanelWatch, cadPanel.watch(input.threadId)),
         [WS_METHODS.cadStorageWatch]: () =>

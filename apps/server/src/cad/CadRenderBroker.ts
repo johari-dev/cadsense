@@ -1,3 +1,4 @@
+import type { CadCommentRenderWork } from "@cadsense/contracts";
 import type { CadSnapshotManifest, CadViewState, ThreadId } from "@cadsense/contracts";
 import {
   CadRenderError,
@@ -21,6 +22,7 @@ export interface CadRenderRequest {
   readonly runId: string;
   readonly manifest: CadSnapshotManifest;
   readonly state: CadViewState;
+  readonly commentWork?: CadCommentRenderWork;
   readonly readAsset: (sha256: string) => Effect.Effect<Uint8Array, CadRenderError>;
 }
 export interface CadRenderedImage {

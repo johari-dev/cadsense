@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./cadCommentIdentity": {
+      "types": "./src/cadCommentIdentity.ts",
+      "import": "./src/cadCommentIdentity.ts"
+    },
     "./cadSceneBudget": {
       "types": "./src/cadSceneBudget.ts",
       "import": "./src/cadSceneBudget.ts"

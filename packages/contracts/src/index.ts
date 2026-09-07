@@ -33,3 +33,5 @@ export * from "./cadCaptures.ts";
 export * from "./cadUser.ts";
 export * from "./cadPanel.ts";
 export * from "./cadStorage.ts";
+
+export * from "./cadComments.ts";

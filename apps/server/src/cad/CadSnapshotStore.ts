@@ -1,3 +1,5 @@
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Option from "effect/Option";
 // @effect-diagnostics nodeBuiltinImport:off
 // This filesystem adapter needs lstat and atomic non-replacing links; disk reserve uses statfs.
 import * as NodeCrypto from "node:crypto";
@@ -102,6 +104,7 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const disk = yield* CadDiskSpace;
   const lock = yield* Semaphore.make(1);
+  const database = yield* Effect.serviceOption(SqlClient.SqlClient);
   const root = NodePath.join(config.stateDir, "cad");
   const assets = NodePath.join(root, "assets");
   const manifests = NodePath.join(root, "manifests");
@@ -378,6 +381,15 @@ export const make = Effect.gen(function* () {
           try: () => new Set(snapshotIds.map((id) => decodeSnapshotId(id))),
           catch: () => failure("corrupt"),
         });
+        if (Option.isSome(database)) {
+          const durable =
+            yield* database.value`SELECT c.snapshot_id FROM projection_cad_comments c JOIN projection_threads t ON t.thread_id=c.thread_id JOIN projection_projects p ON p.project_id=t.project_id WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL`.pipe(
+              Effect.mapError(() => failure("unavailable")),
+            );
+          for (const row of durable)
+            if (typeof row.snapshot_id === "string") targets.delete(row.snapshot_id);
+        }
+        if (!targets.size) return;
         if (
           acquisitions > 0 ||
           [...targets].some((id) => pins.has(id) || protectedIds.includes(id))

@@ -1,3 +1,4 @@
+import { CadCommentRenderWork, CadCommentRenderHit } from "@cadsense/contracts";
 import { CadCameraPose, CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { CadAppearance } from "./CadAppearance";
@@ -8,6 +9,7 @@ export const CadWorkerInput = Schema.Union([
     type: Schema.Literal("capture"),
     jobId: Schema.String,
     state: CadViewState,
+    commentWork: Schema.optionalKey(CadCommentRenderWork),
     manifest: Schema.optionalKey(CadSnapshotManifest),
     width: Schema.Number,
     height: Schema.Number,
@@ -39,6 +41,7 @@ export const CadWorkerOutput = Schema.Union([
     snapshotId: Schema.String,
     revision: Schema.Int,
     pose: CadCameraPose,
+    commentHits: Schema.optionalKey(Schema.Array(CadCommentRenderHit)),
     png: Schema.instanceOf(Blob),
   }),
   Schema.Struct({

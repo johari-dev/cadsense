@@ -1,3 +1,11 @@
+import {
+  CadComment,
+  CadCommentReceipt,
+  CadCommentReviewed,
+  CadCommentsCommitted,
+  CadCommentsCommitCommand,
+  CadCommentReviewCommand,
+} from "./cadComments.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
@@ -428,6 +436,9 @@ export const OrchestrationThread = Schema.Struct({
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
 export const OrchestrationReadModel = Schema.Struct({
+  cadComments: Schema.optionalKey(Schema.Array(CadComment)),
+  cadCommentReceipts: Schema.optionalKey(Schema.Array(CadCommentReceipt)),
+  cadCommentReviews: Schema.optionalKey(Schema.Array(CadCommentReviewed)),
   cadSessions: Schema.optionalKey(Schema.Array(CadSessionIndex)),
   cadUserViews: Schema.optionalKey(Schema.Array(CadUserViewIndex)),
   snapshotSequence: NonNegativeInt,
@@ -1003,6 +1014,8 @@ const ThreadTurnLifecycleSettleCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  CadCommentsCommitCommand,
+  CadCommentReviewCommand,
   Schema.Struct({
     type: Schema.Literal("project.onshape.remove"),
     commandId: CommandId,
@@ -1061,6 +1074,8 @@ export const OrchestrationCommand = Schema.Union([
 export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 
 export const OrchestrationEventType = Schema.Literals([
+  "thread.cad-comments-committed",
+  "thread.cad-comment-reviewed",
   "thread.cad-capture-recorded",
   "thread.cad-presentation-settled",
   "thread.cad-context-ensured",
@@ -1338,6 +1353,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.cad-user-view-set"),
     payload: CadUserViewSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-comments-committed"),
+    payload: CadCommentsCommitted,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-comment-reviewed"),
+    payload: CadCommentReviewed,
   }),
   Schema.Struct({
     ...EventBaseFields,

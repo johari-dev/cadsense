@@ -82,6 +82,7 @@ export const createCadRenderHost = (baseUrl: string) => {
             snapshotId: result.snapshotId,
             revision: result.revision,
             pose: result.pose,
+            ...(result.commentHits ? { commentHits: result.commentHits } : {}),
           }),
         },
       });

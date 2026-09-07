@@ -1,3 +1,4 @@
+import { readCadComments, projectCadCommentEvent } from "./CadCommentPersistence.ts";
 import {
   CadSessionIndex,
   CadCaptureRecord,
@@ -60,6 +61,7 @@ export const readLatestCadCapture = Effect.fn("readLatestCadCapture")(
 export const projectCadSessionEvent = Effect.fn("projectCadSessionEvent")(
   function* (event: OrchestrationEvent) {
     const sql = yield* SqlClient.SqlClient;
+    yield* projectCadCommentEvent(event);
     switch (event.type) {
       case "thread.cad-capture-recorded": {
         const record = event.payload;
@@ -101,6 +103,11 @@ export const readCadSessionIndexes = Effect.fn("readCadSessionIndexes")(
     const users =
       yield* sql`SELECT thread_id AS "threadId", revision FROM projection_cad_user_views`;
     return {
+      ...(yield* readCadComments().pipe(
+        Effect.catchTag("SchemaError", (error) =>
+          Effect.fail(toPersistenceDecodeError("CAD comments")(error)),
+        ),
+      )),
       cadSessions: yield* decodeSessionIndexes(sessions).pipe(
         Effect.mapError(toPersistenceDecodeError("CAD session index")),
       ),

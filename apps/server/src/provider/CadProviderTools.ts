@@ -9,6 +9,14 @@ import * as Semaphore from "effect/Semaphore";
 import { CadViewing, type CadAgentTools } from "../cad/CadViewing.ts";
 
 const descriptions = {
+  cad_comments_list:
+    "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them.",
+  cad_comment_locate:
+    "Pick candidate surface locations from a specific retained capture. Use original-image pixels with top-left origin and explicit intended occurrence IDs. A hit is not semantic verification: an opening may hit an inner wall.",
+  cad_comment_inspect:
+    "Receive an annotated alternate view of candidate locations. Visually verify the actual surface and depth. Red/occluded candidates require another view or whole-part fallback. This does not move the user view.",
+  cad_comments_publish:
+    "Publish complete verified findings incrementally using stable publicationKey values and expectedCatalogVersion from list. Precise targets require candidateId, inspectionId and your confirmationReason after inspecting the alternate image. Otherwise use a whole-part target with preciseLocationLimitation. Published content and review state cannot be edited by the agent. Reuse existing comments, or add a linked correction/follow-up for new evidence.",
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
@@ -43,6 +51,12 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
   input: unknown,
 ): Effect.fn.Return<CadToolDelivery, CadViewError> {
   switch (name) {
+    case "cad_comments_list":
+    case "cad_comment_locate":
+    case "cad_comment_inspect":
+    case "cad_comments_publish":
+      if (!tools.comments) return yield* new CadViewError({ reason: "capability-unavailable" });
+      return yield* tools.comments(name, input);
     case "cad_context":
       return { result: yield* tools.context() };
     case "cad_hierarchy":

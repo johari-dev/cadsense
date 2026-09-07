@@ -90,6 +90,7 @@ const createOffscreenWorker = (
                 type: "capture",
                 jobId: job.jobId,
                 state: job.state,
+                ...(job.commentWork ? { commentWork: job.commentWork } : {}),
                 width: job.width,
                 height: job.height,
                 ...(job.appearance ? { appearance: job.appearance } : {}),
@@ -169,12 +170,15 @@ const createMainThreadWorker = async (
       }
       renderer.resize(job.width, job.height, 1);
       if (job.appearance) renderer.setAppearance(job.appearance);
-      const pose = renderer.apply(job.state);
+      renderer.apply(job.state);
+      const commentHits = job.commentWork ? renderer.commentWork(job.commentWork) : undefined;
+      const pose = renderer.cameraPose();
       return {
         jobId: job.jobId,
         snapshotId: job.state.snapshotId,
         revision: job.state.revision,
         pose,
+        ...(commentHits ? { commentHits } : {}),
         png: await renderer.capture(),
       };
     },

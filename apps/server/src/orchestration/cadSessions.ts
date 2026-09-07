@@ -9,7 +9,12 @@ import { requireThread, requireActiveProject, requireProjectCadIdle } from "./co
 
 type CadCommand = Exclude<
   Extract<OrchestrationCommand, { type: `thread.cad.${string}` }>,
-  { type: "thread.cad.presentation.settle" }
+  {
+    type:
+      | "thread.cad.presentation.settle"
+      | "thread.cad.comments.commit"
+      | "thread.cad.comment.review";
+  }
 >;
 export const decideCadPresentation = Effect.fn("decideCadPresentation")(function* (
   command: Extract<OrchestrationCommand, { type: "thread.cad.presentation.settle" }>,

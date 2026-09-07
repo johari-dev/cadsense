@@ -1,3 +1,4 @@
+import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   CadViewError,
   CadViewState,
@@ -40,6 +41,10 @@ const decodeView = Schema.decodeUnknownEffect(CadViewState);
 const decodeUpdate = Schema.decodeUnknownEffect(CadUpdateViewInput);
 const decodeCapture = Schema.decodeUnknownEffect(CadCaptureInput);
 export interface CadAgentTools {
+  readonly comments?: (
+    name: string,
+    input: unknown,
+  ) => Effect.Effect<CadCommentDelivery, CadViewError>;
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
@@ -76,6 +81,7 @@ export const make = Effect.gen(function* () {
   const store = yield* CadSnapshotStore;
   const crypto = yield* Crypto.Crypto;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
+  const commentService = yield* Effect.serviceOption(CadComments);
   const active = new Set<string>();
   const activity = yield* makeCadToolActivity;
   const db = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
@@ -379,7 +385,23 @@ export const make = Effect.gen(function* () {
               });
             }),
           );
+        const commentActivation =
+          turnId && Option.isSome(commentService)
+            ? yield* commentService.value
+                .activate(session.threadId, contextId, turnId)
+                .pipe(Effect.mapError(unavailable))
+            : null;
         return yield* use({
+          ...(commentActivation
+            ? {
+                comments: (name: string, input: unknown) =>
+                  commentActivation
+                    .invoke(name, input)
+                    .pipe(
+                      Effect.catch((cause) => Effect.succeed({ result: { error: cause.reason } })),
+                    ),
+              }
+            : {}),
           context: () => activity.track(session.threadId, turnId, context()),
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),

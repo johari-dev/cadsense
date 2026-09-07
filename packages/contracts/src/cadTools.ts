@@ -1,3 +1,9 @@
+import {
+  CadCommentsListInput,
+  CadCommentLocateInput,
+  CadCommentInspectInput,
+  CadCommentsPublishToolInput,
+} from "./cadComments.ts";
 import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
@@ -63,6 +69,10 @@ export const CadCaptureToolResult = Schema.Struct({
 
 /** Provider adapters share this closed set. Remote CAD operations are deliberately absent. */
 export const CAD_TOOL_INPUTS = {
+  cad_comments_list: CadCommentsListInput,
+  cad_comment_locate: CadCommentLocateInput,
+  cad_comment_inspect: CadCommentInspectInput,
+  cad_comments_publish: CadCommentsPublishToolInput,
   cad_context: Schema.Struct({}),
   cad_hierarchy: CadHierarchyInput,
   cad_update_view: CadUpdateViewInput,

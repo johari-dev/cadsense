@@ -153,12 +153,18 @@ export const make = Effect.gen(function* () {
     Stream.unwrap(
       Effect.gen(function* () {
         const project = yield* projectFor(threadId);
+        const historical = (yield* query
+          .getCommandReadModel()
+          .pipe(Effect.mapError(unavailable))).cadComments?.some(
+          (c) => c.threadId === threadId && c.snapshotId === snapshotId,
+        );
         if (
           sceneCount >= 64 ||
-          !project.cad?.roots.some(
-            (root) =>
-              root.current?.snapshotId === snapshotId || root.rollback?.snapshotId === snapshotId,
-          )
+          (!historical &&
+            !project.cad?.roots.some(
+              (root) =>
+                root.current?.snapshotId === snapshotId || root.rollback?.snapshotId === snapshotId,
+            ))
         )
           return yield* unavailable();
         yield* Effect.acquireRelease(

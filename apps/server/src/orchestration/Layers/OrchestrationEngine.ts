@@ -152,6 +152,20 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           "orchestration.aggregate_id": aggregateRef.aggregateId,
         });
 
+        if (envelope.command.type === "thread.cad.comment.review") {
+          const command = envelope.command;
+          const prior = commandReadModel.cadCommentReviews?.find(
+            (r) => r.commandId === command.commandId,
+          );
+          if (
+            prior &&
+            (prior.payloadHash !== command.payloadHash || prior.threadId !== command.threadId)
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "idempotency-conflict",
+            });
+        }
         const existingReceipt = yield* commandReceiptRepository.getByCommandId({
           commandId: envelope.command.commandId,
         });

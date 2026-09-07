@@ -1,5 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { CadSnapshotManifest, type CadViewState, type ScopedThreadRef } from "@cadsense/contracts";
+import {
+  CadSnapshotManifest,
+  type CadComment,
+  type CadViewState,
+  type ScopedThreadRef,
+} from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -25,6 +30,12 @@ import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import "./CadPanel.css";
+import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
+import {
+  CadCommentsCard,
+  type CadCommentsCardProps,
+  type CadCommentSelection,
+} from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 
@@ -60,6 +71,8 @@ function CadScene({
   captureId,
   fullscreen,
   compact,
+  commentsCard,
+  framing,
 }: {
   threadRef: ScopedThreadRef;
   view: CadViewState;
@@ -69,6 +82,8 @@ function CadScene({
   captureId: string | null;
   fullscreen: boolean;
   compact: boolean;
+  framing: { x: number; y: number } | null;
+  commentsCard: Omit<CadCommentsCardProps, "manifest" | "displayedSnapshotId">;
 }) {
   const lease = useAtomValue(
     cadPanelEnvironment.scene({
@@ -79,7 +94,7 @@ function CadScene({
   const baseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
   const ticket = AsyncResult.isSuccess(lease) ? lease.value : null;
   const canvas = useRef<HTMLDivElement>(null);
-  const renderer = useRef<CadSceneRenderer | null>(null);
+  const renderer = commentsCard.renderer;
   const latest = useRef({ view, disabled, onChange });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(() =>
     cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId),
@@ -231,6 +246,7 @@ function CadScene({
         if (sameScene && !matchMedia("(prefers-reduced-motion: reduce)").matches)
           current.transition(latest.current.view);
         else current.apply(latest.current.view);
+        if (framing) current.restoreCommentFraming(framing);
         setError(null);
         setManifest(snapshot);
       } catch {
@@ -271,6 +287,11 @@ function CadScene({
             {unavailable ?? <LoadingMark kind="cad" />}
           </div>
         )}
+        <CadCommentsCard
+          {...commentsCard}
+          manifest={manifest}
+          displayedSnapshotId={view.snapshotId}
+        />
         {manifest && !unavailable && !compact && (
           <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
         )}
@@ -370,6 +391,24 @@ export function CadPanel({
       input: { threadId: threadRef.threadId },
     }),
   );
+  const commentState = useAtomValue(
+    cadPanelEnvironment.comments({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
+  const comments = AsyncResult.isSuccess(commentState) ? commentState.value : [];
+  const renderer = useRef<CadSceneRenderer | null>(null);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [selection, setSelection] = useState<CadCommentSelection | null>(null);
+  const [historicalView, setHistoricalView] = useState<CadViewState | null>(null);
+  const savedCurrent = useRef<{
+    view: CadViewState;
+    descriptor: string | null;
+    framing: { x: number; y: number };
+  } | null>(null);
+  const [localFraming, setLocalFraming] = useState<{ x: number; y: number } | null>(null);
+  const [localView, setLocalView] = useState<CadViewState | null>(null);
   const threads = useThreadShells();
   const runActive = isCadProjectRunActive(project, threads);
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
@@ -397,14 +436,76 @@ export function CadPanel({
     ),
   );
   const optimistic = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
-  const view = (!locked && optimistic) || data?.view || null;
+  const currentView = (!locked && optimistic) || data?.view || null;
+  const view =
+    historicalView ||
+    (localView?.snapshotId === currentView?.snapshotId ? localView : null) ||
+    currentView;
   useLayoutEffect(() => {
     edits.observe(data?.userRevision ?? null, locked);
   }, [edits, data, locked]);
   const change = (next: CadViewState) => {
-    if (locked) return;
+    if (historicalView) {
+      setHistoricalView(next);
+      return;
+    }
+    if (locked) {
+      if (commentsOpen) setLocalView(next);
+      return;
+    }
+    setLocalView(null);
     setError(null);
     edits.select(next);
+  };
+  const choose = (comment: CadComment, target: number) => {
+    setCommentsOpen(true);
+    setSelection((previous) => ({ id: comment.id, target, request: (previous?.request ?? 0) + 1 }));
+    const manifest = view ? cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId) : null;
+    if (manifest && cadCommentModelDescriptor(manifest) === comment.modelDescriptor) return;
+    if (!savedCurrent.current && currentView) {
+      const currentManifest = cadVisibleViewer.peek(
+        threadRef.environmentId,
+        currentView.snapshotId,
+      );
+      const pose = renderer.current?.cameraPose();
+      savedCurrent.current = {
+        view: pose ? { ...currentView, camera: { kind: "pose", pose, fit: null } } : currentView,
+        descriptor: currentManifest ? cadCommentModelDescriptor(currentManifest) : null,
+        framing: renderer.current?.commentFraming() ?? { x: 0, y: 0 },
+      };
+    }
+    setHistoricalView({
+      rootId: comment.rootId,
+      snapshotId: comment.snapshotId,
+      revision: 0,
+      camera: { kind: "preset", preset: "isometric", fit: [] },
+      visibility: {},
+      isolatedOccurrenceIds: [],
+      explosion: 0,
+    });
+  };
+  const back = () => {
+    renderer.current?.endCommentReview();
+    const saved = savedCurrent.current;
+    const manifest = currentView
+      ? cadVisibleViewer.peek(threadRef.environmentId, currentView.snapshotId)
+      : null;
+    const equivalent =
+      currentView &&
+      saved &&
+      (currentView.snapshotId === saved.view.snapshotId ||
+        (manifest && cadCommentModelDescriptor(manifest) === saved.descriptor));
+    setLocalView(
+      equivalent
+        ? { ...saved.view, snapshotId: currentView.snapshotId, rootId: currentView.rootId }
+        : null,
+    );
+    if (saved && !equivalent)
+      setError("CAD changed during review. Showing the newest current model with its saved view.");
+    setLocalFraming(equivalent ? saved.framing : null);
+    savedCurrent.current = null;
+    setHistoricalView(null);
+    setSelection(null);
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
   return (
@@ -433,7 +534,7 @@ export function CadPanel({
               };
             })}
             selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
-            disabled={locked}
+            disabled={locked || !!historicalView}
             onSelect={(id) => {
               const root = roots.find((root) => root.rootId === id);
               if (root?.current)
@@ -465,12 +566,24 @@ export function CadPanel({
       {view ? (
         <>
           <CadScene
+            framing={historicalView ? null : localFraming}
             captureId={data?.captureId ?? null}
             key={`${threadRef.threadId}:${view.snapshotId}`}
             threadRef={threadRef}
             view={view}
-            disabled={locked}
-            cadDimmed={locked && !showActivity}
+            disabled={locked && !commentsOpen && !historicalView}
+            cadDimmed={locked && !showActivity && !commentsOpen && !historicalView}
+            commentsCard={{
+              threadRef,
+              comments,
+              renderer,
+              open: commentsOpen,
+              setOpen: setCommentsOpen,
+              selection,
+              choose,
+              historical: !!historicalView,
+              back,
+            }}
             fullscreen={fullscreen}
             compact={compact}
             onChange={(next) => void change(next)}

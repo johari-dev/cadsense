@@ -1,3 +1,4 @@
+import Migration0053 from "./Migrations/053_CadComments.ts";
 /**
  * MigrationsLive - Migration runner with inline loader
  *
@@ -105,6 +106,7 @@ export const migrationEntries = [
   [50, "CadLifecycle", Migration0050],
   [51, "CadViewerSessions", Migration0051],
   [52, "CadCaptures", Migration0052],
+  [53, "CadComments", Migration0053],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

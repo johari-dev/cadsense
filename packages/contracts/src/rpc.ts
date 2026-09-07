@@ -1,3 +1,5 @@
+import { ThreadId } from "./baseSchemas.ts";
+import { CadComment, CadCommentError, CadCommentReviewInput } from "./cadComments.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -173,6 +175,8 @@ export const WS_METHODS = {
   cadUserSetEnabled: "cad.user.setEnabled",
   cadRenderConnect: "cad.render.connect",
   cadPanelWatch: "cad.panel.watch",
+  cadCommentsWatch: "cad.comments.watch",
+  cadCommentReview: "cad.comment.review",
   cadPanelSave: "cad.panel.save",
   cadPanelScene: "cad.panel.scene",
   cadStorageWatch: "cad.storage.watch",
@@ -455,6 +459,17 @@ export const WsCadRenderConnectRpc = Rpc.make(WS_METHODS.cadRenderConnect, {
   error: Schema.Union([CadRenderError, EnvironmentAuthorizationError]),
   stream: true,
 });
+export const WsCadCommentsWatchRpc = Rpc.make(WS_METHODS.cadCommentsWatch, {
+  payload: Schema.Struct({ threadId: ThreadId }),
+  success: Schema.Array(CadComment),
+  error: Schema.Union([CadCommentError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+export const WsCadCommentReviewRpc = Rpc.make(WS_METHODS.cadCommentReview, {
+  payload: CadCommentReviewInput,
+  success: CadComment,
+  error: Schema.Union([CadCommentError, EnvironmentAuthorizationError]),
+});
 export const WsCadPanelWatchRpc = Rpc.make(WS_METHODS.cadPanelWatch, {
   payload: CadPanelInput,
   success: CadPanelState,
@@ -686,6 +701,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
   WsCadPanelWatchRpc,
+  WsCadCommentsWatchRpc,
+  WsCadCommentReviewRpc,
   WsCadStorageWatchRpc,
   WsCadStorageRunRpc,
   WsCadPanelSceneRpc,
