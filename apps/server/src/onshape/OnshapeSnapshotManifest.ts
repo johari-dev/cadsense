@@ -103,7 +103,12 @@ const schemaFailure = () => invalid("invalid-response");
 const hash = (value: unknown) =>
   NodeCrypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-export const snapshotRootId = (root: CadSnapshotRoot) =>
+export const snapshotRootId = (
+  root: Pick<
+    CadSnapshotRoot,
+    "host" | "documentId" | "originalRevision" | "elementId" | "configuration"
+  >,
+) =>
   hash([
     root.host,
     root.documentId,

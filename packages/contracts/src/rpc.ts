@@ -1,6 +1,13 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+import {
+  CadUserStartInput,
+  CadUserStartResult,
+  CadUserOperationInput,
+  CadUserEnabledInput,
+  CadUserOperationError,
+} from "./cadUser.ts";
 
 import { FileManagerError, OpenInFileManagerInput } from "./fileManager.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
@@ -151,6 +158,9 @@ export const WS_METHODS = {
   onshapeConnectionsRemove: "onshape.connections.remove",
   onshapeProjectsCreate: "onshape.projects.create",
   onshapeProjectsSetConnection: "onshape.projects.setConnection",
+  cadUserStart: "cad.user.start",
+  cadUserCancel: "cad.user.cancel",
+  cadUserSetEnabled: "cad.user.setEnabled",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -418,6 +428,22 @@ export const WsOnshapeProjectsSetConnectionRpc = Rpc.make(WS_METHODS.onshapeProj
   error: Schema.Union([OnshapeProjectError, EnvironmentAuthorizationError]),
 });
 
+export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
+  payload: CadUserStartInput,
+  success: CadUserStartResult,
+  error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
+});
+export const WsCadUserCancelRpc = Rpc.make(WS_METHODS.cadUserCancel, {
+  payload: CadUserOperationInput,
+  success: Schema.Void,
+  error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
+});
+export const WsCadUserSetEnabledRpc = Rpc.make(WS_METHODS.cadUserSetEnabled, {
+  payload: CadUserEnabledInput,
+  success: Schema.Void,
+  error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
+});
+
 export const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
@@ -607,6 +633,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeConnectionsRemoveRpc,
   WsOnshapeProjectsCreateRpc,
   WsOnshapeProjectsSetConnectionRpc,
+  WsCadUserStartRpc,
+  WsCadUserCancelRpc,
+  WsCadUserSetEnabledRpc,
   WsPreviewOpenRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,

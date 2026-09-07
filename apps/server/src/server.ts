@@ -71,6 +71,11 @@ import * as NetService from "@cadsense/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
+import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
+import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
+import * as CadUserOperations from "./cad/CadUserOperations.ts";
+import * as CadProjectQuiescence from "./cad/CadProjectQuiescence.ts";
 import * as ManagedWorkspaceAllocator from "./workspace/ManagedWorkspaceAllocator.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
@@ -238,7 +243,16 @@ const OnshapeLayerLive = OnshapeProjects.layer.pipe(
   Layer.provideMerge(OnshapeWorkspaceReactorLayerLive),
 );
 
-const AgentRuntimeLayerLive = OnshapeLayerLive.pipe(Layer.provideMerge(ProviderRuntimeLayerLive));
+const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
+  Layer.provideMerge(CadSnapshotStore.layer),
+  Layer.provideMerge(OnshapeCadRoots.layer),
+);
+const AgentRuntimeLayerLive = CadUserOperations.layer.pipe(
+  Layer.provideMerge(CadProjectQuiescence.layer),
+  Layer.provideMerge(CadAcquisitionLayerLive),
+  Layer.provideMerge(OnshapeLayerLive),
+  Layer.provideMerge(ProviderRuntimeLayerLive),
+);
 
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),

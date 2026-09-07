@@ -18,6 +18,7 @@ import { FolderOpenIcon, SettingsIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { isCadProjectRunActive } from "../../cad/CadProjectState";
 import { isElectron } from "../../env";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
@@ -48,6 +49,7 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { OnshapeProjectSettings } from "./OnshapeProjectSettings";
+import { CadProjectSettings } from "./CadProjectSettings";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -115,6 +117,8 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   const settings = usePrimarySettings();
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const threads = useThreadShells();
+  const cadRunActive = isCadProjectRunActive(project, threads);
+  const cadBusy = !!project.onshapeSource && (cadRunActive || !!project.cad?.operation);
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const openInFileManager = useAtomCommand(shellEnvironment.openInFileManager, {
@@ -175,6 +179,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   );
 
   const removeProject = useCallback(async () => {
+    if (cadBusy) return;
     const api = readLocalApi();
     if (!api) return;
     const projectThreads = threads.filter(
@@ -220,7 +225,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
     if (projectDraft) drafts.clearDraftThread(projectDraft.draftId);
     drafts.clearProjectDraftThreadId(ref);
     void navigate({ to: "/", replace: true });
-  }, [deleteProject, navigate, project, reportFailure, threads]);
+  }, [cadBusy, deleteProject, navigate, project, reportFailure, threads]);
 
   const showInExplorer = useCallback(async () => {
     const result = await openInFileManager({
@@ -283,7 +288,14 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
         </SettingsSection>
 
         {project.onshapeSource && (
-          <OnshapeProjectSettings project={project} source={project.onshapeSource} />
+          <>
+            <OnshapeProjectSettings
+              project={project}
+              source={project.onshapeSource}
+              busy={cadBusy}
+            />
+            <CadProjectSettings project={project} runActive={cadRunActive} />
+          </>
         )}
 
         <SettingsSection title="New threads">
@@ -344,7 +356,12 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
             title="Remove project"
             description="Deletes this project's threads without touching its files."
             control={
-              <Button variant="destructive-outline" size="sm" onClick={() => void removeProject()}>
+              <Button
+                variant="destructive-outline"
+                size="sm"
+                disabled={cadBusy}
+                onClick={() => void removeProject()}
+              >
                 <Trash2Icon />
                 Remove project
               </Button>
