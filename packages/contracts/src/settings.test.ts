@@ -20,6 +20,22 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("Glass opacity", () => {
+  it("keeps the existing 80% appearance by default", () => {
+    expect(decodeClientSettings({}).glassOpacity).toBe(80);
+  });
+  it.each([40, 80, 100])("persists a supported opacity of %s", (glassOpacity) => {
+    const settings = decodeClientSettings({ glassOpacity });
+    expect(
+      decodeClientSettings(Schema.encodeSync(ClientSettingsSchema)(settings)).glassOpacity,
+    ).toBe(glassOpacity);
+    expect(decodeClientSettingsPatch({ glassOpacity }).glassOpacity).toBe(glassOpacity);
+  });
+  it.each([39, 101, 40.5])("rejects invalid opacity %s", (glassOpacity) => {
+    expect(() => decodeClientSettingsPatch({ glassOpacity })).toThrow();
+  });
+});
+
 describe("Default typography", () => {
   it("defaults interface and composer text to 15px without replacing explicit preferences", () => {
     expect(decodeClientSettings({})).toMatchObject({ fontSizeInterface: 15, fontSizePrompt: 15 });

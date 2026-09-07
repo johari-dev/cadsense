@@ -49,6 +49,13 @@ export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6
  * the interface size scales every rem-based dimension in the app, so the
  * bounds keep layouts intact rather than offering unusable extremes.
  */
+export const MIN_GLASS_OPACITY = 40;
+export const MAX_GLASS_OPACITY = 100;
+export const GlassOpacity = Schema.Int.check(
+  Schema.isBetween({ minimum: MIN_GLASS_OPACITY, maximum: MAX_GLASS_OPACITY }),
+);
+export const DEFAULT_GLASS_OPACITY = 80;
+
 export const MIN_INTERFACE_FONT_SIZE = 12;
 export const MAX_INTERFACE_FONT_SIZE = 20;
 export const InterfaceFontSize = Schema.Int.check(
@@ -126,6 +133,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   fontSizeInterface: InterfaceFontSize.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
+  ),
+  glassOpacity: GlassOpacity.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
   ),
   fontSizePrompt: PromptFontSize.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROMPT_FONT_SIZE)),
@@ -630,6 +640,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
+  glassOpacity: Schema.optionalKey(GlassOpacity),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),
   fontSizeCode: Schema.optionalKey(CodeFontSize),
   fontFamilyCode: Schema.optionalKey(FontFamilyPreference),

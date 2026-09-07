@@ -34,6 +34,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/cad-storage",
   },
   { id: "interface-font", title: "Interface font", to: "/settings/appearance" },
+  { id: "glass-opacity", title: "Transparency", to: "/settings/appearance" },
   { id: "prompt-font", title: "Prompt font", to: "/settings/appearance" },
   { id: "font-smoothing", title: "Font smoothing", to: "/settings/appearance" },
   { id: "show-permission-settings", title: "Show permission settings", to: "/settings/appearance" },
