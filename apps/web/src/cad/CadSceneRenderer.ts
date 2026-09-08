@@ -15,7 +15,11 @@ import { CadCameraPose } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 const isCadCameraPose = Schema.is(CadCameraPose);
 import * as THREE from "three";
-import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
+import {
+  CAD_SCENE_LIMITS,
+  createCadSceneBudget,
+  measureCadGeometry,
+} from "@cadsense/shared/cadSceneBudget";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { prefetchCadAssets } from "./CadAssetPrefetch";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -446,7 +450,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       activeSnapshot = manifest.snapshotId;
       let total = [...cachedScenes.values()].reduce((sum, entry) => sum + entry.bytes, 0);
       for (const [id, entry] of cachedScenes) {
-        if (cachedScenes.size <= (options.cacheScenes ? 3 : 1) && total <= 256 * 1024 * 1024) break;
+        // Match scene admission: a supported assembly must not exceed the entire warm-cache
+        // budget by itself. Still bound aggregate CPU/GPU estimates and retain at most three scenes.
+        if (
+          cachedScenes.size <= (options.cacheScenes ? 3 : 1) &&
+          total <= CAD_SCENE_LIMITS.decodedBytes
+        )
+          break;
         if (id === activeSnapshot) continue;
         cachedScenes.delete(id);
         total -= entry.bytes;

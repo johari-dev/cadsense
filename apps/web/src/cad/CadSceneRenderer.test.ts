@@ -346,9 +346,42 @@ describe("CAD renderer lifecycle without WebGL", () => {
       renderer.dispose();
     }
   });
+  it("keeps a full robot warm across thread reattachment and a small-project round trip", async () => {
+    const measurement = vi.spyOn(CadBudget, "measureCadGeometry").mockReturnValue({
+      decodedBytes: 1100 * 1024 * 1024,
+      triangles: 0,
+      drawCalls: 0,
+      nodeCount: 0,
+    });
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, cacheScenes: true });
+    const read = vi.fn(async () => geometry());
+    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    try {
+      await renderer.load(manifest, read);
+      renderer.apply(state);
+      renderer.suspend();
+      renderer.resume();
+      expect(await renderer.load(manifest, read)).toBe(true);
+      expect(read).toHaveBeenCalledTimes(1);
+      measurement.mockReturnValue({
+        decodedBytes: 10 * 1024 * 1024,
+        triangles: 0,
+        drawCalls: 0,
+        nodeCount: 0,
+      });
+      await renderer.load(second, read);
+      renderer.suspend();
+      renderer.resume();
+      await renderer.load(manifest, read);
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      renderer.dispose();
+      measurement.mockRestore();
+    }
+  });
   it("evicts least-recent scenes at the aggregate memory limit", async () => {
     const measurement = vi.spyOn(CadBudget, "measureCadGeometry").mockReturnValue({
-      decodedBytes: 100 * 1024 * 1024,
+      decodedBytes: 600 * 1024 * 1024,
       triangles: 0,
       drawCalls: 0,
       nodeCount: 0,
