@@ -22,6 +22,8 @@ Processing uses the actual PoC parser and shared-geometry builder, a fresh modul
 
 ## Hole and anchor checks
 
+Cold page reloads were much less stable than the repeated, already-downloaded-byte benchmark: two observed per-level fetch-to-first-frame passes were 8.54 / 15.88 / 18.04 seconds and 8.19 / 18.00 / 60.55 seconds (coarse / medium / fine). Fine worker parsing alone varied from 7.83 to 48.76 seconds. The cause of this browser/runtime variability was not isolated. Keep these observations alongside the warm medians; **the 1.31 / 2.47 / 7.86 second figures are not cold-load promises**. File-size and geometric-comparison results do not depend on these timing fluctuations.
+
 Inspected the five exposed flange holes at 90, 60, 30, 0, and -30 degrees around the 25.4 mm bolt-circle radius. Intersected each exported mesh at assembly Z = -0.25, -1, and -2 mm, then measured radial distance to each hole wall in 360 directions. All **5,400 samples per export** found a wall; no tested hole was missing. Compared matching samples to fine, not to an exact CAD/B-rep oracle. Mean differences were 0.00791 mm coarse and 0.00176 mm medium; maxima are in the table.
 
 Also replayed five previously published, alternate-view-verified Kraken comment anchor points, transformed from the motor part into assembly coordinates. Maximum distance to the exported surface was **0.01065 mm coarse**, 0.00153 mm medium, and 0.00237 mm fine. Fine is not necessarily closest to these points because the original anchors were selected on another tessellation.
