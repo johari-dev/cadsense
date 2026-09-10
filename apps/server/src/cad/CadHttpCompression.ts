@@ -5,5 +5,8 @@ import { HttpMiddleware } from "effect/unstable/http";
 export const compressCadResponse = HttpMiddleware.compression({
   algorithms: ["gzip"],
   levels: { gzip: 1 },
-  compressible: (contentType) => contentType.split(";")[0]?.trim() === "model/gltf-binary",
+  compressible: (contentType) =>
+    ["model/gltf-binary", "application/vnd.cadsense.geometry-bundle"].includes(
+      contentType.split(";")[0]?.trim() ?? "",
+    ),
 });

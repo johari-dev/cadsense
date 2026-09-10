@@ -26,6 +26,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { readCadAssetResponse } from "./readCadAssetResponse";
+import { readCadAssetBundle } from "./CadAssetBundle";
 import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
@@ -250,16 +251,24 @@ function CadScene({
         let received = 0;
         let lastUpdate = 0;
         setLoadProgress({ received, total });
-        const sameScene = await current.load(snapshot, async (hash) =>
-          readCadAssetResponse(await request(hash), assets.get(hash)!.byteLength, (count) => {
-            received += count;
-            const now = performance.now();
-            if (!controller.signal.aborted && (now - lastUpdate >= 100 || received === total)) {
-              lastUpdate = now;
-              setLoadProgress({ received, total });
-            }
-          }),
-        );
+        const onBytes = (count: number) => {
+          received += count;
+          const now = performance.now();
+          if (!controller.signal.aborted && (now - lastUpdate >= 100 || received === total)) {
+            lastUpdate = now;
+            setLoadProgress({ received, total });
+          }
+        };
+        const readAsset =
+          snapshot.root.tessellationProfile === "onshape-3mf-coarse-meters-z-up-v1"
+            ? readCadAssetBundle(
+                snapshot.assets,
+                (start, end) => request(`bundle?start=${start}&end=${end}`),
+                onBytes,
+              )
+            : async (hash: string) =>
+                readCadAssetResponse(await request(hash), assets.get(hash)!.byteLength, onBytes);
+        const sameScene = await current.load(snapshot, readAsset);
         if (controller.signal.aborted) return;
         diagnostics.record({
           type: "worker-count",

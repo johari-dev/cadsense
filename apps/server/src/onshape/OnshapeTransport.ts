@@ -29,7 +29,12 @@ export interface OnshapeTransportResponse {
 export const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_BINARY_BODY_BYTES = 128 * 1024 * 1024;
 /** Scoped to one sync, including separately signed redirect hops. */
-export const OnshapeRequestMetrics = Context.Reference<{ requests: number } | undefined>(
+export interface OnshapeApiMetrics {
+  requests: number;
+  quotaCountedRequests?: number;
+  quotaObservations?: Array<{ request: number; header: string; value: number }>;
+}
+export const OnshapeRequestMetrics = Context.Reference<OnshapeApiMetrics | undefined>(
   "@cadsense/server/onshape/OnshapeRequestMetrics",
   { defaultValue: () => undefined },
 );
@@ -80,6 +85,23 @@ export const layer = Layer.effect(
             }).pipe(Effect.andThen(client.execute(request))),
           Effect.flatMap(
             Effect.fn(function* (response) {
+              if (metrics) {
+                if (response.status >= 200 && response.status < 400)
+                  metrics.quotaCountedRequests = (metrics.quotaCountedRequests ?? 0) + 1;
+                for (const [header, value] of Object.entries(response.headers)) {
+                  if (
+                    /quota|credits|rate.?limit.*remaining|remaining.*api/i.test(header) &&
+                    value !== undefined &&
+                    /^\d+$/.test(value)
+                  ) {
+                    (metrics.quotaObservations ??= []).push({
+                      request: metrics.requests,
+                      header,
+                      value: Number(value),
+                    });
+                  }
+                }
+              }
               const result = {
                 status: response.status,
                 retryAfter: response.headers["retry-after"] ?? null,

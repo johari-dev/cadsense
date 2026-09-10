@@ -20,6 +20,7 @@
     "effect": "catalog:",
     "gltf-validator": "2.0.0-dev.3.10",
     "msgpackr-extract": "3.0.4",
+    "saxes": "^6.0.0",
     "yaml": "catalog:"
   },
   "devDependencies": {

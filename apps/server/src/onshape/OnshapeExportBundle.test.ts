@@ -1,49 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeZlib from "node:zlib";
+import { zip } from "./testFixtures/zip.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { normalizeOnshapeExport } from "./OnshapeExportBundle.ts";
+import { normalizeOnshapeExport, readOnshapeZip } from "./OnshapeExportBundle.ts";
 import { normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import { bulkFixture, encodeFixture } from "./testFixtures/bulkExport.ts";
 
-function zip(entries: Array<{ name: string; bytes: Uint8Array }>, corruptCrc = false) {
-  const locals: Buffer[] = [],
-    records: Buffer[] = [];
-  let offset = 0;
-  for (const entry of entries) {
-    const name = Buffer.from(entry.name),
-      packed = NodeZlib.deflateRawSync(entry.bytes);
-    const crc = corruptCrc ? 0 : NodeZlib.crc32(entry.bytes);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(packed.length, 18);
-    local.writeUInt32LE(entry.bytes.length, 22);
-    local.writeUInt16LE(name.length, 26);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(8, 10);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(packed.length, 20);
-    central.writeUInt32LE(entry.bytes.length, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(offset, 42);
-    locals.push(local, name, packed);
-    records.push(central, name);
-    offset += local.length + name.length + packed.length;
-  }
-  const directory = Buffer.concat(records),
-    end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(directory.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, directory, end]);
-}
 const fixtureArchive = (uri = "mesh.bin") => {
   const fixture = bulkFixture(1);
   return [
@@ -58,6 +20,13 @@ const fixtureArchive = (uri = "mesh.bin") => {
   ];
 };
 describe("Onshape export bundle", () => {
+  it("reads Onshape ZIP64 directories and rejects corrupt 64-bit offsets", () => {
+    const bytes = zip([{ name: "model", bytes: Buffer.from("geometry") }], false, true);
+    assert.equal(new TextDecoder().decode(readOnshapeZip(bytes).get("model")!()), "geometry");
+    const corrupt = Buffer.from(bytes);
+    corrupt.writeBigUInt64LE(9007199254740992n, corrupt.length - 34);
+    assert.throws(() => readOnshapeZip(corrupt));
+  });
   it.effect("normalizes a bulk response above the per-part input limit", () =>
     Effect.gen(function* () {
       const fixture = bulkFixture(1);

@@ -959,6 +959,22 @@ it.layer(NodeServices.layer)("Onshape authenticated reads", (it) => {
           query: "",
         });
         assert.equal(request.headers.Authorization, expected.Authorization);
+        const threeMfRequest = {
+          ...exportRequest,
+          path: exportRequest.path.replace("/export/gltf", "/translations"),
+          body: { storeInDocument: false, notifyUser: false, formatName: "3MF" },
+        };
+        yield* connections.readJson(threeMfRequest);
+        assert.deepEqual(
+          yield* decodeJson(harness.state.requests.at(-1)!.body),
+          threeMfRequest.body,
+        );
+        const beforeRejectedFormat = harness.state.requests.length;
+        const rejectedFormat = yield* connections
+          .readJson({ ...threeMfRequest, body: { ...threeMfRequest.body, formatName: "STEP" } })
+          .pipe(Effect.exit);
+        assert.equal(rejectedFormat._tag, "Failure");
+        assert.equal(harness.state.requests.length, beforeRejectedFormat);
         const count = harness.state.requests.length;
         const rejected = yield* connections
           .readJson({ ...exportRequest, body: { ...exportRequest.body, storeInDocument: true } })

@@ -32,7 +32,7 @@ import {
   type OnshapeExportError,
 } from "./OnshapeBulkAcquisition.ts";
 import * as OnshapeSyncState from "./OnshapeSyncState.ts";
-import { OnshapeRequestMetrics } from "./OnshapeTransport.ts";
+import { OnshapeRequestMetrics, type OnshapeApiMetrics } from "./OnshapeTransport.ts";
 import {
   completeSnapshotManifest,
   enrichSnapshotMetadata,
@@ -267,7 +267,7 @@ export const make = Effect.gen(function* () {
   return OnshapeSnapshotAcquisition.of({
     acquire: (input) =>
       Effect.gen(function* () {
-        const metrics = { requests: 0 };
+        const metrics: OnshapeApiMetrics = { requests: 0 };
         const start = yield* Clock.currentTimeMillis;
         return yield* store.withAcquisition(run(input)).pipe(
           Effect.provideService(OnshapeRequestMetrics, metrics),
@@ -276,6 +276,8 @@ export const make = Effect.gen(function* () {
               yield* Effect.logInfo("Onshape CAD sync finished", {
                 projectId: input.projectId,
                 apiRequests: metrics.requests,
+                quotaCountedRequests: metrics.quotaCountedRequests ?? 0,
+                quotaObservations: metrics.quotaObservations ?? [],
                 elapsedMs: (yield* Clock.currentTimeMillis) - start,
                 result: Exit.isSuccess(exit) ? "complete" : "failed",
               });

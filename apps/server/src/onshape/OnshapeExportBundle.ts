@@ -17,7 +17,7 @@ const external = () => new CadGeometryError({ reason: "external-resource" });
 const isGeometryError = Schema.is(CadGeometryError);
 
 /** ZIP entries stay in memory. Central-directory and actual inflated sizes both have limits. */
-function readZip(bytes: Uint8Array) {
+export function readOnshapeZip(bytes: Uint8Array) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let end = bytes.length - 22;
   for (; end >= Math.max(0, bytes.length - 65_557); end--) {
@@ -29,11 +29,39 @@ function readZip(bytes: Uint8Array) {
   }
   if (end < 0 || view.getUint32(end, true) !== 0x06054b50) throw invalid();
   if (view.getUint16(end + 4, true) !== 0 || view.getUint16(end + 6, true) !== 0) throw invalid();
-  const count = view.getUint16(end + 10, true);
-  if (count > 4096 || count !== view.getUint16(end + 8, true)) throw tooLarge();
-  const centralSize = view.getUint32(end + 12, true);
+  let count = view.getUint16(end + 10, true);
+  if (count !== view.getUint16(end + 8, true)) throw invalid();
+  let centralSize = view.getUint32(end + 12, true);
   let offset = view.getUint32(end + 16, true);
-  if (offset + centralSize !== end) throw invalid();
+  let centralEnd = end;
+  const uint64 = (at: number) => {
+    if (at < 0 || at + 8 > bytes.length) throw invalid();
+    const value = view.getBigUint64(at, true);
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw tooLarge();
+    return Number(value);
+  };
+  // Onshape 3MF uses ZIP64 even for small archives. Validate its locator and directory,
+  // retaining the same inflated-byte and entry-count limits as ordinary ZIP.
+  if (end >= 20 && view.getUint32(end - 20, true) === 0x07064b50) {
+    if (view.getUint32(end - 16, true) !== 0 || view.getUint32(end - 4, true) !== 1)
+      throw invalid();
+    const record = uint64(end - 12);
+    if (
+      record + 56 > end - 20 ||
+      view.getUint32(record, true) !== 0x06064b50 ||
+      record + 12 + uint64(record + 4) !== end - 20 ||
+      view.getUint32(record + 16, true) !== 0 ||
+      view.getUint32(record + 20, true) !== 0
+    )
+      throw invalid();
+    count = uint64(record + 32);
+    if (count !== uint64(record + 24)) throw invalid();
+    centralSize = uint64(record + 40);
+    offset = uint64(record + 48);
+    centralEnd = record;
+  }
+  if (count > 4096) throw tooLarge();
+  if (offset + centralSize !== centralEnd) throw invalid();
   const files = new Map<string, () => Uint8Array>();
   let total = 0;
   for (let i = 0; i < count; i++) {
@@ -41,7 +69,7 @@ function readZip(bytes: Uint8Array) {
     const flags = view.getUint16(offset + 8, true),
       method = view.getUint16(offset + 10, true);
     const crc = view.getUint32(offset + 16, true);
-    const compressed = view.getUint32(offset + 20, true),
+    let compressed = view.getUint32(offset + 20, true),
       size = view.getUint32(offset + 24, true);
     const nameLength = view.getUint16(offset + 28, true);
     const next =
@@ -50,7 +78,28 @@ function readZip(bytes: Uint8Array) {
       nameLength +
       view.getUint16(offset + 30, true) +
       view.getUint16(offset + 32, true);
-    const local = view.getUint32(offset + 42, true);
+    let local = view.getUint32(offset + 42, true);
+    const extraEnd = offset + 46 + nameLength + view.getUint16(offset + 30, true);
+    if (extraEnd > centralEnd) throw invalid();
+    for (let extra = offset + 46 + nameLength; extra < extraEnd; ) {
+      if (extra + 4 > extraEnd) throw invalid();
+      const tag = view.getUint16(extra, true),
+        length = view.getUint16(extra + 2, true);
+      if (extra + 4 + length > extraEnd) throw invalid();
+      if (tag === 1) {
+        let cursor = extra + 4;
+        const next64 = () => {
+          if (cursor + 8 > extra + 4 + length) throw invalid();
+          const value = uint64(cursor);
+          cursor += 8;
+          return value;
+        };
+        if (size === 0xffffffff) size = next64();
+        if (compressed === 0xffffffff) compressed = next64();
+        if (local === 0xffffffff) local = next64();
+      }
+      extra += 4 + length;
+    }
     if (next > end || local + 30 > offset || (flags & 1) !== 0 || (method !== 0 && method !== 8))
       throw invalid();
     const name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
@@ -81,7 +130,7 @@ function readZip(bytes: Uint8Array) {
     });
     offset = next;
   }
-  if (offset !== end) throw invalid();
+  if (offset !== centralEnd) throw invalid();
   return files;
 }
 
@@ -98,7 +147,7 @@ export const normalizeOnshapeExport = Effect.fn("normalizeOnshapeExport")(functi
           0x04034b50
       )
         return bytes;
-      const files = readZip(bytes);
+      const files = readOnshapeZip(bytes);
       const models = [...files.keys()].filter((name) => /\.(gltf|glb)$/i.test(name));
       if (models.length !== 1) throw invalid();
       const name = models[0]!;

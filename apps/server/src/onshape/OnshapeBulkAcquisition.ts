@@ -1,6 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import {
   OnshapeWorkspaceId,
+  CadSnapshotId,
+  type CadSnapshotDraft,
   type CadGeometryAsset,
   type CadSnapshotContext,
   type CadSnapshotManifest,
@@ -24,15 +26,17 @@ import {
 } from "./OnshapeConnections.ts";
 import { normalizeOnshapeExport } from "./OnshapeExportBundle.ts";
 import { readOnshapeExportGeometry } from "./OnshapeExportGeometry.ts";
+import { readOnshapeThreeMf, OnshapeThreeMfIdentityError } from "./OnshapeThreeMf.ts";
 import {
   completeSnapshotManifest,
+  snapshotGeometryKey,
   parseAssemblySnapshotDraft,
   parsePartStudioSnapshotDraft,
   withAssemblyExportMetadata,
 } from "./OnshapeSnapshotManifest.ts";
 import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
-export const ONSHAPE_BULK_TESSELLATION_PROFILE = "onshape-bulk-gltf-medium-meters-z-up-v1";
+export const ONSHAPE_BULK_TESSELLATION_PROFILE = "onshape-3mf-coarse-meters-z-up-v1";
 export const ONSHAPE_TRANSLATION_MAX_POLLS = 24;
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{24}$/));
 const Translation = Schema.Struct({
@@ -57,8 +61,10 @@ export class OnshapeExportError extends Schema.TaggedErrorClass<OnshapeExportErr
 ) {}
 const invalid = () => new OnshapeExportError({ reason: "invalid-response" });
 const isGeometryError = Schema.is(CadGeometryError);
+const isIdentityError = Schema.is(OnshapeThreeMfIdentityError);
+const decodeSnapshotId = Schema.decodeUnknownEffect(CadSnapshotId);
 const geometryFailure = (error: unknown) =>
-  isGeometryError(error)
+  isGeometryError(error) || isIdentityError(error)
     ? error
     : new CadGeometryError({
         reason: error instanceof CadSceneBudgetError ? error.reason : "invalid-geometry",
@@ -69,15 +75,18 @@ export const makeBulkAcquisition = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
   const state = yield* OnshapeSyncState;
   const store = yield* CadSnapshotStore;
-  return Effect.fn("OnshapeBulkAcquisition.acquire")(function* (
+  const acquire = Effect.fn("OnshapeBulkAcquisition.acquire")(function* (
     context: CadSnapshotContext,
     source: OnshapeProjectSource,
+    references?: ReadonlyMap<string, Uint8Array>,
+    gltf = false,
   ) {
     const { root } = context;
     const cacheKey = NodeCrypto.createHash("sha256")
       .update(context.projectId)
       .update("\0")
       .update(context.rootId)
+      .update(gltf ? "\0gltf-identity" : "")
       .digest("hex");
     const revisionKey = NodeCrypto.createHash("sha256")
       .update(cacheKey)
@@ -156,18 +165,30 @@ export const makeBulkAcquisition = Effect.gen(function* () {
           const translation = yield* read({
             method: "POST",
             query: "",
-            path: `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "partstudios"}/d/${root.documentId}/${root.originalRevision.kind}/${root.originalRevision.id}/e/${root.elementId}/export/gltf`,
-            body: {
-              storeInDocument: false,
-              notifyUser: false,
-              grouping: true,
-              excludeHiddenEntities: false,
-              isYAxisUp: false,
-              includeExportIds: true,
-              meshParams: { resolution: "MEDIUM", unit: "METER" },
-              advancedParams: { configuration: root.configuration },
-              correlationId: revisionKey,
-            },
+            path: `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "partstudios"}/d/${root.documentId}/${root.originalRevision.kind}/${root.originalRevision.id}/e/${root.elementId}/${gltf ? "export/gltf" : "translations"}`,
+            body: gltf
+              ? {
+                  storeInDocument: false,
+                  notifyUser: false,
+                  grouping: true,
+                  excludeHiddenEntities: false,
+                  isYAxisUp: false,
+                  includeExportIds: true,
+                  meshParams: { resolution: "COARSE", unit: "METER" },
+                  advancedParams: { configuration: root.configuration },
+                  correlationId: revisionKey,
+                }
+              : {
+                  storeInDocument: false,
+                  notifyUser: false,
+                  grouping: true,
+                  formatName: "3MF",
+                  resolution: "coarse",
+                  unit: "METER",
+                  allowFaultyParts: true,
+                  configuration: root.configuration,
+                  correlationId: revisionKey,
+                },
           }).pipe(
             Effect.flatMap(decodeTranslation),
             Effect.mapError((error) => (error._tag === "SchemaError" ? invalid() : error)),
@@ -241,9 +262,27 @@ export const makeBulkAcquisition = Effect.gen(function* () {
           checkpoint = yield* entry.saveDownload(checkpoint.draft, revisionKey, downloaded.bytes);
         }
         const bytes = yield* entry.readDownload(checkpoint);
-        const normalized = yield* normalizeOnshapeExport(bytes);
+        const normalized = gltf ? yield* normalizeOnshapeExport(bytes) : bytes;
         const geometry = yield* Effect.try({
-          try: () => readOnshapeExportGeometry(checkpoint.draft, normalized, true),
+          try: () =>
+            gltf
+              ? readOnshapeExportGeometry(checkpoint.draft, normalized, true)
+              : readOnshapeThreeMf(
+                  checkpoint.draft,
+                  bytes,
+                  references &&
+                    new Map(
+                      checkpoint.draft.parts.flatMap((p) => {
+                        const value = references.get(
+                          snapshotGeometryKey({
+                            ...p.source,
+                            tessellationProfile: "identity-reference",
+                          }),
+                        );
+                        return value ? [[p.geometryKey, value] as const] : [];
+                      }),
+                    ),
+                ),
           catch: geometryFailure,
         });
         const draft = checkpoint.draft;
@@ -307,6 +346,74 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         yield* entry.write({ phase: "complete", revisionKey, snapshotId: manifest.snapshotId });
         return manifest;
       }),
+    );
+  });
+
+  const referenceKey = (part: CadSnapshotDraft["parts"][number]) =>
+    snapshotGeometryKey({ ...part.source, tessellationProfile: "identity-reference" });
+  const referencesFrom = Effect.fn(function* (
+    context: CadSnapshotContext,
+    manifests: readonly CadSnapshotManifest[],
+  ) {
+    const references = new Map<string, Uint8Array>();
+    for (const manifest of manifests) {
+      if (
+        manifest.rootId !== context.rootId ||
+        manifest.root.microversionId !== context.root.microversionId ||
+        manifest.projectId !== context.projectId
+      )
+        continue;
+      yield* store.withPinned(manifest.snapshotId, (_, readAsset) =>
+        Effect.gen(function* () {
+          for (const part of manifest.parts) {
+            const asset = manifest.assets.find((a) => a.geometryKey === part.geometryKey);
+            if (asset && !references.has(referenceKey(part)))
+              references.set(referenceKey(part), yield* readAsset(asset.sha256));
+          }
+        }),
+      );
+    }
+    return references;
+  });
+  // Source-ID geometry is the conservative fallback for coincident names, hidden
+  // bodies and unsupported 3MF identity mappings. Reuse only the exact revision.
+  return Effect.fn("OnshapeBulkAcquisition.acquireWithIdentity")(function* (
+    context: CadSnapshotContext,
+    source: OnshapeProjectSource,
+  ) {
+    const manifests: CadSnapshotManifest[] = [];
+    for (const summary of yield* store.list()) {
+      if (summary.projectId !== context.projectId || summary.rootId !== context.rootId) continue;
+      const manifest = yield* store.load(summary.snapshotId);
+      if (manifest.root.tessellationProfile !== ONSHAPE_BULK_TESSELLATION_PROFILE)
+        manifests.push(manifest);
+    }
+    let references = yield* referencesFrom(context, manifests);
+
+    // Draft geometry keys differ only by the export profile; remap references as
+    // the draft is read, without changing the source revision or part identity.
+    const attempt = (refs: ReadonlyMap<string, Uint8Array>) => acquire(context, source, refs);
+    return yield* attempt(references).pipe(
+      Effect.catchTag("OnshapeThreeMfIdentityError", () =>
+        Effect.gen(function* () {
+          const fallbackContext = {
+            ...context,
+            snapshotId: yield* decodeSnapshotId(NodeCrypto.randomUUID()).pipe(
+              Effect.mapError(geometryFailure),
+            ),
+            root: {
+              ...context.root,
+              tessellationProfile: "onshape-bulk-gltf-coarse-meters-z-up-v1",
+            },
+          };
+          const fallback = yield* acquire(fallbackContext, source, undefined, true);
+          references = yield* referencesFrom(context, [fallback]);
+          return yield* attempt(references);
+        }),
+      ),
+      Effect.catchTag("OnshapeThreeMfIdentityError", () =>
+        Effect.fail(new CadGeometryError({ reason: "invalid-geometry" })),
+      ),
     );
   });
 });

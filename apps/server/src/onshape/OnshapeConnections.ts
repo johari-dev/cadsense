@@ -557,9 +557,10 @@ export const make = Effect.gen(function* () {
       // Export jobs create external files only; this adapter never edits the source document.
       if (
         input.method === "POST" &&
-        (!/^\/api\/v17\/(?:assemblies|partstudios)\/d\/[a-f0-9]{24}\/[wv]\/[a-f0-9]{24}\/e\/[a-f0-9]{24}\/export\/gltf$/.test(
+        (!/^\/api\/v17\/(?:assemblies|partstudios)\/d\/[a-f0-9]{24}\/[wv]\/[a-f0-9]{24}\/e\/[a-f0-9]{24}\/(?:export\/gltf|translations)$/.test(
           input.path,
         ) ||
+          (input.path.endsWith("/translations") && input.body.formatName !== "3MF") ||
           input.body.storeInDocument !== false ||
           input.body.notifyUser !== false)
       )

@@ -29,6 +29,30 @@ const layer = (fetch: FetchHandler) =>
   );
 
 describe("bounded Onshape JSON transport", () => {
+  it.effect("counts successful and redirect credits separately from failed requests", () => {
+    const statuses = [200, 307, 429, 500];
+    const metrics: OnshapeTransport.OnshapeApiMetrics = { requests: 0 };
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      const { responseType: _responseType, ...headRequest } = request;
+      for (const _ of statuses.slice()) yield* transport.execute(headRequest);
+      assert.equal(metrics.requests, 4);
+      assert.equal(metrics.quotaCountedRequests, 2);
+      assert.lengthOf(metrics.quotaObservations!, 4);
+      assert.equal(metrics.quotaObservations![0]!.header, "x-rate-limit-remaining");
+    }).pipe(
+      Effect.provideService(OnshapeTransport.OnshapeRequestMetrics, metrics),
+      Effect.provide(
+        layer(
+          async () =>
+            new Response(null, {
+              status: statuses.shift()!,
+              headers: { "x-rate-limit-remaining": "400", authorization: "not-recorded" },
+            }),
+        ),
+      ),
+    );
+  });
   it.effect(
     "accepts an assembly export above the per-part limit without changing the default limit",
     () => {

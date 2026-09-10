@@ -20,8 +20,8 @@ import {
   bulkInput,
   bulkMicroversion,
   translationDone,
-  encodeFixture,
 } from "./testFixtures/bulkExport.ts";
+import { threeMfArchive, threeMfXml } from "./testFixtures/threeMf.ts";
 
 const unused = () => Effect.die("Unexpected operation");
 const makeHarness = (count: number) =>
@@ -37,6 +37,7 @@ const makeHarness = (count: number) =>
     };
     const statusRead = yield* Deferred.make<void>();
     let pins = 0;
+    let gltf = false;
     const store = yield* Store.make.pipe(
       Effect.provideService(Store.CadDiskSpace, {
         availableBytes: () => Effect.succeed(10 * 1024 ** 3),
@@ -58,7 +59,10 @@ const makeHarness = (count: number) =>
                   ? "999999999999999999999999"
                   : bulkMicroversion,
             };
-          if (request.method === "POST") return translationDone;
+          if (request.method === "POST") {
+            gltf = request.path.endsWith("/export/gltf");
+            return translationDone;
+          }
           if (request.path.includes("/translations/")) {
             yield* Deferred.succeed(statusRead, undefined);
             return options.activeTranslation
@@ -74,20 +78,8 @@ const makeHarness = (count: number) =>
           requests.push(request);
           if (options.failDownload) return yield* new OnshapeRateLimitError({});
           if (request.beforeChunk) yield* request.beforeChunk(fixture.bytes.length);
-          const bytes =
-            options.omitBody && request.path.includes("/externaldata/")
-              ? new TextEncoder().encode(
-                  encodeFixture({
-                    ...fixture.gltf,
-                    nodes: fixture.gltf.nodes.map((node, i) =>
-                      i === count * 2 && "children" in node
-                        ? { ...node, children: node.children.slice(1) }
-                        : node,
-                    ),
-                  }),
-                )
-              : fixture.bytes;
-          return { bytes, contentType: "model/gltf+json" };
+          const bytes = gltf ? fixture.bytes : threeMfArchive(threeMfXml(count, options.omitBody));
+          return { bytes, contentType: "model/3mf" };
         }),
     });
     // Rebuild both services for every attempt to test actual on-disk recovery, not an in-memory memo.
@@ -126,21 +118,30 @@ const harness = <A, E, R>(
   );
 
 describe("bulk snapshot acquisition", () => {
-  it.effect("fetches absent source bodies at their pinned version before publishing", () =>
-    harness(
-      (h) =>
-        Effect.gen(function* () {
-          h.options.omitBody = true;
-          const manifest = yield* h.acquire();
-          assert.lengthOf(manifest.assets, 2);
-          const fallback = h.requests.filter((request) => request.path.includes("/partid/"));
-          assert.lengthOf(fallback, 1);
-          assert.include(fallback[0]!.path, "/v/777777777777777777777777/");
-          assert.include(fallback[0]!.query, "linkDocumentId=");
-          assert.include(fallback[0]!.path, "/partid/part-0/gltf");
-        }),
-      2,
-    ),
+  it.effect(
+    "fills omitted 3MF bodies with one coarse identity export and resumes without resubmission",
+    () =>
+      harness(
+        (h) =>
+          Effect.gen(function* () {
+            h.options.omitBody = true;
+            const result = yield* h.acquire();
+            assert.lengthOf(result.assets, 2);
+            const exports = h.requests.filter((request) => request.method === "POST");
+            assert.lengthOf(exports, 2);
+            const identity = exports.find((request) => request.path.endsWith("/export/gltf"));
+            assert.isDefined(identity);
+            assert.deepInclude("body" in identity! ? identity.body : {}, {
+              meshParams: { resolution: "COARSE", unit: "METER" },
+            });
+            const before = h.requests.length;
+            assert.equal((yield* h.acquire()).snapshotId, result.snapshotId);
+            assert.equal(h.requests.length - before, 1);
+            const fallback = h.requests.filter((request) => request.path.includes("/partid/"));
+            assert.lengthOf(fallback, 0);
+          }),
+        2,
+      ),
   );
   it.effect(
     "downloads 400 distinct parts in five calls and unchanged sync uses one revision check",
@@ -157,6 +158,11 @@ describe("bulk snapshot acquisition", () => {
           );
           const post = h.requests.find((request) => request.method === "POST");
           assert.isDefined(post);
+          assert.include(post?.path, "/translations");
+          assert.deepInclude("body" in post! ? post.body : {}, {
+            formatName: "3MF",
+            resolution: "coarse",
+          });
           const second = yield* h.acquire();
           assert.equal(second.snapshotId, first.snapshotId);
           assert.lengthOf(h.requests, 6);
