@@ -24,6 +24,8 @@ const descriptions = {
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
+  cad_find_parts:
+    "Search the selected cached snapshot using snapshotId and expectedRevision from cad_context. nameQuery and materialName are case-insensitive substrings; bodyType is a case-insensitive exact match. sourcePartKey finds repeated instances of the same source/configuration. kind defaults to part; use all to include assemblies. visibility defaults to all and uses effective visibility, including hidden ancestors, isolation and suppression. All supplied filters combine. Results contain stable occurrence IDs, source identity and assembly paths. No filters returns a bounded page. limit defaults to 25, maximum 50. Continue with nextCursor and the same filters, limit, snapshot and revision. Order follows the immutable manifest. Missing metadata and material names are explicit. Text fields are capped at 256 characters; paths retain the nearest 16 ancestors, with truncation indicators. No geometry or network access; the view is unchanged.",
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -65,6 +67,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.context() };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
+    case "cad_find_parts":
+      return { result: yield* tools.findParts(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":
