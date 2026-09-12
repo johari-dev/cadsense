@@ -4,15 +4,27 @@ import { loadCadAssetDelivery } from "./CadAssetDelivery";
 const cache = vi.hoisted(() => ({
   complete: vi.fn(async () => false),
   invalidate: vi.fn(async () => {}),
+  corruptOriginal: false,
 }));
-vi.mock("./CadAssetRangeCache", async (original) => ({
-  ...(await original<typeof import("./CadAssetRangeCache")>()),
-  hasCachedCadAssetRanges: cache.complete,
-  invalidateCadAssetRanges: cache.invalidate,
-}));
+vi.mock("./CadAssetRangeCache", async (original) => {
+  const actual = await original<typeof import("./CadAssetRangeCache")>();
+  return {
+    ...actual,
+    hasCachedCadAssetRanges: cache.complete,
+    invalidateCadAssetRanges: cache.invalidate,
+    createCachedCadAssetRangeRequest: (
+      options: Parameters<typeof actual.createCachedCadAssetRangeRequest>[0],
+    ) => {
+      if (cache.corruptOriginal && !options.namespace.representation)
+        return async (start: number, end: number) => new Response(new Uint8Array(end - start + 1));
+      return actual.createCachedCadAssetRangeRequest(options);
+    },
+  };
+});
 afterEach(() => {
   vi.clearAllMocks();
   cache.complete.mockResolvedValue(false);
+  cache.corruptOriginal = false;
 });
 const namespace = {
   baseUrl: "https://cad.test",
@@ -20,6 +32,102 @@ const namespace = {
   snapshotId: "snapshot",
 };
 const body = new TextEncoder().encode("prefix-bin");
+
+it("rejects same-length corrupt original cache bytes and retries through the live bundle", async () => {
+  const { hash, assets } = await fixture();
+  cache.complete.mockResolvedValue(true);
+  cache.corruptOriginal = true;
+  const published: Uint8Array[] = [];
+  const request = vi.fn(async () => new Response(body));
+  await loadCadAssetDelivery({
+    assets,
+    namespace,
+    signal: new AbortController().signal,
+    request,
+    load: async (reader) => {
+      try {
+        published.push(new Uint8Array(await reader(hash)));
+      } catch (error) {
+        // The production renderer wraps read failures as invalid-snapshot errors.
+        throw new Error("invalid-snapshot", { cause: error });
+      }
+    },
+    onProgress: () => {},
+  });
+  expect(published).toEqual([body]);
+  expect(request).toHaveBeenCalledExactlyOnceWith("bundle?start=0&end=9", expect.any(AbortSignal));
+  expect(cache.invalidate).toHaveBeenCalledExactlyOnceWith(namespace);
+});
+
+it("does not publish corrupt original geometry when the live retry also fails integrity", async () => {
+  const { hash, assets } = await fixture();
+  cache.complete.mockResolvedValue(true);
+  cache.corruptOriginal = true;
+  const published = vi.fn();
+  const request = vi.fn(async () => new Response(new Uint8Array(body.length)));
+  await expect(
+    loadCadAssetDelivery({
+      assets,
+      namespace,
+      signal: new AbortController().signal,
+      request,
+      load: async (reader) => {
+        published(await reader(hash));
+      },
+      onProgress: () => {},
+    }),
+  ).rejects.toThrow(/hash mismatch/);
+  expect(published).not.toHaveBeenCalled();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it("does not retry or discard the original cache for a renderer failure", async () => {
+  const { hash, assets } = await fixture();
+  cache.complete.mockResolvedValue(true);
+  const request = vi.fn(async () => new Response(body));
+  await expect(
+    loadCadAssetDelivery({
+      assets,
+      namespace,
+      signal: new AbortController().signal,
+      request,
+      load: async (reader) => {
+        await reader(hash);
+        throw new Error("graphics context unavailable");
+      },
+      onProgress: () => {},
+    }),
+  ).rejects.toThrow("graphics context unavailable");
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(cache.invalidate).not.toHaveBeenCalled();
+});
+
+it("does not retry corrupt original geometry after cancellation", async () => {
+  const { hash, assets } = await fixture();
+  cache.complete.mockResolvedValue(true);
+  cache.corruptOriginal = true;
+  const controller = new AbortController();
+  const request = vi.fn(async () => new Response(body));
+  await expect(
+    loadCadAssetDelivery({
+      assets,
+      namespace,
+      signal: controller.signal,
+      request,
+      load: async (reader) => {
+        try {
+          await reader(hash);
+        } catch (error) {
+          controller.abort();
+          throw error;
+        }
+      },
+      onProgress: () => {},
+    }),
+  ).rejects.toThrow(/hash mismatch/);
+  expect(request).not.toHaveBeenCalled();
+  expect(cache.invalidate).not.toHaveBeenCalled();
+});
 async function fixture() {
   const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", body))]
     .map((n) => n.toString(16).padStart(2, "0"))

@@ -1,6 +1,7 @@
 import type { CadTransferIndex } from "@cadsense/shared/cadTransfer";
 import { readCadAssetBundle } from "./CadAssetBundle";
 import { decodeCadTransferBin } from "./CadTransferDecoder";
+import { verifyCadAssetBytes } from "./CadAssetIntegrity";
 
 const MAX_PREFIX_BYTES = 32 * 1024 ** 2;
 const MAX_SHARED_BIN_BYTES = 64 * 1024 ** 2;
@@ -66,12 +67,8 @@ export function readCadTransferAssets(
       );
       bytes.set(bin, asset.prefix.byteLength);
       if (--remaining[asset.bin]! === 0) bins.delete(asset.bin);
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
-      const actual = [...new Uint8Array(digest)]
-        .map((n) => n.toString(16).padStart(2, "0"))
-        .join("");
+      await verifyCadAssetBytes(bytes.buffer, hash);
       assertActive();
-      if (actual !== hash) throw new Error("CAD transfer asset hash mismatch");
       onBytes(bytes.byteLength);
       return bytes.buffer;
     });

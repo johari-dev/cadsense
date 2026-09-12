@@ -25,6 +25,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { ServerConfig } from "../config.ts";
@@ -576,6 +577,12 @@ it.effect(
         view: initialCadView(h.snapshot, 0),
       });
       yield* h.dispatch({
+        type: "thread.cad.user-view.set",
+        threadId,
+        expectedRevision: null,
+        view: initialCadView(h.snapshot, 0),
+      });
+      yield* h.dispatch({
         type: "thread.cad.capture.record",
         threadId,
         contextId,
@@ -628,9 +635,32 @@ it.effect(
         runtimeMode: "full-access",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       });
+      const sql = yield* SqlClient.SqlClient;
+      const staleCadRows = yield* sql`SELECT
+        (SELECT COUNT(*) FROM projection_cad_captures WHERE thread_id=${threadId}) AS captures,
+        (SELECT COUNT(*) FROM projection_cad_sessions WHERE thread_id=${threadId}) AS sessions,
+        (SELECT COUNT(*) FROM projection_cad_user_views WHERE thread_id=${threadId}) AS user_views`;
+      assert.deepStrictEqual(staleCadRows[0], { captures: 0, sessions: 0, user_views: 0 });
       assert.equal(
         (yield* a.invoke("cad_comments_list", {}).pipe(Effect.flip)).reason,
         "comment-unavailable",
+      );
+      const recreated = yield* h.service.activate(threadId, contextId, TurnId.make("recreated"));
+      assert.equal(
+        (yield* recreated
+          .invoke("cad_comment_locate", {
+            captureId,
+            picks: [
+              {
+                pickKey: "stale-hole",
+                intendedOccurrenceId: h.snapshot.nodes.at(-1)!.id,
+                x: 640,
+                y: 480,
+              },
+            ],
+          })
+          .pipe(Effect.flip)).reason,
+        "capture-unavailable",
       );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );

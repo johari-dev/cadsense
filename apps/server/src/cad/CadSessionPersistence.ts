@@ -63,6 +63,16 @@ export const projectCadSessionEvent = Effect.fn("projectCadSessionEvent")(
     const sql = yield* SqlClient.SqlClient;
     yield* projectCadCommentEvent(event);
     switch (event.type) {
+      case "thread.created": {
+        const threadId = event.payload.threadId;
+        // A recreated thread is a new owner even when it reuses the durable ID.
+        // Clear every CAD projection that could otherwise expose the prior
+        // incarnation's view or authorize one of its captures.
+        yield* sql`DELETE FROM projection_cad_captures WHERE thread_id=${threadId}`;
+        yield* sql`DELETE FROM projection_cad_sessions WHERE thread_id=${threadId}`;
+        yield* sql`DELETE FROM projection_cad_user_views WHERE thread_id=${threadId}`;
+        return;
+      }
       case "thread.cad-capture-recorded": {
         const record = event.payload;
         const camera = encodeCamera({ kind: "pose", pose: record.cameraPose, fit: null });
