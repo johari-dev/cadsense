@@ -139,6 +139,9 @@ const handle = Effect.gen(function* () {
         };
     if (range) {
       if (acceptsPreparedCadEncoding(request.headers["accept-encoding"])) {
+        preparedCadTransfers.retain(bundle, scene, () =>
+          runPromise(Deferred.await(scene.released)),
+        );
         const encoded = yield* Effect.tryPromise(() =>
           preparedCadTransfers.get(bundle, selected, readAsset),
         );
@@ -202,6 +205,7 @@ const handle = Effect.gen(function* () {
     const bundle = createCadBundlePlan(scene.manifest);
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(runtimeContext);
+    preparedCadTransfers.retain(bundle, scene, () => runPromise(Deferred.await(scene.released)));
     void preparedCadTransfers.warm(bundle, (sha256) => runPromise(scene.readAsset(sha256)));
   }
   return yield* HttpServerResponse.json(scene.manifest, { headers });

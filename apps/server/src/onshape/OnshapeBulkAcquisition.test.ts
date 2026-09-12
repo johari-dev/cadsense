@@ -14,6 +14,7 @@ import {
   type OnshapeReadRequest,
 } from "./OnshapeConnections.ts";
 import * as Acquisition from "./OnshapeSnapshotAcquisition.ts";
+import { ONSHAPE_BULK_TESSELLATION_PROFILE } from "./OnshapeBulkAcquisition.ts";
 import * as SyncState from "./OnshapeSyncState.ts";
 import {
   bulkFixture,
@@ -38,6 +39,10 @@ const makeHarness = (count: number) =>
     const statusRead = yield* Deferred.make<void>();
     let pins = 0;
     let gltf = false;
+    let activeReferencePins = 0;
+    let liveReferenceAssets = 0;
+    let maxLiveReferenceAssets = 0;
+    let referenceAssetReads = 0;
     const store = yield* Store.make.pipe(
       Effect.provideService(Store.CadDiskSpace, {
         availableBytes: () => Effect.succeed(10 * 1024 ** 3),
@@ -93,15 +98,64 @@ const makeHarness = (count: number) =>
           Effect.provideService(SyncState.OnshapeSyncState, syncState),
           Effect.provideService(Store.CadSnapshotStore, {
             ...store,
+            putAsset: (bytes) =>
+              store.putAsset(bytes).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (liveReferenceAssets > 0) liveReferenceAssets--;
+                  }),
+                ),
+              ),
             publish: (manifest) =>
               options.failPublish
                 ? Effect.fail(new Store.CadSnapshotStoreError({ reason: "unavailable" }))
                 : store.publish(manifest),
+            withPinned: (snapshotId, use) =>
+              store.withPinned(snapshotId, (manifest, readAsset) => {
+                const tracksReference =
+                  manifest.root.tessellationProfile !== ONSHAPE_BULK_TESSELLATION_PROFILE;
+                const usePinned = use(manifest, (sha256) =>
+                  readAsset(sha256).pipe(
+                    Effect.tap(() =>
+                      tracksReference
+                        ? Effect.sync(() => {
+                            assert.isAbove(activeReferencePins, 0);
+                            referenceAssetReads++;
+                            liveReferenceAssets++;
+                            maxLiveReferenceAssets = Math.max(
+                              maxLiveReferenceAssets,
+                              liveReferenceAssets,
+                            );
+                          })
+                        : Effect.void,
+                    ),
+                  ),
+                );
+                return tracksReference
+                  ? Effect.sync(() => {
+                      activeReferencePins++;
+                    }).pipe(
+                      Effect.andThen(usePinned),
+                      Effect.ensuring(
+                        Effect.sync(() => {
+                          activeReferencePins--;
+                        }),
+                      ),
+                    )
+                  : usePinned;
+              }),
           }),
         );
         return yield* acquisition.acquire(bulkInput);
       });
-    return { acquire, requests, options, statusRead };
+    return {
+      acquire,
+      requests,
+      options,
+      statusRead,
+      maxLiveReferenceAssets: () => maxLiveReferenceAssets,
+      referenceAssetReads: () => referenceAssetReads,
+    };
   });
 const harness = <A, E, R>(
   use: (h: Effect.Success<ReturnType<typeof makeHarness>>) => Effect.Effect<A, E, R>,
@@ -142,6 +196,19 @@ describe("bulk snapshot acquisition", () => {
           }),
         2,
       ),
+  );
+  it.effect("keeps source-reference geometry bounded to one live asset", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          h.options.omitBody = true;
+          const result = yield* h.acquire();
+          assert.lengthOf(result.assets, 2);
+          assert.equal(h.maxLiveReferenceAssets(), 1);
+          assert.equal(h.referenceAssetReads(), 1);
+        }),
+      2,
+    ),
   );
   it.effect(
     "downloads 400 distinct parts in five calls and unchanged sync uses one revision check",

@@ -173,6 +173,7 @@ interface ReadyEntry {
 type Entry = PendingEntry | ReadyEntry;
 
 export interface PreparedCadTransferCache {
+  readonly retain: (plan: CadBundlePlan, owner: object, whenReleased: () => Promise<void>) => void;
   readonly get: (
     plan: CadBundlePlan,
     range: CadBundleRange,
@@ -184,6 +185,8 @@ export interface PreparedCadTransferCache {
     readonly bytes: number;
     readonly pendingEntries: number;
     readonly readyEntries: number;
+    readonly retainedIdentities: number;
+    readonly warmJobs: number;
   };
 }
 
@@ -225,7 +228,16 @@ export const makePreparedCadTransferCache = (options?: {
     assertPositiveInteger(value, name);
   const encode = options?.encode ?? brotliEncode;
   const entries = new Map<string, Entry>();
-  const activeIdentities = new Map<string, string>();
+  interface Retention {
+    count: number;
+  }
+  interface WarmJob {
+    readonly retention: Retention;
+    readonly promise: Promise<void>;
+  }
+  const retentions = new Map<string, Retention>();
+  let owners = new WeakMap<object, Set<string>>();
+  const warmJobs = new Map<string, WarmJob>();
   let retainedBytes = 0;
   let clock = 0;
   let activePreparations = 0;
@@ -254,13 +266,43 @@ export const makePreparedCadTransferCache = (options?: {
     }
   };
   const activate = (plan: CadBundlePlan) => {
-    const previous = activeIdentities.get(plan.snapshotId);
-    if (previous === plan.identity) return;
-    activeIdentities.set(plan.snapshotId, plan.identity);
-    if (previous === undefined) return;
     for (const [key, entry] of entries)
       if (entry.snapshotId === plan.snapshotId && entry.identity !== plan.identity)
         remove(key, entry);
+  };
+  const retain: PreparedCadTransferCache["retain"] = (plan, owner, whenReleased) => {
+    let identities = owners.get(owner);
+    if (identities?.has(plan.identity)) return;
+    if (!identities) {
+      identities = new Set();
+      owners.set(owner, identities);
+    }
+    // Keep this tombstone for the owner's lifetime so a released scene cannot
+    // reacquire cache ownership through a late request.
+    identities.add(plan.identity);
+    activate(plan);
+    let retention = retentions.get(plan.identity);
+    if (!retention) {
+      retention = { count: 0 };
+      retentions.set(plan.identity, retention);
+    }
+    retention.count++;
+    let active = true;
+    const release = () => {
+      if (!active) return;
+      active = false;
+      retention.count--;
+      if (retention.count !== 0 || retentions.get(plan.identity) !== retention) return;
+      retentions.delete(plan.identity);
+      const warming = warmJobs.get(plan.identity);
+      if (warming?.retention === retention) warmJobs.delete(plan.identity);
+      for (const [key, entry] of entries) if (entry.identity === plan.identity) remove(key, entry);
+    };
+    try {
+      void whenReleased().then(release, release);
+    } catch {
+      release();
+    }
   };
   const prepare = async (range: CadBundleRange, readAsset: ReadAsset) => {
     if (activePreparations >= maxConcurrentPreparations)
@@ -273,7 +315,12 @@ export const makePreparedCadTransferCache = (options?: {
       preparationWaiters.shift()?.();
     }
   };
-  const get: PreparedCadTransferCache["get"] = (plan, range, readAsset) => {
+  const getRetained = (
+    plan: CadBundlePlan,
+    range: CadBundleRange,
+    readAsset: ReadAsset,
+    retention: Retention,
+  ) => {
     activate(plan);
     const key = `${ENCODING_VERSION}:${plan.identity}:${range.start}-${range.end}`;
     const existing = entries.get(key);
@@ -292,7 +339,7 @@ export const makePreparedCadTransferCache = (options?: {
     };
     const promise = prepare(range, readAsset).then(
       (result) => {
-        if (entries.get(key) !== entry || activeIdentities.get(plan.snapshotId) !== plan.identity)
+        if (entries.get(key) !== entry || retentions.get(plan.identity) !== retention)
           return result;
         if (result.byteLength > maxBytes) {
           entries.delete(key);
@@ -323,23 +370,43 @@ export const makePreparedCadTransferCache = (options?: {
     entries.set(key, entry);
     return promise;
   };
+  const get: PreparedCadTransferCache["get"] = (plan, range, readAsset) => {
+    const retention = retentions.get(plan.identity);
+    return retention ? getRetained(plan, range, readAsset, retention) : prepare(range, readAsset);
+  };
   const warm: PreparedCadTransferCache["warm"] = async (plan, readAsset) => {
-    activate(plan);
+    const retention = retentions.get(plan.identity);
+    if (!retention) return;
+    const existing = warmJobs.get(plan.identity);
+    if (existing?.retention === retention) return existing.promise;
     if (plan.totalBytes > maxWarmInputBytes || plan.ranges.length > maxEntries) return;
-    let next = 0;
-    const worker = async () => {
-      while (next < plan.ranges.length) {
-        const range = plan.ranges[next++]!;
-        await get(plan, range, readAsset).catch(() => undefined);
-      }
+    const job: WarmJob = {
+      retention,
+      promise: undefined as never,
     };
-    await Promise.all(
-      Array.from({ length: Math.min(warmConcurrency, plan.ranges.length) }, () => worker()),
-    );
+    const promise = (async () => {
+      let next = 0;
+      const worker = async () => {
+        while (retentions.get(plan.identity) === retention && next < plan.ranges.length) {
+          const range = plan.ranges[next++]!;
+          await getRetained(plan, range, readAsset, retention).catch(() => undefined);
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(warmConcurrency, plan.ranges.length) }, () => worker()),
+      );
+    })().finally(() => {
+      if (warmJobs.get(plan.identity) === job) warmJobs.delete(plan.identity);
+    });
+    Object.assign(job, { promise });
+    warmJobs.set(plan.identity, job);
+    return promise;
   };
   const clear = () => {
     entries.clear();
-    activeIdentities.clear();
+    retentions.clear();
+    owners = new WeakMap();
+    warmJobs.clear();
     retainedBytes = 0;
   };
   const stats = () => {
@@ -349,9 +416,15 @@ export const makePreparedCadTransferCache = (options?: {
       if (entry.state === "pending") pendingEntries++;
       else readyEntries++;
     }
-    return { bytes: retainedBytes, pendingEntries, readyEntries };
+    return {
+      bytes: retainedBytes,
+      pendingEntries,
+      readyEntries,
+      retainedIdentities: retentions.size,
+      warmJobs: warmJobs.size,
+    };
   };
-  return { get, warm, clear, stats };
+  return { retain, get, warm, clear, stats };
 };
 
 export const preparedCadTransfers = makePreparedCadTransferCache();

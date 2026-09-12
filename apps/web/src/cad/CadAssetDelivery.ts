@@ -65,49 +65,45 @@ export async function loadCadAssetDelivery(options: CadAssetDeliveryOptions) {
     }
   };
   const original = async () => {
-    const cachedAttempt = new AbortController();
-    let cachedIntegrityFailed = false;
-    const abortCachedAttempt = () => cachedAttempt.abort(signal.reason);
-    signal.addEventListener("abort", abortCachedAttempt, { once: true });
-    const loadOriginal = async (useCache: boolean) => {
-      if (signal.aborted) throw signal.reason;
-      resetProgress();
-      const readSignal = useCache ? cachedAttempt.signal : signal;
-      const live = (start: number, end: number) =>
-        request(`bundle?start=${start}&end=${end}`, readSignal);
-      const readAsset = readCadAssetBundle(
-        assets,
-        useCache
-          ? createCachedCadAssetRangeRequest({
-              namespace,
-              expectedTotalBytes: total,
-              signal: readSignal,
-              request: live,
-            })
-          : live,
-        onBytes,
-      );
-      await load(async (hash) => {
-        const bytes = await readAsset(hash);
-        try {
-          await verifyCadAssetBytes(bytes, hash);
-        } catch (error) {
-          if (useCache && error instanceof CadAssetIntegrityError) cachedIntegrityFailed = true;
-          throw error;
-        }
+    for (let retry = 0; retry < 2; retry++) {
+      const attempt = new AbortController();
+      let integrityFailed = false;
+      const onAbort = () => attempt.abort(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
         if (signal.aborted) throw signal.reason;
-        return bytes;
-      });
-    };
-    try {
-      await loadOriginal(true);
-    } catch (error) {
-      cachedAttempt.abort();
-      if (signal.aborted || !cachedIntegrityFailed) throw error;
-      void invalidateCadAssetRanges(namespace);
-      await loadOriginal(false);
-    } finally {
-      signal.removeEventListener("abort", abortCachedAttempt);
+        resetProgress();
+        const readAsset = readCadAssetBundle(
+          assets,
+          createCachedCadAssetRangeRequest({
+            namespace,
+            expectedTotalBytes: total,
+            signal: attempt.signal,
+            request: (start, end) => request(`bundle?start=${start}&end=${end}`, attempt.signal),
+            skipCacheRead: retry > 0,
+          }),
+          onBytes,
+        );
+        await load(async (hash) => {
+          const bytes = await readAsset(hash);
+          try {
+            await verifyCadAssetBytes(bytes, hash);
+          } catch (error) {
+            if (error instanceof CadAssetIntegrityError) integrityFailed = true;
+            throw error;
+          }
+          if (signal.aborted) throw signal.reason;
+          return bytes;
+        });
+        return;
+      } catch (error) {
+        attempt.abort();
+        if (signal.aborted || !integrityFailed) throw error;
+        void invalidateCadAssetRanges(namespace);
+        if (retry > 0) throw error;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
     }
   };
   if (total === 0 || (await hasCachedCadAssetRanges(namespace, total))) {

@@ -17,7 +17,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadGeometryError, normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import { batchOnshapeGeometry } from "./OnshapeGeometryBatching.ts";
-import { CadSnapshotStore } from "../cad/CadSnapshotStore.ts";
+import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import {
   OnshapeConnections,
@@ -69,6 +69,9 @@ const geometryFailure = (error: unknown) =>
     : new CadGeometryError({
         reason: error instanceof CadSceneBudgetError ? error.reason : "invalid-geometry",
       });
+type GeometryReference = {
+  readonly read: () => Effect.Effect<Uint8Array, CadSnapshotStoreError>;
+};
 
 /** One export job per root, with bounded polling and durable resume on the next explicit sync. */
 export const makeBulkAcquisition = Effect.gen(function* () {
@@ -78,7 +81,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
   const acquire = Effect.fn("OnshapeBulkAcquisition.acquire")(function* (
     context: CadSnapshotContext,
     source: OnshapeProjectSource,
-    references?: ReadonlyMap<string, Uint8Array>,
+    references?: ReadonlyMap<string, GeometryReference>,
     gltf = false,
   ) {
     const { root } = context;
@@ -263,25 +266,36 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         }
         const bytes = yield* entry.readDownload(checkpoint);
         const normalized = gltf ? yield* normalizeOnshapeExport(bytes) : bytes;
+        const mappedReferences =
+          references &&
+          new Map(
+            checkpoint.draft.parts.flatMap((part) => {
+              const reference = references.get(
+                snapshotGeometryKey({
+                  ...part.source,
+                  tessellationProfile: "identity-reference",
+                }),
+              );
+              return reference ? [[part.geometryKey, reference] as const] : [];
+            }),
+          );
+        const readReference = (key: string) => {
+          const reference = mappedReferences?.get(key);
+          return reference
+            ? reference.read()
+            : Effect.fail(new CadGeometryError({ reason: "invalid-geometry" }));
+        };
         const geometry = yield* Effect.try({
           try: () =>
             gltf
-              ? readOnshapeExportGeometry(checkpoint.draft, normalized, true)
+              ? {
+                  ...readOnshapeExportGeometry(checkpoint.draft, normalized, true),
+                  usesReference: (_key: string) => false,
+                }
               : readOnshapeThreeMf(
                   checkpoint.draft,
                   bytes,
-                  references &&
-                    new Map(
-                      checkpoint.draft.parts.flatMap((p) => {
-                        const value = references.get(
-                          snapshotGeometryKey({
-                            ...p.source,
-                            tessellationProfile: "identity-reference",
-                          }),
-                        );
-                        return value ? [[p.geometryKey, value] as const] : [];
-                      }),
-                    ),
+                  mappedReferences && new Set(mappedReferences.keys()),
                 ),
           catch: geometryFailure,
         });
@@ -294,10 +308,12 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         for (const part of draft.parts) {
           if (!part.geometryRequired) continue;
           const extracted = geometry.has(part.geometryKey)
-            ? yield* Effect.try({
-                try: () => geometry.extract(part.geometryKey),
-                catch: geometryFailure,
-              })
+            ? geometry.usesReference(part.geometryKey)
+              ? yield* readReference(part.geometryKey)
+              : yield* Effect.try({
+                  try: () => geometry.extract(part.geometryKey),
+                  catch: geometryFailure,
+                })
             : yield* Effect.gen(function* () {
                 // Bulk exports can omit bodies. Fetch only absent source geometry,
                 // pinned to its inspected revision; never publish an incomplete scene.
@@ -351,30 +367,43 @@ export const makeBulkAcquisition = Effect.gen(function* () {
 
   const referenceKey = (part: CadSnapshotDraft["parts"][number]) =>
     snapshotGeometryKey({ ...part.source, tessellationProfile: "identity-reference" });
-  const referencesFrom = Effect.fn(function* (
+  const withReferences = <A, E, R>(
     context: CadSnapshotContext,
     manifests: readonly CadSnapshotManifest[],
-  ) {
-    const references = new Map<string, Uint8Array>();
-    for (const manifest of manifests) {
+    use: (references: ReadonlyMap<string, GeometryReference>) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | CadSnapshotStoreError, R> => {
+    const references = new Map<string, GeometryReference>();
+    const visit = (index: number): Effect.Effect<A, E | CadSnapshotStoreError, R> => {
+      const manifest = manifests[index];
+      if (!manifest) return use(references);
       if (
         manifest.rootId !== context.rootId ||
         manifest.root.microversionId !== context.root.microversionId ||
         manifest.projectId !== context.projectId
       )
-        continue;
-      yield* store.withPinned(manifest.snapshotId, (_, readAsset) =>
-        Effect.gen(function* () {
-          for (const part of manifest.parts) {
-            const asset = manifest.assets.find((a) => a.geometryKey === part.geometryKey);
-            if (asset && !references.has(referenceKey(part)))
-              references.set(referenceKey(part), yield* readAsset(asset.sha256));
-          }
-        }),
-      );
-    }
-    return references;
-  });
+        return visit(index + 1);
+      return store.withPinned(manifest.snapshotId, (pinned, readAsset) => {
+        const added: string[] = [];
+        for (const part of pinned.parts) {
+          const asset = pinned.assets.find(
+            (candidate) => candidate.geometryKey === part.geometryKey,
+          );
+          const key = referenceKey(part);
+          if (!asset || references.has(key)) continue;
+          references.set(key, { read: () => readAsset(asset.sha256) });
+          added.push(key);
+        }
+        return visit(index + 1).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              for (const key of added) references.delete(key);
+            }),
+          ),
+        );
+      });
+    };
+    return visit(0);
+  };
   // Source-ID geometry is the conservative fallback for coincident names, hidden
   // bodies and unsupported 3MF identity mappings. Reuse only the exact revision.
   return Effect.fn("OnshapeBulkAcquisition.acquireWithIdentity")(function* (
@@ -388,12 +417,11 @@ export const makeBulkAcquisition = Effect.gen(function* () {
       if (manifest.root.tessellationProfile !== ONSHAPE_BULK_TESSELLATION_PROFILE)
         manifests.push(manifest);
     }
-    let references = yield* referencesFrom(context, manifests);
-
     // Draft geometry keys differ only by the export profile; remap references as
     // the draft is read, without changing the source revision or part identity.
-    const attempt = (refs: ReadonlyMap<string, Uint8Array>) => acquire(context, source, refs);
-    return yield* attempt(references).pipe(
+    const attempt = (refs: ReadonlyMap<string, GeometryReference>) =>
+      acquire(context, source, refs);
+    return yield* withReferences(context, manifests, attempt).pipe(
       Effect.catchTag("OnshapeThreeMfIdentityError", () =>
         Effect.gen(function* () {
           const fallbackContext = {
@@ -407,8 +435,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             },
           };
           const fallback = yield* acquire(fallbackContext, source, undefined, true);
-          references = yield* referencesFrom(context, [fallback]);
-          return yield* attempt(references);
+          return yield* withReferences(context, [fallback], attempt);
         }),
       ),
       Effect.catchTag("OnshapeThreeMfIdentityError", () =>

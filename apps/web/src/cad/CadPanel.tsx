@@ -575,7 +575,11 @@ export function CadPanel({
       selection: { id: comment.id, target, request: (current.selection?.request ?? 0) + 1 },
     }));
     const manifest = view ? cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId) : null;
-    if (manifest && cadCommentModelDescriptor(manifest) === comment.modelDescriptor) return;
+    if (
+      (manifest && cadCommentModelDescriptor(manifest) === comment.modelDescriptor) ||
+      (!manifest && comment.snapshotId === view?.snapshotId)
+    )
+      return;
     if (!savedCurrent && currentView) {
       const currentManifest = cadVisibleViewer.peek(
         threadRef.environmentId,

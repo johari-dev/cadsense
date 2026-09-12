@@ -30,6 +30,9 @@ const removeTestState = async (stateDir: string) => {
     throw new Error("Unsafe test cleanup");
   await NodeFSP.rm(stateDir, { recursive: true, force: true });
 };
+const drainPromises = async () => {
+  for (let index = 0; index < 10; index++) await Promise.resolve();
+};
 const manifest = {
   snapshotId: "00000000-0000-4000-8000-000000000003",
   assets: [
@@ -293,6 +296,7 @@ describe("CAD panel binary route", () => {
 
   it("authorizes before reading and serves exact prepared Brotli ranges without public caching", async () => {
     let assetReads = 0;
+    const released = Deferred.makeUnsafe<void>();
     const panel = CadPanel.of({
       watch: () => Stream.empty,
       scene: () => Stream.empty,
@@ -301,8 +305,8 @@ describe("CAD panel binary route", () => {
         if (ticket.token !== token)
           return Effect.fail(new CadViewError({ reason: "capability-unavailable" }));
         return Effect.succeed({
-          cancel: undefined as never,
-          released: undefined as never,
+          cancel: released,
+          released,
           ticket,
           manifest,
           readAsset: () => {
@@ -355,7 +359,64 @@ describe("CAD panel binary route", () => {
       );
       expect(cached.status).toBe(200);
       expect(assetReads).toBe(1);
+      expect(preparedCadTransfers.stats().retainedIdentities).toBe(1);
+      Deferred.doneUnsafe(released, Effect.void);
+      await drainPromises();
+      expect(preparedCadTransfers.stats()).toEqual({
+        bytes: 0,
+        pendingEntries: 0,
+        readyEntries: 0,
+        retainedIdentities: 0,
+        warmJobs: 0,
+      });
     } finally {
+      Deferred.doneUnsafe(released, Effect.void);
+      await app.dispose();
+    }
+  });
+
+  it("releases manifest warming when its scene closes", async () => {
+    const released = Deferred.makeUnsafe<void>();
+    const panel = CadPanel.of({
+      watch: () => Stream.empty,
+      scene: () => Stream.empty,
+      releaseProject: () => Effect.void,
+      read: (ticket) =>
+        Effect.succeed({
+          cancel: released,
+          released,
+          ticket,
+          manifest,
+          readAsset: () => Effect.succeed(payload),
+        }),
+    });
+    const app = HttpRouter.toWebHandler(
+      routeLayer.pipe(
+        Layer.provideMerge(Layer.succeed(CadPanel, panel)),
+        Layer.provideMerge(NodeHttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
+      ),
+      { disableLogger: true },
+    );
+    try {
+      const response = await app.handler(
+        new Request(`http://localhost/api/cad-panel/${sceneId}`, {
+          headers: { "x-cad-panel-token": token, "accept-encoding": "br" },
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(preparedCadTransfers.stats().retainedIdentities).toBe(1);
+
+      Deferred.doneUnsafe(released, Effect.void);
+      await drainPromises();
+      expect(preparedCadTransfers.stats()).toEqual({
+        bytes: 0,
+        pendingEntries: 0,
+        readyEntries: 0,
+        retainedIdentities: 0,
+        warmJobs: 0,
+      });
+    } finally {
+      Deferred.doneUnsafe(released, Effect.void);
       await app.dispose();
     }
   });

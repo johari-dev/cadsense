@@ -1,21 +1,62 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
 import { loadCadAssetDelivery } from "./CadAssetDelivery";
+import { createCadAssetRangeCacheKey } from "./CadAssetRangeCache";
 
-const cache = vi.hoisted(() => ({
-  complete: vi.fn(async () => false),
-  invalidate: vi.fn(async () => {}),
-  corruptOriginal: false,
-}));
+const cache = vi.hoisted(() => {
+  const entries = new Map<
+    string,
+    { bytes: ArrayBuffer; range: string; byteLength: number; lastAccessed: number }
+  >();
+  const backend = {
+    entries,
+    async get(key: string) {
+      const entry = entries.get(key);
+      return entry ? { ...entry, bytes: entry.bytes.slice(0) } : null;
+    },
+    async list() {
+      return [...entries].map(([key, entry]) => ({
+        key,
+        byteLength: entry.byteLength,
+        lastAccessed: entry.lastAccessed,
+      }));
+    },
+    async set(
+      key: string,
+      entry: { bytes: ArrayBuffer; range: string; byteLength: number; lastAccessed: number },
+    ) {
+      entries.set(key, { ...entry, bytes: entry.bytes.slice(0) });
+    },
+    async delete(key: string) {
+      entries.delete(key);
+    },
+  };
+  return {
+    backend,
+    complete: vi.fn(async () => false),
+    invalidate: vi.fn(),
+    corruptOriginal: false,
+    useBackend: false,
+  };
+});
 vi.mock("./CadAssetRangeCache", async (original) => {
   const actual = await original<typeof import("./CadAssetRangeCache")>();
   return {
     ...actual,
     hasCachedCadAssetRanges: cache.complete,
-    invalidateCadAssetRanges: cache.invalidate,
+    invalidateCadAssetRanges: (
+      namespace: Parameters<typeof actual.invalidateCadAssetRanges>[0],
+    ) => {
+      cache.invalidate(namespace);
+      return cache.useBackend
+        ? actual.invalidateCadAssetRanges(namespace, cache.backend)
+        : Promise.resolve();
+    },
     createCachedCadAssetRangeRequest: (
       options: Parameters<typeof actual.createCachedCadAssetRangeRequest>[0],
     ) => {
-      if (cache.corruptOriginal && !options.namespace.representation)
+      if (cache.useBackend)
+        return actual.createCachedCadAssetRangeRequest({ ...options, backend: cache.backend });
+      if (cache.corruptOriginal && !options.namespace.representation && !options.skipCacheRead)
         return async (start: number, end: number) => new Response(new Uint8Array(end - start + 1));
       return actual.createCachedCadAssetRangeRequest(options);
     },
@@ -25,6 +66,8 @@ afterEach(() => {
   vi.clearAllMocks();
   cache.complete.mockResolvedValue(false);
   cache.corruptOriginal = false;
+  cache.useBackend = false;
+  cache.backend.entries.clear();
 });
 const namespace = {
   baseUrl: "https://cad.test",
@@ -78,6 +121,40 @@ it("does not publish corrupt original geometry when the live retry also fails in
     }),
   ).rejects.toThrow(/hash mismatch/);
   expect(published).not.toHaveBeenCalled();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+it("removes write-through recovery bytes when the live retry also fails integrity", async () => {
+  const { hash, assets } = await fixture();
+  cache.complete.mockResolvedValue(true);
+  cache.useBackend = true;
+  const key = createCadAssetRangeCacheKey(namespace, 0, body.length - 1);
+  cache.backend.entries.set(key, {
+    bytes: new Uint8Array(body.length).buffer,
+    range: `bytes 0-${body.length - 1}/${body.length}`,
+    byteLength: body.length,
+    lastAccessed: 0,
+  });
+  const request = vi.fn(
+    async () =>
+      new Response(new Uint8Array(body.length), {
+        headers: { "x-cad-bundle-range": `bytes 0-${body.length - 1}/${body.length}` },
+      }),
+  );
+  await expect(
+    loadCadAssetDelivery({
+      assets,
+      namespace,
+      signal: new AbortController().signal,
+      request,
+      load: async (reader) => {
+        await reader(hash);
+      },
+      onProgress: () => {},
+    }),
+  ).rejects.toThrow(/hash mismatch/);
+  await vi.waitFor(() => expect(cache.backend.entries.size).toBe(0));
+  expect(cache.invalidate).toHaveBeenCalledTimes(2);
   expect(request).toHaveBeenCalledTimes(1);
 });
 

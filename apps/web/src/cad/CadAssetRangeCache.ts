@@ -60,6 +60,8 @@ export interface CachedCadAssetRangeRequestOptions {
   readonly maxPendingWrites?: number;
   readonly cacheReadTimeoutMs?: number;
   readonly cacheWriteWaitMs?: number;
+  /** Integrity recovery bypasses stale reads while repopulating the same bounded cache. */
+  readonly skipCacheRead?: boolean;
   readonly now?: () => number;
 }
 
@@ -100,13 +102,14 @@ export function createCadAssetRangeCacheKey(
 export async function hasCachedCadAssetRanges(
   namespace: CadAssetRangeCacheNamespace,
   total: number,
+  backend: CadAssetRangeCacheBackend = getSharedIndexedDbBackend(),
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const records = await Promise.race([
-      getSharedIndexedDbBackend().list(),
+      backend.list(),
       new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), 250);
+        timer = setTimeout(() => resolve(null), DEFAULT_CAD_ASSET_RANGE_CACHE_READ_TIMEOUT_MS);
       }),
     ]);
     if (!records) return false;
@@ -125,8 +128,10 @@ export async function hasCachedCadAssetRanges(
 }
 
 /** A failed integrity check invalidates only this derived representation, never other models. */
-export async function invalidateCadAssetRanges(namespace: CadAssetRangeCacheNamespace) {
-  const backend = getSharedIndexedDbBackend();
+export async function invalidateCadAssetRanges(
+  namespace: CadAssetRangeCacheNamespace,
+  backend: CadAssetRangeCacheBackend = getSharedIndexedDbBackend(),
+) {
   const sample = createCadAssetRangeCacheKey(namespace, 0, 0);
   const prefix = sample.slice(0, sample.lastIndexOf("/") + 1);
   await queueMutation(backend, async () => {
@@ -310,6 +315,7 @@ export function createCachedCadAssetRangeRequest({
   maxPendingWrites = DEFAULT_CAD_ASSET_RANGE_CACHE_WRITES,
   cacheReadTimeoutMs = DEFAULT_CAD_ASSET_RANGE_CACHE_READ_TIMEOUT_MS,
   cacheWriteWaitMs = DEFAULT_CAD_ASSET_RANGE_CACHE_WRITE_WAIT_MS,
+  skipCacheRead = false,
   now = Date.now,
 }: CachedCadAssetRangeRequestOptions): (start: number, end: number) => Promise<Response> {
   if (!Number.isSafeInteger(expectedTotalBytes) || expectedTotalBytes < 0)
@@ -345,7 +351,8 @@ export function createCachedCadAssetRangeRequest({
 
     let cached: CadAssetRangeCacheEntry | null = null;
     try {
-      cached = await readBeforeTimeout(backend, key, cacheReadTimeoutMs, signal);
+      if (!skipCacheRead)
+        cached = await readBeforeTimeout(backend, key, cacheReadTimeoutMs, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
     }

@@ -3,6 +3,7 @@ import {
   createCachedCadAssetRangeRequest,
   createCadAssetRangeCacheKey,
   DEFAULT_CAD_ASSET_RANGE_CACHE_READ_TIMEOUT_MS,
+  hasCachedCadAssetRanges,
   type CadAssetRangeCacheBackend,
   type CadAssetRangeCacheEntry,
   type CadAssetRangeCacheRecord,
@@ -50,6 +51,72 @@ function rangeResponse(start: number, end: number, total: number, value = start 
 }
 
 describe("persistent CAD bundle range cache", () => {
+  it("recognizes a complete cache when listing storage takes 500 ms", async () => {
+    vi.useFakeTimers();
+    try {
+      const backend = new MemoryBackend();
+      backend.entries.set(createCadAssetRangeCacheKey(namespace, 0, 2), {
+        bytes: new Uint8Array([7, 7, 7]).buffer,
+        range: "bytes 0-2/3",
+        byteLength: 3,
+        lastAccessed: 0,
+      });
+      const list = backend.list.bind(backend);
+      backend.list = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return list();
+      };
+      const complete = hasCachedCadAssetRanges(namespace, 3, backend);
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(complete).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds a stalled complete-cache listing at the cache read timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const backend = new MemoryBackend();
+      backend.list = () => new Promise(() => {});
+      let settled = false;
+      const complete = hasCachedCadAssetRanges(namespace, 3, backend).finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(DEFAULT_CAD_ASSET_RANGE_CACHE_READ_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(complete).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("repopulates the cache during integrity recovery without reading stale bytes", async () => {
+    const backend = new MemoryBackend();
+    const key = createCadAssetRangeCacheKey(namespace, 0, 2);
+    backend.entries.set(key, {
+      bytes: new Uint8Array([0, 0, 0]).buffer,
+      range: "bytes 0-2/3",
+      byteLength: 3,
+      lastAccessed: 0,
+    });
+    const read = vi.spyOn(backend, "get");
+    const live = vi.fn(async () => rangeResponse(0, 2, 3, 7));
+    const options = { namespace, expectedTotalBytes: 3, request: live, backend };
+    const recovery = createCachedCadAssetRangeRequest({ ...options, skipCacheRead: true });
+    expect(new Uint8Array(await (await recovery(0, 2)).arrayBuffer())).toEqual(
+      new Uint8Array([7, 7, 7]),
+    );
+    expect(read).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(new Uint8Array(backend.entries.get(key)!.bytes)[0]).toBe(7));
+    const reload = createCachedCadAssetRangeRequest(options);
+    expect(new Uint8Array(await (await reload(0, 2)).arrayBuffer())).toEqual(
+      new Uint8Array([7, 7, 7]),
+    );
+    expect(live).toHaveBeenCalledTimes(1);
+  });
+
   it("still downloads when persistent storage never responds", async () => {
     vi.useFakeTimers();
     try {

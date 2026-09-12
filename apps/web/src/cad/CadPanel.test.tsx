@@ -408,6 +408,22 @@ it("remounts a historical review on the same snapshot while its geometry is stil
   expect(after.commentsCard.historical).toBe(true);
 });
 
+it("keeps a same-snapshot comment in the current view while its manifest is loading", () => {
+  const { render, comment, current } = reviewHarness();
+  const currentComment = {
+    ...comment,
+    rootId: current.rootId,
+    snapshotId: current.snapshotId,
+  };
+  render().commentsCard.choose(currentComment, 0);
+  const selected = render();
+  expect(selected.view).toEqual(current);
+  expect(selected.commentsCard.open).toBe(true);
+  expect(selected.commentsCard.selection?.id).toBe(comment.id);
+  expect(selected.commentsCard.historical).toBe(false);
+  expect(Object.values(useCadCommentReviewStore.getState().sessions)[0]!.savedCurrent).toBeNull();
+});
+
 it("isolates review sessions by environment and thread when navigating away and back", () => {
   const { render, comment, props } = reviewHarness();
   render().commentsCard.choose(comment, 0);

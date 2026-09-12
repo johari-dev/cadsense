@@ -219,7 +219,7 @@ function glb(object: Object3mf, palettes: Map<string, number[][]>) {
 export function readOnshapeThreeMf(
   draft: CadSnapshotDraft,
   bytes: Uint8Array,
-  references?: ReadonlyMap<string, Uint8Array>,
+  references?: ReadonlySet<string>,
 ) {
   const files = readOnshapeZip(bytes),
     relationships = files.get("_rels/.rels");
@@ -408,13 +408,10 @@ export function readOnshapeThreeMf(
     }
   return {
     has: (key: string) => keys.has(key) || (references?.has(key) ?? false),
+    usesReference: (key: string) => !keys.has(key) && (references?.has(key) ?? false),
     extract: (key: string) => {
       const ids = keys.get(key);
-      if (!ids) {
-        const reference = references?.get(key);
-        if (!reference) throw invalid();
-        return reference;
-      }
+      if (!ids) throw invalid();
       if (ids.length === 1) return glb(objects.get(ids[0]!)!, palettes);
       const merged: Object3mf = {
         id: key,

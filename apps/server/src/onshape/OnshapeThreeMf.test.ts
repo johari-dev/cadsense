@@ -112,7 +112,7 @@ describe("3MF source geometry", () => {
       assert.throws(() => readOnshapeThreeMf(ambiguous, threeMfArchive(threeMfXml())));
     }),
   );
-  it.effect("preserves source-ID reference geometry for ambiguous coincident parts", () =>
+  it.effect("selects source-ID references for ambiguous coincident parts", () =>
     Effect.gen(function* () {
       const d = yield* draft(),
         first = d.nodes.find((n) => n.sourcePartKey !== null)!;
@@ -126,11 +126,9 @@ describe("3MF source geometry", () => {
           metadata: p.metadata ? { ...p.metadata, name: "Part 0" } : p.metadata,
         })),
       };
-      const original = readOnshapeThreeMf(d, threeMfArchive(threeMfXml()));
-      const refs = new Map(d.parts.map((p) => [p.geometryKey, original.extract(p.geometryKey)]));
+      const refs = new Set(d.parts.map((p) => p.geometryKey));
       const result = readOnshapeThreeMf(ambiguous, threeMfArchive(threeMfXml()), refs);
-      for (const p of d.parts)
-        assert.strictEqual(result.extract(p.geometryKey), refs.get(p.geometryKey));
+      for (const p of d.parts) assert.isTrue(result.usesReference(p.geometryKey));
     }),
   );
   it.effect("collects renamed composite member bodies at a unique source placement", () =>
@@ -170,8 +168,7 @@ describe("3MF source geometry", () => {
             : p.metadata,
         })),
       };
-      const original = readOnshapeThreeMf(d, threeMfArchive(threeMfXml()));
-      const refs = new Map(d.parts.map((p) => [p.geometryKey, original.extract(p.geometryKey)]));
+      const refs = new Set(d.parts.map((p) => p.geometryKey));
       const result = readOnshapeThreeMf(
         collision,
         threeMfArchive(
@@ -179,8 +176,7 @@ describe("3MF source geometry", () => {
         ),
         refs,
       );
-      for (const p of d.parts)
-        assert.strictEqual(result.extract(p.geometryKey), refs.get(p.geometryKey));
+      for (const p of d.parts) assert.isTrue(result.usesReference(p.geometryKey));
     }),
   );
 });
