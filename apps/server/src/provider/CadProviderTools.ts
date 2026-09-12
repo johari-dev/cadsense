@@ -22,6 +22,8 @@ const descriptions = {
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
+  cad_measure:
+    'Read bounded measurements at {expectedRevision,snapshotId}. For points use {mode:"point-distance",from:{space:"world",point:[x,y,z]},to:{space:"part",occurrenceId,point:[x,y,z]}}. Coordinates are meters in original assembled Z-up world or part CAD coordinates before the occurrence transform. Points are caller-specified and unverified; never copy exploded display coordinates. For approximate unsigned triangle-surface separation use {mode:"surface-clearance",fromOccurrenceId,toOccurrenceId}, with part occurrence IDs from cad_hierarchy. Geometry uses original assembled placements regardless of visibility or explosion. Check status: unknown has no measurement. Positive surface distance does not exclude solid containment, and zero does not prove penetration. Results provide mesh provenance and uncertainty, not manufacturing tolerance.',
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
   cad_update_view: [
@@ -63,6 +65,9 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return yield* tools.comments(name, input);
     case "cad_context":
       return { result: yield* tools.context() };
+    case "cad_measure":
+      if (!tools.measure) return yield* new CadViewError({ reason: "capability-unavailable" });
+      return { result: yield* tools.measure(input) };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
     case "cad_update_view":
