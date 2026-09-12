@@ -78,6 +78,66 @@ const harness = <A, E, R>(
   );
 
 describe("CadSnapshotStore", () => {
+  for (const damage of ["hash", "length", "missing", "directory", "oversized"] as const)
+    it.effect(`load rejects ${damage} damage in the last verification cohort`, () =>
+      harness((store, dir) =>
+        Effect.gen(function* () {
+          const draft = yield* parsePartStudioSnapshotDraft(
+            {
+              snapshotId: firstId,
+              projectId: ProjectId.make(firstId),
+              createdAt: "2026-09-05T00:00:00Z",
+              root,
+              rootId: snapshotRootId(root),
+            },
+            Array.from({ length: 9 }, (_, id) => ({
+              partId: `part-${id}`,
+              name: `Part ${id}`,
+              bodyType: "solid",
+            })),
+          );
+          const assets = yield* Effect.forEach(draft.parts, (part, index) =>
+            store
+              .putAsset(new Uint8Array([index, 2, 3, 4]))
+              .pipe(Effect.map((asset) => ({ ...asset, geometryKey: part.geometryKey }))),
+          );
+          const manifest = yield* completeSnapshotManifest(draft, assets);
+          yield* store.publish(manifest);
+          assert.deepStrictEqual(yield* store.load(firstId), manifest);
+          const target = NodePath.join(dir, "assets", assets[8]!.relativePath);
+          yield* Effect.promise(async () => {
+            switch (damage) {
+              case "hash":
+                await NodeFSP.writeFile(target, new Uint8Array([9, 9, 9, 9]));
+                break;
+              case "length":
+                await NodeFSP.writeFile(target, new Uint8Array([8]));
+                break;
+              case "missing":
+                await NodeFSP.unlink(target);
+                break;
+              case "directory":
+                await NodeFSP.unlink(target);
+                await NodeFSP.mkdir(target);
+                break;
+              case "oversized":
+                await NodeFSP.truncate(target, 512 * 1024 ** 2 + 1);
+                break;
+            }
+          });
+          assert.strictEqual((yield* Effect.flip(store.load(firstId))).reason, "corrupt");
+          let exposed = false;
+          yield* Effect.flip(
+            store.withPinned(firstId, () =>
+              Effect.sync(() => {
+                exposed = true;
+              }),
+            ),
+          );
+          assert.isFalse(exposed);
+        }),
+      ),
+    );
   it.effect("cancellation collects orphan geometry while an unrelated snapshot stays pinned", () =>
     harness((store, dir) =>
       Effect.gen(function* () {

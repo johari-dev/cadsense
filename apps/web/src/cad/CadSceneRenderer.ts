@@ -120,6 +120,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let activeSnapshot: string | null = null;
   let generation = 0;
   let frameRevision = 0;
+  const frameListeners = new Set<() => void>();
   let disposed = false;
   let lost = false;
   let applying = false;
@@ -163,6 +164,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       renderer.autoClear = autoClear;
     }
     options.onFrame?.(performance.now() - start);
+    for (const listener of frameListeners) listener();
   };
   const pose = (): ResolvedCadCamera => ({
     position: [camera.position.x, camera.position.y, camera.position.z],
@@ -499,6 +501,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   };
   return {
     cameraPose: pose,
+    subscribeFrames: (listener: () => void) => {
+      frameListeners.add(listener);
+      return () => {
+        frameListeners.delete(listener);
+      };
+    },
     commentFraming: () => ({ ...focusOffset }),
     restoreCommentFraming: (offset: { x: number; y: number }) => {
       focusOffset = { ...offset };
@@ -754,9 +762,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       return hits;
     },
     cachedManifest: (snapshotId: string) => cachedScenes.get(snapshotId)?.manifest ?? null,
+    displayedManifest: () =>
+      activeSnapshot === null ? null : (cachedScenes.get(activeSnapshot)?.manifest ?? null),
+    cancelLoad: () => {
+      generation++;
+    },
     suspend: () => {
       cancelTransition();
-      generation++;
       interactive = false;
       if (controls) {
         controls.enabled = false;
@@ -813,6 +825,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       clearCommentMarkers();
       outline.dispose();
       disposed = true;
+      frameListeners.clear();
       generation++;
       canvas.removeEventListener("webglcontextlost", contextLost);
       controls?.removeEventListener("start", cancelTransition);

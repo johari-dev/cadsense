@@ -1,0 +1,182 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeZlib from "node:zlib";
+import { describe, expect, it } from "vite-plus/test";
+import {
+  acceptsPreparedCadEncoding,
+  createCadBundlePlan,
+  makePreparedCadTransferCache,
+} from "./CadPreparedTransfer.ts";
+
+const asset = (sha256: string, byteLength: number) => ({ sha256, byteLength });
+const bytes = (value: string) => new TextEncoder().encode(value);
+
+describe("prepared CAD transfers", () => {
+  it("deduplicates manifest assets and preserves their first-seen byte order", () => {
+    const plan = createCadBundlePlan(
+      {
+        snapshotId: "snapshot-a",
+        assets: [asset("a", 3), asset("b", 2), asset("a", 3)],
+      },
+      { rangeBytes: 4 },
+    );
+
+    expect(plan.totalBytes).toBe(5);
+    expect(plan.ranges).toEqual([
+      {
+        start: 0,
+        end: 3,
+        slices: [
+          { sha256: "a", byteLength: 3, start: 0, end: 3 },
+          { sha256: "b", byteLength: 2, start: 0, end: 1 },
+        ],
+      },
+      {
+        start: 4,
+        end: 4,
+        slices: [{ sha256: "b", byteLength: 2, start: 1, end: 2 }],
+      },
+    ]);
+  });
+
+  it("recognizes Brotli without overriding an explicit zero quality", () => {
+    expect(acceptsPreparedCadEncoding("gzip, deflate, br, zstd")).toBe(true);
+    expect(acceptsPreparedCadEncoding("gzip, *;q=0.5")).toBe(true);
+    expect(acceptsPreparedCadEncoding("gzip, br;q=0, *;q=1")).toBe(false);
+    expect(acceptsPreparedCadEncoding("gzip")).toBe(false);
+    expect(acceptsPreparedCadEncoding("not valid;q=wat")).toBe(false);
+  });
+
+  it("Brotli-encodes a range that reconstructs the exact source bytes", async () => {
+    const plan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 3), asset("b", 3)] },
+      { rangeBytes: 4 },
+    );
+    const source = new Map([
+      ["a", bytes("abc")],
+      ["b", bytes("def")],
+    ]);
+    const cache = makePreparedCadTransferCache();
+
+    const encoded = await cache.get(plan, plan.ranges[0]!, async (sha256) => source.get(sha256)!);
+
+    expect(Uint8Array.from(NodeZlib.brotliDecompressSync(encoded))).toEqual(bytes("abcd"));
+  });
+
+  it("coalesces concurrent preparation of the same immutable range", async () => {
+    let reads = 0;
+    let encodes = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const plan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 4)] },
+      { rangeBytes: 4 },
+    );
+    const cache = makePreparedCadTransferCache({
+      encode: async (input) => {
+        encodes++;
+        await gate;
+        return input;
+      },
+    });
+    const read = async () => {
+      reads++;
+      return bytes("abcd");
+    };
+
+    const first = cache.get(plan, plan.ranges[0]!, read);
+    const second = cache.get(plan, plan.ranges[0]!, read);
+    release();
+
+    expect(await first).toEqual(bytes("abcd"));
+    expect(await second).toEqual(bytes("abcd"));
+    expect({ reads, encodes }).toEqual({ reads: 1, encodes: 1 });
+  });
+
+  it("bounds retained encoded bytes and entry count", async () => {
+    const plan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 12)] },
+      { rangeBytes: 4 },
+    );
+    const cache = makePreparedCadTransferCache({
+      maxBytes: 5,
+      maxEntries: 2,
+      encode: async (input) => input,
+    });
+    const read = async () => bytes("abcdefghijkl");
+
+    for (const range of plan.ranges) await cache.get(plan, range, read);
+
+    expect(cache.stats()).toEqual({ bytes: 4, pendingEntries: 0, readyEntries: 1 });
+  });
+
+  it("invalidates prepared ranges when a snapshot identity changes", async () => {
+    const firstPlan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 4)] },
+      { rangeBytes: 4 },
+    );
+    const secondPlan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("b", 4)] },
+      { rangeBytes: 4 },
+    );
+    const cache = makePreparedCadTransferCache({ encode: async (input) => input });
+    let reads = 0;
+
+    const first = await cache.get(firstPlan, firstPlan.ranges[0]!, async () => {
+      reads++;
+      return bytes("aaaa");
+    });
+    const second = await cache.get(secondPlan, secondPlan.ranges[0]!, async () => {
+      reads++;
+      return bytes("bbbb");
+    });
+
+    expect(first).toEqual(bytes("aaaa"));
+    expect(second).toEqual(bytes("bbbb"));
+    expect(reads).toBe(2);
+    expect(cache.stats()).toEqual({ bytes: 4, pendingEntries: 0, readyEntries: 1 });
+  });
+
+  it("removes failed entries so a later request can retry", async () => {
+    const plan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 4)] },
+      { rangeBytes: 4 },
+    );
+    const cache = makePreparedCadTransferCache({ encode: async (input) => input });
+    let reads = 0;
+    const read = async () => {
+      reads++;
+      if (reads === 1) throw new Error("transient");
+      return bytes("abcd");
+    };
+
+    await expect(cache.get(plan, plan.ranges[0]!, read)).rejects.toThrow("transient");
+    await expect(cache.get(plan, plan.ranges[0]!, read)).resolves.toEqual(bytes("abcd"));
+    expect(reads).toBe(2);
+  });
+
+  it("warms ranges with bounded concurrency", async () => {
+    const plan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 20)] },
+      { rangeBytes: 4 },
+    );
+    let active = 0;
+    let peak = 0;
+    const cache = makePreparedCadTransferCache({
+      warmConcurrency: 2,
+      encode: async (input) => {
+        active++;
+        peak = Math.max(peak, active);
+        await Promise.resolve();
+        active--;
+        return input;
+      },
+    });
+
+    await cache.warm(plan, async () => bytes("abcdefghijklmnopqrst"));
+
+    expect(peak).toBe(2);
+    expect(cache.stats()).toEqual({ bytes: 20, pendingEntries: 0, readyEntries: 5 });
+  });
+});

@@ -21,6 +21,7 @@ import { measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 
 import { ServerConfig } from "../config.ts";
 import { completeSnapshotManifest } from "../onshape/OnshapeSnapshotManifest.ts";
+import { verifyCadAssets } from "./CadAssetVerification.ts";
 
 export const CAD_DISK_RESERVE_BYTES = 2 * 1024 ** 3;
 const MAX_MANIFEST_BYTES = 128 * 1024 ** 2;
@@ -273,7 +274,9 @@ export const make = Effect.gen(function* () {
     const manifest = yield* io(() => readManifest(snapshotId), "corrupt").pipe(
       Effect.flatMap(validateManifest),
     );
-    for (const asset of manifest.assets) yield* io(() => verifyAsset(asset), "corrupt");
+    yield* verifyCadAssets(manifest.assets, (asset) =>
+      io(() => verifyAsset(asset), "corrupt").pipe(Effect.asVoid),
+    );
     return manifest;
   });
   const load = (snapshotId: string) => lock.withPermits(1)(loadUnlocked(snapshotId));

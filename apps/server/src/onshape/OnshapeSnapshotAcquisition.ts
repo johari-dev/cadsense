@@ -16,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   CadSceneBudgetError,
@@ -23,6 +24,8 @@ import {
   measureCadGeometry,
 } from "@cadsense/shared/cadSceneBudget";
 import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
+import { cadTransferArtifacts } from "../cad/CadTransferArtifacts.ts";
+import { ServerConfig } from "../config.ts";
 import { normalizeCadGeometry, CadGeometryError } from "../cad/CadGeometry.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
@@ -87,10 +90,38 @@ export class OnshapeSnapshotAcquisition extends Context.Service<
   }
 >()("@cadsense/server/onshape/OnshapeSnapshotAcquisition") {}
 
+/** Keep the source pin until preparation settles, even when an import is cancelled. */
+export const prepareCadSnapshotTransfer = (
+  manifest: CadSnapshotManifest,
+  store: CadSnapshotStore["Service"],
+  stateDir: string,
+) =>
+  store
+    .withPinned(manifest.snapshotId, (stored, readAsset) =>
+      Effect.gen(function* () {
+        const context = yield* Effect.context<never>();
+        const runPromise = Effect.runPromiseWith(context);
+        yield* Effect.tryPromise(() =>
+          cadTransferArtifacts(stateDir).get(stored.assets, (sha256) =>
+            runPromise(readAsset(sha256)),
+          ),
+        );
+      }),
+    )
+    .pipe(
+      // This is a derived optimization. A full disk or unavailable encoder must not
+      // fail an otherwise complete, authoritative CAD import.
+      Effect.catch(() =>
+        Effect.logDebug("CAD transfer preparation unavailable; using original assets"),
+      ),
+      Effect.uninterruptible,
+    );
+
 /** Private acquisition only. The caller must admit an explicit user operation before invoking it. */
 export const make = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
   const store = yield* CadSnapshotStore;
+  const config = yield* Effect.serviceOption(ServerConfig);
   const crypto = yield* Crypto.Crypto;
   const acquireBulk = yield* makeBulkAcquisition;
   const run = Effect.fn("OnshapeSnapshotAcquisition.acquire")(function* (
@@ -269,21 +300,31 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const metrics: OnshapeApiMetrics = { requests: 0 };
         const start = yield* Clock.currentTimeMillis;
-        return yield* store.withAcquisition(run(input)).pipe(
-          Effect.provideService(OnshapeRequestMetrics, metrics),
-          Effect.onExit((exit) =>
-            Effect.gen(function* () {
-              yield* Effect.logInfo("Onshape CAD sync finished", {
-                projectId: input.projectId,
-                apiRequests: metrics.requests,
-                quotaCountedRequests: metrics.quotaCountedRequests ?? 0,
-                quotaObservations: metrics.quotaObservations ?? [],
-                elapsedMs: (yield* Clock.currentTimeMillis) - start,
-                result: Exit.isSuccess(exit) ? "complete" : "failed",
-              });
-            }),
-          ),
-        );
+        return yield* store
+          .withAcquisition(
+            run(input).pipe(
+              Effect.tap((manifest) =>
+                Option.isSome(config)
+                  ? prepareCadSnapshotTransfer(manifest, store, config.value.stateDir)
+                  : Effect.void,
+              ),
+            ),
+          )
+          .pipe(
+            Effect.provideService(OnshapeRequestMetrics, metrics),
+            Effect.onExit((exit) =>
+              Effect.gen(function* () {
+                yield* Effect.logInfo("Onshape CAD sync finished", {
+                  projectId: input.projectId,
+                  apiRequests: metrics.requests,
+                  quotaCountedRequests: metrics.quotaCountedRequests ?? 0,
+                  quotaObservations: metrics.quotaObservations ?? [],
+                  elapsedMs: (yield* Clock.currentTimeMillis) - start,
+                  result: Exit.isSuccess(exit) ? "complete" : "failed",
+                });
+              }),
+            ),
+          );
       }),
   });
 });

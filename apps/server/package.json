@@ -19,6 +19,7 @@
     "@ff-labs/fff-node": "0.9.4",
     "effect": "catalog:",
     "gltf-validator": "2.0.0-dev.3.10",
+    "meshoptimizer": "1.1.1",
     "msgpackr-extract": "3.0.4",
     "saxes": "^6.0.0",
     "yaml": "catalog:"

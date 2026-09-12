@@ -177,6 +177,9 @@ importers:
       gltf-validator:
         specifier: 2.0.0-dev.3.10
         version: 2.0.0-dev.3.10
+      meshoptimizer:
+        specifier: 1.1.1
+        version: 1.1.1
       msgpackr-extract:
         specifier: 3.0.4
         version: 3.0.4
@@ -274,6 +277,9 @@ importers:
       lucide-react:
         specifier: ^0.564.0
         version: 0.564.0(react@19.2.6)
+      meshoptimizer:
+        specifier: 1.1.1
+        version: 1.1.1
       react:
         specifier: 19.2.6
         version: 19.2.6

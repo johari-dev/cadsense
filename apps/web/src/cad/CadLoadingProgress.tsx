@@ -21,7 +21,7 @@ export function CadLoadingProgress({ progress = null }: { progress?: CadLoadProg
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={progress ? percent : undefined}
-        aria-valuetext={complete ? "Download complete; preparing geometry" : undefined}
+        aria-valuetext={complete ? "CAD data loaded; preparing geometry" : undefined}
         className="h-1.5 overflow-hidden rounded-full bg-muted"
       >
         <div
@@ -32,7 +32,7 @@ export function CadLoadingProgress({ progress = null }: { progress?: CadLoadProg
       {progress && (
         <div className="text-center tabular-nums">
           {complete
-            ? "Download complete"
+            ? "CAD data loaded"
             : `${(progress.received / 1_000_000).toFixed(1)} / ${(progress.total / 1_000_000).toFixed(1)} MB`}
         </div>
       )}

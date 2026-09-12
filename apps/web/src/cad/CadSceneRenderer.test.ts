@@ -163,6 +163,28 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("notifies marker subscribers after rendered camera and scene changes and releases subscriptions", async () => {
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    const frames = vi.fn();
+    const unsubscribe = renderer.subscribeFrames(frames);
+    try {
+      await renderer.load(manifest, async () => geometry());
+      renderer.apply(state);
+      expect(frames).toHaveBeenCalledTimes(1);
+      renderer.resize(1280, 960);
+      expect(frames).toHaveBeenCalledTimes(2);
+      renderer.restoreCommentFraming({ x: 0.1, y: 0 });
+      expect(frames).toHaveBeenCalledTimes(3);
+      renderer.endCommentReview();
+      expect(frames).toHaveBeenCalledTimes(4);
+      unsubscribe();
+      renderer.apply(state);
+      expect(frames).toHaveBeenCalledTimes(4);
+    } finally {
+      unsubscribe();
+      renderer.dispose();
+    }
+  });
   it("overlaps bounded asset downloads and does not expose a partial scene", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas });
@@ -330,7 +352,9 @@ describe("CAD renderer lifecycle without WebGL", () => {
     const read = vi.fn(async () => geometry());
     const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
     try {
+      expect(renderer.displayedManifest()).toBeNull();
       expect(await renderer.load(manifest, read)).toBe(false);
+      expect(renderer.displayedManifest()).toBe(manifest);
       renderer.apply(state);
       expect(await renderer.load(manifest, read)).toBe(true);
       // The current view remains capturable while a different thread supplies its next view.
@@ -338,8 +362,10 @@ describe("CAD renderer lifecycle without WebGL", () => {
       h.completeCapture();
       await captured;
       expect(await renderer.load(second, read)).toBe(false);
+      expect(renderer.displayedManifest()).toBe(second);
       renderer.apply({ ...state, snapshotId: second.snapshotId });
       expect(await renderer.load(manifest, read)).toBe(false);
+      expect(renderer.displayedManifest()).toBe(manifest);
       expect(read).toHaveBeenCalledTimes(2);
       expect(renderer.cachedManifest(manifest.snapshotId)).toBe(manifest);
     } finally {
@@ -406,7 +432,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
     }
     expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
   });
-  it("bounds small scene retention to three and cancels unfinished loads when detached", async () => {
+  it("bounds small scene retention to three and continues unfinished loads while detached", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
     try {
@@ -427,10 +453,33 @@ describe("CAD renderer lifecycle without WebGL", () => {
       );
       renderer.suspend();
       finish(geometry());
-      await expect(loading).rejects.toMatchObject({ reason: "superseded" });
-      expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
+      await expect(loading).resolves.toBe(false);
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBe(manifest);
       renderer.resume();
-      expect(await renderer.load(manifest, async () => geometry())).toBe(false);
+      expect(await renderer.load(manifest, async () => geometry())).toBe(true);
+    } finally {
+      renderer.dispose();
+    }
+  });
+  it("cannot activate a cancelled background load after another snapshot is displayed", async () => {
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, cacheScenes: true });
+    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    let finish!: (value: ArrayBuffer) => void;
+    const old = renderer.load(
+      manifest,
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      renderer.cancelLoad();
+      await renderer.load(second, async () => geometry());
+      expect(renderer.displayedManifest()).toBe(second);
+      finish(geometry());
+      await expect(old).rejects.toMatchObject({ reason: "superseded" });
+      expect(renderer.displayedManifest()).toBe(second);
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
     } finally {
       renderer.dispose();
     }

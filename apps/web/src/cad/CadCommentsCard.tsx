@@ -45,6 +45,8 @@ export function CadCommentsCard({
     historical ? "history" : "open",
   );
   const [notice, setNotice] = useState("");
+  const [pendingReviews, setPendingReviews] = useState<ReadonlySet<string>>(new Set());
+  const inFlightReviews = useRef(new Set<string>());
   const [layoutVersion, setLayoutVersion] = useState(0);
   const card = useRef<HTMLDivElement>(null),
     markers = useRef<HTMLDivElement>(null),
@@ -141,12 +143,19 @@ export function CadCommentsCard({
   }, [selection, descriptor, open, layoutVersion]);
   useEffect(() => {
     let frame = 0;
+    const current = renderer.current;
+    const byId = new Map(comments.map((comment) => [comment.id, comment]));
     const draw = () => {
-      frame = requestAnimationFrame(draw);
+      frame = 0;
       markers.current?.querySelectorAll<HTMLButtonElement>("[data-comment]").forEach((button) => {
-        const comment = comments.find((c) => c.id === button.dataset.comment),
-          target = comment?.targets[Number(button.dataset.target)];
-        const point = target ? renderer.current?.commentProjection(target) : null;
+        const comment = byId.get(button.dataset.comment ?? "");
+        const shown =
+          manifest &&
+          comment &&
+          (comment.state === "open" ||
+            (open && filter === "reviewed" && comment.id === selection?.id));
+        const target = shown ? comment.targets[Number(button.dataset.target)] : null;
+        const point = target ? current?.commentProjection(target) : null;
         button.style.visibility = point?.visible ? "visible" : "hidden";
         if (point) {
           button.style.left = `${point.x}px`;
@@ -156,26 +165,45 @@ export function CadCommentsCard({
         }
       });
     };
-    draw();
-    return () => cancelAnimationFrame(frame);
-  }, [comments, manifest, renderer]);
+    // Project after layout, then only when graphics change. Occlusion checks raycast
+    // the assembly, so polling every animation tick makes an idle model expensive.
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(draw);
+    };
+    schedule();
+    const unsubscribe = current?.subscribeFrames(schedule);
+    return () => {
+      unsubscribe?.();
+      cancelAnimationFrame(frame);
+    };
+  }, [comments, manifest, renderer, open, filter, selection?.id]);
   const change = async (c: CadComment, state: CadComment["state"]) => {
-    const result = await review({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        commentId: c.id,
-        expectedVersion: c.version,
-        state,
-        commandId: newCommandId(),
-      },
-    });
-    if (result._tag !== "Failure" && state !== "open") clearSelection(c.id);
-    setNotice(
-      result._tag === "Failure"
-        ? "Could not update this finding. Reload its latest review state and try again."
-        : `Comment ${c.number} ${state}.`,
-    );
+    // Guard synchronously as two clicks can arrive before React disables the controls.
+    if (inFlightReviews.current.has(c.id)) return;
+    inFlightReviews.current.add(c.id);
+    setPendingReviews(new Set(inFlightReviews.current));
+    setNotice("");
+    try {
+      const result = await review({
+        environmentId: threadRef.environmentId,
+        input: {
+          threadId: threadRef.threadId,
+          commentId: c.id,
+          expectedVersion: c.version,
+          state,
+          commandId: newCommandId(),
+        },
+      });
+      if (result._tag !== "Failure" && state !== "open") clearSelection(c.id);
+      setNotice(
+        result._tag === "Failure"
+          ? "Could not update this finding. Reload its latest review state and try again."
+          : `Comment ${c.number} ${state}.`,
+      );
+    } finally {
+      inFlightReviews.current.delete(c.id);
+      setPendingReviews(new Set(inFlightReviews.current));
+    }
   };
   return (
     <div
@@ -186,7 +214,9 @@ export function CadCommentsCard({
       <div ref={markers} className="absolute inset-0 overflow-hidden">
         {displayed
           .filter(
-            (c) => c.state === "open" || (open && filter === "reviewed" && c.id === selection?.id),
+            (c) =>
+              manifest &&
+              (c.state === "open" || (open && filter === "reviewed" && c.id === selection?.id)),
           )
           .flatMap((c) =>
             c.targets.map((t, i) => (
@@ -194,6 +224,7 @@ export function CadCommentsCard({
                 key={`${c.id}:${i}`}
                 data-comment={c.id}
                 data-target={i}
+                style={{ visibility: "hidden" }}
                 aria-label={`Comment ${c.number}: ${t.label}`}
                 onClick={() => choose(c, i)}
                 className={`pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border-2 border-solid border-neutral-800 bg-amber-200 px-1.5 py-1 text-[11px] font-semibold text-neutral-950 shadow ${open && c.id === selection?.id ? "ring-2 ring-foreground" : ""}`}
@@ -205,9 +236,9 @@ export function CadCommentsCard({
           )}
       </div>
       {historical && (
-        <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-md border bg-popover px-2 py-1 text-xs">
-          <span>Previous CAD revision</span>
-          <Button size="compact" variant="outline" onClick={back}>
+        <div className="pointer-events-auto absolute left-3 top-3 flex max-w-[calc(100%-72px)] items-center gap-2 rounded-md border bg-popover px-2 py-1 text-xs">
+          <span className="min-w-0 truncate">Previous CAD revision</span>
+          <Button size="compact" variant="outline" className="shrink-0" onClick={back}>
             Back to current
           </Button>
         </div>
@@ -216,6 +247,7 @@ export function CadCommentsCard({
         ref={card}
         data-comments-surface
         data-open={open}
+        data-historical={historical}
         className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-popover-foreground shadow-lg"
       >
         {!open && (
@@ -364,6 +396,7 @@ export function CadCommentsCard({
                               <Button
                                 size="compact"
                                 variant="outline"
+                                disabled={pendingReviews.has(c.id)}
                                 onClick={() => void change(c, "resolved")}
                               >
                                 <Check />
@@ -372,6 +405,7 @@ export function CadCommentsCard({
                               <Button
                                 size="compact"
                                 variant="ghost"
+                                disabled={pendingReviews.has(c.id)}
                                 onClick={() => void change(c, "dismissed")}
                               >
                                 Dismiss
@@ -381,6 +415,7 @@ export function CadCommentsCard({
                             <Button
                               size="compact"
                               variant="outline"
+                              disabled={pendingReviews.has(c.id)}
                               onClick={() => void change(c, "open")}
                             >
                               <RotateCcw />

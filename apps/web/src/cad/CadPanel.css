@@ -14,6 +14,12 @@
   overflow: hidden;
 }
 
+/* Keep revision navigation reachable while a finding is expanded. */
+.cad-comments-surface[data-open="true"][data-historical="true"] {
+  top: 56px;
+  height: min(440px, 60%, calc(100% - 68px));
+}
+
 .cad-comments-content {
   animation: cad-comments-appear 200ms ease both;
 }
