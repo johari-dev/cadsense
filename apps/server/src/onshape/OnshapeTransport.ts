@@ -5,12 +5,15 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { MAX_ASSEMBLY_EXPORT_BYTES } from "../cad/CadGeometry.ts";
 
 export interface OnshapeTransportRequest<E = never, R = never> {
-  readonly method: "GET";
+  readonly method: "GET" | "POST";
+  readonly body?: string;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly responseType?: "json" | "binary";
+  readonly bulkExport?: boolean;
   readonly beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>;
 }
 
@@ -25,6 +28,16 @@ export interface OnshapeTransportResponse {
 
 export const MAX_JSON_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_BINARY_BODY_BYTES = 128 * 1024 * 1024;
+/** Scoped to one sync, including separately signed redirect hops. */
+export interface OnshapeApiMetrics {
+  requests: number;
+  quotaCountedRequests?: number;
+  quotaObservations?: Array<{ request: number; header: string; value: number }>;
+}
+export const OnshapeRequestMetrics = Context.Reference<OnshapeApiMetrics | undefined>(
+  "@cadsense/server/onshape/OnshapeRequestMetrics",
+  { defaultValue: () => undefined },
+);
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const responseContentType = (header: string | undefined): string | null => {
   const mediaType = header?.split(";")[0]?.trim().toLowerCase();
@@ -38,8 +51,9 @@ const responseContentType = (header: string | undefined): string | null => {
 /** Deliberately contains no underlying exception or request data. */
 export class OnshapeTransportFailure extends Schema.TaggedErrorClass<OnshapeTransportFailure>()(
   "OnshapeTransportFailure",
-  {},
+  { reason: Schema.optionalKey(Schema.Literals(["too-large", "timeout"])) },
 ) {}
+const isTransportFailure = Schema.is(OnshapeTransportFailure);
 
 export class OnshapeTransport extends Context.Service<
   OnshapeTransport,
@@ -58,11 +72,36 @@ export const layer = Layer.effect(
     const execute: OnshapeTransport["Service"]["execute"] = Effect.fn("OnshapeTransport.execute")(
       function* <E = never, R = never>(request: OnshapeTransportRequest<E, R>) {
         let guardFailure: Option.Option<E> = Option.none();
-        return yield* HttpClientRequest.get(request.url).pipe(
+        const metrics = yield* OnshapeRequestMetrics;
+        return yield* HttpClientRequest.make(request.method)(request.url).pipe(
+          (req) =>
+            request.body === undefined
+              ? req
+              : HttpClientRequest.bodyText(req, request.body, "application/json"),
           HttpClientRequest.setHeaders(request.headers),
-          client.execute,
+          (request) =>
+            Effect.sync(() => {
+              if (metrics) metrics.requests++;
+            }).pipe(Effect.andThen(client.execute(request))),
           Effect.flatMap(
             Effect.fn(function* (response) {
+              if (metrics) {
+                if (response.status >= 200 && response.status < 400)
+                  metrics.quotaCountedRequests = (metrics.quotaCountedRequests ?? 0) + 1;
+                for (const [header, value] of Object.entries(response.headers)) {
+                  if (
+                    /quota|credits|rate.?limit.*remaining|remaining.*api/i.test(header) &&
+                    value !== undefined &&
+                    /^\d+$/.test(value)
+                  ) {
+                    (metrics.quotaObservations ??= []).push({
+                      request: metrics.requests,
+                      header,
+                      value: Number(value),
+                    });
+                  }
+                }
+              }
               const result = {
                 status: response.status,
                 retryAfter: response.headers["retry-after"] ?? null,
@@ -82,12 +121,17 @@ export const layer = Layer.effect(
               }
               let bytes = 0;
               const maxBytes =
-                request.responseType === "binary" ? MAX_BINARY_BODY_BYTES : MAX_JSON_BODY_BYTES;
+                request.responseType === "binary"
+                  ? request.bulkExport
+                    ? MAX_ASSEMBLY_EXPORT_BYTES
+                    : MAX_BINARY_BODY_BYTES
+                  : MAX_JSON_BODY_BYTES;
               const chunks: Uint8Array[] = [];
               yield* response.stream.pipe(
                 Stream.runForEach((chunk) => {
                   bytes += chunk.byteLength;
-                  if (bytes > maxBytes) return Effect.fail(new OnshapeTransportFailure());
+                  if (bytes > maxBytes)
+                    return Effect.fail(new OnshapeTransportFailure({ reason: "too-large" }));
                   return (request.beforeChunk?.(bytes) ?? Effect.void).pipe(
                     Effect.mapError((error) => {
                       guardFailure = Option.some(error);
@@ -116,10 +160,23 @@ export const layer = Layer.effect(
             }),
           ),
           Effect.scoped,
-          Effect.timeout("15 seconds"),
+          // Export submission can take time before returning a resumable translation job ID.
+          Effect.timeout(
+            request.responseType === "binary"
+              ? "3 minutes"
+              : request.method === "POST"
+                ? "2 minutes"
+                : "15 seconds",
+          ),
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.mapError(() =>
-            Option.isSome(guardFailure) ? guardFailure.value : new OnshapeTransportFailure(),
+          Effect.mapError((error) =>
+            Option.isSome(guardFailure)
+              ? guardFailure.value
+              : isTransportFailure(error)
+                ? error
+                : new OnshapeTransportFailure(
+                    error._tag === "TimeoutError" ? { reason: "timeout" } : {},
+                  ),
           ),
         );
       },

@@ -47,7 +47,9 @@ const capture = async (message: Extract<CadWorkerInput, { type: "capture" }>) =>
     }
     renderer.resize(message.width, message.height, 1);
     if (message.appearance) renderer.setAppearance(message.appearance);
-    const pose = renderer.apply(message.state);
+    renderer.apply(message.state);
+    const commentHits = message.commentWork ? renderer.commentWork(message.commentWork) : undefined;
+    const pose = renderer.cameraPose();
     const png = await renderer.capture();
     post({
       type: "result",
@@ -55,6 +57,7 @@ const capture = async (message: Extract<CadWorkerInput, { type: "capture" }>) =>
       snapshotId: message.state.snapshotId,
       revision: message.state.revision,
       pose,
+      ...(commentHits ? { commentHits } : {}),
       png,
     });
   } catch (error) {

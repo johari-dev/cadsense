@@ -23,6 +23,8 @@ import * as OnshapeConnections from "./OnshapeConnections.ts";
 import * as OnshapeRequestSigner from "./OnshapeRequestSigner.ts";
 import * as OnshapeTransport from "./OnshapeTransport.ts";
 
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+
 const OLD_ACCESS_KEY = "old-access-key";
 const OLD_SECRET_KEY = "old-secret-key";
 const NEW_ACCESS_KEY = "new-access-key";
@@ -36,6 +38,7 @@ interface HarnessState {
   status: number;
   retryAfter: string | null;
   failTransport: boolean;
+  failTransportReason?: "too-large" | "timeout";
   failRead: boolean;
   verificationStarted: Deferred.Deferred<void> | null;
   verificationRelease: Deferred.Deferred<void> | null;
@@ -151,7 +154,11 @@ const makeHarness = <E, R>(
           ),
           Effect.andThen(
             state.failTransport
-              ? Effect.fail(new OnshapeTransport.OnshapeTransportFailure())
+              ? Effect.fail(
+                  new OnshapeTransport.OnshapeTransportFailure({
+                    ...(state.failTransportReason ? { reason: state.failTransportReason } : {}),
+                  }),
+                )
               : Effect.succeed(
                   state.responses.shift() ?? {
                     status: state.status,
@@ -436,6 +443,23 @@ it.layer(NodeServices.layer)("OnshapeConnections", (it) => {
       }).pipe(Effect.provide(harness.layer));
       assert.equal(networkError._tag, "OnshapeNetworkError");
       assert.equal(harness.state.requests.length, 1);
+    }),
+  );
+
+  it.effect("preserves size and timeout failures instead of reporting a network outage", () =>
+    Effect.gen(function* () {
+      for (const reason of ["too-large", "timeout"] as const) {
+        const harness = makeMemoryHarness();
+        harness.state.failTransport = true;
+        harness.state.failTransportReason = reason;
+        const error = yield* Effect.gen(function* () {
+          const connections = yield* OnshapeConnections.OnshapeConnections;
+          return yield* connections.create(createInput).pipe(Effect.flip);
+        }).pipe(Effect.provide(harness.layer));
+        assert.equal(error._tag, "OnshapeResponseError");
+        assert.equal("reason" in error ? error.reason : null, reason);
+        assert.equal(harness.state.requests.length, 1);
+      }
     }),
   );
 
@@ -901,6 +925,67 @@ it.layer(NodeServices.layer)("Onshape authenticated reads", (it) => {
   };
 
   it.effect(
+    "signs an external glTF export as POST and rejects document-writing export options",
+    () => {
+      const harness = makeMemoryHarness();
+      return Effect.gen(function* () {
+        const connections = yield* OnshapeConnections.OnshapeConnections;
+        const signer = yield* OnshapeRequestSigner.OnshapeRequestSigner;
+        const saved = yield* connections.create(createInput);
+        const exportRequest = {
+          connectionId: saved.connectionId,
+          host: target.host,
+          path: `/api/v17/assemblies/d/${"a".repeat(24)}/w/${"b".repeat(24)}/e/${"c".repeat(24)}/export/gltf`,
+          query: "",
+          method: "POST" as const,
+          body: {
+            storeInDocument: false,
+            notifyUser: false,
+            advancedParams: { configuration: "Length=10 mm;Color=Red+Blue" },
+          },
+        };
+        yield* connections.readJson(exportRequest);
+        const request = harness.state.requests.at(-1)!;
+        assert.equal(request.method, "POST");
+        assert.deepEqual(yield* decodeJson(request.body), exportRequest.body);
+        const expected = yield* signer.sign({
+          accessKeyId: OLD_ACCESS_KEY,
+          secretKey: OLD_SECRET_KEY,
+          method: "POST",
+          nonce: request.headers["On-Nonce"]!,
+          date: request.headers.Date!,
+          contentType: "application/json",
+          path: exportRequest.path,
+          query: "",
+        });
+        assert.equal(request.headers.Authorization, expected.Authorization);
+        const threeMfRequest = {
+          ...exportRequest,
+          path: exportRequest.path.replace("/export/gltf", "/translations"),
+          body: { storeInDocument: false, notifyUser: false, formatName: "3MF" },
+        };
+        yield* connections.readJson(threeMfRequest);
+        assert.deepEqual(
+          yield* decodeJson(harness.state.requests.at(-1)!.body),
+          threeMfRequest.body,
+        );
+        const beforeRejectedFormat = harness.state.requests.length;
+        const rejectedFormat = yield* connections
+          .readJson({ ...threeMfRequest, body: { ...threeMfRequest.body, formatName: "STEP" } })
+          .pipe(Effect.exit);
+        assert.equal(rejectedFormat._tag, "Failure");
+        assert.equal(harness.state.requests.length, beforeRejectedFormat);
+        const count = harness.state.requests.length;
+        const rejected = yield* connections
+          .readJson({ ...exportRequest, body: { ...exportRequest.body, storeInDocument: true } })
+          .pipe(Effect.exit);
+        assert.equal(rejected._tag, "Failure");
+        assert.equal(harness.state.requests.length, count);
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect(
     "signs every trusted binary redirect independently and checks reserve on each hop",
     () => {
       const harness = makeMemoryHarness();
@@ -958,7 +1043,7 @@ it.layer(NodeServices.layer)("Onshape authenticated reads", (it) => {
             query: url.search.slice(1),
           });
           assert.equal(item.headers.Authorization, expected.Authorization);
-          assert.equal(item.headers.Accept, "model/gltf-binary");
+          assert.include(item.headers.Accept, "model/gltf-binary");
         }
       }).pipe(Effect.provide(harness.layer));
     },

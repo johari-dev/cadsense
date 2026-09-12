@@ -1,3 +1,4 @@
+import { CadCommentRenderWork, CadCommentRenderHit } from "./cadComments.ts";
 import * as Schema from "effect/Schema";
 import { CadSnapshotId, CadSnapshotManifest } from "./cad.ts";
 import { CadCameraPose, CadViewState } from "./cadView.ts";
@@ -8,6 +9,7 @@ export const CadRenderPayload = Schema.Struct({
   runId: Schema.String,
   manifest: CadSnapshotManifest,
   state: CadViewState,
+  commentWork: Schema.optionalKey(CadCommentRenderWork),
 });
 
 export class CadRenderError extends Schema.TaggedErrorClass<CadRenderError>()("CadRenderError", {
@@ -29,5 +31,6 @@ export const CadRenderReceipt = Schema.Struct({
   snapshotId: CadSnapshotId,
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   pose: CadCameraPose,
+  commentHits: Schema.optionalKey(Schema.Array(CadCommentRenderHit)),
 });
 export type CadRenderReceipt = typeof CadRenderReceipt.Type;

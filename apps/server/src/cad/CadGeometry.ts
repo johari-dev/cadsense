@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { validateBytes } from "gltf-validator";
 
 const MAX_BYTES = 128 * 1024 * 1024;
+export const MAX_ASSEMBLY_EXPORT_BYTES = 512 * 1024 * 1024;
 const ObjectValue = Schema.Record(Schema.String, Schema.Unknown);
 const isObject = Schema.is(ObjectValue);
 const BufferDefinition = Schema.Struct({
@@ -45,11 +46,9 @@ const isGeometryError = Schema.is(CadGeometryError);
 
 const embeddedBytes = (uri: string): Uint8Array => {
   const match =
-    /^data:(?:application\/(?:octet-stream|gltf-buffer)|image\/(?:png|jpeg));base64,([A-Za-z0-9+/]*={0,2})$/.exec(
-      uri,
-    );
+    /^data:(?:application\/(?:octet-stream|gltf-buffer)|image\/(?:png|jpeg));base64,/.exec(uri);
   if (!match) throw new CadGeometryError({ reason: "external-resource" });
-  const payload = match[1]!;
+  const payload = uri.slice(match[0].length);
   if (payload.length % 4 !== 0) throw invalid();
   const bytes = Buffer.from(payload, "base64");
   if (bytes.toString("base64") !== payload) throw invalid();
@@ -59,8 +58,10 @@ const embeddedBytes = (uri: string): Uint8Array => {
 /** Produces a self-contained GLB; no geometry loader can trigger an implicit remote request. */
 export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* (
   input: Uint8Array,
+  scope: "part" | "assembly" = "part",
 ) {
-  if (input.byteLength > MAX_BYTES) return yield* new CadGeometryError({ reason: "too-large" });
+  const maxBytes = scope === "assembly" ? MAX_ASSEMBLY_EXPORT_BYTES : MAX_BYTES;
+  if (input.byteLength > maxBytes) return yield* new CadGeometryError({ reason: "too-large" });
   const container = yield* Effect.try({
     try: () => {
       const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
@@ -146,7 +147,7 @@ export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* 
         offsets.push(length);
         buffers.push(bytes.subarray(0, buffer.byteLength));
         length += align(buffer.byteLength);
-        if (length > MAX_BYTES) throw new CadGeometryError({ reason: "too-large" });
+        if (length > maxBytes) throw new CadGeometryError({ reason: "too-large" });
       }
       const bin = new Uint8Array(length);
       buffers.forEach((buffer, index) => bin.set(buffer, offsets[index]));
@@ -179,7 +180,7 @@ export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* 
   const jsonLength = align(json.byteLength);
   const total =
     20 + jsonLength + (normalized.bin.byteLength > 0 ? 8 + normalized.bin.byteLength : 0);
-  if (total > MAX_BYTES) return yield* new CadGeometryError({ reason: "too-large" });
+  if (total > maxBytes) return yield* new CadGeometryError({ reason: "too-large" });
   const output = new Uint8Array(total);
   const view = new DataView(output.buffer);
   view.setUint32(0, 0x46546c67, true);
@@ -200,7 +201,7 @@ export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* 
         maxIssues: 32,
         // Onshape omits this optional GPU binding hint on many valid face primitives.
         // Do not let repeated hints exhaust the bounded report before validation finishes.
-        ignoredIssues: ["BUFFER_VIEW_TARGET_MISSING"],
+        ignoredIssues: ["BUFFER_VIEW_TARGET_MISSING", "UNUSED_OBJECT"],
         externalResourceFunction: () =>
           Promise.reject(new Error("External CAD resource unavailable")),
       }),

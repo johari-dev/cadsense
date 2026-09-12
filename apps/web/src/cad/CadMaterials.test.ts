@@ -17,6 +17,33 @@ const material = (root: THREE.Group, index: number) => {
 };
 
 describe("Onshape CAD materials", () => {
+  it("matches bulk-export colors to standalone colors without part appearance metadata", () => {
+    const root = scene([
+      new THREE.Color(0.250980406999588, 0.250980406999588, 0.250980406999588),
+      new THREE.Color(0, 0.4470588266849518, 0.8078431487083435),
+    ]);
+    material(root, 0).name = "0.250980_0.250980_0.250980_0.000000_0.000000";
+    material(root, 1).name = "0.000000_0.447059_0.807843_0.000000_0.000000";
+    prepareCadMaterials(root, [null], new Set([material(root, 0)]));
+    expect(material(root, 0).color.getHex()).toBe(0x404040);
+    expect(material(root, 1).color.getHex()).toBe(0x0072ce);
+    expect(material(root, 0).roughness).toBe(0.4);
+    prepareCadMaterials(root, [null]);
+    expect(material(root, 0).color.getHex()).toBe(0x404040);
+  });
+  it("requires matching bulk-export factors and preserves already-linear and textured materials", () => {
+    for (const color of [new THREE.Color(0x404040), new THREE.Color(0.8, 0.1, 0.2)]) {
+      const root = scene([color.clone()]);
+      material(root, 0).name = "0.250980_0.250980_0.250980_0.000000_0.000000";
+      prepareCadMaterials(root, [null]);
+      expect(material(root, 0).color).toEqual(color);
+    }
+    const root = scene([new THREE.Color(64 / 255, 64 / 255, 64 / 255)]);
+    material(root, 0).name = "0.250980_0.250980_0.250980_0.000000_0.000000";
+    material(root, 0).map = new THREE.Texture();
+    prepareCadMaterials(root, [null]);
+    expect(material(root, 0).color.r).toBe(64 / 255);
+  });
   it("decodes exported display RGB for both the part and its individual face colors", () => {
     const root = scene([
       new THREE.Color(64 / 255, 64 / 255, 64 / 255),

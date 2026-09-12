@@ -10,6 +10,7 @@ import { CadPanel } from "./CadPanel";
 import { CadFloatingPreview } from "./CadFloatingPreview";
 import { useCadFloatingStore } from "./cadFloatingStore";
 import { cadActivityIndicator } from "./CadActivityIndicator";
+import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 
 /** Watch metadata even when CAD is closed; only mount the renderer when it is shown. */
 export function CadAutoPreview({
@@ -60,7 +61,16 @@ export function CadAutoPreview({
         useRightPanelStore.getState().open(threadRef, "cad");
       }}
     >
-      <CadPanel compact project={project} threadRef={threadRef} />
+      <CadPanel
+        compact
+        project={project}
+        threadRef={threadRef}
+        onOpenComments={(target) => {
+          useCadCommentReviewStore.getState().request(threadRef, target);
+          close();
+          useRightPanelStore.getState().open(threadRef, "cad");
+        }}
+      />
     </CadFloatingPreview>
   );
 }

@@ -1,6 +1,7 @@
+import { createCadBrowserPool } from "./CadBrowserWorkers";
 import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { CadRendererError } from "./CadSceneModel";
 import {
   createCadRendererPool,
@@ -302,4 +303,57 @@ describe("CAD background renderer pool", () => {
     expect(h.workers.every((worker) => worker.disposed)).toBe(true);
     h.pool.dispose();
   });
+});
+
+it("rejects malformed worker results without waiting for the capture watchdog", async () => {
+  vi.useFakeTimers();
+  class FakeWorker extends EventTarget {
+    terminate() {}
+    postMessage(message: { type: string; jobId?: string }) {
+      Promise.resolve().then(() =>
+        this.dispatchEvent(
+          new MessageEvent("message", {
+            data:
+              message.type === "initialize"
+                ? { type: "ready" }
+                : {
+                    type: "result",
+                    jobId: message.jobId,
+                    snapshotId: state.snapshotId,
+                    revision: 0,
+                    pose: {
+                      position: [0, 0, 1],
+                      target: [0, 0, 0],
+                      up: [0, 0, 1],
+                      projection: "perspective",
+                      zoom: 1,
+                    },
+                    png: new Blob(),
+                  },
+          }),
+        ),
+      );
+    }
+  }
+  vi.stubGlobal("Worker", FakeWorker);
+  vi.stubGlobal(
+    "OffscreenCanvas",
+    class {
+      width = 1;
+      height = 1;
+    },
+  );
+  const pool = createCadBrowserPool({
+    isCurrent: () => true,
+    readAsset: async () => new ArrayBuffer(0),
+  });
+  try {
+    await expect(pool.capture(job("invalid-pose"))).rejects.toMatchObject({
+      reason: "renderer-unavailable",
+    });
+  } finally {
+    pool.dispose();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });

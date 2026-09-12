@@ -18,6 +18,11 @@ export const pruneCadSnapshots = Effect.fn("pruneCadSnapshots")(function* (proje
         ),
       ) ?? [],
   );
+  for (const comment of model.cadComments ?? []) {
+    const thread = model.threads.find((t) => t.id === comment.threadId && t.deletedAt === null);
+    if (thread && model.projects.some((p) => p.id === thread.projectId && p.deletedAt === null))
+      protectedIds.push(comment.snapshotId);
+  }
   const protectedSet = new Set(protectedIds);
   const operatingProjects = new Set(
     model.projects.filter((project) => project.cad?.operation).map((project) => project.id),

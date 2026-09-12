@@ -1,7 +1,27 @@
+import type {
+  CadCommentTarget,
+  CadCommentRenderWork,
+  CadCommentRenderHit,
+} from "@cadsense/contracts";
+import {
+  locateCadCommentPoints,
+  cadCommentWorldPoint,
+  cadCommentVisible,
+  cadCommentCameraUp,
+  cadCommentInspectionDirections,
+} from "./CadCommentGeometry";
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
+import { CadCameraPose } from "@cadsense/contracts";
+import * as Schema from "effect/Schema";
+const isCadCameraPose = Schema.is(CadCameraPose);
 import * as THREE from "three";
-import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
+import {
+  CAD_SCENE_LIMITS,
+  createCadSceneBudget,
+  measureCadGeometry,
+} from "@cadsense/shared/cadSceneBudget";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { prefetchCadAssets } from "./CadAssetPrefetch";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
 import { prepareCadMaterials } from "./CadMaterials";
@@ -40,6 +60,22 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   renderer.setClearColor(DEFAULT_CAD_APPEARANCE.background);
   const outline = createCadOutline(renderer);
   const scene = new THREE.Scene();
+  const commentMarkers = new THREE.Group();
+  const markerScene = new THREE.Scene();
+  markerScene.add(commentMarkers);
+  const clearCommentMarkers = () => {
+    for (const o of [...commentMarkers.children]) {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        if (!Array.isArray(o.material)) o.material.dispose();
+      }
+      if (o instanceof THREE.Sprite) {
+        o.material.map?.dispose();
+        o.material.dispose();
+      }
+      commentMarkers.remove(o);
+    }
+  };
   const ambient = new THREE.HemisphereLight(0xffffff, 0x89939f, 1.5);
   scene.add(ambient);
   const key = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -84,12 +120,24 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let activeSnapshot: string | null = null;
   let generation = 0;
   let frameRevision = 0;
+  const frameListeners = new Set<() => void>();
   let disposed = false;
   let lost = false;
   let applying = false;
   let width = 1,
     height = 1;
   let view: CadViewState | null = null;
+  let reviewOccurrence: string | null = null;
+  const reviewHidden = new Set<string>();
+  let focusOffset = { x: 0, y: 0 };
+  const reviewVisibility = () => {
+    if (!model || !reviewOccurrence) return;
+    for (const [id, entry] of model.objects) {
+      if (id === reviewOccurrence) entry.object.visible = true;
+      else if (reviewHidden.has(id)) entry.object.visible = false;
+    }
+  };
+
   let appearance = DEFAULT_CAD_APPEARANCE;
   let animationFrame: number | null = null;
   let interactive = false;
@@ -108,7 +156,15 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     renderer.render(scene, camera);
     if (model && outlineSupported)
       outline.render(scene, camera, model.bounds.getSize(outlineBounds).length());
+    if (commentMarkers.children.length) {
+      const autoClear = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(markerScene, camera);
+      renderer.autoClear = autoClear;
+    }
     options.onFrame?.(performance.now() - start);
+    for (const listener of frameListeners) listener();
   };
   const pose = (): ResolvedCadCamera => ({
     position: [camera.position.x, camera.position.y, camera.position.z],
@@ -147,6 +203,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   const ended = () => {
     if (controls?.enabled && !applying && !lost && !disposed) options.onInteractionEnd?.(pose());
   };
+  controls?.addEventListener("start", cancelTransition);
   controls?.addEventListener("change", changed);
   controls?.addEventListener("end", ended);
   const contextLost = (event: Event) => {
@@ -189,6 +246,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     camera.up.fromArray(resolved.up);
     camera.zoom = resolved.zoom;
     camera.lookAt(new THREE.Vector3(...resolved.target));
+    if (focusOffset.x || focusOffset.y)
+      camera.setViewOffset(width, height, focusOffset.x, focusOffset.y, width, height);
     camera.updateProjectionMatrix();
     target.fromArray(resolved.target);
     if (controls && synchronizeControls) {
@@ -202,7 +261,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   const applyFrame = (state: CadViewState, synchronizeControls = true): ResolvedCadCamera => {
     assertAvailable();
     if (!model) throw new CadRendererError("invalid-view");
+    clearCommentMarkers();
     const bounds = model.apply(state);
+    reviewVisibility();
     const resolved = resolveCadCamera(state.camera, bounds, width / height);
     applying = true;
     try {
@@ -301,6 +362,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         model = cached.model;
         outlineSupported = cached.outlineSupported;
         scene.add(model.group);
+        reviewOccurrence = null;
+        reviewHidden.clear();
+        focusOffset = { x: 0, y: 0 };
+        clearCommentMarkers();
         view = null;
         activeSnapshot = manifest.snapshotId;
       }
@@ -329,6 +394,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       appearances.push(partsByKey.get(asset.geometryKey)?.metadata?.appearance ?? null);
       appearancesByHash.set(asset.sha256, appearances);
     }
+    const prefetched = prefetchCadAssets(
+      manifest.assets,
+      readAsset,
+      () => token === generation && !disposed && !lost,
+    );
     try {
       const budget = createCadSceneBudget(manifest.nodes);
       for (const asset of manifest.assets) {
@@ -336,12 +406,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         if (token !== generation) throw new CadRendererError("superseded");
         let prototype = assetsByHash.get(asset.sha256);
         if (!prototype) {
-          const bytes = await readAsset(asset.sha256);
+          const bytes = await prefetched.read(asset.sha256);
+          assertAvailable();
+          if (token !== generation) throw new CadRendererError("superseded");
           const complexity = measureCadGeometry(new Uint8Array(bytes));
           decodedBytes = budget.add(asset, complexity).decodedBytes;
           complexities.set(asset.sha256, complexity);
-          assertAvailable();
-          if (token !== generation) throw new CadRendererError("superseded");
           const parsed = await loader.parseAsync(bytes, "");
           ownedScenes.push(...parsed.scenes);
           prototype = parsed.scene;
@@ -382,18 +452,30 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       activeSnapshot = manifest.snapshotId;
       let total = [...cachedScenes.values()].reduce((sum, entry) => sum + entry.bytes, 0);
       for (const [id, entry] of cachedScenes) {
-        if (cachedScenes.size <= (options.cacheScenes ? 3 : 1) && total <= 256 * 1024 * 1024) break;
+        // Match scene admission: a supported assembly must not exceed the entire warm-cache
+        // budget by itself. Still bound aggregate CPU/GPU estimates and retain at most three scenes.
+        if (
+          cachedScenes.size <= (options.cacheScenes ? 3 : 1) &&
+          total <= CAD_SCENE_LIMITS.decodedBytes
+        )
+          break;
         if (id === activeSnapshot) continue;
         cachedScenes.delete(id);
         total -= entry.bytes;
         disposeCadObjects(entry.prototypes);
       }
+      reviewOccurrence = null;
+      reviewHidden.clear();
+      focusOffset = { x: 0, y: 0 };
+      clearCommentMarkers();
       view = null;
       return false;
     } catch (error) {
       disposeCadObjects(ownedScenes);
       if (error instanceof CadRendererError) throw error;
       throw new CadRendererError("invalid-snapshot");
+    } finally {
+      prefetched.dispose();
     }
   };
   const capture = async (): Promise<Blob> => {
@@ -418,10 +500,275 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     return blob;
   };
   return {
+    cameraPose: pose,
+    subscribeFrames: (listener: () => void) => {
+      frameListeners.add(listener);
+      return () => {
+        frameListeners.delete(listener);
+      };
+    },
+    commentFraming: () => ({ ...focusOffset }),
+    restoreCommentFraming: (offset: { x: number; y: number }) => {
+      focusOffset = { ...offset };
+      configureCamera(pose());
+      if (view) render();
+    },
+    commentProjection: (t: CadCommentTarget) => {
+      if (!model) return null;
+      const entry = model.objects.get(t.occurrenceId);
+      if (!entry) return null;
+      const point =
+        t.kind === "point"
+          ? cadCommentWorldPoint(model, t.occurrenceId, t.point)
+          : new THREE.Box3().setFromObject(entry.object).getCenter(new THREE.Vector3());
+      if (!point) return null;
+      const projected = point.clone().project(camera);
+      return {
+        x: ((projected.x + 1) * width) / 2,
+        y: ((1 - projected.y) * height) / 2,
+        visible: projected.z >= -1 && projected.z <= 1,
+        occluded: !entry.object.visible || !cadCommentVisible(model, camera, point),
+      };
+    },
+    endCommentReview: () => {
+      cancelTransition();
+      reviewOccurrence = null;
+      reviewHidden.clear();
+      if (model && view) {
+        model.apply(view);
+        render();
+      }
+    },
+    focusComment: (
+      t: CadCommentTarget,
+      safe: { width: number; height: number; centerX: number; centerY: number },
+      reducedMotion: boolean,
+    ) => {
+      cancelTransition();
+      if (!model || !view) return "Location unavailable";
+      model.apply(view);
+      reviewHidden.clear();
+      reviewOccurrence = t.occurrenceId;
+      const entry = model.objects.get(t.occurrenceId);
+      if (!entry) return "Location unavailable";
+      const wasHidden = !entry.object.visible;
+      entry.object.visible = true;
+      const bounds = new THREE.Box3().setFromObject(entry.object),
+        size = bounds.getSize(new THREE.Vector3()).length();
+      const point =
+        t.kind === "point"
+          ? cadCommentWorldPoint(model, t.occurrenceId, t.point)
+          : bounds.getCenter(new THREE.Vector3());
+      if (!point) return "Location unavailable";
+      const radius =
+        t.kind === "part"
+          ? bounds.getBoundingSphere(new THREE.Sphere()).radius
+          : Math.max(size * 0.35, 0.001);
+      const angle = Math.atan(
+        Math.tan(Math.PI / 8) * Math.min(safe.height / height, safe.width / height),
+      );
+      const distance = (Math.max(radius, 1e-6) / Math.sin(Math.max(angle, 0.01))) * 1.15;
+      const direction = camera.position.clone().sub(target).normalize();
+      const rayHits = (d: THREE.Vector3) => {
+        const origin = point.clone().addScaledVector(d, distance);
+        const ray = new THREE.Raycaster(
+          origin,
+          point.clone().sub(origin).normalize(),
+          0,
+          distance - Math.max(1e-7, size * 1e-5),
+        );
+        return [...model!.objects].filter(
+          ([, e]) => e.object.visible && ray.intersectObject(e.object, true).length,
+        );
+      };
+      let blockers = rayHits(direction);
+      for (const d of [
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(1, -1, 1).normalize(),
+        new THREE.Vector3(-1, 1, 1).normalize(),
+        new THREE.Vector3(0, 0, -1),
+      ]) {
+        if (!blockers.length) break;
+        const hits = rayHits(d);
+        if (hits.length < blockers.length) {
+          direction.copy(d);
+          blockers = hits;
+        }
+      }
+      for (const [id, e] of blockers)
+        if (id !== t.occurrenceId) {
+          reviewHidden.add(id);
+          e.object.visible = false;
+        }
+      focusOffset = { x: width / 2 - safe.centerX, y: height / 2 - safe.centerY };
+      const from = pose(),
+        eye = point.clone().addScaledVector(direction, distance),
+        started = performance.now();
+      const move = (now: number) => {
+        animationFrame = null;
+        const fraction = reducedMotion ? 1 : Math.min(1, (now - started) / 280),
+          eased = 1 - (1 - fraction) ** 3;
+        const position = new THREE.Vector3(...from.position).lerp(eye, eased),
+          aim = new THREE.Vector3(...from.target).lerp(point, eased);
+        applying = true;
+        configureCamera({
+          ...from,
+          position: [position.x, position.y, position.z],
+          target: [aim.x, aim.y, aim.z],
+          up:
+            Math.abs(
+              position
+                .clone()
+                .sub(aim)
+                .normalize()
+                .dot(new THREE.Vector3(...from.up).normalize()),
+            ) > 0.99
+              ? cadCommentCameraUp(position.clone().sub(aim))
+              : from.up,
+          zoom: 1,
+        });
+        applying = false;
+        render();
+        if (fraction < 1) animationFrame = requestAnimationFrame(move);
+      };
+      if (controls) controls.enabled = interactive;
+      move(started);
+      return blockers.some(([id]) => id === t.occurrenceId)
+        ? "Target is occluded by its own geometry; orbit to inspect"
+        : reviewHidden.size
+          ? "Blocking parts temporarily hidden"
+          : wasHidden
+            ? "Target temporarily revealed"
+            : "";
+    },
+    commentWork: (work: CadCommentRenderWork): CadCommentRenderHit[] => {
+      assertAvailable();
+      clearCommentMarkers();
+      if (!model || !view) throw new CadRendererError("invalid-view");
+      focusOffset = { x: 0, y: 0 };
+      if (work.kind === "locate") {
+        const hits = locateCadCommentPoints(model, camera, work.picks, width, height);
+        for (const hit of hits) {
+          if (hit.point && hit.occurrenceId) {
+            const point = cadCommentWorldPoint(model, hit.occurrenceId, hit.point);
+            if (point) {
+              const radius = point.distanceTo(camera.position) * 0.008;
+              const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 12, 8),
+                new THREE.MeshBasicMaterial({ color: 0xffd866, depthTest: false }),
+              );
+              marker.position.copy(point);
+              marker.renderOrder = 100;
+              commentMarkers.add(marker);
+            }
+          }
+        }
+        render();
+        return hits;
+      }
+      const currentModel = model;
+      const targets = work.targets.map((t) => ({
+        ...t,
+        world: cadCommentWorldPoint(currentModel, t.occurrenceId, t.point),
+      }));
+      const bounds = new THREE.Box3();
+      for (const [id, entry] of model.objects) {
+        if (targets.some((t) => t.occurrenceId === id))
+          bounds.union(new THREE.Box3().setFromObject(entry.object));
+      }
+      if (bounds.isEmpty())
+        return targets.map((t) => ({
+          pickKey: t.candidateId,
+          reason: "geometry-unavailable",
+          occurrenceId: t.occurrenceId,
+          point: null,
+          normal: null,
+        }));
+      const center = bounds.getCenter(new THREE.Vector3()),
+        radius = Math.max(bounds.getBoundingSphere(new THREE.Sphere()).radius, 1e-6);
+      const distance =
+        (radius / Math.sin(Math.atan(Math.tan(Math.PI / 8) * Math.min(1, width / height)))) * 1.2;
+      const originalDirection = camera.position.clone().sub(target).normalize();
+      const directions = cadCommentInspectionDirections(originalDirection);
+      let best = directions[0]!,
+        score = -1;
+      const orient = (d: THREE.Vector3) => {
+        const inspectionPose = {
+          ...pose(),
+          position: center.clone().addScaledVector(d.clone().normalize(), distance).toArray() as [
+            number,
+            number,
+            number,
+          ],
+          target: center.toArray() as [number, number, number],
+          up: cadCommentCameraUp(d),
+          zoom: 1,
+        };
+        if (!isCadCameraPose(inspectionPose)) throw new CadRendererError("invalid-view");
+        configureCamera(inspectionPose);
+      };
+      for (const direction of directions) {
+        orient(direction);
+        const n = targets.filter(
+          (t) => t.world && cadCommentVisible(currentModel, camera, t.world),
+        ).length;
+        if (n > score) {
+          score = n;
+          best = direction;
+        }
+      }
+      orient(best);
+      const hits = targets.map((t, index): CadCommentRenderHit => {
+        const visible = t.world && cadCommentVisible(currentModel, camera, t.world);
+        if (t.world) {
+          const marker = new THREE.Mesh(
+            new THREE.SphereGeometry(radius * 0.035, 12, 8),
+            new THREE.MeshBasicMaterial({ color: visible ? 0xffd866 : 0xff6262, depthTest: false }),
+          );
+          marker.position.copy(t.world);
+          marker.renderOrder = 100;
+          commentMarkers.add(marker);
+          const labelCanvas = new OffscreenCanvas(64, 64),
+            context = labelCanvas.getContext("2d");
+          if (context) {
+            context.fillStyle = visible ? "#ffd866" : "#ff6262";
+            context.beginPath();
+            context.arc(32, 32, 29, 0, Math.PI * 2);
+            context.fill();
+            context.fillStyle = "#171717";
+            context.font = "bold 36px sans-serif";
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            context.fillText(String(index + 1), 32, 33);
+            const texture = new THREE.CanvasTexture(labelCanvas),
+              sprite = new THREE.Sprite(
+                new THREE.SpriteMaterial({ map: texture, depthTest: false }),
+              );
+            sprite.position.copy(t.world);
+            sprite.scale.setScalar(radius * 0.13);
+            sprite.renderOrder = 101;
+            commentMarkers.add(sprite);
+          }
+        }
+        return {
+          pickKey: t.candidateId,
+          reason: visible ? "visible" : "occluded",
+          occurrenceId: t.occurrenceId,
+          point: t.point,
+          normal: null,
+        };
+      });
+      render();
+      return hits;
+    },
     cachedManifest: (snapshotId: string) => cachedScenes.get(snapshotId)?.manifest ?? null,
+    displayedManifest: () =>
+      activeSnapshot === null ? null : (cachedScenes.get(activeSnapshot)?.manifest ?? null),
+    cancelLoad: () => {
+      generation++;
+    },
     suspend: () => {
       cancelTransition();
-      generation++;
       interactive = false;
       if (controls) {
         controls.enabled = false;
@@ -475,10 +822,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     dispose: () => {
       cancelTransition();
       if (disposed) return;
+      clearCommentMarkers();
       outline.dispose();
       disposed = true;
+      frameListeners.clear();
       generation++;
       canvas.removeEventListener("webglcontextlost", contextLost);
+      controls?.removeEventListener("start", cancelTransition);
       controls?.removeEventListener("change", changed);
       controls?.removeEventListener("end", ended);
       controls?.dispose();

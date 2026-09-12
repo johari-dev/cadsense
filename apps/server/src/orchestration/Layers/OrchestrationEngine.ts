@@ -152,10 +152,34 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           "orchestration.aggregate_id": aggregateRef.aggregateId,
         });
 
+        if (envelope.command.type === "thread.cad.comment.review") {
+          const command = envelope.command;
+          const prior = commandReadModel.cadCommentReviews?.find(
+            (r) => r.commandId === command.commandId,
+          );
+          if (
+            prior &&
+            (prior.payloadHash !== command.payloadHash || prior.threadId !== command.threadId)
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "idempotency-conflict",
+            });
+        }
         const existingReceipt = yield* commandReceiptRepository.getByCommandId({
           commandId: envelope.command.commandId,
         });
         if (Option.isSome(existingReceipt)) {
+          if (
+            envelope.command.type === "thread.cad.comment.review" &&
+            !commandReadModel.cadCommentReviews?.some(
+              (r) => r.commandId === envelope.command.commandId,
+            )
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: "idempotency-conflict",
+            });
           // A receipt only proves this exact command was handled. Replaying it
           // for a command aimed at another aggregate would report success for
           // work that never happened.

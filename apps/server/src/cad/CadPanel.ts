@@ -4,7 +4,7 @@ import {
   type CadPanelSceneTicket,
   type CadSnapshotManifest,
   type ThreadId,
-  type ProjectId,
+  ProjectId,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Schema from "effect/Schema";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
@@ -41,6 +42,7 @@ export class CadPanel extends Context.Service<
   }
 >()("@cadsense/server/cad/CadPanel") {}
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
+const decodeProjectId = Schema.decodeUnknownEffect(ProjectId);
 
 export const make = Effect.gen(function* () {
   const query = yield* ProjectionSnapshotQuery;
@@ -52,11 +54,13 @@ export const make = Effect.gen(function* () {
   const scenes = new Map<string, Scene>();
   let sceneCount = 0;
   const projectFor = Effect.fn("CadPanel.projectFor")(function* (threadId: ThreadId) {
-    const thread = yield* query.getThreadShellById(threadId).pipe(Effect.mapError(unavailable));
-    if (Option.isNone(thread)) return yield* unavailable();
-    const project = yield* query
-      .getProjectShellById(thread.value.projectId)
-      .pipe(Effect.mapError(unavailable));
+    const rows =
+      yield* sql`SELECT project_id FROM projection_threads WHERE thread_id=${threadId} AND deleted_at IS NULL`.pipe(
+        Effect.mapError(unavailable),
+      );
+    if (!rows[0]) return yield* unavailable();
+    const projectId = yield* decodeProjectId(rows[0].project_id).pipe(Effect.mapError(unavailable));
+    const project = yield* query.getProjectShellById(projectId).pipe(Effect.mapError(unavailable));
     if (
       Option.isNone(project) ||
       !project.value.onshapeSource ||
@@ -153,12 +157,18 @@ export const make = Effect.gen(function* () {
     Stream.unwrap(
       Effect.gen(function* () {
         const project = yield* projectFor(threadId);
+        const historical = (yield* query
+          .getCommandReadModel()
+          .pipe(Effect.mapError(unavailable))).cadComments?.some(
+          (c) => c.threadId === threadId && c.snapshotId === snapshotId,
+        );
         if (
           sceneCount >= 64 ||
-          !project.cad?.roots.some(
-            (root) =>
-              root.current?.snapshotId === snapshotId || root.rollback?.snapshotId === snapshotId,
-          )
+          (!historical &&
+            !project.cad?.roots.some(
+              (root) =>
+                root.current?.snapshotId === snapshotId || root.rollback?.snapshotId === snapshotId,
+            ))
         )
           return yield* unavailable();
         yield* Effect.acquireRelease(

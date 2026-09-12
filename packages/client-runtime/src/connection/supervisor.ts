@@ -418,8 +418,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
                   }
                   break;
                 case "Wakeup":
-                  yield* Fiber.interrupt(probe);
-                  return true;
+                  // Repeated foreground notifications share the in-flight health check.
+                  // Cancelling it would tear down a healthy session and lose pending RPC replies.
+                  break;
                 case "ConnectRequested":
                   break;
               }

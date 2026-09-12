@@ -6,6 +6,15 @@ import { WS_METHODS } from "@cadsense/contracts";
 import { connectionAtomRuntime } from "../connection/runtime";
 
 export const cadPanelEnvironment = {
+  comments: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+    label: "cad-comments:watch",
+    tag: WS_METHODS.cadCommentsWatch,
+    idleTtlMs: 60000,
+  }),
+  review: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "cad-comments:review",
+    tag: WS_METHODS.cadCommentReview,
+  }),
   watch: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "cad-panel:watch",
     tag: WS_METHODS.cadPanelWatch,

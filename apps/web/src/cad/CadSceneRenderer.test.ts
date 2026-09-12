@@ -1,8 +1,9 @@
-import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
+import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createCadSceneRenderer } from "./CadSceneRenderer";
-import { Camera, Matrix4, Quaternion, Vector3 } from "three";
+import { BoxGeometry, Camera, Matrix4, Mesh, MeshBasicMaterial, Quaternion, Vector3 } from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as CadBudget from "@cadsense/shared/cadSceneBudget";
 
 const calls = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() }));
@@ -19,6 +20,7 @@ vi.mock("three", async (importOriginal) => {
       setClearColor() {}
       setPixelRatio() {}
       setSize() {}
+      clearDepth() {}
       getContext() {
         return { isContextLost: () => false };
       }
@@ -44,6 +46,7 @@ vi.mock("three/addons/loaders/GLTFLoader.js", async () => {
 });
 
 const id = "1".repeat(64);
+const isCameraPose = Schema.is(CadCameraPose);
 // Valid empty GLB: lifecycle tests fake the graphics boundary, not asset admission.
 const geometry = () => {
   const json = new TextEncoder().encode(JSON.stringify({ asset: { version: "2.0" }, nodes: [] }));
@@ -160,6 +163,145 @@ const canvasHarness = () => {
 };
 
 describe("CAD renderer lifecycle without WebGL", () => {
+  it("notifies marker subscribers after rendered camera and scene changes and releases subscriptions", async () => {
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    const frames = vi.fn();
+    const unsubscribe = renderer.subscribeFrames(frames);
+    try {
+      await renderer.load(manifest, async () => geometry());
+      renderer.apply(state);
+      expect(frames).toHaveBeenCalledTimes(1);
+      renderer.resize(1280, 960);
+      expect(frames).toHaveBeenCalledTimes(2);
+      renderer.restoreCommentFraming({ x: 0.1, y: 0 });
+      expect(frames).toHaveBeenCalledTimes(3);
+      renderer.endCommentReview();
+      expect(frames).toHaveBeenCalledTimes(4);
+      unsubscribe();
+      renderer.apply(state);
+      expect(frames).toHaveBeenCalledTimes(4);
+    } finally {
+      unsubscribe();
+      renderer.dispose();
+    }
+  });
+  it("overlaps bounded asset downloads and does not expose a partial scene", async () => {
+    const h = canvasHarness();
+    const renderer = createCadSceneRenderer({ canvas: h.canvas });
+    const assets = Array.from({ length: 12 }, (_, i) => ({
+      ...manifest.assets[0]!,
+      geometryKey: i.toString(16).padStart(64, "0"),
+      sha256: i.toString(16).padStart(64, "0"),
+    }));
+    const large = { ...manifest, assets };
+    const releases: Array<() => void> = [];
+    const read = vi.fn(
+      () => new Promise<ArrayBuffer>((resolve) => releases.push(() => resolve(geometry()))),
+    );
+    const loading = renderer.load(large, read);
+    try {
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(6));
+      expect(renderer.cachedManifest(large.snapshotId)).toBeNull();
+      while (releases.length) releases.shift()!();
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(12));
+      while (releases.length) releases.shift()!();
+      await loading;
+      expect(renderer.cachedManifest(large.snapshotId)).toBe(large);
+    } finally {
+      renderer.dispose();
+      while (releases.length) releases.shift()!();
+      await loading.catch(() => {});
+    }
+  });
+  it("does not verify a target through another visible component during inspection", async () => {
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext() {
+          return null;
+        }
+      },
+    );
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [
+            { ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey },
+            {
+              ...manifest.nodes[0]!,
+              id: "3".repeat(64),
+              kind: "part",
+              sourcePartKey: geometryKey,
+              transform: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1],
+            },
+          ],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(1280, 960);
+      renderer.apply(state);
+      const hits = renderer.commentWork({
+        kind: "inspect",
+        targets: [
+          {
+            candidateId: "inside",
+            occurrenceId: id,
+            point: [0, 0, 0.01],
+          },
+        ],
+      });
+      expect(hits[0]?.reason).toBe("occluded");
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+  it("can restore a comment camera after rotating to reveal the underside of a part", async () => {
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [{ ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey }],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(800, 600);
+      renderer.apply(state);
+      renderer.focusComment(
+        {
+          kind: "point",
+          label: "Underside",
+          occurrenceId: id,
+          point: [0, 0, -0.01],
+          normal: [0, 0, -1],
+          captureId: "capture",
+          inspectionId: "inspection",
+          confirmationReason: "Verified underside",
+        },
+        { width: 400, height: 600, centerX: 200, centerY: 300 },
+        true,
+      );
+      const pose = renderer.cameraPose();
+      expect(pose.position[2]).toBeLessThan(0);
+      expect(isCameraPose(pose)).toBe(true);
+      expect(() =>
+        renderer.apply({ ...state, camera: { kind: "pose", pose, fit: null } }),
+      ).not.toThrow();
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+    }
+  });
   it.each(["perspective", "orthographic"] as const)(
     "centers an arbitrary world point and scales magnification in %s captures",
     async (projection) => {
@@ -210,7 +352,9 @@ describe("CAD renderer lifecycle without WebGL", () => {
     const read = vi.fn(async () => geometry());
     const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
     try {
+      expect(renderer.displayedManifest()).toBeNull();
       expect(await renderer.load(manifest, read)).toBe(false);
+      expect(renderer.displayedManifest()).toBe(manifest);
       renderer.apply(state);
       expect(await renderer.load(manifest, read)).toBe(true);
       // The current view remains capturable while a different thread supplies its next view.
@@ -218,17 +362,52 @@ describe("CAD renderer lifecycle without WebGL", () => {
       h.completeCapture();
       await captured;
       expect(await renderer.load(second, read)).toBe(false);
+      expect(renderer.displayedManifest()).toBe(second);
       renderer.apply({ ...state, snapshotId: second.snapshotId });
       expect(await renderer.load(manifest, read)).toBe(false);
+      expect(renderer.displayedManifest()).toBe(manifest);
       expect(read).toHaveBeenCalledTimes(2);
       expect(renderer.cachedManifest(manifest.snapshotId)).toBe(manifest);
     } finally {
       renderer.dispose();
     }
   });
+  it("keeps a full robot warm across thread reattachment and a small-project round trip", async () => {
+    const measurement = vi.spyOn(CadBudget, "measureCadGeometry").mockReturnValue({
+      decodedBytes: 1100 * 1024 * 1024,
+      triangles: 0,
+      drawCalls: 0,
+      nodeCount: 0,
+    });
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, cacheScenes: true });
+    const read = vi.fn(async () => geometry());
+    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    try {
+      await renderer.load(manifest, read);
+      renderer.apply(state);
+      renderer.suspend();
+      renderer.resume();
+      expect(await renderer.load(manifest, read)).toBe(true);
+      expect(read).toHaveBeenCalledTimes(1);
+      measurement.mockReturnValue({
+        decodedBytes: 10 * 1024 * 1024,
+        triangles: 0,
+        drawCalls: 0,
+        nodeCount: 0,
+      });
+      await renderer.load(second, read);
+      renderer.suspend();
+      renderer.resume();
+      await renderer.load(manifest, read);
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      renderer.dispose();
+      measurement.mockRestore();
+    }
+  });
   it("evicts least-recent scenes at the aggregate memory limit", async () => {
     const measurement = vi.spyOn(CadBudget, "measureCadGeometry").mockReturnValue({
-      decodedBytes: 100 * 1024 * 1024,
+      decodedBytes: 600 * 1024 * 1024,
       triangles: 0,
       drawCalls: 0,
       nodeCount: 0,
@@ -253,7 +432,7 @@ describe("CAD renderer lifecycle without WebGL", () => {
     }
     expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
   });
-  it("bounds small scene retention to three and cancels unfinished loads when detached", async () => {
+  it("bounds small scene retention to three and continues unfinished loads while detached", async () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
     try {
@@ -274,10 +453,33 @@ describe("CAD renderer lifecycle without WebGL", () => {
       );
       renderer.suspend();
       finish(geometry());
-      await expect(loading).rejects.toMatchObject({ reason: "superseded" });
-      expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
+      await expect(loading).resolves.toBe(false);
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBe(manifest);
       renderer.resume();
-      expect(await renderer.load(manifest, async () => geometry())).toBe(false);
+      expect(await renderer.load(manifest, async () => geometry())).toBe(true);
+    } finally {
+      renderer.dispose();
+    }
+  });
+  it("cannot activate a cancelled background load after another snapshot is displayed", async () => {
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, cacheScenes: true });
+    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    let finish!: (value: ArrayBuffer) => void;
+    const old = renderer.load(
+      manifest,
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      renderer.cancelLoad();
+      await renderer.load(second, async () => geometry());
+      expect(renderer.displayedManifest()).toBe(second);
+      finish(geometry());
+      await expect(old).rejects.toMatchObject({ reason: "superseded" });
+      expect(renderer.displayedManifest()).toBe(second);
+      expect(renderer.cachedManifest(manifest.snapshotId)).toBeNull();
     } finally {
       renderer.dispose();
     }

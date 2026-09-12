@@ -49,6 +49,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeResourceTelemetry
   | typeof WS_METHODS.previewAutomationConnect
   | typeof WS_METHODS.cadRenderConnect
+  | typeof WS_METHODS.cadCommentsWatch
   | typeof WS_METHODS.cadPanelWatch
   | typeof WS_METHODS.cadStorageWatch
   | typeof WS_METHODS.cadPanelScene;

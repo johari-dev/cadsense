@@ -1,3 +1,4 @@
+import { readCadComments, projectCadCommentEvent } from "./CadCommentPersistence.ts";
 import {
   CadSessionIndex,
   CadCaptureRecord,
@@ -60,7 +61,18 @@ export const readLatestCadCapture = Effect.fn("readLatestCadCapture")(
 export const projectCadSessionEvent = Effect.fn("projectCadSessionEvent")(
   function* (event: OrchestrationEvent) {
     const sql = yield* SqlClient.SqlClient;
+    yield* projectCadCommentEvent(event);
     switch (event.type) {
+      case "thread.created": {
+        const threadId = event.payload.threadId;
+        // A recreated thread is a new owner even when it reuses the durable ID.
+        // Clear every CAD projection that could otherwise expose the prior
+        // incarnation's view or authorize one of its captures.
+        yield* sql`DELETE FROM projection_cad_captures WHERE thread_id=${threadId}`;
+        yield* sql`DELETE FROM projection_cad_sessions WHERE thread_id=${threadId}`;
+        yield* sql`DELETE FROM projection_cad_user_views WHERE thread_id=${threadId}`;
+        return;
+      }
       case "thread.cad-capture-recorded": {
         const record = event.payload;
         const camera = encodeCamera({ kind: "pose", pose: record.cameraPose, fit: null });
@@ -101,6 +113,11 @@ export const readCadSessionIndexes = Effect.fn("readCadSessionIndexes")(
     const users =
       yield* sql`SELECT thread_id AS "threadId", revision FROM projection_cad_user_views`;
     return {
+      ...(yield* readCadComments().pipe(
+        Effect.catchTag("SchemaError", (error) =>
+          Effect.fail(toPersistenceDecodeError("CAD comments")(error)),
+        ),
+      )),
       cadSessions: yield* decodeSessionIndexes(sessions).pipe(
         Effect.mapError(toPersistenceDecodeError("CAD session index")),
       ),

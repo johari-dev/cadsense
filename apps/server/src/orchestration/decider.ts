@@ -1,3 +1,4 @@
+import { decideCadComments } from "./cadComments.ts";
 import {
   EventId,
   initialCadProjectState,
@@ -235,6 +236,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: { threadId: command.threadId, captureId: command.captureId },
       });
       return events;
+    }
+    case "thread.cad.comments.commit":
+    case "thread.cad.comment.review": {
+      return {
+        ...(yield* withEventBase({
+          commandId: command.commandId,
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: yield* nowIso,
+        })),
+        ...(yield* decideCadComments(command, readModel)),
+      };
     }
     case "thread.cad.context.ensure":
     case "thread.cad.view.set":

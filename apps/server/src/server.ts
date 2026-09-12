@@ -1,3 +1,4 @@
+import * as CadComments from "./cad/CadComments.ts";
 import { EnvironmentHttpApi } from "@cadsense/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -254,16 +255,19 @@ const OnshapeLayerLive = OnshapeProjects.layer.pipe(
   Layer.provideMerge(OnshapeWorkspaceReactorLayerLive),
 );
 
+const CadSnapshotStoreLayerLive = CadSnapshotStore.layer.pipe(Layer.provide(PersistenceLayerLive));
+
 const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
-  Layer.provideMerge(CadSnapshotStore.layer),
+  Layer.provideMerge(CadSnapshotStoreLayerLive),
   Layer.provideMerge(OnshapeCadRoots.layer),
 );
 const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadViewing.layer),
+  Layer.provideMerge(CadComments.layer),
   Layer.provideMerge(ClaudeCadCapabilities.layer),
   Layer.provideMerge(CadCaptureArtifacts.layer),
   Layer.provideMerge(CadRenderBroker.layer),
-  Layer.provideMerge(CadSnapshotStore.layer),
+  Layer.provideMerge(CadSnapshotStoreLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
 );

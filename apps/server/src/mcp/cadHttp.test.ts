@@ -103,7 +103,16 @@ it.effect("serves native images only for the authenticated session's one-use CAD
     expect(listed.headers.get("cache-control")).toBe("no-store");
     expect(
       decode(yield* Effect.promise(() => listed.json())).result.tools?.map((tool) => tool.name),
-    ).toEqual(["cad_context", "cad_hierarchy", "cad_update_view", "cad_capture"]);
+    ).toEqual([
+      "cad_comments_list",
+      "cad_comment_locate",
+      "cad_comment_inspect",
+      "cad_comments_publish",
+      "cad_context",
+      "cad_hierarchy",
+      "cad_update_view",
+      "cad_capture",
+    ]);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",

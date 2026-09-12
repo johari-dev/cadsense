@@ -1,3 +1,4 @@
+import type { CadCommentRenderWork, CadCommentRenderHit } from "@cadsense/contracts";
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import type { ResolvedCadCamera } from "./CadSceneModel";
 import { CadRendererError } from "./CadRendererError";
@@ -9,6 +10,7 @@ export interface CadRenderJob {
   readonly runId: string;
   readonly manifest: CadSnapshotManifest;
   readonly state: CadViewState;
+  readonly commentWork?: CadCommentRenderWork;
   readonly width: number;
   readonly height: number;
   readonly appearance?: CadAppearance;
@@ -18,6 +20,7 @@ export interface CadRenderResult {
   readonly snapshotId: string;
   readonly revision: number;
   readonly pose: ResolvedCadCamera;
+  readonly commentHits?: readonly CadCommentRenderHit[];
   readonly png: Blob;
 }
 export interface CadRenderWorker {

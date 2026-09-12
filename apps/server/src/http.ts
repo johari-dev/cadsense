@@ -128,6 +128,7 @@ export const browserApiCorsLayer = Layer.unwrap(
       credentials: true,
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
+      exposedHeaders: ["x-cad-bundle-range"],
       maxAge: 600,
     });
   }),

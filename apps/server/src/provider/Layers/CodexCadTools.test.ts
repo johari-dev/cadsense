@@ -11,7 +11,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import wire from "../testFixtures/codexMultiAgentWire.json" with { type: "json" };
 import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
-import type { CadProviderTools } from "../CadProviderTools.ts";
+import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeResponses = Schema.decodeUnknownSync(
@@ -33,7 +33,15 @@ const decodeResponses = Schema.decodeUnknownSync(
 const decodeStart = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
-      params: Schema.Struct({ dynamicTools: Schema.Array(Schema.Struct({ name: Schema.String })) }),
+      params: Schema.Struct({
+        dynamicTools: Schema.Array(
+          Schema.Struct({
+            name: Schema.String,
+            description: Schema.String,
+            inputSchema: Schema.Unknown,
+          }),
+        ),
+      }),
     }),
   ),
 );
@@ -217,9 +225,23 @@ it.effect(
       const start = decodeStart(
         (yield* fs.readFileString(`${scriptPath}.requests`)).split("\n")[0]!,
       );
+      for (const tool of start.params.dynamicTools) {
+        const definition = cadToolDefinitions.find((item) => item.name === tool.name)!;
+        assert.deepEqual(tool.inputSchema, definition.inputSchema);
+        assert.equal(tool.description, definition.description);
+      }
       assert.deepEqual(
         start.params.dynamicTools.map((tool) => tool.name),
-        ["cad_context", "cad_hierarchy", "cad_update_view", "cad_capture"],
+        [
+          "cad_comments_list",
+          "cad_comment_locate",
+          "cad_comment_inspect",
+          "cad_comments_publish",
+          "cad_context",
+          "cad_hierarchy",
+          "cad_update_view",
+          "cad_capture",
+        ],
       );
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

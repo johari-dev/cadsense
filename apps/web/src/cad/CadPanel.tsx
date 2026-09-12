@@ -1,11 +1,24 @@
-import { useAtomValue } from "@effect/atom-react";
-import { CadSnapshotManifest, type CadViewState, type ScopedThreadRef } from "@cadsense/contracts";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import {
+  CadSnapshotManifest,
+  type CadComment,
+  type CadViewState,
+  type ScopedThreadRef,
+} from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Button } from "../components/ui/button";
-import { LoadingMark } from "../components/LoadingMark";
+import { CadLoadingProgress, type CadLoadProgress } from "./CadLoadingProgress";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -13,6 +26,7 @@ import { cadPanelEnvironment } from "../state/cadPanel";
 import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
+import { loadCadAssetDelivery } from "./CadAssetDelivery";
 import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
@@ -25,6 +39,13 @@ import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import "./CadPanel.css";
+import {
+  EMPTY_CAD_PANEL_REVIEW,
+  useCadCommentReviewStore,
+  type CadPanelReviewSession,
+} from "./cadCommentReviewStore";
+import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
+import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 
@@ -51,7 +72,7 @@ function PendingCadScene({ environmentId }: { environmentId: string }) {
   );
 }
 
-function CadScene({
+export function CadScene({
   threadRef,
   view,
   disabled,
@@ -60,6 +81,8 @@ function CadScene({
   captureId,
   fullscreen,
   compact,
+  commentsCard,
+  framing,
 }: {
   threadRef: ScopedThreadRef;
   view: CadViewState;
@@ -69,22 +92,24 @@ function CadScene({
   captureId: string | null;
   fullscreen: boolean;
   compact: boolean;
+  framing: { x: number; y: number } | null;
+  commentsCard: Omit<CadCommentsCardProps, "manifest" | "displayedSnapshotId">;
 }) {
-  const lease = useAtomValue(
-    cadPanelEnvironment.scene({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, snapshotId: view.snapshotId },
-    }),
-  );
+  const sceneAtom = cadPanelEnvironment.scene({
+    environmentId: threadRef.environmentId,
+    input: { threadId: threadRef.threadId, snapshotId: view.snapshotId },
+  });
+  const lease = useAtomValue(sceneAtom);
+  const registry = useContext(RegistryContext);
   const baseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
   const ticket = AsyncResult.isSuccess(lease) ? lease.value : null;
   const canvas = useRef<HTMLDivElement>(null);
-  const renderer = useRef<CadSceneRenderer | null>(null);
+  const renderer = commentsCard.renderer;
+  const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
   const latest = useRef({ view, disabled, onChange });
-  const [manifest, setManifest] = useState<CadSnapshotManifest | null>(() =>
-    cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId),
-  );
+  const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const sceneContainer = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
@@ -153,6 +178,7 @@ function CadScene({
   useLayoutEffect(() => {
     if (!baseUrl || !canvas.current) return;
     setError(null);
+    setLoadProgress(null);
     const controller = new AbortController();
     let attachment: ReturnType<typeof cadVisibleViewer.acquire>;
     try {
@@ -172,8 +198,50 @@ function CadScene({
       return;
     }
     const { renderer: current, canvas: node, diagnostics } = attachment;
-    setManifest(current.cachedManifest(view.snapshotId));
+    attachmentRef.current = attachment;
     renderer.current = current;
+    const stopLoad = attachment.watchLoad(view.snapshotId, (state) => {
+      try {
+        if (state.status === "idle") {
+          setManifest(null);
+          setLoadProgress(null);
+          return;
+        }
+        if (state.status === "loading") {
+          setError(null);
+          setManifest(null);
+          setLoadProgress(
+            state.total === null ? null : { received: state.received, total: state.total },
+          );
+          return;
+        }
+        if (state.status === "failure") {
+          setManifest(null);
+          setError(
+            "Downloaded CAD could not be opened. Existing CAD is unchanged; no Onshape request was made.",
+          );
+          return;
+        }
+        current.setInteractive(!latest.current.disabled);
+        const readyView = latest.current.view;
+        current.apply(readyView);
+        if (framing) current.restoreCommentFraming(framing);
+        applied.current = {
+          manifest: state.manifest,
+          state: JSON.stringify({ ...readyView, revision: 0 }),
+        };
+        diagnostics.record({
+          type: "worker-count",
+          workers: 1,
+          snapshotIds: [state.manifest.snapshotId],
+        });
+        setLoadProgress(null);
+        setError(null);
+        setManifest(state.manifest);
+      } catch {
+        setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
+      }
+    });
     const stopAppearance = observeCadAppearance((appearance) => {
       try {
         if (!controller.signal.aborted) current.setAppearance(appearance);
@@ -197,57 +265,70 @@ function CadScene({
     const observer = new ResizeObserver(resize);
     observer.observe(node);
     resize();
-    const request = async (hash?: string) => {
-      if (!ticket) throw new Error("CAD scene lease unavailable");
-      const response = await fetch(
-        new URL(
-          `api/cad-panel/${ticket.sceneId}${hash ? `/${hash}` : ""}`,
-          baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
-        ),
-        {
-          signal: controller.signal,
-          credentials: "omit",
-          headers: { "x-cad-panel-token": ticket.token },
-        },
-      );
-      if (!response.ok) throw new Error("CAD scene unavailable");
-      return response;
-    };
-    void (async () => {
-      try {
-        if (!ticket && !current.cachedManifest(view.snapshotId)) return;
-        const snapshot =
-          current.cachedManifest(view.snapshotId) ?? decodeManifest(await (await request()).json());
-        const sameScene = await current.load(snapshot, async (hash) =>
-          (await request(hash)).arrayBuffer(),
-        );
-        if (controller.signal.aborted) return;
-        diagnostics.record({
-          type: "worker-count",
-          workers: 1,
-          snapshotIds: [snapshot.snapshotId],
-        });
-        current.setInteractive(!latest.current.disabled);
-        if (sameScene && !matchMedia("(prefers-reduced-motion: reduce)").matches)
-          current.transition(latest.current.view);
-        else current.apply(latest.current.view);
-        setError(null);
-        setManifest(snapshot);
-      } catch {
-        if (!controller.signal.aborted)
-          setError(
-            "Downloaded CAD could not be opened. Existing CAD is unchanged; no Onshape request was made.",
-          );
-      }
-    })();
     return () => {
       controller.abort();
       stopAppearance();
+      stopLoad();
       observer.disconnect();
       renderer.current = null;
+      attachmentRef.current = null;
       attachment.release();
     };
-  }, [baseUrl, ticket]);
+  }, [baseUrl, threadRef.environmentId, view.snapshotId]);
+  useLayoutEffect(() => {
+    const attachment = attachmentRef.current;
+    if (!baseUrl || !attachment) return;
+    const cached = attachment.renderer.cachedManifest(view.snapshotId);
+    if (!ticket && !cached) return;
+    attachment.ensureLoad(
+      view.snapshotId,
+      ticket ? `${ticket.sceneId}:${ticket.token}` : `cached:${view.snapshotId}`,
+      () => (ticket ? registry.mount(sceneAtom) : () => {}),
+      async (current, signal, onProgress) => {
+        const request = async (hash?: string, requestSignal: AbortSignal = signal) => {
+          if (!ticket) throw new Error("CAD scene lease unavailable");
+          const response = await fetch(
+            new URL(
+              `api/cad-panel/${ticket.sceneId}${hash ? `/${hash}` : "?delivery=meshopt-bin-v1"}`,
+              baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
+            ),
+            {
+              signal: requestSignal,
+              credentials: "omit",
+              headers: { "x-cad-panel-token": ticket.token },
+            },
+          );
+          if (!response.ok) throw new Error("CAD scene unavailable");
+          return response;
+        };
+        const snapshot =
+          current.cachedManifest(view.snapshotId) ?? decodeManifest(await (await request()).json());
+        if (signal.aborted) throw new Error("CAD scene load cancelled");
+        if (current.cachedManifest(snapshot.snapshotId)) {
+          await current.load(snapshot, async () => {
+            throw new Error("Cached CAD unexpectedly requested geometry");
+          });
+        } else {
+          await loadCadAssetDelivery({
+            assets: snapshot.assets,
+            namespace: {
+              baseUrl,
+              environmentId: threadRef.environmentId,
+              snapshotId: snapshot.snapshotId,
+            },
+            signal,
+            request,
+            load: async (readAsset) => {
+              await current.load(snapshot, readAsset);
+            },
+            onProgress,
+          });
+        }
+        if (signal.aborted) throw new Error("CAD scene load cancelled");
+        return snapshot;
+      },
+    );
+  }, [baseUrl, registry, sceneAtom, ticket, view.snapshotId]);
   const unavailable =
     error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null);
   return (
@@ -268,9 +349,14 @@ function CadScene({
             className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
             role="status"
           >
-            {unavailable ?? <LoadingMark kind="cad" />}
+            {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
           </div>
         )}
+        <CadCommentsCard
+          {...commentsCard}
+          manifest={manifest}
+          displayedSnapshotId={view.snapshotId}
+        />
         {manifest && !unavailable && !compact && (
           <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
         )}
@@ -358,11 +444,13 @@ export function CadPanel({
   threadRef,
   fullscreen = false,
   compact = false,
+  onOpenComments,
 }: {
   project: Project;
   threadRef: ScopedThreadRef;
   fullscreen?: boolean;
   compact?: boolean;
+  onOpenComments?: (target?: { id: string; target: number }) => void;
 }) {
   const state = useAtomValue(
     cadPanelEnvironment.watch({
@@ -370,6 +458,64 @@ export function CadPanel({
       input: { threadId: threadRef.threadId },
     }),
   );
+  const commentState = useAtomValue(
+    cadPanelEnvironment.comments({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
+  const comments = useMemo(
+    () =>
+      AsyncResult.isSuccess(commentState)
+        ? commentState.value.comments.map((c) => ({
+            ...c,
+            modelDescriptor: commentState.value.modelDescriptors[c.modelKey] ?? "",
+          }))
+        : [],
+    [commentState],
+  );
+  const renderer = useRef<CadSceneRenderer | null>(null);
+  const reviewKey = scopedThreadKey(threadRef);
+  const { commentsOpen, selection, historicalView, savedCurrent, localFraming, localView } =
+    useCadCommentReviewStore((state) => state.sessions[reviewKey] ?? EMPTY_CAD_PANEL_REVIEW);
+  const updateReview = useCallback(
+    (update: (current: CadPanelReviewSession) => CadPanelReviewSession) =>
+      useCadCommentReviewStore.getState().updateSession(threadRef, update),
+    [threadRef.environmentId, threadRef.threadId],
+  );
+  const clearSelection = useCallback(
+    (id?: string) => {
+      updateReview((current) => ({
+        ...current,
+        selection: !id || current.selection?.id === id ? null : current.selection,
+      }));
+    },
+    [updateReview],
+  );
+  const setCommentsOpen = useCallback(
+    (open: boolean) => {
+      if (open && onOpenComments) {
+        onOpenComments();
+        return;
+      }
+      updateReview((current) => ({
+        ...current,
+        commentsOpen: open,
+        selection: open ? current.selection : null,
+      }));
+    },
+    [onOpenComments, updateReview],
+  );
+  const pendingReview = useCadCommentReviewStore((s) => s.pending[scopedThreadKey(threadRef)]);
+  useLayoutEffect(() => {
+    if (compact || pendingReview === undefined) return;
+    updateReview((current) => ({
+      ...current,
+      commentsOpen: true,
+      selection: pendingReview ? { ...pendingReview, request: 1 } : null,
+    }));
+    useCadCommentReviewStore.getState().consume(threadRef);
+  }, [compact, pendingReview, threadRef, updateReview]);
   const threads = useThreadShells();
   const runActive = isCadProjectRunActive(project, threads);
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
@@ -397,14 +543,95 @@ export function CadPanel({
     ),
   );
   const optimistic = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
-  const view = (!locked && optimistic) || data?.view || null;
+  const currentView = (!locked && optimistic) || data?.view || null;
+  const view =
+    historicalView ||
+    (localView?.snapshotId === currentView?.snapshotId ? localView : null) ||
+    currentView;
   useLayoutEffect(() => {
     edits.observe(data?.userRevision ?? null, locked);
   }, [edits, data, locked]);
   const change = (next: CadViewState) => {
-    if (locked) return;
+    if (historicalView) {
+      updateReview((current) => ({ ...current, historicalView: next }));
+      return;
+    }
+    if (locked) {
+      if (commentsOpen) updateReview((current) => ({ ...current, localView: next }));
+      return;
+    }
+    updateReview((current) => ({ ...current, localView: null }));
     setError(null);
     edits.select(next);
+  };
+  const choose = (comment: CadComment, target: number) => {
+    if (onOpenComments) {
+      onOpenComments({ id: comment.id, target });
+      return;
+    }
+    updateReview((current) => ({
+      ...current,
+      commentsOpen: true,
+      selection: { id: comment.id, target, request: (current.selection?.request ?? 0) + 1 },
+    }));
+    const manifest = view ? cadVisibleViewer.peek(threadRef.environmentId, view.snapshotId) : null;
+    if (
+      (manifest && cadCommentModelDescriptor(manifest) === comment.modelDescriptor) ||
+      (!manifest && comment.snapshotId === view?.snapshotId)
+    )
+      return;
+    if (!savedCurrent && currentView) {
+      const currentManifest = cadVisibleViewer.peek(
+        threadRef.environmentId,
+        currentView.snapshotId,
+      );
+      const pose = renderer.current?.cameraPose();
+      const saved = {
+        view: pose
+          ? { ...(view ?? currentView), camera: { kind: "pose" as const, pose, fit: null } }
+          : (view ?? currentView),
+        descriptor: currentManifest ? cadCommentModelDescriptor(currentManifest) : null,
+        framing: renderer.current?.commentFraming() ?? { x: 0, y: 0 },
+      };
+      updateReview((current) => ({ ...current, savedCurrent: current.savedCurrent ?? saved }));
+    }
+    updateReview((current) => ({
+      ...current,
+      historicalView: {
+        rootId: comment.rootId,
+        snapshotId: comment.snapshotId,
+        revision: 0,
+        camera: { kind: "preset", preset: "isometric", fit: [] },
+        visibility: {},
+        isolatedOccurrenceIds: [],
+        explosion: 0,
+      },
+    }));
+  };
+  const back = () => {
+    renderer.current?.endCommentReview();
+    const saved = savedCurrent;
+    const manifest = currentView
+      ? cadVisibleViewer.peek(threadRef.environmentId, currentView.snapshotId)
+      : null;
+    const equivalent =
+      currentView &&
+      saved &&
+      (currentView.snapshotId === saved.view.snapshotId ||
+        (manifest && cadCommentModelDescriptor(manifest) === saved.descriptor));
+    const restoredView = equivalent
+      ? { ...saved.view, snapshotId: currentView.snapshotId, rootId: currentView.rootId }
+      : null;
+    if (saved && !equivalent)
+      setError("CAD changed during review. Showing the newest current model with its saved view.");
+    updateReview((current) => ({
+      ...current,
+      localView: restoredView,
+      localFraming: equivalent ? saved.framing : null,
+      savedCurrent: null,
+      historicalView: null,
+      selection: null,
+    }));
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
   return (
@@ -433,7 +660,7 @@ export function CadPanel({
               };
             })}
             selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
-            disabled={locked}
+            disabled={locked || !!historicalView}
             onSelect={(id) => {
               const root = roots.find((root) => root.rootId === id);
               if (root?.current)
@@ -465,12 +692,25 @@ export function CadPanel({
       {view ? (
         <>
           <CadScene
+            framing={historicalView ? null : localFraming}
             captureId={data?.captureId ?? null}
             key={`${threadRef.threadId}:${view.snapshotId}`}
             threadRef={threadRef}
             view={view}
-            disabled={locked}
-            cadDimmed={locked && !showActivity}
+            disabled={locked && !commentsOpen && !historicalView}
+            cadDimmed={locked && !showActivity && !commentsOpen && !historicalView}
+            commentsCard={{
+              threadRef,
+              comments,
+              renderer,
+              open: commentsOpen,
+              setOpen: setCommentsOpen,
+              selection,
+              clearSelection,
+              choose,
+              historical: !!historicalView,
+              back,
+            }}
             fullscreen={fullscreen}
             compact={compact}
             onChange={(next) => void change(next)}
@@ -488,7 +728,7 @@ export function CadPanel({
           {AsyncResult.isFailure(state) ? (
             "CAD is unavailable for this thread."
           ) : !data ? (
-            <LoadingMark kind="cad" />
+            <CadLoadingProgress />
           ) : data.unavailableRootId ? (
             "This downloaded CAD is unavailable. You can select another cached scene."
           ) : roots.length ? (
@@ -497,6 +737,22 @@ export function CadPanel({
             "No CAD has been downloaded. Select and sync CAD in project settings."
           )}
         </div>
+      )}
+      {!view && comments.length > 0 && (
+        <CadCommentsCard
+          threadRef={threadRef}
+          comments={comments}
+          renderer={renderer}
+          manifest={null}
+          displayedSnapshotId=""
+          open={commentsOpen}
+          setOpen={setCommentsOpen}
+          selection={selection}
+          clearSelection={clearSelection}
+          choose={choose}
+          historical={false}
+          back={back}
+        />
       )}
     </section>
   );

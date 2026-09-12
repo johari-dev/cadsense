@@ -240,6 +240,17 @@ export class OnshapeVerificationThrottledError extends Schema.TaggedErrorClass<O
   }
 }
 
+export class OnshapeResponseError extends Schema.TaggedErrorClass<OnshapeResponseError>()(
+  "OnshapeResponseError",
+  { reason: Schema.Literals(["too-large", "timeout"]) },
+) {
+  override get message(): string {
+    return this.reason === "too-large"
+      ? "The Onshape response exceeds the supported download size."
+      : "The Onshape request timed out.";
+  }
+}
+
 export class OnshapeNetworkError extends Schema.TaggedErrorClass<OnshapeNetworkError>()(
   "OnshapeNetworkError",
   {},
@@ -307,6 +318,7 @@ export const OnshapeConnectionError = Schema.Union([
   OnshapeRedirectError,
   OnshapeVerificationThrottledError,
   OnshapeNetworkError,
+  OnshapeResponseError,
   OnshapeInvalidHostError,
   OnshapeConnectionNotFoundError,
   OnshapeConnectionConflictError,

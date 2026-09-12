@@ -29,6 +29,143 @@ const layer = (fetch: FetchHandler) =>
   );
 
 describe("bounded Onshape JSON transport", () => {
+  it.effect("counts successful and redirect credits separately from failed requests", () => {
+    const statuses = [200, 307, 429, 500];
+    const metrics: OnshapeTransport.OnshapeApiMetrics = { requests: 0 };
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      const { responseType: _responseType, ...headRequest } = request;
+      for (const _ of statuses.slice()) yield* transport.execute(headRequest);
+      assert.equal(metrics.requests, 4);
+      assert.equal(metrics.quotaCountedRequests, 2);
+      assert.lengthOf(metrics.quotaObservations!, 4);
+      assert.equal(metrics.quotaObservations![0]!.header, "x-rate-limit-remaining");
+    }).pipe(
+      Effect.provideService(OnshapeTransport.OnshapeRequestMetrics, metrics),
+      Effect.provide(
+        layer(
+          async () =>
+            new Response(null, {
+              status: statuses.shift()!,
+              headers: { "x-rate-limit-remaining": "400", authorization: "not-recorded" },
+            }),
+        ),
+      ),
+    );
+  });
+  it.effect(
+    "accepts an assembly export above the per-part limit without changing the default limit",
+    () => {
+      const chunk = new Uint8Array(1024 * 1024);
+      const fetch: FetchHandler = async () => {
+        let remaining = 129;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (remaining-- > 0) controller.enqueue(chunk);
+              else controller.close();
+            },
+          }),
+        );
+      };
+      return Effect.gen(function* () {
+        const transport = yield* OnshapeTransport.OnshapeTransport;
+        const failure = yield* transport
+          .execute({ ...request, responseType: "binary" })
+          .pipe(Effect.flip);
+        assert.equal(failure.reason, "too-large");
+        const result = yield* transport.execute({
+          ...request,
+          responseType: "binary",
+          bulkExport: true,
+        });
+        assert.equal(result.bytes?.length, 129 * 1024 * 1024);
+      }).pipe(Effect.provide(layer(fetch)));
+    },
+  );
+  it.effect("allows export submission two minutes before aborting without retry", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let aborted = false;
+      let calls = 0;
+      const fetch: FetchHandler = (_input, init) => {
+        calls++;
+        Deferred.doneUnsafe(started, Effect.void);
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          });
+        });
+      };
+      yield* Effect.gen(function* () {
+        const transport = yield* OnshapeTransport.OnshapeTransport;
+        const pending = yield* transport
+          .execute({ ...request, method: "POST", body: "{}" })
+          .pipe(Effect.flip, Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("119 seconds");
+        assert.isFalse(aborted);
+        yield* TestClock.adjust("1 second");
+        assert.equal((yield* Fiber.join(pending))._tag, "OnshapeTransportFailure");
+        assert.isTrue(aborted);
+        assert.equal(calls, 1);
+      }).pipe(Effect.provide(layer(fetch)));
+    }),
+  );
+  it.effect("sends the JSON export body and counts actual HTTP attempts", () => {
+    const metrics = { requests: 0 };
+    const body = '{"storeInDocument":false,"notifyUser":false}';
+    const fetch: FetchHandler = async (_input, init) => {
+      assert.equal(init?.method, "POST");
+      assert.equal(await new Response(init?.body).text(), body);
+      assert.equal(init?.redirect, "manual");
+      return new Response('{"id":"export-job"}', { status: 200 });
+    };
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      yield* transport.execute({ ...request, method: "POST", body });
+      assert.equal(metrics.requests, 1);
+    }).pipe(
+      Effect.provide(layer(fetch)),
+      Effect.provideService(OnshapeTransport.OnshapeRequestMetrics, metrics),
+    );
+  });
+  it.effect(
+    "allows binary downloads past the JSON deadline but still cancels at three minutes",
+    () => {
+      let cancelled = false;
+      return Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const fetch: FetchHandler = async () =>
+          new Response(
+            new ReadableStream<Uint8Array>(
+              {
+                pull() {
+                  Deferred.doneUnsafe(started, Effect.void);
+                },
+                cancel() {
+                  cancelled = true;
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+          );
+        yield* Effect.gen(function* () {
+          const transport = yield* OnshapeTransport.OnshapeTransport;
+          const fiber = yield* transport
+            .execute({ ...request, responseType: "binary" })
+            .pipe(Effect.flip, Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* TestClock.adjust("16 seconds");
+          assert.isFalse(cancelled);
+          yield* TestClock.adjust("164 seconds");
+          assert.equal((yield* Fiber.join(fiber))._tag, "OnshapeTransportFailure");
+          assert.isTrue(cancelled);
+        }).pipe(Effect.provide(layer(fetch)));
+      });
+    },
+  );
   it.effect("checks cumulative bytes and cancels immediately on a typed reserve failure", () => {
     let reads = 0;
     let cancelled = false;
