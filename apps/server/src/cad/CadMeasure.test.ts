@@ -268,18 +268,16 @@ it.effect("registers the typed provider tool and dispatches a measurement", () =
     const tools = {
       context: unused,
       hierarchy: unused,
+      partInfo: unused,
       capture: unused,
       updateView: unused,
       measure: (value: unknown) => measureCad(snapshot, state, value, unused),
     };
     const delivered = yield* invokeCadTool(tools, "cad_measure", input);
     assert.equal(decodeResult(delivered.result).distanceMeters, 5);
+    const { measure: _measure, ...withoutMeasure } = tools;
     assert.equal(
-      (yield* invokeCadTool(
-        { context: unused, hierarchy: unused, capture: unused, updateView: unused },
-        "cad_measure",
-        input,
-      ).pipe(Effect.flip)).reason,
+      (yield* invokeCadTool(withoutMeasure, "cad_measure", input).pipe(Effect.flip)).reason,
       "capability-unavailable",
     );
   }),
