@@ -40,6 +40,7 @@ const makeHarness = (count: number) =>
     let pins = 0;
     let gltf = false;
     let activeReferencePins = 0;
+    let maxActiveReferencePins = 0;
     let liveReferenceAssets = 0;
     let maxLiveReferenceAssets = 0;
     let referenceAssetReads = 0;
@@ -134,6 +135,10 @@ const makeHarness = (count: number) =>
                 return tracksReference
                   ? Effect.sync(() => {
                       activeReferencePins++;
+                      maxActiveReferencePins = Math.max(
+                        maxActiveReferencePins,
+                        activeReferencePins,
+                      );
                     }).pipe(
                       Effect.andThen(usePinned),
                       Effect.ensuring(
@@ -155,6 +160,7 @@ const makeHarness = (count: number) =>
       statusRead,
       maxLiveReferenceAssets: () => maxLiveReferenceAssets,
       referenceAssetReads: () => referenceAssetReads,
+      maxActiveReferencePins: () => maxActiveReferencePins,
     };
   });
 const harness = <A, E, R>(
@@ -206,6 +212,7 @@ describe("bulk snapshot acquisition", () => {
           assert.lengthOf(result.assets, 2);
           assert.equal(h.maxLiveReferenceAssets(), 1);
           assert.equal(h.referenceAssetReads(), 1);
+          assert.equal(h.maxActiveReferencePins(), 1);
         }),
       2,
     ),

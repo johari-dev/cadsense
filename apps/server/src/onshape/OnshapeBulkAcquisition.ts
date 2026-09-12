@@ -382,21 +382,26 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         manifest.projectId !== context.projectId
       )
         return visit(index + 1);
-      return store.withPinned(manifest.snapshotId, (pinned, readAsset) => {
-        const added: string[] = [];
-        for (const part of pinned.parts) {
-          const asset = pinned.assets.find(
-            (candidate) => candidate.geometryKey === part.geometryKey,
-          );
-          const key = referenceKey(part);
-          if (!asset || references.has(key)) continue;
-          references.set(key, { read: () => readAsset(asset.sha256) });
-          added.push(key);
-        }
+      const additions: Array<{ readonly key: string; readonly sha256: string }> = [];
+      const selected = new Set(references.keys());
+      for (const part of manifest.parts) {
+        const key = referenceKey(part);
+        if (selected.has(key)) continue;
+        const asset = manifest.assets.find(
+          (candidate) => candidate.geometryKey === part.geometryKey,
+        );
+        if (!asset) continue;
+        additions.push({ key, sha256: asset.sha256 });
+        selected.add(key);
+      }
+      if (!additions.length) return visit(index + 1);
+      return store.withPinned(manifest.snapshotId, (_pinned, readAsset) => {
+        for (const reference of additions)
+          references.set(reference.key, { read: () => readAsset(reference.sha256) });
         return visit(index + 1).pipe(
           Effect.ensuring(
             Effect.sync(() => {
-              for (const key of added) references.delete(key);
+              for (const reference of additions) references.delete(reference.key);
             }),
           ),
         );
