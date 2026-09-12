@@ -206,7 +206,7 @@ const handle = Effect.gen(function* () {
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(runtimeContext);
     preparedCadTransfers.retain(bundle, scene, () => runPromise(Deferred.await(scene.released)));
-    void preparedCadTransfers.warm(bundle, (sha256) => runPromise(scene.readAsset(sha256)));
+    void preparedCadTransfers.warm(bundle, scene, (sha256) => runPromise(scene.readAsset(sha256)));
   }
   return yield* HttpServerResponse.json(scene.manifest, { headers });
 }).pipe(

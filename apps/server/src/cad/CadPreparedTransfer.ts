@@ -179,7 +179,7 @@ export interface PreparedCadTransferCache {
     range: CadBundleRange,
     readAsset: ReadAsset,
   ) => Promise<Uint8Array>;
-  readonly warm: (plan: CadBundlePlan, readAsset: ReadAsset) => Promise<void>;
+  readonly warm: (plan: CadBundlePlan, owner: object, readAsset: ReadAsset) => Promise<void>;
   readonly clear: () => void;
   readonly stats: () => {
     readonly bytes: number;
@@ -231,13 +231,17 @@ export const makePreparedCadTransferCache = (options?: {
   interface Retention {
     count: number;
   }
+  interface OwnerIdentity {
+    retention: Retention | undefined;
+  }
   interface WarmJob {
     readonly retention: Retention;
+    active: boolean;
     readonly promise: Promise<void>;
   }
   const retentions = new Map<string, Retention>();
-  let owners = new WeakMap<object, Set<string>>();
-  const warmJobs = new Map<string, WarmJob>();
+  let owners = new WeakMap<object, Map<string, OwnerIdentity>>();
+  const warmJobs = new Map<string, Map<object, WarmJob>>();
   let retainedBytes = 0;
   let clock = 0;
   let activePreparations = 0;
@@ -274,28 +278,36 @@ export const makePreparedCadTransferCache = (options?: {
     let identities = owners.get(owner);
     if (identities?.has(plan.identity)) return;
     if (!identities) {
-      identities = new Set();
+      identities = new Map();
       owners.set(owner, identities);
     }
     // Keep this tombstone for the owner's lifetime so a released scene cannot
     // reacquire cache ownership through a late request.
-    identities.add(plan.identity);
+    const ownerIdentity: OwnerIdentity = { retention: undefined };
+    identities.set(plan.identity, ownerIdentity);
     activate(plan);
     let retention = retentions.get(plan.identity);
     if (!retention) {
       retention = { count: 0 };
       retentions.set(plan.identity, retention);
     }
+    ownerIdentity.retention = retention;
     retention.count++;
     let active = true;
     const release = () => {
       if (!active) return;
       active = false;
+      ownerIdentity.retention = undefined;
+      const jobs = warmJobs.get(plan.identity);
+      const warming = jobs?.get(owner);
+      if (warming?.retention === retention) {
+        warming.active = false;
+        jobs!.delete(owner);
+        if (jobs!.size === 0) warmJobs.delete(plan.identity);
+      }
       retention.count--;
       if (retention.count !== 0 || retentions.get(plan.identity) !== retention) return;
       retentions.delete(plan.identity);
-      const warming = warmJobs.get(plan.identity);
-      if (warming?.retention === retention) warmJobs.delete(plan.identity);
       for (const [key, entry] of entries) if (entry.identity === plan.identity) remove(key, entry);
     };
     try {
@@ -374,32 +386,52 @@ export const makePreparedCadTransferCache = (options?: {
     const retention = retentions.get(plan.identity);
     return retention ? getRetained(plan, range, readAsset, retention) : prepare(range, readAsset);
   };
-  const warm: PreparedCadTransferCache["warm"] = async (plan, readAsset) => {
-    const retention = retentions.get(plan.identity);
-    if (!retention) return;
-    const existing = warmJobs.get(plan.identity);
+  const warm: PreparedCadTransferCache["warm"] = async (plan, owner, readAsset) => {
+    const retention = owners.get(owner)?.get(plan.identity)?.retention;
+    if (!retention || retentions.get(plan.identity) !== retention) return;
+    let jobs = warmJobs.get(plan.identity);
+    const existing = jobs?.get(owner);
     if (existing?.retention === retention) return existing.promise;
     if (plan.totalBytes > maxWarmInputBytes || plan.ranges.length > maxEntries) return;
     const job: WarmJob = {
       retention,
+      active: true,
       promise: undefined as never,
     };
     const promise = (async () => {
       let next = 0;
       const worker = async () => {
-        while (retentions.get(plan.identity) === retention && next < plan.ranges.length) {
+        while (
+          job.active &&
+          retentions.get(plan.identity) === retention &&
+          next < plan.ranges.length
+        ) {
           const range = plan.ranges[next++]!;
-          await getRetained(plan, range, readAsset, retention).catch(() => undefined);
+          try {
+            await getRetained(plan, range, readAsset, retention);
+          } catch {
+            // A shared pending read can fail when its originating scene releases.
+            // Retry once with this still-active owner's reader.
+            if (job.active && retentions.get(plan.identity) === retention)
+              await getRetained(plan, range, readAsset, retention).catch(() => undefined);
+          }
         }
       };
       await Promise.all(
         Array.from({ length: Math.min(warmConcurrency, plan.ranges.length) }, () => worker()),
       );
     })().finally(() => {
-      if (warmJobs.get(plan.identity) === job) warmJobs.delete(plan.identity);
+      const current = warmJobs.get(plan.identity);
+      if (current?.get(owner) !== job) return;
+      current.delete(owner);
+      if (current.size === 0) warmJobs.delete(plan.identity);
     });
     Object.assign(job, { promise });
-    warmJobs.set(plan.identity, job);
+    if (!jobs) {
+      jobs = new Map();
+      warmJobs.set(plan.identity, jobs);
+    }
+    jobs.set(owner, job);
     return promise;
   };
   const clear = () => {
@@ -421,7 +453,7 @@ export const makePreparedCadTransferCache = (options?: {
       pendingEntries,
       readyEntries,
       retainedIdentities: retentions.size,
-      warmJobs: warmJobs.size,
+      warmJobs: [...warmJobs.values()].reduce((count, jobs) => count + jobs.size, 0),
     };
   };
   return { retain, get, warm, clear, stats };

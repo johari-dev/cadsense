@@ -21,7 +21,9 @@ const retain = (
   plan: ReturnType<typeof createCadBundlePlan>,
 ) => {
   const released = pending();
-  cache.retain(plan, {}, () => released.promise);
+  const owner = {};
+  cache.retain(plan, owner, () => released.promise);
+  return owner;
 };
 const emptyStats = {
   bytes: 0,
@@ -212,9 +214,9 @@ describe("prepared CAD transfers", () => {
         return input;
       },
     });
-    retain(cache, plan);
+    const owner = retain(cache, plan);
 
-    await cache.warm(plan, async () => bytes("abcdefghijklmnopqrst"));
+    await cache.warm(plan, owner, async () => bytes("abcdefghijklmnopqrst"));
 
     expect(peak).toBe(2);
     expect(cache.stats()).toEqual({
@@ -295,9 +297,10 @@ describe("prepared CAD transfers", () => {
         return input;
       },
     });
-    cache.retain(plan, {}, () => released.promise);
+    const owner = {};
+    cache.retain(plan, owner, () => released.promise);
 
-    const warming = cache.warm(plan, async () => bytes("abcdefghijkl"));
+    const warming = cache.warm(plan, owner, async () => bytes("abcdefghijkl"));
     await Promise.resolve();
     released.resolve();
     await Promise.resolve();
@@ -305,6 +308,57 @@ describe("prepared CAD transfers", () => {
     await warming;
 
     expect(encodes).toBe(1);
+    expect(cache.stats()).toEqual(emptyStats);
+  });
+
+  it("continues warming from a surviving owner when the first owner's read fails", async () => {
+    const plan = createCadBundlePlan(
+      { snapshotId: "snapshot-a", assets: [asset("a", 12)] },
+      { rangeBytes: 4 },
+    );
+    const firstReleased = pending();
+    const secondReleased = pending();
+    const firstReadStarted = pending();
+    const failFirstRead = pending();
+    const firstOwner = {};
+    const secondOwner = {};
+    let firstReads = 0;
+    let secondReads = 0;
+    const cache = makePreparedCadTransferCache({
+      warmConcurrency: 1,
+      encode: async (input) => input,
+    });
+    cache.retain(plan, firstOwner, () => firstReleased.promise);
+    cache.retain(plan, secondOwner, () => secondReleased.promise);
+
+    const firstWarm = cache.warm(plan, firstOwner, async () => {
+      firstReads++;
+      firstReadStarted.resolve();
+      await failFirstRead.promise;
+      throw new Error("scene released");
+    });
+    await firstReadStarted.promise;
+    const secondWarm = cache.warm(plan, secondOwner, async () => {
+      secondReads++;
+      return bytes("abcdefghijkl");
+    });
+
+    firstReleased.resolve();
+    await Promise.resolve();
+    failFirstRead.resolve();
+    await Promise.all([firstWarm, secondWarm]);
+
+    expect({ firstReads, secondReads }).toEqual({ firstReads: 1, secondReads: 3 });
+    expect(cache.stats()).toEqual({
+      bytes: 12,
+      pendingEntries: 0,
+      readyEntries: 3,
+      retainedIdentities: 1,
+      warmJobs: 0,
+    });
+
+    secondReleased.resolve();
+    await Promise.resolve();
     expect(cache.stats()).toEqual(emptyStats);
   });
 
