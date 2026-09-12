@@ -16,6 +16,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadGeometryError, normalizeCadGeometry } from "../cad/CadGeometry.ts";
+import { applyOnshapeOpacity } from "./OnshapeGeometryAppearance.ts";
 import { batchOnshapeGeometry } from "./OnshapeGeometryBatching.ts";
 import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
@@ -32,11 +33,11 @@ import {
   snapshotGeometryKey,
   parseAssemblySnapshotDraft,
   parsePartStudioSnapshotDraft,
-  withAssemblyExportMetadata,
 } from "./OnshapeSnapshotManifest.ts";
+import { acquireSnapshotMetadata } from "./OnshapeSnapshotMetadata.ts";
 import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
-export const ONSHAPE_BULK_TESSELLATION_PROFILE = "onshape-3mf-coarse-meters-z-up-v1";
+export const ONSHAPE_BULK_TESSELLATION_PROFILE = "onshape-3mf-coarse-meters-z-up-opacity-v2";
 export const ONSHAPE_TRANSLATION_MAX_POLLS = 24;
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{24}$/));
 const Translation = Schema.Struct({
@@ -150,15 +151,17 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             path: `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${root.microversionId}/e/${root.elementId}`,
             query: query.toString(),
           });
-          const draft = yield* root.kind === "assembly"
-            ? parseAssemblySnapshotDraft(context, response).pipe(
-                Effect.flatMap((draft) => withAssemblyExportMetadata(draft, response)),
-              )
+          let draft = yield* root.kind === "assembly"
+            ? parseAssemblySnapshotDraft(context, response)
             : parsePartStudioSnapshotDraft(context, response);
           yield* Effect.try({
             try: () => createCadSceneBudget(draft.nodes),
             catch: geometryFailure,
           });
+          if (root.kind === "assembly")
+            draft = yield* acquireSnapshotMetadata(draft, (path, query = "") =>
+              read({ path, query }),
+            );
           if (!draft.parts.some((part) => part.geometryRequired)) {
             const manifest = yield* completeSnapshotManifest(draft, []);
             yield* store.publish(manifest);
@@ -341,7 +344,8 @@ export const makeBulkAcquisition = Effect.gen(function* () {
                 return yield* normalizeCadGeometry(response.bytes);
               });
           const batched = yield* Effect.try({
-            try: () => batchOnshapeGeometry(extracted),
+            try: () =>
+              applyOnshapeOpacity(batchOnshapeGeometry(extracted), part.metadata?.appearance),
             catch: geometryFailure,
           });
           const bytes = yield* normalizeCadGeometry(batched);
@@ -436,7 +440,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             ),
             root: {
               ...context.root,
-              tessellationProfile: "onshape-bulk-gltf-coarse-meters-z-up-v1",
+              tessellationProfile: "onshape-bulk-gltf-coarse-meters-z-up-opacity-v2",
             },
           };
           const fallback = yield* acquire(fallbackContext, source, undefined, true);

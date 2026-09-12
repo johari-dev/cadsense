@@ -366,48 +366,6 @@ export function snapshotPartStudioGroups(draft: CadSnapshotDraft) {
   return [...groups.values()];
 }
 
-/** Bulk exports carry appearance; the assembly definition supplies identity, names and body types.
- * Engineering material/property data is unknown until explicitly fetched, never inferred from color.
- */
-export const withAssemblyExportMetadata = Effect.fn("withAssemblyExportMetadata")(function* (
-  draft: CadSnapshotDraft,
-  response: unknown,
-) {
-  const definition = yield* decodeDefinition(response).pipe(Effect.mapError(schemaFailure));
-  const bodyTypes = new Map<string, string>();
-  for (const part of definition.parts) {
-    if (part.partId === "") continue;
-    const source = yield* decodeSource({
-      ...normalizedReference(draft.root.host, part),
-      partId: part.partId,
-      tessellationProfile: draft.root.tessellationProfile,
-    }).pipe(Effect.mapError(schemaFailure));
-    bodyTypes.set(snapshotGeometryKey(source), part.bodyType ?? "unknown");
-  }
-  const names = new Map(
-    draft.nodes
-      .filter((node) => node.sourcePartKey !== null)
-      .map((node) => [node.sourcePartKey, node.name]),
-  );
-  return {
-    ...draft,
-    parts: draft.parts.map((part) => ({
-      ...part,
-      metadata: part.geometryRequired
-        ? {
-            name: names.get(part.geometryKey) ?? "Part",
-            bodyType: bodyTypes.get(part.geometryKey) ?? "unknown",
-            isHidden: false,
-            isMesh: bodyTypes.get(part.geometryKey)?.toLowerCase() === "mesh",
-            partIdentity: null,
-            configurationId: null,
-            appearance: null,
-            material: null,
-          }
-        : part.metadata,
-    })),
-  };
-});
 const metadataValue = (part: (typeof Metadata.Type)[number]): CadPartMetadata => ({
   name: part.name,
   bodyType: part.bodyType,
