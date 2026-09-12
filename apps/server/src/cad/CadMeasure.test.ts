@@ -269,6 +269,7 @@ it.effect("registers the typed provider tool and dispatches a measurement", () =
       context: unused,
       hierarchy: unused,
       partInfo: unused,
+      findParts: unused,
       capture: unused,
       updateView: unused,
       measure: (value: unknown) => measureCad(snapshot, state, value, unused),

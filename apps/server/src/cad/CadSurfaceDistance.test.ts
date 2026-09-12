@@ -54,6 +54,52 @@ describe("triangle surface distance", () => {
     ];
     expect(cadTriangleDistance(line, other).distance).toBe(2);
   });
+  it.each([
+    { length: 1, rise: 1e-9 },
+    { length: 1e8, rise: 0.1 },
+  ])(
+    "detects crossing collapsed triangles with near-parallel edges at $length meters",
+    ({ length, rise }) => {
+      const first: CadMeshTriangle = [
+        [0, 0, 0],
+        [length, rise, 0],
+        [length, rise, 0],
+      ];
+      const second: CadMeshTriangle = [
+        [0, rise, 0],
+        [length, 0, 0],
+        [length, 0, 0],
+      ];
+      const result = cadTriangleDistance(first, second);
+      expect(result.distance).toBe(0);
+      expect(result.points).toEqual([
+        [length / 2, rise / 2, 0],
+        [length / 2, rise / 2, 0],
+      ]);
+      expect(cadSurfaceDistance([first], [second])?.distance).toBe(0);
+    },
+  );
+
+  it("keeps near-parallel closest points on finite segments and preserves a skew gap", () => {
+    const first: CadMeshTriangle = [
+      [0, 0, 0],
+      [1, 1e-9, 0],
+      [1, 1e-9, 0],
+    ];
+    const beyond: CadMeshTriangle = [
+      [2, 1e-9, 0],
+      [3, 0, 0],
+      [3, 0, 0],
+    ];
+    expect(cadTriangleDistance(first, beyond).distance).toBeCloseTo(1, 12);
+    const skew: CadMeshTriangle = [
+      [0, 1e-9, 0.25],
+      [1, 0, 0.25],
+      [1, 0, 0.25],
+    ];
+    expect(cadTriangleDistance(first, skew).distance).toBe(0.25);
+  });
+
   it("does not return an overlapping box as zero surface separation", () => {
     const first: CadMeshTriangle = [
       [0, 0, 0],

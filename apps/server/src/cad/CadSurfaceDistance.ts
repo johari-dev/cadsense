@@ -71,8 +71,10 @@ function segmentPair(a: Point, b: Point, c: Point, d: Point): Pair {
     vw = dot(v, w);
   if (uu === 0) return pair(a, pointSegment(a, c, d));
   if (vv === 0) return pair(pointSegment(c, a, b), c);
-  const determinant = multiply(uu, vv) - multiply(uv, uv);
-  let s = determinant > 0 ? clamp((multiply(uv, vw) - multiply(uw, vv)) / determinant) : 0;
+  // Squared cross length retains near-parallel angles that uu*vv - uv*uv rounds to zero.
+  const normal = cross(u, v);
+  const determinant = dot(normal, normal);
+  let s = determinant > 0 ? clamp(dot(cross(v, w), normal) / determinant) : 0;
   let t = (uv * s + vw) / vv;
   if (t < 0) {
     t = 0;
