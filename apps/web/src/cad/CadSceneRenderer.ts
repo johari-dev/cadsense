@@ -153,8 +153,14 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   const render = () => {
     assertAvailable();
     const start = options.onFrame ? performance.now() : 0;
+    renderer.clippingPlanes = model?.clippingPlanes() ?? [];
     renderer.render(scene, camera);
-    if (model && outlineSupported)
+    if (
+      model &&
+      outlineSupported &&
+      !view?.sectionPlanes?.length &&
+      !view?.ghost?.occurrenceIds.length
+    )
       outline.render(scene, camera, model.bounds.getSize(outlineBounds).length());
     if (commentMarkers.children.length) {
       const autoClear = renderer.autoClear;
@@ -462,6 +468,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         if (id === activeSnapshot) continue;
         cachedScenes.delete(id);
         total -= entry.bytes;
+        entry.model.dispose();
         disposeCadObjects(entry.prototypes);
       }
       reviewOccurrence = null;
@@ -471,6 +478,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       view = null;
       return false;
     } catch (error) {
+      candidate?.dispose();
       disposeCadObjects(ownedScenes);
       if (error instanceof CadRendererError) throw error;
       throw new CadRendererError("invalid-snapshot");
@@ -560,6 +568,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           ? cadCommentWorldPoint(model, t.occurrenceId, t.point)
           : bounds.getCenter(new THREE.Vector3());
       if (!point) return "Location unavailable";
+      if (model.isClipped(point))
+        return "Location clipped by section planes; reset inspection to review";
       const radius =
         t.kind === "part"
           ? bounds.getBoundingSphere(new THREE.Sphere()).radius
@@ -578,7 +588,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           distance - Math.max(1e-7, size * 1e-5),
         );
         return [...model!.objects].filter(
-          ([, e]) => e.object.visible && ray.intersectObject(e.object, true).length,
+          ([, e]) =>
+            e.object.visible &&
+            ray.intersectObject(e.object, true).some((hit) => !model!.isClipped(hit.point)),
         );
       };
       let blockers = rayHits(direction);
@@ -719,7 +731,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       }
       orient(best);
       const hits = targets.map((t, index): CadCommentRenderHit => {
-        const visible = t.world && cadCommentVisible(currentModel, camera, t.world);
+        const visible =
+          currentModel.objects.get(t.occurrenceId)?.object.visible &&
+          t.world &&
+          cadCommentVisible(currentModel, camera, t.world);
         if (t.world) {
           const marker = new THREE.Mesh(
             new THREE.SphereGeometry(radius * 0.035, 12, 8),
@@ -832,7 +847,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       controls?.removeEventListener("change", changed);
       controls?.removeEventListener("end", ended);
       controls?.dispose();
-      for (const entry of cachedScenes.values()) disposeCadObjects(entry.prototypes);
+      for (const entry of cachedScenes.values()) {
+        entry.model.dispose();
+        disposeCadObjects(entry.prototypes);
+      }
       cachedScenes.clear();
       model = null;
       scene.clear();

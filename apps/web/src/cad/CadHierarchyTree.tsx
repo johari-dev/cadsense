@@ -1,6 +1,6 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
-import { ChevronDown, ChevronRight, Focus } from "lucide-react";
+import { ChevronDown, ChevronRight, Focus, Highlighter, Blend } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -158,6 +158,40 @@ export function CadHierarchyTree({
                   </TooltipTrigger>
                   <TooltipPopup>{node.name}</TooltipPopup>
                 </Tooltip>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Highlight ${node.name}`}
+                  aria-pressed={view.highlightedOccurrenceIds?.includes(row.id) ?? false}
+                  disabled={disabled || node.suppressed}
+                  onClick={() =>
+                    onChange({
+                      ...view,
+                      highlightedOccurrenceIds: view.highlightedOccurrenceIds?.includes(row.id)
+                        ? []
+                        : [row.id],
+                    })
+                  }
+                >
+                  <Highlighter size={12} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Ghost ${node.name}`}
+                  aria-pressed={view.ghost?.occurrenceIds.includes(row.id) ?? false}
+                  disabled={disabled || node.suppressed}
+                  onClick={() =>
+                    onChange({
+                      ...view,
+                      ghost: view.ghost?.occurrenceIds.includes(row.id)
+                        ? null
+                        : { occurrenceIds: [row.id], opacity: 0.2 },
+                    })
+                  }
+                >
+                  <Blend size={12} />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon-xs"

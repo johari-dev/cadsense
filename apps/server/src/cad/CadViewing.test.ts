@@ -1099,7 +1099,12 @@ it.effect(
             yield* tools.context();
             yield* tools.updateView({
               expectedRevision: 0,
-              operations: [{ type: "explode", amount: 0.25 }],
+              operations: [
+                { type: "explode", amount: 0.25 },
+                { type: "highlight", occurrenceIds: [snapshot.nodes[0]!.id] },
+                { type: "ghost", occurrenceIds: [snapshot.nodes[0]!.id], opacity: 0.2 },
+                { type: "section", planes: [{ normal: [1, 0, 0], constant: -0.1 }] },
+              ],
             });
             assert.equal(
               (yield* tools.capture({ expectedRevision: 0 }).pipe(Effect.flip)).reason,
@@ -1114,11 +1119,20 @@ it.effect(
             assert.isNull(yield* h.service.getUserView(threadId));
             yield* tools.updateView({
               expectedRevision: 1,
-              operations: [{ type: "explode", amount: 0.8 }],
+              operations: [{ type: "explode", amount: 0.8 }, { type: "reset-inspection" }],
             });
             const candidate = yield* readLatestCadCapture(threadId, turnId);
             assert.equal(candidate?.record.capture.captureId, delivery.result.captureId);
             assert.equal(candidate?.view.explosion, 0.25);
+            assert.deepEqual(candidate?.view.highlightedOccurrenceIds, [snapshot.nodes[0]!.id]);
+            assert.equal(candidate?.view.ghost?.opacity, 0.2);
+            assert.deepEqual(candidate?.view.sectionPlanes, [
+              { normal: [1, 0, 0], constant: -0.1 },
+            ]);
+            assert.deepEqual(
+              h.renderRequests[0]?.state.sectionPlanes,
+              candidate?.view.sectionPlanes,
+            );
             assert.equal(candidate?.view.camera.kind, "pose");
             assert.isNull(yield* readLatestCadCapture(otherThreadId, turnId));
             return delivery;
@@ -1209,7 +1223,10 @@ it.effect(
           assert.equal(h.pins(), 1);
           const updated = yield* tools.updateView({
             expectedRevision: 0,
-            operations: [{ type: "explode", amount: 0.5 }],
+            operations: [
+              { type: "explode", amount: 0.5 },
+              { type: "section", planes: [{ normal: [0, 0, 1], constant: 0.2 }] },
+            ],
           });
           assert.equal(updated.revision, 1);
           assert.equal(
@@ -1228,6 +1245,9 @@ it.effect(
             })
             .pipe(Effect.flip);
           assert.equal((yield* tools.context()).state?.explosion, 0.5);
+          assert.deepEqual((yield* tools.context()).state?.sectionPlanes, [
+            { normal: [0, 0, 1], constant: 0.2 },
+          ]);
         }),
       );
       assert.equal(h.pins(), 0);
@@ -1236,6 +1256,9 @@ it.effect(
       yield* restarted.withActivation(contextId, (tools) =>
         Effect.gen(function* () {
           assert.equal((yield* tools.context()).state?.explosion, 0.5);
+          assert.deepEqual((yield* tools.context()).state?.sectionPlanes, [
+            { normal: [0, 0, 1], constant: 0.2 },
+          ]);
         }),
       );
       const query = yield* ProjectionSnapshotQuery;

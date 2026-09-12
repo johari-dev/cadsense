@@ -2,7 +2,16 @@ import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense
 import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createCadSceneRenderer } from "./CadSceneRenderer";
-import { BoxGeometry, Camera, Matrix4, Mesh, MeshBasicMaterial, Quaternion, Vector3 } from "three";
+import {
+  BoxGeometry,
+  Camera,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  Quaternion,
+  Vector3,
+  type Plane,
+} from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as CadBudget from "@cadsense/shared/cadSceneBudget";
 
@@ -17,6 +26,7 @@ vi.mock("three", async (importOriginal) => {
     ...actual,
     WebGLRenderer: class {
       outputColorSpace = "";
+      clippingPlanes: Plane[] = [];
       setClearColor() {}
       setPixelRatio() {}
       setSize() {}
@@ -26,7 +36,7 @@ vi.mock("three", async (importOriginal) => {
       }
       render(scene: unknown, camera: Camera) {
         camera.updateMatrixWorld();
-        calls.render(scene, camera);
+        calls.render(scene, camera, this.clippingPlanes);
       }
       dispose = calls.dispose;
       forceContextLoss = calls.forceContextLoss;
@@ -760,4 +770,60 @@ describe("CAD renderer lifecycle without WebGL", () => {
     await expect(loading).rejects.toMatchObject({ reason: "renderer-unavailable" });
     expect(calls.dispose.mock.calls.length).toBe(before + 1);
   });
+});
+
+it("uses the same section planes for displayed frames and captures, then clears them on reset", async () => {
+  const h = canvasHarness();
+  const renderer = createCadSceneRenderer({ canvas: h.canvas });
+  try {
+    await renderer.load(manifest, async () => geometry());
+    renderer.apply({ ...state, sectionPlanes: [{ normal: [0, 0, 1], constant: -0.25 }] });
+    const displayed = calls.render.mock.calls.at(-1)![2] as Plane[];
+    expect(displayed[0]!.normal.toArray()).toEqual([0, 0, 1]);
+    expect(displayed[0]!.constant).toBe(-0.25);
+    const capture = renderer.capture();
+    h.completeCapture();
+    await capture;
+    expect(calls.render.mock.calls.at(-1)![2]).toBe(displayed);
+    renderer.apply(state);
+    expect(calls.render.mock.calls.at(-1)![2]).toEqual([]);
+  } finally {
+    renderer.dispose();
+  }
+});
+
+it("cannot verify clipped or translucent targets by choosing an alternate inspection angle", async () => {
+  vi.stubGlobal(
+    "OffscreenCanvas",
+    class {
+      getContext() {
+        return null;
+      }
+    },
+  );
+  const scene = await new GLTFLoader().parseAsync(geometry(), "");
+  scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+  const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+  const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+  const work = {
+    kind: "inspect" as const,
+    targets: [{ candidateId: "target", occurrenceId: id, point: [0, 0, 0.01] as const }],
+  };
+  try {
+    await renderer.load(
+      { ...manifest, nodes: [{ ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey }] },
+      async () => geometry(),
+    );
+    renderer.resize(800, 600);
+    renderer.apply({ ...state, sectionPlanes: [{ normal: [0, 0, -1], constant: -0.02 }] });
+    expect(renderer.commentWork(work)[0]?.reason).toBe("occluded");
+    renderer.apply({ ...state, ghost: { occurrenceIds: [id], opacity: 0.2 } });
+    expect(renderer.commentWork(work)[0]?.reason).toBe("occluded");
+    renderer.apply(state);
+    expect(renderer.commentWork(work)[0]?.reason).toBe("visible");
+  } finally {
+    renderer.dispose();
+    parser.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { buildCadSceneModel } from "./CadSceneModel";
 
 const isCadCameraPose = Schema.is(CadCameraPose);
+const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const id = (n: number) => n.toString(16).padStart(64, "0");
 const transform = (x: number, y = 0) => [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, 0, 0, 0, 0, 1];
 const node = (n: number, parent: number | null, x: number, overrides = {}) => ({
@@ -229,4 +230,57 @@ it.each([
     zoom: 1,
   };
   expect(isCadCameraPose(pose)).toBe(true);
+});
+
+it("clips front geometry from picking and refuses clipped or translucent comment locations", () => {
+  const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+  const stacked = {
+    ...manifest,
+    nodes: [
+      node(3, null, 0),
+      node(4, null, 0, { transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -2, 0, 0, 0, 1] }),
+    ],
+  };
+  const model = buildCadSceneModel(decodeManifest(stacked), new Map([[id(9), box]]));
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+  camera.position.set(0, 0, 5);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  const picks = [{ pickKey: "p", x: 50, y: 50, intendedOccurrenceId: id(4) }];
+  model.apply(state);
+  expect(locateCadCommentPoints(model, camera, picks, 100, 100)[0]?.reason).toBe(
+    "occurrence-mismatch",
+  );
+  model.apply({ ...state, sectionPlanes: [{ normal: [0, 0, -1], constant: -1 }] });
+  const hit = locateCadCommentPoints(model, camera, picks, 100, 100)[0]!;
+  expect(hit.reason).toBe("candidate");
+  expect(hit.occurrenceId).toBe(id(4));
+  expect(hit.point?.[2]).toBeCloseTo(0.5);
+  expect(cadCommentVisible(model, camera, new THREE.Vector3(0, 0, 0.5))).toBe(false);
+  expect(cadCommentVisible(model, camera, new THREE.Vector3(0, 0, -1.5))).toBe(true);
+  model.apply({ ...state, ghost: { occurrenceIds: [id(3)], opacity: 0.2 } });
+  expect(locateCadCommentPoints(model, camera, picks, 100, 100)[0]?.reason).toBe("transparent-hit");
+  expect(cadCommentVisible(model, camera, new THREE.Vector3(0, 0, 0.5))).toBe(false);
+  model.apply(state);
+  expect(
+    locateCadCommentPoints(
+      model,
+      camera,
+      [{ ...picks[0]!, intendedOccurrenceId: id(3) }],
+      100,
+      100,
+    )[0]?.reason,
+  ).toBe("candidate");
+});
+
+it("evaluates sections in displayed world space after explosion", () => {
+  const { model } = setup(1);
+  const point = cadCommentWorldPoint(model, id(3), [0, 0, 0])!;
+  model.apply({
+    ...state,
+    explosion: 1,
+    sectionPlanes: [{ normal: [1, 0, 0], constant: -point.x - 0.01 }],
+  });
+  expect(model.isClipped(point)).toBe(true);
+  expect(model.clippingPlanes()[0]!.distanceToPoint(point)).toBeCloseTo(-0.01);
 });
