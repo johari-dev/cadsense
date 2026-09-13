@@ -60,6 +60,50 @@ import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+it.effect("dispatches read-only measurements through an activation with revision checks", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("native-measure");
+    yield* tools.invoke(null, turnId, "cad_context", {});
+    const input = {
+      expectedRevision: 0,
+      snapshotId: snapshot.snapshotId,
+      mode: "point-distance",
+      from: { space: "world", point: [0, 0, 0] },
+      to: { space: "world", point: [3, 4, 0] },
+    };
+    const result = yield* tools.invoke(null, turnId, "cad_measure", input);
+    assert.ok(
+      typeof result.result === "object" &&
+        result.result !== null &&
+        "distanceMeters" in result.result,
+    );
+    assert.equal(result.result.distanceMeters, 5);
+    assert.equal(h.pins(), 1);
+    yield* tools.invoke(null, turnId, "cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "explode", amount: 1 }],
+    });
+    assert.equal(
+      (yield* tools.invoke(null, turnId, "cad_measure", input).pipe(Effect.flip)).reason,
+      "revision-conflict",
+    );
+    const next = yield* tools.invoke(null, turnId, "cad_measure", {
+      ...input,
+      expectedRevision: 1,
+    });
+    assert.ok(
+      typeof next.result === "object" && next.result !== null && "distanceMeters" in next.result,
+    );
+    assert.equal(next.result.distanceMeters, 5);
+    yield* tools.end(null, turnId);
+    assert.equal(h.pins(), 0);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
 it.effect(
   "returns a fitted capture pose that the agent can recenter and zoom without changing angle",
   () =>

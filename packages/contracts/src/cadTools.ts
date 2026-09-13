@@ -5,6 +5,7 @@ import {
   CadCommentsPublishToolInput,
 } from "./cadComments.ts";
 import * as Schema from "effect/Schema";
+import { CadMeasureInput } from "./cadMeasure.ts";
 import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
@@ -75,6 +76,7 @@ export const CAD_TOOL_INPUTS = {
   cad_comments_publish: CadCommentsPublishToolInput,
   cad_context: Schema.Struct({}),
   cad_hierarchy: CadHierarchyInput,
+  cad_measure: CadMeasureInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;
