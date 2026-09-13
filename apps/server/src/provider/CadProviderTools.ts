@@ -24,6 +24,8 @@ const descriptions = {
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
+  cad_part_info:
+    "Read one occurrence using occurrenceId, snapshotId and expectedRevision from cad_context/cad_hierarchy. Returns cached source identity, body and material metadata, original row-major assembled transform, and mesh-based axis-aligned bounds/dimensions in meters (Z-up). Bounds ignore explosion and visibility and are tessellation approximations, not exact CAD dimensions. Null source/metadata means absent in the snapshot; material and geometry report explicit unavailable states. Suppressed occurrences have unavailable transforms and bounds because their stored placement may be a placeholder. Repeated occurrence counts include the selected part and suppressed instances, with suppressedCount reported separately. IDs are bounded by repeatedOccurrenceLimit (default 20, maximum 50), with total/truncated. Material summaries include at most 16 properties and 512 characters per value. This read does not change the view.",
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -65,6 +67,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.context() };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
+    case "cad_part_info":
+      return { result: yield* tools.partInfo(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":
