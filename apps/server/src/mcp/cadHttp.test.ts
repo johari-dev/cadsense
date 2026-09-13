@@ -25,6 +25,7 @@ const decode = Schema.decodeUnknownSync(
           Schema.Struct({
             name: Schema.String,
             inputSchema: Schema.Struct({ type: Schema.Literal("object") }),
+            annotations: Schema.Struct({ readOnlyHint: Schema.Boolean }),
           }),
         ),
       ),
@@ -110,9 +111,33 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_comments_publish",
       "cad_context",
       "cad_hierarchy",
+      "cad_find_parts",
       "cad_update_view",
       "cad_capture",
     ]);
+    const searchTool = (yield* response("tools/list")).result.tools?.find(
+      (tool) => tool.name === "cad_find_parts",
+    );
+    expect(searchTool?.annotations.readOnlyHint).toBe(true);
+    const searchInput = {
+      snapshotId: "00000000-0000-4000-8000-000000000001",
+      expectedRevision: 3,
+      nameQuery: "bolt",
+    };
+    const searchToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_find_parts",
+      searchInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_find_parts",
+        arguments: { _cadsenseCapability: searchToken, nameQuery: "forged" },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(searchInput);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",

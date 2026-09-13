@@ -13,7 +13,13 @@ import {
 it("keeps CAD activity tied to the live chat row, including completed tool gaps", () => {
   const turnId = TurnId.make("cad-turn");
   const createdAt = "2026-09-07T00:00:00Z";
-  for (const toolTitle of ["cad_capture", "cad_comments_publish", "mcp__cad__cad_update_view"]) {
+  for (const toolTitle of [
+    "cad_capture",
+    "cad_comments_publish",
+    "mcp__cad__cad_update_view",
+    "cad_find_parts",
+    "mcp__cad__cad_find_parts",
+  ]) {
     for (const toolLifecycleStatus of ["inProgress", "completed"] as const) {
       const timelineEntries: TimelineEntry[] = [
         {
