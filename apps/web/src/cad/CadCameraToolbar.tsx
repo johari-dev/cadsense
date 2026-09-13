@@ -164,7 +164,7 @@ export function CadCameraToolbar({
               onChange({ ...view, highlightedOccurrenceIds: [], ghost: null, sectionPlanes: [] })
             }
           >
-            Reset inspection{view.sectionPlanes?.length ? " (section)" : ""}
+            Reset inspection
           </Button>
         ) : null}
         <div className="mx-0.5 w-px self-stretch bg-border" />

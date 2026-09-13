@@ -72,7 +72,7 @@ it("resyncs an open section editor after incoming sections and reset without los
   view = { ...view, sectionPlanes: [{ normal: [0, 1, 0], constant: 0.04 }] };
   expect(findControl(render(), "Section axis")!.value).toBe("y");
   expect(findControl(render(), "Section offset in meters")!.value).toBe("-0.04");
-  findControl(render(), "Reset inspection (section)")!.onClick!();
+  findControl(render(), "Reset inspection")!.onClick!();
   expect(findControl(render(), "Section axis")!.value).toBe("z");
   expect(findControl(render(), "Section offset in meters")!.value).toBe("0");
   view = { ...view, sectionPlanes: [{ normal: [0, 0, -1], constant: 0.5 }] };

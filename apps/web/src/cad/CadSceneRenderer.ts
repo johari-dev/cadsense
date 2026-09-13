@@ -513,6 +513,15 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!blob) throw new CadRendererError("capture-failed");
     return blob;
   };
+  const endCommentReview = () => {
+    cancelTransition();
+    reviewOccurrence = null;
+    reviewHidden.clear();
+    if (model && view) {
+      model.apply(view);
+      render();
+    }
+  };
   return {
     cameraPose: pose,
     subscribeFrames: (listener: () => void) => {
@@ -544,15 +553,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         occluded: !entry.object.visible || !cadCommentVisible(model, camera, point),
       };
     },
-    endCommentReview: () => {
-      cancelTransition();
-      reviewOccurrence = null;
-      reviewHidden.clear();
-      if (model && view) {
-        model.apply(view);
-        render();
-      }
-    },
+    endCommentReview,
     focusComment: (
       t: CadCommentTarget,
       safe: { width: number; height: number; centerX: number; centerY: number },
@@ -560,8 +561,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     ) => {
       cancelTransition();
       if (!model || !view) return "Location unavailable";
+      const fail = (reason: string) => {
+        endCommentReview();
+        return reason;
+      };
       const entry = model.objects.get(t.occurrenceId);
-      if (!entry) return "Location unavailable";
+      if (!entry) return fail("Location unavailable");
       model.apply(view);
       const bounds = new THREE.Box3().setFromObject(entry.object),
         size = bounds.getSize(new THREE.Vector3()).length();
@@ -569,12 +574,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         t.kind === "point"
           ? cadCommentWorldPoint(model, t.occurrenceId, t.point)
           : bounds.getCenter(new THREE.Vector3());
-      if (!point) return "Location unavailable";
-      if (model.isClipped(point)) {
-        reviewVisibility();
-        render();
-        return "Location clipped by section planes; reset inspection to review";
-      }
+      if (!point) return fail("Location unavailable");
+      if (model.isClipped(point))
+        return fail("Location clipped by section planes; reset inspection to review");
       reviewHidden.clear();
       reviewOccurrence = t.occurrenceId;
       const wasHidden = !entry.object.visible;
@@ -692,6 +694,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         ...t,
         world: cadCommentWorldPoint(currentModel, t.occurrenceId, t.point),
       }));
+      const isTargetVisible = (t: (typeof targets)[number]) =>
+        currentModel.objects.get(t.occurrenceId)?.object.visible &&
+        t.world &&
+        cadCommentVisible(currentModel, camera, t.world);
       const bounds = new THREE.Box3();
       for (const [id, entry] of model.objects) {
         if (targets.some((t) => t.occurrenceId === id))
@@ -730,12 +736,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       };
       for (const direction of directions) {
         orient(direction);
-        const n = targets.filter(
-          (t) =>
-            currentModel.objects.get(t.occurrenceId)?.object.visible &&
-            t.world &&
-            cadCommentVisible(currentModel, camera, t.world),
-        ).length;
+        const n = targets.filter(isTargetVisible).length;
         if (n > score) {
           score = n;
           best = direction;
@@ -743,10 +744,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       }
       orient(best);
       const hits = targets.map((t, index): CadCommentRenderHit => {
-        const visible =
-          currentModel.objects.get(t.occurrenceId)?.object.visible &&
-          t.world &&
-          cadCommentVisible(currentModel, camera, t.world);
+        const visible = isTargetVisible(t);
         if (t.world) {
           const marker = new THREE.Mesh(
             new THREE.SphereGeometry(radius * 0.035, 12, 8),

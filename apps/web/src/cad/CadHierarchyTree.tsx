@@ -22,6 +22,14 @@ export function CadHierarchyTree({
   fullHeight?: boolean;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
+  const highlighted = useMemo(
+    () => index.subtree(view.highlightedOccurrenceIds ?? []),
+    [index, view.highlightedOccurrenceIds],
+  );
+  const ghosted = useMemo(
+    () => index.subtree(view.ghost?.occurrenceIds ?? []),
+    [index, view.ghost?.occurrenceIds],
+  );
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [scrollTop, setScrollTop] = useState(0);
@@ -162,14 +170,13 @@ export function CadHierarchyTree({
                   variant="ghost"
                   size="icon-xs"
                   aria-label={`Highlight ${node.name}`}
-                  aria-pressed={view.highlightedOccurrenceIds?.includes(row.id) ?? false}
+                  aria-pressed={highlighted.has(row.id)}
+                  className="aria-pressed:bg-accent"
                   disabled={disabled || node.suppressed}
                   onClick={() =>
                     onChange({
                       ...view,
-                      highlightedOccurrenceIds: view.highlightedOccurrenceIds?.includes(row.id)
-                        ? []
-                        : [row.id],
+                      highlightedOccurrenceIds: highlighted.has(row.id) ? [] : [row.id],
                     })
                   }
                 >
@@ -179,14 +186,13 @@ export function CadHierarchyTree({
                   variant="ghost"
                   size="icon-xs"
                   aria-label={`Ghost ${node.name}`}
-                  aria-pressed={view.ghost?.occurrenceIds.includes(row.id) ?? false}
+                  aria-pressed={ghosted.has(row.id)}
+                  className="aria-pressed:bg-accent"
                   disabled={disabled || node.suppressed}
                   onClick={() =>
                     onChange({
                       ...view,
-                      ghost: view.ghost?.occurrenceIds.includes(row.id)
-                        ? null
-                        : { occurrenceIds: [row.id], opacity: 0.2 },
+                      ghost: ghosted.has(row.id) ? null : { occurrenceIds: [row.id], opacity: 0.2 },
                     })
                   }
                 >

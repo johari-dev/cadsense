@@ -930,3 +930,75 @@ it("chooses the angle that reveals visible targets even when hidden targets favo
     vi.unstubAllGlobals();
   }
 });
+
+it.each(["missing", "clipped"])(
+  "ends the previous review when the next target is %s",
+  async (failure) => {
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    const blockerId = "3".repeat(64),
+      clippedId = "4".repeat(64);
+    const current: CadViewState = {
+      ...state,
+      visibility: { [id]: false },
+      sectionPlanes: [{ normal: [0, 0, -1], constant: 0.025 }],
+    };
+    const target = (occurrenceId: string) => ({
+      kind: "part" as const,
+      label: "Part",
+      occurrenceId,
+      preciseLocationLimitation: "Whole part",
+    });
+    const safe = { width: 800, height: 600, centerX: 400, centerY: 300 };
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [
+            { ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey },
+            {
+              ...manifest.nodes[0]!,
+              id: blockerId,
+              kind: "part",
+              sourcePartKey: geometryKey,
+              transform: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1],
+            },
+            {
+              ...manifest.nodes[0]!,
+              id: clippedId,
+              kind: "part",
+              sourcePartKey: geometryKey,
+              transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0.05, 0, 0, 0, 1],
+            },
+          ],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(800, 600);
+      renderer.apply(current);
+      renderer.focusComment(target(id), safe, true);
+      const displayed = calls.render.mock.calls.at(-1)![0];
+      expect(displayed.getObjectByName(id).visible).toBe(true);
+      expect(displayed.getObjectByName(blockerId).visible).toBe(false);
+      const before = calls.render.mock.calls.length;
+      expect(
+        renderer.focusComment(
+          target(failure === "missing" ? "5".repeat(64) : clippedId),
+          safe,
+          true,
+        ),
+      ).toContain(failure === "missing" ? "Location unavailable" : "Location clipped");
+      expect(calls.render.mock.calls.length).toBeGreaterThan(before);
+      expect(displayed.getObjectByName(id).visible).toBe(false);
+      expect(displayed.getObjectByName(blockerId).visible).toBe(true);
+      renderer.apply(current);
+      expect(displayed.getObjectByName(id).visible).toBe(false);
+      expect(displayed.getObjectByName(blockerId).visible).toBe(true);
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+    }
+  },
+);

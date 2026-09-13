@@ -1,7 +1,7 @@
 import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import * as THREE from "three";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { buildCadSceneModel } from "./CadSceneModel";
 
 const isCadCameraPose = Schema.is(CadCameraPose);
@@ -300,5 +300,43 @@ it("accepts opaque source alpha while rejecting materials that render with alpha
     expect(cadCommentVisible(model, camera, point)).toBe(false);
   } finally {
     model.dispose();
+  }
+});
+
+it.each([
+  { name: "opaque", material: new THREE.MeshBasicMaterial(), visible: true },
+  {
+    name: "blended",
+    material: new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5 }),
+    visible: false,
+  },
+  {
+    name: "alpha-tested",
+    material: new THREE.MeshBasicMaterial({ alphaTest: 0.5 }),
+    visible: false,
+  },
+  {
+    name: "alpha-hashed",
+    material: new THREE.MeshBasicMaterial({ alphaHash: true }),
+    visible: false,
+  },
+  {
+    name: "transmissive",
+    material: new THREE.MeshPhysicalMaterial({ transmission: 0.5 }),
+    visible: false,
+  },
+])("verifies $name source surfaces with one assembly raycast", ({ material, visible }) => {
+  const { model, camera, point } = setup();
+  const intersect = vi.spyOn(THREE.Raycaster.prototype, "intersectObjects");
+  try {
+    model.objects.get(id(3))!.object.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.material = material;
+    });
+    expect(cadCommentVisible(model, camera, point)).toBe(visible);
+    expect(intersect).toHaveBeenCalledTimes(1);
+  } finally {
+    intersect.mockRestore();
+    model.dispose();
+    material.dispose();
   }
 });

@@ -133,17 +133,15 @@ export const cadCommentVisible = (
     origin.copy(point).addScaledVector(direction, -point.clone().sub(origin).dot(direction));
   }
   const distance = origin.distanceTo(point);
+  const epsilon = Math.max(1e-7, model.bounds.getSize(new THREE.Vector3()).length() * 1e-5);
   const ray = new THREE.Raycaster(
     origin,
     point.clone().sub(origin).normalize(),
     0,
-    Math.max(
-      0,
-      distance - Math.max(1e-7, model.bounds.getSize(new THREE.Vector3()).length() * 1e-5),
-    ),
+    distance + epsilon,
   );
-  if (cadVisibleIntersections(model, ray).length) return false;
-  // A previously located target may have become translucent since its capture.
-  ray.far = distance + Math.max(1e-7, model.bounds.getSize(new THREE.Vector3()).length() * 1e-5);
-  return !cadVisibleIntersections(model, ray).some(cadHitIsTransparent);
+  // Include the target surface so newly translucent locations remain unverifiable.
+  return !cadVisibleIntersections(model, ray).some(
+    (hit) => hit.distance <= Math.max(0, distance - epsilon) || cadHitIsTransparent(hit),
+  );
 };
