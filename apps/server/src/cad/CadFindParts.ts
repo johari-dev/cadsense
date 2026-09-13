@@ -2,16 +2,20 @@ import * as NodeCrypto from "node:crypto";
 import {
   CadFindPartsInput,
   CadViewError,
-  type CadFindPartsEntry,
-  type CadFindPartsResult,
+  CadFindPartsEntry,
+  CadFindPartsResult,
   type CadSnapshotManifest,
   type CadViewState,
 } from "@cadsense/contracts";
-import { indexCadSnapshot } from "@cadsense/shared/cadScene";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { indexCadSnapshot } from "./CadViewState.ts";
 
 const decodeInput = Schema.decodeUnknownEffect(CadFindPartsInput);
+const encodeEntry = Schema.encodeSync(Schema.fromJsonString(CadFindPartsEntry));
+const encodeResult = Schema.encodeSync(Schema.fromJsonString(CadFindPartsResult));
+// The field and ancestor caps keep even one maximally JSON-escaped entry below this budget.
+const MAX_RESULT_BYTES = 64 * 1024;
 const encodeFingerprint = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.Union([Schema.String, Schema.Number, Schema.Null]))),
 );
@@ -62,13 +66,24 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     const suffix = input.cursor.slice(prefix.length);
     if (!input.cursor.startsWith(prefix) || !/^[1-9][0-9]*$/.test(suffix)) return yield* invalid();
     offset = Number(suffix);
-    if (!Number.isSafeInteger(offset) || offset % limit !== 0 || offset >= snapshot.nodes.length)
-      return yield* invalid();
+    if (!Number.isSafeInteger(offset) || offset >= snapshot.nodes.length) return yield* invalid();
   }
   const index = indexCadSnapshot(snapshot),
     visible = index.visible(state),
     parts = new Map(snapshot.parts.map((part) => [part.geometryKey, part]));
   const entries: CadFindPartsEntry[] = [];
+  // Reserve the envelope using upper bounds for both the match count and cursor offset.
+  let resultBytes = Buffer.byteLength(
+    encodeResult({
+      rootId: snapshot.rootId,
+      snapshotId: snapshot.snapshotId,
+      revision: state.revision,
+      entries: [],
+      totalMatches: snapshot.nodes.length,
+      nextCursor: `${prefix}${snapshot.nodes.length}`,
+    }),
+  );
+  let pageFull = false;
   let totalMatches = 0;
   for (const node of snapshot.nodes) {
     const part = node.sourcePartKey === null ? undefined : parts.get(node.sourcePartKey),
@@ -84,7 +99,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     )
       continue;
     const ordinal = totalMatches++;
-    if (ordinal < offset || entries.length === limit) continue;
+    if (ordinal < offset || entries.length === limit || pageFull) continue;
     let textTruncated = false;
     const text = (value: string) => {
       if (value.length > 256) textTruncated = true;
@@ -102,7 +117,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
       parentId = parent.parentId;
     }
     assemblyPath.reverse();
-    entries.push({
+    const entry: CadFindPartsEntry = {
       occurrenceId: node.id,
       parentOccurrenceId: node.parentId,
       name: text(node.name),
@@ -132,7 +147,16 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
       assemblyPath,
       omittedAncestorCount: Math.max(0, ancestorCount - 16),
       textTruncated,
-    });
+    };
+    const entryBytes = Buffer.byteLength(encodeEntry(entry)) + (entries.length > 0 ? 1 : 0);
+    if (resultBytes + entryBytes > MAX_RESULT_BYTES) {
+      if (entries.length === 0) return yield* invalid();
+      // Keep counting matches, but leave this entry and every later match for the next page.
+      pageFull = true;
+      continue;
+    }
+    entries.push(entry);
+    resultBytes += entryBytes;
   }
   if (offset > 0 && offset >= totalMatches) return yield* invalid();
   return {

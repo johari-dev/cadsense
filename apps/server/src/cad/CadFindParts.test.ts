@@ -11,7 +11,8 @@ import { findCadParts } from "./CadFindParts.ts";
 import { initialCadView } from "./CadViewState.ts";
 
 const id = (value: number) => value.toString(16).padStart(64, "0");
-const snapshot = Schema.decodeUnknownSync(CadSnapshotManifest)({
+const decodeSnapshot = Schema.decodeUnknownSync(CadSnapshotManifest);
+const snapshot = decodeSnapshot({
   schemaVersion: 1,
   snapshotId: "00000000-0000-4000-8000-000000000001",
   rootId: id(1000),
@@ -240,7 +241,7 @@ describe("cad_find_parts", () => {
             )).reason,
             "invalid-operation",
           );
-        for (const suffix of ["0", "-2", "3", "6", "8", "02", "1.5", "NaN", "9007199254740992"])
+        for (const suffix of ["0", "-2", "6", "8", "02", "1.5", "NaN", "9007199254740992"])
           assert.equal(
             (yield* findCadParts(snapshot, state, {
               ...request,
@@ -318,6 +319,68 @@ describe("cad_find_parts", () => {
       assert.deepEqual(empty.entries, []);
       assert.equal(empty.totalMatches, 0);
       assert.isNull(empty.nextCursor);
+    }),
+  );
+  it.effect("bounds serialized UTF-8 pages without skipping large or small matches", () =>
+    Effect.gen(function* () {
+      for (const character of ["\u0001", "\uffff", "\ud800"]) {
+        const longText = character.repeat(4096);
+        const ancestors = Array.from({ length: 16 }, (_, i) => ({
+          ...snapshot.nodes[0]!,
+          id: id(i + 1),
+          parentId: i === 0 ? null : id(i),
+          name: longText,
+        }));
+        const matches = Array.from({ length: 50 }, (_, i) => ({
+          ...snapshot.nodes[2]!,
+          id: id(i + 100),
+          parentId: i % 5 === 4 ? null : id(16),
+          name: i % 5 === 4 ? "Small" : longText,
+          instanceId: longText,
+          sourcePartKey: i % 5 === 4 ? null : id(100),
+        }));
+        const sourcePart = snapshot.parts[0]!;
+        const large = decodeSnapshot({
+          ...snapshot,
+          nodes: [...ancestors, ...matches],
+          parts: [
+            {
+              ...sourcePart,
+              source: { ...sourcePart.source, partId: longText, configuration: longText },
+              metadata: {
+                ...sourcePart.metadata!,
+                bodyType: longText,
+                material: { displayName: longText },
+              },
+            },
+          ],
+        });
+        const all: string[] = [];
+        let cursor: string | undefined;
+        let pageCount = 0;
+        do {
+          const input = { ...request, limit: 50, ...(cursor ? { cursor } : {}) };
+          const page = yield* findCadParts(large, state, input);
+          assert.deepEqual(yield* findCadParts(large, state, input), page);
+          assert.isTrue(validResult(page));
+          assert.isAtMost(new TextEncoder().encode(encode(page)).byteLength, 64 * 1024);
+          assert.isAbove(page.entries.length, 0);
+          assert.equal(page.totalMatches, matches.length);
+          assert.deepEqual(
+            ids(page),
+            matches.slice(all.length, all.length + page.entries.length).map((node) => node.id),
+          );
+          all.push(...ids(page));
+          assert.isAtMost(all.length, matches.length);
+          cursor = page.nextCursor ?? undefined;
+          pageCount++;
+        } while (cursor);
+        assert.isAbove(pageCount, 1);
+        assert.deepEqual(
+          all,
+          matches.map((node) => node.id),
+        );
+      }
     }),
   );
   it("rejects unbounded input pages and invalid filters", () => {
