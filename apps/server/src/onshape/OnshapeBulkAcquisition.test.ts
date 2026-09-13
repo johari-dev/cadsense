@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { OnshapeRateLimitError } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -24,10 +25,23 @@ import {
 } from "./testFixtures/bulkExport.ts";
 import { threeMfArchive, threeMfXml } from "./testFixtures/threeMf.ts";
 
+const decodeMaterials = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      materials: Schema.Array(
+        Schema.Struct({
+          alphaMode: Schema.optionalKey(Schema.String),
+          pbrMetallicRoughness: Schema.Struct({ baseColorFactor: Schema.Array(Schema.Number) }),
+        }),
+      ),
+    }),
+  ),
+);
 const unused = () => Effect.die("Unexpected operation");
 const makeHarness = (count: number) =>
   Effect.gen(function* () {
     const fixture = bulkFixture(count);
+    const metadata = fixture.metadata;
     const requests: Array<OnshapeReadRequest & { method?: string }> = [];
     const options = {
       failDownload: false,
@@ -76,6 +90,7 @@ const makeHarness = (count: number) =>
               : translationDone;
           }
           if (request.path.includes("/assemblies/")) return fixture.definition;
+          if (request.path.includes("/parts/")) return metadata;
           return yield* Effect.die("Unexpected API request");
         }),
       readBinary: (request) =>
@@ -155,6 +170,8 @@ const makeHarness = (count: number) =>
       });
     return {
       acquire,
+      metadata,
+      readAsset: store.readAsset,
       requests,
       options,
       statusRead,
@@ -178,6 +195,46 @@ const harness = <A, E, R>(
   );
 
 describe("bulk snapshot acquisition", () => {
+  it.effect("publishes translucent base faces while retaining opaque face overrides", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          h.metadata[0]!.appearance.opacity = 127;
+          const manifest = yield* h.acquire();
+          const bytes = yield* h.readAsset(manifest.snapshotId, manifest.assets[0]!.sha256);
+          const jsonLength = new DataView(bytes.buffer, bytes.byteOffset).getUint32(12, true);
+          const { materials } = decodeMaterials(
+            new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)),
+          );
+          assert.closeTo(
+            materials[0]!.pbrMetallicRoughness.baseColorFactor[3]!,
+            0.4980392156862745,
+            1e-12,
+          );
+          assert.equal(materials[0]!.alphaMode, "BLEND");
+          assert.equal(materials[1]!.pbrMetallicRoughness.baseColorFactor[3], 1);
+        }),
+      2,
+    ),
+  );
+  it.effect("preserves authored part opacity in bulk snapshot metadata", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          h.metadata[0]!.appearance.opacity = 127;
+          const manifest = yield* h.acquire();
+          assert.equal(manifest.parts[0]!.metadata?.appearance?.opacity, 127);
+          const metadataRequests = h.requests.filter((request) => request.path.includes("/parts/"));
+          assert.lengthOf(metadataRequests, 1);
+          assert.include(metadataRequests[0]!.path, "/v/777777777777777777777777/");
+          assert.equal(
+            new URLSearchParams(metadataRequests[0]!.query).get("linkDocumentId"),
+            bulkInput.source.documentId,
+          );
+        }),
+      2,
+    ),
+  );
   it.effect(
     "fills omitted 3MF bodies with one coarse identity export and resumes without resubmission",
     () =>
@@ -218,14 +275,14 @@ describe("bulk snapshot acquisition", () => {
     ),
   );
   it.effect(
-    "downloads 400 distinct parts in five calls and unchanged sync uses one revision check",
+    "downloads 400 distinct parts with one metadata request per studio and unchanged sync uses one revision check",
     () =>
       harness((h) =>
         Effect.gen(function* () {
           const first = yield* h.acquire();
           assert.lengthOf(first.parts, 400);
           assert.lengthOf(first.assets, 400);
-          assert.lengthOf(h.requests, 5);
+          assert.lengthOf(h.requests, 6);
           assert.lengthOf(
             h.requests.filter((request) => request.path.includes("/partid/")),
             0,
@@ -239,7 +296,7 @@ describe("bulk snapshot acquisition", () => {
           });
           const second = yield* h.acquire();
           assert.equal(second.snapshotId, first.snapshotId);
-          assert.lengthOf(h.requests, 6);
+          assert.lengthOf(h.requests, 7);
         }),
       ),
   );
@@ -281,7 +338,7 @@ describe("bulk snapshot acquisition", () => {
           const error = yield* h.acquire().pipe(Effect.flip);
           assert.equal(error._tag, "OnshapeExportError");
           assert.equal("reason" in error ? error.reason : null, "revision-changed");
-          assert.lengthOf(h.requests, 4);
+          assert.lengthOf(h.requests, 5);
         }),
       2,
     ),

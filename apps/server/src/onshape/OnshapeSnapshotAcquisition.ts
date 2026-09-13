@@ -27,6 +27,7 @@ import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshot
 import { cadTransferArtifacts } from "../cad/CadTransferArtifacts.ts";
 import { ServerConfig } from "../config.ts";
 import { normalizeCadGeometry, CadGeometryError } from "../cad/CadGeometry.ts";
+import { applyOnshapeOpacity } from "./OnshapeGeometryAppearance.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
 import {
@@ -38,17 +39,22 @@ import * as OnshapeSyncState from "./OnshapeSyncState.ts";
 import { OnshapeRequestMetrics, type OnshapeApiMetrics } from "./OnshapeTransport.ts";
 import {
   completeSnapshotManifest,
-  enrichSnapshotMetadata,
   parseAssemblySnapshotDraft,
   parsePartStudioSnapshotDraft,
-  snapshotPartStudioGroups,
   snapshotRootId,
   type OnshapeSnapshotManifestError,
 } from "./OnshapeSnapshotManifest.ts";
 
+import {
+  acquireSnapshotMetadata,
+  onshapePartStudioRequest,
+  OnshapeSnapshotAcquisitionError,
+} from "./OnshapeSnapshotMetadata.ts";
+export { OnshapeSnapshotAcquisitionError } from "./OnshapeSnapshotMetadata.ts";
+
 // Fixed source-part coordinates: meters and radians, without separate face nodes.
 // Onshape v17 parts/{...}/gltf defines these synchronous export parameters.
-export const ONSHAPE_TESSELLATION_PROFILE = "onshape-gltf-chord-0.0005-angle-0.1-v1";
+export const ONSHAPE_TESSELLATION_PROFILE = "onshape-gltf-chord-0.0005-angle-0.1-opacity-v2";
 const decodeMicroversion = Schema.decodeUnknownEffect(
   Schema.Struct({ microversion: OnshapeWorkspaceId }),
 );
@@ -56,15 +62,6 @@ const geometryFailure = (error: unknown) =>
   new CadGeometryError({
     reason: error instanceof CadSceneBudgetError ? error.reason : "invalid-geometry",
   });
-const decodeMetadataProof = Schema.decodeUnknownEffect(
-  Schema.Array(Schema.Struct({ microversionId: Schema.optionalKey(OnshapeWorkspaceId) })),
-);
-export class OnshapeSnapshotAcquisitionError extends Schema.TaggedErrorClass<OnshapeSnapshotAcquisitionError>()(
-  "OnshapeSnapshotAcquisitionError",
-  {
-    reason: Schema.Literals(["invalid-response", "missing-linked-version", "identity-unavailable"]),
-  },
-) {}
 export interface OnshapeSnapshotAcquisitionInput {
   readonly projectId: ProjectId;
   readonly source: OnshapeProjectSource;
@@ -192,55 +189,8 @@ export const make = Effect.gen(function* () {
       try: () => createCadSceneBudget(draft.nodes),
       catch: geometryFailure,
     });
-    const studioRequest = Effect.fn(function* (part: CadPartStudioSource) {
-      const linked = part.documentId !== root.documentId;
-      if (linked && part.documentVersion === null)
-        return yield* new OnshapeSnapshotAcquisitionError({ reason: "missing-linked-version" });
-      const query = new URLSearchParams({
-        configuration: part.fullConfiguration || part.configuration || "default",
-      });
-      if (linked) query.set("linkDocumentId", root.documentId);
-      return {
-        path: `${ONSHAPE_API_BASE_PATH}/parts/d/${part.documentId}/${linked ? "v" : "m"}/${linked ? part.documentVersion : part.documentMicroversion}/e/${part.elementId}`,
-        query,
-      };
-    });
-    if (root.kind === "assembly") {
-      const groups = [];
-      const verifiedVersions = new Map<string, string>();
-      for (const group of snapshotPartStudioGroups(draft)) {
-        const request = yield* studioRequest(group.source);
-        request.query.set("withThumbnails", "false");
-        request.query.set("includePropertyDefaults", "false");
-        const response = yield* read(request.path, request.query.toString());
-        if (group.source.documentId !== root.documentId) {
-          const proof = yield* decodeMetadataProof(response).pipe(
-            Effect.mapError(
-              () => new OnshapeSnapshotAcquisitionError({ reason: "invalid-response" }),
-            ),
-          );
-          if (proof.length === 0 || proof.some((row) => row.microversionId === undefined)) {
-            const key = `${group.source.documentId}/${group.source.documentVersion}`;
-            let resolved = verifiedVersions.get(key);
-            if (resolved === undefined) {
-              resolved = (yield* read(
-                `${ONSHAPE_API_BASE_PATH}/documents/d/${group.source.documentId}/v/${group.source.documentVersion}/currentmicroversion`,
-              ).pipe(
-                Effect.flatMap(decodeMicroversion),
-                Effect.catchTag("SchemaError", () =>
-                  Effect.fail(new OnshapeSnapshotAcquisitionError({ reason: "invalid-response" })),
-                ),
-              )).microversion;
-              verifiedVersions.set(key, resolved);
-            }
-            if (resolved !== group.source.documentMicroversion)
-              return yield* new OnshapeSnapshotAcquisitionError({ reason: "invalid-response" });
-          }
-        }
-        groups.push({ source: group.source, response });
-      }
-      draft = yield* enrichSnapshotMetadata(draft, groups);
-    }
+    const studioRequest = (part: CadPartStudioSource) => onshapePartStudioRequest(root, part);
+    if (root.kind === "assembly") draft = yield* acquireSnapshotMetadata(draft, read);
     const cachedAssets = new Map(
       (yield* store.findGeometry(
         draft.parts.filter((part) => part.geometryRequired).map((part) => part.geometryKey),
@@ -275,7 +225,11 @@ export const make = Effect.gen(function* () {
         beforeRequest: store.checkReserve(),
         beforeChunk: (receivedBytes) => store.checkReserve(receivedBytes),
       });
-      const bytes = yield* normalizeCadGeometry(downloaded.bytes);
+      const normalized = yield* normalizeCadGeometry(downloaded.bytes);
+      const bytes = yield* Effect.try({
+        try: () => applyOnshapeOpacity(normalized, part.metadata?.appearance),
+        catch: geometryFailure,
+      });
       const complexity = yield* Effect.try({
         try: () => measureCadGeometry(bytes),
         catch: geometryFailure,

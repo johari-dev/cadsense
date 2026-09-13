@@ -7,7 +7,7 @@ import { normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import {
   parseAssemblySnapshotDraft,
   snapshotRootId,
-  withAssemblyExportMetadata,
+  enrichSnapshotMetadata,
 } from "./OnshapeSnapshotManifest.ts";
 import { bulkFixture, bulkInput, bulkMicroversion } from "./testFixtures/bulkExport.ts";
 import { threeMfArchive, threeMfXml } from "./testFixtures/threeMf.ts";
@@ -32,7 +32,9 @@ const context = {
 const draft = () => {
   const f = bulkFixture(2);
   return parseAssemblySnapshotDraft(context, f.definition).pipe(
-    Effect.flatMap((d) => withAssemblyExportMetadata(d, f.definition)),
+    Effect.flatMap((d) =>
+      enrichSnapshotMetadata(d, [{ source: d.parts[0]!.source, response: f.metadata }]),
+    ),
   );
 };
 const decodeGlb = Schema.decodeUnknownSync(
