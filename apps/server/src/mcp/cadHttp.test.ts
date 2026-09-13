@@ -25,6 +25,7 @@ const decode = Schema.decodeUnknownSync(
           Schema.Struct({
             name: Schema.String,
             inputSchema: Schema.Struct({ type: Schema.Literal("object") }),
+            annotations: Schema.Struct({ readOnlyHint: Schema.Boolean }),
           }),
         ),
       ),
@@ -110,9 +111,33 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_comments_publish",
       "cad_context",
       "cad_hierarchy",
+      "cad_part_info",
       "cad_update_view",
       "cad_capture",
     ]);
+    const partTool = (yield* response("tools/list")).result.tools?.find(
+      (tool) => tool.name === "cad_part_info",
+    );
+    expect(partTool?.annotations.readOnlyHint).toBe(true);
+    const partInput = {
+      snapshotId: "00000000-0000-4000-8000-000000000001",
+      expectedRevision: 3,
+      occurrenceId: "a".repeat(64),
+    };
+    const partToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_part_info",
+      partInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_part_info",
+        arguments: { _cadsenseCapability: partToken, occurrenceId: "forged" },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(partInput);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",

@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CadSnapshotManifest,
+  CadPartInfoResult,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
@@ -1280,4 +1281,40 @@ it.effect(
       yield* h.service.saveUserView(threadId, null, initialCadView(snapshot));
       assert.isNull(yield* h.service.getUserView(otherThreadId));
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+const decodePartInfo = Schema.decodeUnknownEffect(CadPartInfoResult);
+it.effect("routes revision-bound part info through native tools without changing the view", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const provider = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turn = TurnId.make("part-info");
+    const context = yield* provider.invoke(null, turn, "cad_context", {});
+    const info = yield* provider.invoke(null, turn, "cad_part_info", {
+      snapshotId: snapshot.snapshotId,
+      expectedRevision: 0,
+      occurrenceId: snapshot.nodes[0]!.id,
+    });
+    const result = yield* decodePartInfo(info.result);
+    assert.equal(result.occurrence.name, "Intake");
+    assert.deepEqual(result.geometry, { status: "unavailable", reason: "not-part" });
+    assert.equal(result.revision, 0);
+    assert.deepEqual(yield* provider.invoke(null, turn, "cad_context", {}), context);
+    yield* provider.invoke(null, turn, "cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "explode", amount: 1 }],
+    });
+    assert.equal(
+      (yield* provider
+        .invoke(null, turn, "cad_part_info", {
+          snapshotId: snapshot.snapshotId,
+          expectedRevision: 0,
+          occurrenceId: snapshot.nodes[0]!.id,
+        })
+        .pipe(Effect.flip)).reason,
+      "revision-conflict",
+    );
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );

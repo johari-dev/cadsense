@@ -1,3 +1,4 @@
+import { readCadPartInfo } from "./CadPartInfo.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   CadViewError,
@@ -9,6 +10,7 @@ import {
   type CadViewerSession,
   type CadContextResult,
   type CadHierarchyResult,
+  type CadPartInfoResult,
   type CadSnapshotManifest,
   type OrchestrationCommand,
   type ThreadId,
@@ -47,6 +49,7 @@ export interface CadAgentTools {
   ) => Effect.Effect<CadCommentDelivery, CadViewError>;
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
+  readonly partInfo: (input: unknown) => Effect.Effect<CadPartInfoResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -306,6 +309,19 @@ export const make = Effect.gen(function* () {
               return yield* readCadHierarchy(indexCadSnapshot(binding.snapshot), state, input);
             }),
           );
+        const partInfo: CadAgentTools["partInfo"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              return yield* readCadPartInfo(
+                initialized.binding.snapshot,
+                initialized.state,
+                initialized.binding.readAsset,
+                input,
+              );
+            }),
+          );
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -409,6 +425,7 @@ export const make = Effect.gen(function* () {
             : {}),
           context: () => activity.track(session.threadId, turnId, context()),
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
+          partInfo: (input) => activity.track(session.threadId, turnId, partInfo(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });

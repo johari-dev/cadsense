@@ -1,3 +1,4 @@
+import { CadPartInfoInput } from "./cadPartInfo.ts";
 import {
   CadCommentsListInput,
   CadCommentLocateInput,
@@ -75,6 +76,7 @@ export const CAD_TOOL_INPUTS = {
   cad_comments_publish: CadCommentsPublishToolInput,
   cad_context: Schema.Struct({}),
   cad_hierarchy: CadHierarchyInput,
+  cad_part_info: CadPartInfoInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;
