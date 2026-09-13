@@ -55,6 +55,19 @@ export const CadCamera = Schema.Union([
     fit: Schema.NullOr(Occurrences),
   }),
 ]);
+/** Display-space planes keep points with dot(normal, point) + constant >= 0. */
+export const CadSectionPlane = Schema.Struct({
+  normal: Vector.check(Schema.makeFilter((normal) => Math.abs(Math.hypot(...normal) - 1) < 1e-6)),
+  constant: Schema.Number.check(
+    Schema.isFinite(),
+    Schema.isBetween({ minimum: -1e9, maximum: 1e9 }),
+  ),
+});
+const SectionPlanes = Schema.Array(CadSectionPlane).check(Schema.isMaxLength(6));
+const GhostOpacity = Schema.Number.check(
+  Schema.isFinite(),
+  Schema.isBetween({ minimum: 0.05, maximum: 0.95 }),
+);
 export const CadViewState = Schema.Struct({
   rootId: CadHash,
   snapshotId: CadSnapshotId,
@@ -63,6 +76,11 @@ export const CadViewState = Schema.Struct({
   visibility: Schema.Record(CadHash, Schema.Boolean),
   isolatedOccurrenceIds: Occurrences,
   explosion: Unit,
+  highlightedOccurrenceIds: Schema.optional(Occurrences),
+  ghost: Schema.optional(
+    Schema.NullOr(Schema.Struct({ occurrenceIds: Occurrences, opacity: GhostOpacity })),
+  ),
+  sectionPlanes: Schema.optional(SectionPlanes),
 });
 export type CadViewState = typeof CadViewState.Type;
 export const CadViewOperation = Schema.Union([
@@ -73,6 +91,14 @@ export const CadViewOperation = Schema.Union([
   Schema.Struct({ type: Schema.Literals(["show", "hide", "isolate"]), occurrenceIds: Occurrences }),
   Schema.Struct({ type: Schema.Literal("reset-visibility") }),
   Schema.Struct({ type: Schema.Literal("explode"), amount: Unit }),
+  Schema.Struct({ type: Schema.Literal("highlight"), occurrenceIds: Occurrences }),
+  Schema.Struct({
+    type: Schema.Literal("ghost"),
+    occurrenceIds: Occurrences,
+    opacity: GhostOpacity,
+  }),
+  Schema.Struct({ type: Schema.Literal("section"), planes: SectionPlanes }),
+  Schema.Struct({ type: Schema.Literal("reset-inspection") }),
 ]);
 export type CadViewOperation = typeof CadViewOperation.Type;
 export const CadUpdateViewInput = Schema.Struct({

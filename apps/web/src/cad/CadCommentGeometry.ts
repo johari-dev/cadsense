@@ -30,6 +30,31 @@ export const cadCommentInspectionDirections = (original: THREE.Vector3): THREE.V
   ];
 };
 
+/** Reject alpha-dependent surfaces rather than silently selecting an ambiguous layer. */
+export const cadHitIsTransparent = (hit: THREE.Intersection) => {
+  if (!(hit.object instanceof THREE.Mesh)) return true;
+  const material = Array.isArray(hit.object.material)
+    ? hit.object.material[hit.face?.materialIndex ?? 0]
+    : hit.object.material;
+  return (
+    !material ||
+    material.transparent ||
+    material.alphaTest > 0 ||
+    material.alphaHash ||
+    (material instanceof THREE.MeshPhysicalMaterial && material.transmission > 0)
+  );
+};
+
+export const cadVisibleIntersections = (model: CadSceneModel, ray: THREE.Raycaster) =>
+  ray
+    .intersectObjects(
+      [...model.objects.values()]
+        .filter((entry) => entry.object.visible)
+        .map((entry) => entry.object),
+      true,
+    )
+    .filter((hit) => !model.isClipped(hit.point));
+
 export const locateCadCommentPoints = (
   model: CadSceneModel,
   camera: THREE.Camera,
@@ -55,11 +80,9 @@ export const locateCadCommentPoints = (
       new THREE.Vector2((pick.x / width) * 2 - 1, 1 - (pick.y / height) * 2),
       camera,
     );
-    const hit = ray.intersectObjects(
-      visible.map(([, entry]) => entry.object),
-      true,
-    )[0];
+    const hit = cadVisibleIntersections(model, ray)[0];
     if (!hit) return failure("no-hit");
+    if (cadHitIsTransparent(hit)) return failure("transparent-hit");
     const owner = visible.find(([, entry]) => {
       let node: THREE.Object3D | null = hit.object;
       while (node) {
@@ -103,6 +126,7 @@ export const cadCommentVisible = (
   camera: THREE.Camera,
   point: THREE.Vector3,
 ) => {
+  if (model.isClipped(point)) return false;
   const origin = camera.getWorldPosition(new THREE.Vector3());
   if (camera instanceof THREE.OrthographicCamera) {
     const direction = camera.getWorldDirection(new THREE.Vector3());
@@ -118,10 +142,8 @@ export const cadCommentVisible = (
       distance - Math.max(1e-7, model.bounds.getSize(new THREE.Vector3()).length() * 1e-5),
     ),
   );
-  return (
-    ray.intersectObjects(
-      [...model.objects.values()].filter((e) => e.object.visible).map((e) => e.object),
-      true,
-    ).length === 0
-  );
+  if (cadVisibleIntersections(model, ray).length) return false;
+  // A previously located target may have become translucent since its capture.
+  ray.far = distance + Math.max(1e-7, model.bounds.getSize(new THREE.Vector3()).length() * 1e-5);
+  return !cadVisibleIntersections(model, ray).some(cadHitIsTransparent);
 };

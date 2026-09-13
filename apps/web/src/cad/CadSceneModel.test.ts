@@ -176,3 +176,50 @@ describe("CAD scene model", () => {
     expect(textureDispose).toHaveBeenCalledTimes(1);
   });
 });
+
+it("owns inspection materials per occurrence and per renderer, restores and disposes only copies", () => {
+  const source = prototype();
+  source.material.map = new THREE.Texture();
+  const model = buildCadSceneModel(manifest, new Map([[id(9), source]]));
+  const other = buildCadSceneModel(manifest, new Map([[id(9), source]]));
+  const first = model.objects.get(id(3))!.object.children[0] as THREE.Mesh;
+  const sibling = model.objects.get(id(4))!.object.children[0] as THREE.Mesh;
+  const geometryDispose = vi.spyOn(source.geometry, "dispose");
+  const sourceDispose = vi.spyOn(source.material, "dispose");
+  const textureDispose = vi.spyOn(source.material.map, "dispose");
+  model.apply({
+    ...state,
+    highlightedOccurrenceIds: [id(2)],
+    ghost: { occurrenceIds: [id(3)], opacity: 0.2 },
+  });
+  const copy = first.material as THREE.MeshStandardMaterial;
+  const copyDispose = vi.spyOn(copy, "dispose");
+  expect(copy).not.toBe(source.material);
+  expect(copy.color.getHex()).toBe(0xffbf36);
+  expect(copy.opacity).toBe(0.2);
+  expect(copy.depthWrite).toBe(false);
+  expect(copy.map).toBe(source.material.map);
+  expect(sibling.material).toBe(source.material);
+  expect((other.objects.get(id(3))!.object.children[0] as THREE.Mesh).material).toBe(
+    source.material,
+  );
+  model.apply({
+    ...state,
+    revision: 2,
+    explosion: 1,
+    highlightedOccurrenceIds: [id(2)],
+    ghost: { occurrenceIds: [id(3)], opacity: 0.2 },
+  });
+  expect(first.material).toBe(copy);
+  expect(copyDispose).not.toHaveBeenCalled();
+  expect(source.material.opacity).toBe(1);
+  expect(source.material.color.getHex()).toBe(0x35a76c);
+  model.apply(state);
+  expect(copyDispose).toHaveBeenCalledOnce();
+  expect(first.material).toBe(source.material);
+  expect(first.geometry).toBe(source.geometry);
+  model.dispose();
+  expect(sourceDispose).not.toHaveBeenCalled();
+  expect(textureDispose).not.toHaveBeenCalled();
+  expect(geometryDispose).not.toHaveBeenCalled();
+});
