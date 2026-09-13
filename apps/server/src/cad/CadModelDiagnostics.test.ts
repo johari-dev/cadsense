@@ -339,6 +339,36 @@ it.effect("binds cursors to resolved filters, thresholds, revision, and snapshot
     assert.equal(warnings.findings[0]!.code, "unsupported-component");
   }),
 );
+it.effect("links cost findings only to contributing unsuppressed instances", () =>
+  Effect.gen(function* () {
+    const suppressed = Array.from({ length: 30 }, (_, i) => node(100 + i, 2, true));
+    const active = Array.from({ length: 25 }, (_, i) => node(200 + i, 2));
+    const value = {
+      ...snapshot,
+      nodes: [...suppressed, ...active],
+      parts: [part(2)],
+      assets: [asset(2, small)],
+    };
+    const result = yield* diagnostics(
+      { minimumSeverity: "warning", thresholds: { triangles: 150 } },
+      value,
+    );
+    assert.equal(result.findings.length, 1);
+    const cost = result.findings[0]!;
+    assert.equal(cost.code, "expensive-geometry");
+    assert.deepEqual(
+      cost.occurrenceIds,
+      active.slice(0, 20).map((entry) => entry.id),
+    );
+    assert.equal(cost.occurrenceCount, active.length);
+    assert.isTrue(cost.occurrenceIdsTruncated);
+    assert.equal(cost.evidence.unsuppressedPartOccurrences, active.length);
+    assert.equal(cost.evidence.potentialTriangles, small.triangles * active.length);
+    const all = yield* diagnostics({}, value);
+    assert.deepEqual(all.findings[0]!.occurrenceIds, [suppressed[0]!.id]);
+    assert.equal(all.findings[0]!.occurrenceCount, 1);
+  }),
+);
 it.effect("marks unsafe complexity and overflowing subtotals unknown", () =>
   Effect.gen(function* () {
     const unsafe = yield* diagnostics(

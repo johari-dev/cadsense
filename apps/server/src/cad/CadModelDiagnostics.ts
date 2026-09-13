@@ -21,8 +21,18 @@ export const CAD_DIAGNOSTIC_THRESHOLDS = {
 } as const;
 const severityOrder = { info: 0, warning: 1, error: 2 };
 type Complexity = typeof CadDiagnosticComplexity.Type;
-type References = { ids: string[]; count: number; unsuppressedParts: number };
-const emptyReferences = (): References => ({ ids: [], count: 0, unsuppressedParts: 0 });
+type References = {
+  ids: string[];
+  count: number;
+  unsuppressedPartIds: string[];
+  unsuppressedParts: number;
+};
+const emptyReferences = (): References => ({
+  ids: [],
+  count: 0,
+  unsuppressedPartIds: [],
+  unsuppressedParts: 0,
+});
 const sum = (a: number | null, b: number): number | null =>
   a !== null && Number.isSafeInteger(a + b) ? a + b : null;
 const product = (a: number, b: number): number | null =>
@@ -82,7 +92,10 @@ export const readCadModelDiagnostics = Effect.fn("readCadModelDiagnostics")(func
       const refs = references.get(node.sourcePartKey) ?? emptyReferences();
       refs.count++;
       if (refs.ids.length < 20) refs.ids.push(node.id);
-      if (node.kind === "part" && !node.suppressed) refs.unsuppressedParts++;
+      if (node.kind === "part" && !node.suppressed) {
+        refs.unsuppressedParts++;
+        if (refs.unsuppressedPartIds.length < 20) refs.unsuppressedPartIds.push(node.id);
+      }
       references.set(node.sourcePartKey, refs);
     }
     if (node.kind === "part" && !node.suppressed) {
@@ -147,8 +160,16 @@ export const readCadModelDiagnostics = Effect.fn("readCadModelDiagnostics")(func
       if (storedComplexity.drawCalls * refs.unsuppressedParts >= thresholds.drawCalls)
         thresholdsExceeded.push("potential-draw-calls");
     }
-    const occurrenceIds = node ? [node.id] : refs.ids;
-    const occurrenceCount = node ? 1 : refs.count;
+    const occurrenceIds = node
+      ? [node.id]
+      : classification === "cost"
+        ? refs.unsuppressedPartIds
+        : refs.ids;
+    const occurrenceCount = node
+      ? 1
+      : classification === "cost"
+        ? refs.unsuppressedParts
+        : refs.count;
     findings.push({
       code,
       severity,
@@ -365,7 +386,7 @@ export const readCadModelDiagnostics = Effect.fn("readCadModelDiagnostics")(func
         "Complexity comes from stored metadata. Geometry totals count each required source geometry key once; different keys can share identical asset bytes. Decoded bytes are not a process-memory measurement.",
         "Potential assembled workload counts all unsuppressed part occurrences, including hidden or isolated-away parts. It is not the current rendered workload.",
         "Known subtotals exclude unknown complexity. Null subtotals exceed the safe integer range. Potential counts are null when complexity is unknown or the multiplication exceeds that range.",
-        "Occurrence links include at most the first 20 matching IDs per finding; occurrenceCount and occurrenceIdsTruncated describe that coverage.",
+        "Occurrence links include at most the first 20 matching IDs per finding; occurrenceCount and occurrenceIdsTruncated describe that coverage. Cost findings link only unsuppressed part occurrences, matching the potential workload basis.",
         "Normal completed snapshots validate required metadata and asset associations before activation. This scan cannot diagnose a snapshot that cannot be loaded.",
       ],
     },

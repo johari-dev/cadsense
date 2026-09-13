@@ -12,7 +12,7 @@
 }
 ```
 
-`minimumSeverity` defaults to `info`. The allowed values are `info`, `warning`, and `error`. Pages contain at most 100 findings. `nextCursor` binds the snapshot, revision, severity, and resolved thresholds. Page size can change between requests.
+`minimumSeverity` defaults to `info`. The allowed values are `info`, `warning`, and `error`. Pages contain at most 100 findings. `nextCursor` binds the snapshot, revision, severity, and resolved thresholds. Page size can change between requests. Use `minimumSeverity: "warning"` to omit expected-state messages when looking for unsupported components or cost warnings.
 
 Findings distinguish four classes:
 
@@ -21,9 +21,9 @@ Findings distinguish four classes:
 - Manifest defects include required geometry without an asset descriptor, missing source-part references, and inconsistent requirements.
 - Cost findings identify stored geometry counts or potential instance counts that meet a threshold. They do not establish engineering defects.
 
-Each finding includes a source geometry key when available, a source part ID and microversion, and up to 20 linked occurrence IDs. `occurrenceCount` reports all matching occurrences, and `occurrenceIdsTruncated` identifies incomplete links. The severity filter changes the returned findings, while scan coverage and summary counts still cover the entire manifest.
+Each finding includes a source geometry key when available, a source part ID and microversion, and up to 20 linked occurrence IDs. `occurrenceCount` reports all matching occurrences. Cost findings count and link only unsuppressed part occurrences that contribute to potential workload, and `occurrenceIdsTruncated` identifies incomplete links. The severity filter changes the returned findings, while scan coverage and summary counts still cover the entire manifest.
 
-Default cost thresholds are 1,000,000 triangles, 128 MiB of decoded bytes, and 128 draw calls. A request can override each threshold independently. A cost finding includes the observed stored counts and the thresholds exceeded.
+Default cost thresholds are 1,000,000 triangles, 128 MiB of decoded bytes, and 128 draw calls. Triangle and draw-call thresholds apply to both source geometry and potential instance totals, so repeated simple parts can trigger a cost warning. A request can override each threshold independently. A cost finding includes the observed stored counts and the thresholds exceeded.
 
 `geometryComplexity` counts each required source geometry key once. Different source keys can refer to identical asset bytes, so `assets.distinctHashes` reports distinct SHA-256 values separately. These decoded-byte totals are not process-memory measurements.
 
