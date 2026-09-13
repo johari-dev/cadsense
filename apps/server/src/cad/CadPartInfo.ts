@@ -8,7 +8,11 @@ import {
 import { indexCadSnapshot } from "@cadsense/shared/cadScene";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { CadMeshGeometryError, readCadMeshTriangles } from "./CadMeshGeometry.ts";
+import {
+  CAD_MESH_MAX_BYTES,
+  CadMeshGeometryError,
+  readCadMeshTriangles,
+} from "./CadMeshGeometry.ts";
 
 const decodeInput = Schema.decodeUnknownEffect(CadPartInfoInput);
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
@@ -85,24 +89,26 @@ export const readCadPartInfo = Effect.fn("readCadPartInfo")(function* <E>(
               ]),
           ].some((value) => value !== undefined && value.length > 512),
       }
-    : { status: "unavailable", reason: "not-in-snapshot" };
+    : { status: "unavailable", reason: metadata ? "not-in-metadata" : "not-in-snapshot" };
   const occurrences: string[] = [];
   let total = 0;
+  let suppressedCount = 0;
   if (part)
     for (const candidate of snapshot.nodes) {
       if (candidate.sourcePartKey !== part.geometryKey) continue;
       total++;
+      if (candidate.suppressed) suppressedCount++;
       if (occurrences.length < (input.repeatedOccurrenceLimit ?? 20))
         occurrences.push(candidate.id);
     }
   let geometry: CadPartInfoResult["geometry"] = {
     status: "unavailable",
-    reason: node.kind !== "part" ? "not-part" : "not-cached",
+    reason: node.suppressed ? "suppressed" : node.kind !== "part" ? "not-part" : "not-cached",
   };
   const asset = part && snapshot.assets.find((asset) => asset.geometryKey === part.geometryKey);
-  if (node.kind === "part" && asset && asset.byteLength > 128 * 1024 ** 2) {
+  if (!node.suppressed && node.kind === "part" && asset && asset.byteLength > CAD_MESH_MAX_BYTES) {
     geometry = { status: "unavailable", reason: "too-large" };
-  } else if (node.kind === "part" && asset && part) {
+  } else if (!node.suppressed && node.kind === "part" && asset && part) {
     geometry = yield* readAsset(asset.sha256).pipe(
       Effect.mapError(() => "asset-unavailable" as const),
       Effect.flatMap((bytes) =>
@@ -160,14 +166,17 @@ export const readCadPartInfo = Effect.fn("readCadPartInfo")(function* <E>(
       suppressed: node.suppressed,
       visible: index.visible(state).get(node.id) ?? false,
     },
-    assembledTransform: {
-      matrix: node.transform,
-      storage: "row-major",
-      from: "source-node",
-      to: "assembled-world",
-      translationUnits: "meters",
-      upAxis: "Z",
-    },
+    assembledTransform: node.suppressed
+      ? { status: "unavailable", reason: "suppressed" }
+      : {
+          status: "available",
+          matrix: node.transform,
+          storage: "row-major",
+          from: "source-node",
+          to: "assembled-world",
+          translationUnits: "meters",
+          upAxis: "Z",
+        },
     source: part ? { sourcePartKey: part.geometryKey, ...part.source } : null,
     metadata: metadata
       ? {
@@ -185,6 +194,7 @@ export const readCadPartInfo = Effect.fn("readCadPartInfo")(function* <E>(
       match: "source-part-key",
       occurrenceIds: occurrences,
       total,
+      suppressedCount,
       truncated: occurrences.length < total,
     },
     geometry,

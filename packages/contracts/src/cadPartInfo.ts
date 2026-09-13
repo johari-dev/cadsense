@@ -38,14 +38,18 @@ export const CadPartInfoResult = Schema.Struct({
     suppressed: Schema.Boolean,
     visible: Schema.Boolean,
   }),
-  assembledTransform: Schema.Struct({
-    matrix: CadTransform,
-    storage: Schema.Literal("row-major"),
-    from: Schema.Literal("source-node"),
-    to: Schema.Literal("assembled-world"),
-    translationUnits: Schema.Literal("meters"),
-    upAxis: Schema.Literal("Z"),
-  }),
+  assembledTransform: Schema.Union([
+    Schema.Struct({ status: Schema.Literal("unavailable"), reason: Schema.Literal("suppressed") }),
+    Schema.Struct({
+      status: Schema.Literal("available"),
+      matrix: CadTransform,
+      storage: Schema.Literal("row-major"),
+      from: Schema.Literal("source-node"),
+      to: Schema.Literal("assembled-world"),
+      translationUnits: Schema.Literal("meters"),
+      upAxis: Schema.Literal("Z"),
+    }),
+  ]),
   source: Schema.NullOr(Schema.Struct({ sourcePartKey: CadHash, ...CadPartSource.fields })),
   metadata: Schema.NullOr(
     Schema.Struct({
@@ -61,7 +65,7 @@ export const CadPartInfoResult = Schema.Struct({
   material: Schema.Union([
     Schema.Struct({
       status: Schema.Literal("unavailable"),
-      reason: Schema.Literal("not-in-snapshot"),
+      reason: Schema.Literals(["not-in-snapshot", "not-in-metadata"]),
     }),
     Schema.Struct({
       status: Schema.Literal("available"),
@@ -95,6 +99,7 @@ export const CadPartInfoResult = Schema.Struct({
     match: Schema.Literal("source-part-key"),
     occurrenceIds: Schema.Array(CadHash).check(Schema.isMaxLength(50)),
     total: Count,
+    suppressedCount: Count,
     truncated: Schema.Boolean,
   }),
   geometry: Schema.Union([
@@ -102,6 +107,7 @@ export const CadPartInfoResult = Schema.Struct({
       status: Schema.Literal("unavailable"),
       reason: Schema.Literals([
         "not-part",
+        "suppressed",
         "not-cached",
         "asset-unavailable",
         "invalid-geometry",

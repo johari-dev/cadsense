@@ -115,7 +115,9 @@ describe("cad_part_info", () => {
         assert.equal(result.source?.partId, "JHD");
         assert.equal(result.source?.configuration, "size=5");
         assert.equal(result.metadata?.bodyType, "solid");
-        assert.deepEqual(result.assembledTransform.matrix, snapshot.nodes[0]!.transform);
+        assert.equal(result.assembledTransform.status, "available");
+        if (result.assembledTransform.status === "available")
+          assert.deepEqual(result.assembledTransform.matrix, snapshot.nodes[0]!.transform);
         assert.equal(result.material.status, "available");
         if (result.material.status === "available")
           assert.equal(result.material.properties[0]?.value, "7800");
@@ -134,6 +136,7 @@ describe("cad_part_info", () => {
           tessellationProfile: "test",
         });
         assert.equal(result.repeatedOccurrences.total, 60);
+        assert.equal(result.repeatedOccurrences.suppressedCount, 1);
         assert.lengthOf(result.repeatedOccurrences.occurrenceIds, 20);
         assert.isTrue(result.repeatedOccurrences.truncated);
         assert.deepEqual(state, before);
@@ -225,7 +228,7 @@ describe("cad_part_info", () => {
       assert.isTrue(result.occurrence.suppressed);
       assert.isNull(result.metadata);
       assert.deepEqual(result.material, { status: "unavailable", reason: "not-in-snapshot" });
-      assert.deepEqual(result.geometry, { status: "unavailable", reason: "not-cached" });
+      assert.deepEqual(result.geometry, { status: "unavailable", reason: "suppressed" });
       const assembly = {
         ...missing,
         nodes: [{ ...missing.nodes[0]!, kind: "assembly" as const, sourcePartKey: null }],
@@ -234,6 +237,40 @@ describe("cad_part_info", () => {
       assert.isNull(group.source);
       assert.deepEqual(group.geometry, { status: "unavailable", reason: "not-part" });
       assert.equal(group.repeatedOccurrences.total, 0);
+    }),
+  );
+  it.effect(
+    "does not expose placeholder placement for suppressed instances with a cached sibling",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* readCadPartInfo(
+          snapshot,
+          state,
+          () => Effect.die("Suppressed placement must not read sibling geometry"),
+          { ...request, occurrenceId: id(3) },
+        );
+        assert.isTrue(checkResult(result));
+        assert.deepEqual(result.assembledTransform, {
+          status: "unavailable",
+          reason: "suppressed",
+        });
+        assert.deepEqual(result.geometry, { status: "unavailable", reason: "suppressed" });
+        assert.equal(result.metadata?.name, "Bolt");
+        assert.equal(result.repeatedOccurrences.total, 60);
+        assert.equal(result.repeatedOccurrences.suppressedCount, 1);
+      }),
+  );
+  it.effect("distinguishes absent material fields from missing metadata", () =>
+    Effect.gen(function* () {
+      const part = snapshot.parts[0]!;
+      const result = yield* readCadPartInfo(
+        { ...snapshot, parts: [{ ...part, metadata: { ...part.metadata!, material: null } }] },
+        state,
+        unavailableAsset,
+        request,
+      );
+      assert.isTrue(checkResult(result));
+      assert.deepEqual(result.material, { status: "unavailable", reason: "not-in-metadata" });
     }),
   );
   it.effect("preserves metadata when a cached mesh cannot be decoded", () =>
