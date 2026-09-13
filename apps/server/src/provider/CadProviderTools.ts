@@ -66,7 +66,6 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
     case "cad_context":
       return { result: yield* tools.context() };
     case "cad_measure":
-      if (!tools.measure) return yield* new CadViewError({ reason: "capability-unavailable" });
       return { result: yield* tools.measure(input) };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };

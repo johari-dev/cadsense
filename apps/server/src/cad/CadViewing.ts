@@ -48,7 +48,7 @@ export interface CadAgentTools {
     input: unknown,
   ) => Effect.Effect<CadCommentDelivery, CadViewError>;
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
-  readonly measure?: (input: unknown) => Effect.Effect<CadMeasureResult, CadViewError>;
+  readonly measure: (input: unknown) => Effect.Effect<CadMeasureResult, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
@@ -309,7 +309,7 @@ export const make = Effect.gen(function* () {
               return yield* readCadHierarchy(indexCadSnapshot(binding.snapshot), state, input);
             }),
           );
-        const measure = (input: unknown) =>
+        const measure: CadAgentTools["measure"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
               const initialized = yield* initialize();

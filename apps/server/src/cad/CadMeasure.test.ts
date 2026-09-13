@@ -276,10 +276,96 @@ it.effect("registers the typed provider tool and dispatches a measurement", () =
     };
     const delivered = yield* invokeCadTool(tools, "cad_measure", input);
     assert.equal(decodeResult(delivered.result).distanceMeters, 5);
-    const { measure: _measure, ...withoutMeasure } = tools;
-    assert.equal(
-      (yield* invokeCadTool(withoutMeasure, "cad_measure", input).pipe(Effect.flip)).reason,
-      "capability-unavailable",
+  }),
+);
+
+it.effect("reads a shared asset once while preserving separate occurrence placements", () =>
+  Effect.gen(function* () {
+    const bytes = yield* triangle();
+    let reads = 0;
+    const result = yield* measureCad(snapshot, state, clearance, () =>
+      Effect.sync(() => {
+        reads++;
+        return bytes;
+      }),
     );
+    assert.equal(result.distanceMeters, 3);
+    assert.equal(reads, 1);
+    reads = 0;
+    const self = yield* measureCad(snapshot, state, { ...clearance, toOccurrenceId: first }, () =>
+      Effect.sync(() => {
+        reads++;
+        return bytes;
+      }),
+    );
+    assert.equal(self.distanceMeters, 0);
+    assert.equal(reads, 1);
+  }),
+);
+
+it.effect("rejects known excessive decoded geometry before reading assets", () =>
+  Effect.gen(function* () {
+    for (const excessive of [
+      { triangles: 100_001 },
+      { nodeCount: 10_001 },
+      { decodedBytes: 129 * 1024 ** 2 },
+    ]) {
+      const manifest = {
+        ...snapshot,
+        assets: snapshot.assets.map((asset) => ({
+          ...asset,
+          complexity: { triangles: 1, nodeCount: 1, decodedBytes: 36, drawCalls: 1, ...excessive },
+        })),
+      };
+      const result = yield* measureCad(manifest, state, clearance, unused);
+      assert.equal(result.status, "unknown");
+      if (result.status === "unknown") assert.equal(result.reason, "budget-exceeded");
+    }
+  }),
+);
+
+it.effect(
+  "measures explicit part points without cached assets but rejects uncertain placements",
+  () =>
+    Effect.gen(function* () {
+      const input = {
+        ...request,
+        mode: "point-distance",
+        from: { space: "world", point: [1, 1, 0] },
+        to: { space: "part", occurrenceId: second, point: [1, 0, 0] },
+      };
+      assert.equal(
+        (yield* measureCad({ ...snapshot, assets: [] }, state, input, unused)).distanceMeters,
+        3,
+      );
+      for (const change of [{ suppressed: true }, { kind: "assembly" as const }]) {
+        const manifest = {
+          ...snapshot,
+          nodes: snapshot.nodes.map((node) => ({ ...node, ...change })),
+        };
+        const result = yield* measureCad(manifest, state, input, unused);
+        assert.equal(result.status, "unknown");
+        if (result.status === "unknown") assert.equal(result.reason, "missing-geometry");
+      }
+    }),
+);
+
+it.effect("maps surface solver arithmetic failures to an unknown measurement", () =>
+  Effect.gen(function* () {
+    const bytes = yield* triangle();
+    const manifest = {
+      ...snapshot,
+      nodes: snapshot.nodes.map((node, index) => ({
+        ...node,
+        transform: [1, 0, 0, index === 0 ? 1e308 : -1e308, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      })),
+    };
+    const result = decodeResult(
+      yield* measureCad(manifest, state, clearance, () => Effect.succeed(bytes)),
+    );
+    assert.equal(result.status, "unknown");
+    if (result.status === "unknown") assert.equal(result.reason, "numeric-failure");
+    assert.equal(result.distanceMeters, null);
+    assert.equal(result.closestPoints, null);
   }),
 );

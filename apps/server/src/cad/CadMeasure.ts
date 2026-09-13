@@ -10,16 +10,16 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  CAD_MESH_MAX_BYTES,
   CadMeshGeometryError,
   readCadMeshTriangles,
   transformCadMeshPoint,
   type CadMeshPoint,
 } from "./CadMeshGeometry.ts";
-import { cadSurfaceDistance } from "./CadSurfaceDistance.ts";
+import { CAD_DISTANCE_LIMITS, cadSurfaceDistance } from "./CadSurfaceDistance.ts";
 
 const decode = Schema.decodeUnknownEffect(CadMeasureInput);
 type UnknownReason = Extract<CadMeasureResult, { status: "unknown" }>["reason"];
-const MAX_ASSET_BYTES = 128 * 1024 ** 2;
 const pointLimitations = [
   "Input points are caller-specified and are not verified surface locations.",
   "Part points are in the part's CAD coordinates before the occurrence transform. World points must already use the original assembled placement, never exploded display coordinates.",
@@ -132,14 +132,26 @@ export const measureCad = Effect.fn("measureCad")(function* <E>(
       closestPoints: [resolved.success.from, resolved.success.to] as const,
     } satisfies CadMeasureResult;
   }
+  const assetBytes = new Map<string, Uint8Array>();
   const load = Effect.fn("measureCad.load")(function* (id: string) {
     const node = nodes.get(id)!;
     const asset = assets.get(node.sourcePartKey!);
     if (!asset) return yield* Effect.fail("missing-geometry" as const);
-    if (asset.byteLength > MAX_ASSET_BYTES) return yield* Effect.fail("budget-exceeded" as const);
-    const bytes = yield* readAsset(asset.sha256).pipe(
-      Effect.mapError(() => "missing-geometry" as const),
-    );
+    if (
+      asset.byteLength > CAD_MESH_MAX_BYTES ||
+      (asset.complexity &&
+        (asset.complexity.triangles > CAD_DISTANCE_LIMITS.trianglesPerPart ||
+          asset.complexity.nodeCount > 10_000 ||
+          asset.complexity.decodedBytes > CAD_MESH_MAX_BYTES))
+    )
+      return yield* Effect.fail("budget-exceeded" as const);
+    let bytes = assetBytes.get(asset.sha256);
+    if (!bytes) {
+      bytes = yield* readAsset(asset.sha256).pipe(
+        Effect.mapError(() => "missing-geometry" as const),
+      );
+      assetBytes.set(asset.sha256, bytes);
+    }
     return yield* Effect.try({
       try: () => readCadMeshTriangles(bytes, node.transform),
       catch: (error): UnknownReason =>
@@ -152,11 +164,13 @@ export const measureCad = Effect.fn("measureCad")(function* <E>(
   });
   const result = yield* Effect.gen(function* () {
     const from = yield* load(request.fromOccurrenceId);
-    const to = yield* load(request.toOccurrenceId);
-    return yield* Effect.try({
-      try: () => cadSurfaceDistance(from, to),
-      catch: () => "numeric-failure" as const,
-    });
+    const to =
+      request.fromOccurrenceId === request.toOccurrenceId
+        ? from
+        : yield* load(request.toOccurrenceId);
+    return yield* cadSurfaceDistance(from, to).pipe(
+      Effect.mapError(() => "numeric-failure" as const),
+    );
   }).pipe(Effect.result);
   if (result._tag === "Failure") return unknown(result.failure);
   if (result.success === null) return unknown("budget-exceeded");

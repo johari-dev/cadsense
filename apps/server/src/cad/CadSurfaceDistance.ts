@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import type { CadMeshPoint, CadMeshTriangle } from "./CadMeshGeometry.ts";
 
 type Point = CadMeshPoint;
@@ -151,23 +152,66 @@ export function cadTriangleDistance(a: Triangle, b: Triangle): Pair {
 
 type Bounds = { min: Point; max: Point };
 type Tree = Bounds & ({ triangles: readonly Triangle[] } | { children: readonly [Tree, Tree] });
-function tree(triangles: readonly Triangle[]): Tree {
+const WORK_CHUNK = 512;
+
+/** Sort small runs, then merge with checkpoints instead of one uninterruptible large sort. */
+function* sortTriangles(
+  triangles: readonly Triangle[],
+  axis: 0 | 1 | 2,
+): Generator<void, Triangle[]> {
+  const center = (t: Triangle) => t[0][axis] / 3 + t[1][axis] / 3 + t[2][axis] / 3;
+  if (triangles.length <= WORK_CHUNK) return [...triangles].sort((a, b) => center(a) - center(b));
+  let sorted: Triangle[] = [];
+  for (let start = 0; start < triangles.length; start += WORK_CHUNK) {
+    sorted.push(
+      ...triangles.slice(start, start + WORK_CHUNK).sort((a, b) => center(a) - center(b)),
+    );
+    yield;
+  }
+  for (let width = WORK_CHUNK; width < sorted.length; width *= 2) {
+    const merged: Triangle[] = [];
+    for (let start = 0; start < sorted.length; start += width * 2) {
+      const middle = Math.min(start + width, sorted.length);
+      const end = Math.min(start + width * 2, sorted.length);
+      let left = start,
+        right = middle;
+      while (left < middle || right < end) {
+        merged.push(
+          right >= end || (left < middle && center(sorted[left]!) <= center(sorted[right]!))
+            ? sorted[left++]!
+            : sorted[right++]!,
+        );
+        if (merged.length % WORK_CHUNK === 0) yield;
+      }
+    }
+    sorted = merged;
+  }
+  return sorted;
+}
+
+function* tree(triangles: readonly Triangle[]): Generator<void, Tree> {
   const min: [number, number, number] = [Infinity, Infinity, Infinity],
     max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-  for (const triangle of triangles)
+  let visited = 0;
+  for (const triangle of triangles) {
+    if (++visited % WORK_CHUNK === 0) yield;
     for (const point of triangle)
       for (const axis of [0, 1, 2] as const) {
         min[axis] = Math.min(min[axis], point[axis]);
         max[axis] = Math.max(max[axis], point[axis]);
       }
+  }
   if (triangles.length <= 8) return { min, max, triangles };
   let axis: 0 | 1 | 2 = 0;
   if (max[1] - min[1] > max[axis] - min[axis]) axis = 1;
   if (max[2] - min[2] > max[axis] - min[axis]) axis = 2;
-  const center = (t: Triangle) => t[0][axis] + t[1][axis] + t[2][axis];
-  const sorted = [...triangles].sort((a, b) => center(a) - center(b));
+  const sorted = yield* sortTriangles(triangles, axis);
   const middle = Math.floor(sorted.length / 2);
-  return { min, max, children: [tree(sorted.slice(0, middle)), tree(sorted.slice(middle))] };
+  return {
+    min,
+    max,
+    children: [yield* tree(sorted.slice(0, middle)), yield* tree(sorted.slice(middle))],
+  };
 }
 const boundsDistance = (a: Bounds, b: Bounds) =>
   Math.hypot(
@@ -178,11 +222,11 @@ const boundsDistance = (a: Bounds, b: Bounds) =>
 export const CAD_DISTANCE_LIMITS = { trianglesPerPart: 100_000, comparisons: 250_000 } as const;
 
 /** Boxes only prune triangle work. A box distance is never returned as a measurement. */
-export function cadSurfaceDistance(
+function* surfaceDistance(
   a: readonly Triangle[],
   b: readonly Triangle[],
   comparisonBudget: number = CAD_DISTANCE_LIMITS.comparisons,
-): Pair | null {
+): Generator<void, Pair | null> {
   if (
     comparisonBudget < 1 ||
     !a.length ||
@@ -194,15 +238,17 @@ export function cadSurfaceDistance(
   let best = cadTriangleDistance(a[0]!, b[0]!);
   if (best.distance === 0) return best;
   let remaining = comparisonBudget - 1;
-  const pending: (readonly [Tree, Tree])[] = [[tree(a), tree(b)]];
+  const pending: (readonly [Tree, Tree])[] = [[yield* tree(a), yield* tree(b)]];
   while (pending.length > 0) {
     if (--remaining < 0) return null;
+    if (remaining % WORK_CHUNK === 0) yield;
     const [left, right] = pending.pop()!;
     if (boundsDistance(left, right) >= best.distance) continue;
     if ("triangles" in left && "triangles" in right) {
       for (const first of left.triangles)
         for (const second of right.triangles) {
           if (--remaining < 0) return null;
+          if (remaining % WORK_CHUNK === 0) yield;
           const candidate = cadTriangleDistance(first, second);
           if (candidate.distance < best.distance) best = candidate;
           if (best.distance === 0) return best;
@@ -220,3 +266,25 @@ export function cadSurfaceDistance(
   }
   return best;
 }
+
+/** Cooperatively build and search the trees so other requests and cancellation can run. */
+export const cadSurfaceDistance = Effect.fn("cadSurfaceDistance")(function* (
+  a: readonly Triangle[],
+  b: readonly Triangle[],
+  comparisonBudget: number = CAD_DISTANCE_LIMITS.comparisons,
+) {
+  const computation = surfaceDistance(a, b, comparisonBudget);
+  return yield* Effect.gen(function* () {
+    while (true) {
+      const step = yield* Effect.try(() => computation.next());
+      if (step.done) return step.value;
+      yield* Effect.yieldNow;
+    }
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        computation.return(null);
+      }),
+    ),
+  );
+});
