@@ -25,6 +25,7 @@ const decode = Schema.decodeUnknownSync(
           Schema.Struct({
             name: Schema.String,
             inputSchema: Schema.Struct({ type: Schema.Literal("object") }),
+            annotations: Schema.Struct({ readOnlyHint: Schema.Boolean }),
           }),
         ),
       ),
@@ -110,9 +111,32 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_comments_publish",
       "cad_context",
       "cad_hierarchy",
+      "cad_model_diagnostics",
       "cad_update_view",
       "cad_capture",
     ]);
+    const diagnosticTool = (yield* response("tools/list")).result.tools?.find(
+      (tool) => tool.name === "cad_model_diagnostics",
+    );
+    expect(diagnosticTool?.annotations.readOnlyHint).toBe(true);
+    const diagnosticInput = {
+      expectedRevision: 3,
+      snapshotId: "00000000-0000-4000-8000-000000000002",
+    };
+    const diagnosticToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_model_diagnostics",
+      diagnosticInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_model_diagnostics",
+        arguments: { _cadsenseCapability: diagnosticToken },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(diagnosticInput);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",

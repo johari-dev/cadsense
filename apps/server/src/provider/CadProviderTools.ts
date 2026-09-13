@@ -22,6 +22,8 @@ const descriptions = {
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
   cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
+  cad_model_diagnostics:
+    "Read bounded diagnostics from the selected pinned snapshot at {expectedRevision,snapshotId}. Reports unsupported and suppressed components, expected unloaded geometry, missing manifest associations or metadata, and stored mesh costs. Optional minimumSeverity is info, warning, or error; thresholds accepts triangles, decodedBytes, and drawCalls. Defaults are 1000000 triangles,134217728 decoded bytes,128 draw calls. limit is 1..100; follow nextCursor with unchanged snapshot, revision, severity, and thresholds. No asset files or remote sources are checked by this scan. Inspect coverage and unknown counts before interpreting known subtotals. Potential assembled workload includes all unsuppressed instances independent of visibility. Cost warnings do not establish engineering defects.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
   cad_update_view: [
@@ -63,6 +65,10 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return yield* tools.comments(name, input);
     case "cad_context":
       return { result: yield* tools.context() };
+    case "cad_model_diagnostics":
+      if (!tools.modelDiagnostics)
+        return yield* new CadViewError({ reason: "capability-unavailable" });
+      return { result: yield* tools.modelDiagnostics(input) };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
     case "cad_update_view":
