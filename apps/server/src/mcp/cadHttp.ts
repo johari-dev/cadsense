@@ -55,7 +55,10 @@ const handle = Effect.gen(function* () {
         tools: cadToolDefinitions.map(({ type: _type, ...tool }) => ({
           ...tool,
           annotations: {
-            readOnlyHint: tool.name === "cad_context" || tool.name === "cad_hierarchy",
+            readOnlyHint:
+              tool.name === "cad_context" ||
+              tool.name === "cad_hierarchy" ||
+              tool.name === "cad_find_parts",
             destructiveHint: false,
             openWorldHint: false,
           },

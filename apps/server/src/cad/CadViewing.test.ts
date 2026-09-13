@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CadSnapshotManifest,
+  CadFindPartsResult,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
@@ -1280,4 +1281,41 @@ it.effect(
       yield* h.service.saveUserView(threadId, null, initialCadView(snapshot));
       assert.isNull(yield* h.service.getUserView(otherThreadId));
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+const decodeFindParts = Schema.decodeUnknownEffect(CadFindPartsResult);
+it.effect("searches pinned metadata through native tools without asset reads or view changes", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const provider = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turn = TurnId.make("find-parts");
+    const context = yield* provider.invoke(null, turn, "cad_context", {});
+    const delivery = yield* provider.invoke(null, turn, "cad_find_parts", {
+      snapshotId: snapshot.snapshotId,
+      expectedRevision: 0,
+      kind: "all",
+      nameQuery: "INTAKE",
+    });
+    const result = yield* decodeFindParts(delivery.result);
+    assert.deepEqual(
+      result.entries.map((entry) => entry.occurrenceId),
+      [snapshot.nodes[0]!.id],
+    );
+    assert.deepEqual(yield* provider.invoke(null, turn, "cad_context", {}), context);
+    yield* provider.invoke(null, turn, "cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "explode", amount: 1 }],
+    });
+    assert.equal(
+      (yield* provider
+        .invoke(null, turn, "cad_find_parts", {
+          snapshotId: snapshot.snapshotId,
+          expectedRevision: 0,
+        })
+        .pipe(Effect.flip)).reason,
+      "revision-conflict",
+    );
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
