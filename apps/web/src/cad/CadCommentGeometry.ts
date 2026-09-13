@@ -38,7 +38,6 @@ export const cadHitIsTransparent = (hit: THREE.Intersection) => {
     : hit.object.material;
   return (
     !material ||
-    material.opacity < 1 ||
     material.transparent ||
     material.alphaTest > 0 ||
     material.alphaHash ||

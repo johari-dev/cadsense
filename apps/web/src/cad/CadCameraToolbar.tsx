@@ -45,8 +45,22 @@ export function CadCameraToolbar({
   onChange: (view: CadViewState) => void;
 }) {
   const [sectionOpen, setSectionOpen] = useState(false);
-  const [sectionAxis, setSectionAxis] = useState("z");
-  const [sectionOffset, setSectionOffset] = useState("0");
+  const sectionKey = JSON.stringify(view.sectionPlanes ?? []);
+  const plane = view.sectionPlanes?.length === 1 ? view.sectionPlanes[0] : undefined;
+  const axisIndex =
+    plane?.normal.findIndex(
+      (value, index, normal) => value === 1 && normal.every((v, i) => i === index || v === 0),
+    ) ?? -1;
+  const initialSection = {
+    key: sectionKey,
+    axis: axisIndex >= 0 ? ["x", "y", "z"][axisIndex]! : "z",
+    offset: axisIndex >= 0 ? String(-plane!.constant) : "0",
+  };
+  const [draft, setDraft] = useState(initialSection);
+  const section = draft.key === sectionKey ? draft : initialSection;
+  if (draft.key !== sectionKey) setDraft(initialSection);
+  const sectionAxis = section.axis;
+  const sectionOffset = section.offset;
   const offset = Number(sectionOffset);
   const validOffset =
     sectionOffset.trim() !== "" && Number.isFinite(offset) && Math.abs(offset) <= 1e9;
@@ -74,7 +88,7 @@ export function CadCameraToolbar({
                 aria-label="Section axis"
                 value={sectionAxis}
                 disabled={disabled}
-                onChange={(event) => setSectionAxis(event.target.value)}
+                onChange={(event) => setDraft({ ...section, axis: event.target.value })}
               >
                 <option value="x">X</option>
                 <option value="y">Y</option>
@@ -92,14 +106,16 @@ export function CadCameraToolbar({
                 max={1e9}
                 value={sectionOffset}
                 disabled={disabled}
-                onChange={(event) => setSectionOffset(event.target.value)}
+                onChange={(event) => setDraft({ ...section, offset: event.target.value })}
               />
             </label>
             <Button size="sm" type="submit" disabled={disabled || !validOffset}>
               Apply section
             </Button>
             <p className="w-full text-muted-foreground">
-              Uncapped section in displayed world coordinates.
+              {view.sectionPlanes?.length && axisIndex < 0
+                ? "Apply section replaces the current planes with the selected axis and offset."
+                : "Uncapped section in displayed world coordinates."}
             </p>
           </form>
         )}

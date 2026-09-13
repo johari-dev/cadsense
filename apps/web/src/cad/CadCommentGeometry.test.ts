@@ -284,3 +284,21 @@ it("evaluates sections in displayed world space after explosion", () => {
   expect(model.isClipped(point)).toBe(true);
   expect(model.clippingPlanes()[0]!.distanceToPoint(point)).toBeCloseTo(-0.01);
 });
+
+it("accepts opaque source alpha while rejecting materials that render with alpha effects", () => {
+  const { model, camera, point } = setup();
+  try {
+    model.objects.get(id(3))!.object.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.material.opacity = 0.5;
+    });
+    expect(pick(model, camera, point).reason).toBe("candidate");
+    expect(cadCommentVisible(model, camera, point)).toBe(true);
+    model.objects.get(id(3))!.object.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.material.transparent = true;
+    });
+    expect(pick(model, camera, point).reason).toBe("transparent-hit");
+    expect(cadCommentVisible(model, camera, point)).toBe(false);
+  } finally {
+    model.dispose();
+  }
+});

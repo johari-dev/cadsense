@@ -164,10 +164,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       outline.render(scene, camera, model.bounds.getSize(outlineBounds).length());
     if (commentMarkers.children.length) {
       const autoClear = renderer.autoClear;
+      const clippingPlanes = renderer.clippingPlanes;
       renderer.autoClear = false;
-      renderer.clearDepth();
-      renderer.render(markerScene, camera);
-      renderer.autoClear = autoClear;
+      renderer.clippingPlanes = [];
+      try {
+        renderer.clearDepth();
+        renderer.render(markerScene, camera);
+      } finally {
+        renderer.autoClear = autoClear;
+        renderer.clippingPlanes = clippingPlanes;
+      }
     }
     options.onFrame?.(performance.now() - start);
     for (const listener of frameListeners) listener();
@@ -554,13 +560,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     ) => {
       cancelTransition();
       if (!model || !view) return "Location unavailable";
-      model.apply(view);
-      reviewHidden.clear();
-      reviewOccurrence = t.occurrenceId;
       const entry = model.objects.get(t.occurrenceId);
       if (!entry) return "Location unavailable";
-      const wasHidden = !entry.object.visible;
-      entry.object.visible = true;
+      model.apply(view);
       const bounds = new THREE.Box3().setFromObject(entry.object),
         size = bounds.getSize(new THREE.Vector3()).length();
       const point =
@@ -568,8 +570,15 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           ? cadCommentWorldPoint(model, t.occurrenceId, t.point)
           : bounds.getCenter(new THREE.Vector3());
       if (!point) return "Location unavailable";
-      if (model.isClipped(point))
+      if (model.isClipped(point)) {
+        reviewVisibility();
+        render();
         return "Location clipped by section planes; reset inspection to review";
+      }
+      reviewHidden.clear();
+      reviewOccurrence = t.occurrenceId;
+      const wasHidden = !entry.object.visible;
+      entry.object.visible = true;
       const radius =
         t.kind === "part"
           ? bounds.getBoundingSphere(new THREE.Sphere()).radius
@@ -722,7 +731,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       for (const direction of directions) {
         orient(direction);
         const n = targets.filter(
-          (t) => t.world && cadCommentVisible(currentModel, camera, t.world),
+          (t) =>
+            currentModel.objects.get(t.occurrenceId)?.object.visible &&
+            t.world &&
+            cadCommentVisible(currentModel, camera, t.world),
         ).length;
         if (n > score) {
           score = n;

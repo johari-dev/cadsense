@@ -817,10 +817,113 @@ it("cannot verify clipped or translucent targets by choosing an alternate inspec
     renderer.resize(800, 600);
     renderer.apply({ ...state, sectionPlanes: [{ normal: [0, 0, -1], constant: -0.02 }] });
     expect(renderer.commentWork(work)[0]?.reason).toBe("occluded");
+    const scenePass = calls.render.mock.calls.at(-2)!;
+    const markerPass = calls.render.mock.calls.at(-1)!;
+    expect(scenePass[2]).toHaveLength(1);
+    expect(markerPass[2]).toEqual([]);
+    expect(markerPass[0].children[0].children[0].material.color.getHex()).toBe(0xff6262);
     renderer.apply({ ...state, ghost: { occurrenceIds: [id], opacity: 0.2 } });
     expect(renderer.commentWork(work)[0]?.reason).toBe("occluded");
     renderer.apply(state);
     expect(renderer.commentWork(work)[0]?.reason).toBe("visible");
+  } finally {
+    renderer.dispose();
+    parser.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("does not reveal a hidden clipped target or arm review visibility when focus fails", async () => {
+  const scene = await new GLTFLoader().parseAsync(geometry(), "");
+  scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+  const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+  const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+  const hidden: CadViewState = {
+    ...state,
+    visibility: { [id]: false },
+    sectionPlanes: [{ normal: [0, 0, -1], constant: -0.02 }],
+  };
+  try {
+    await renderer.load(
+      { ...manifest, nodes: [{ ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey }] },
+      async () => geometry(),
+    );
+    renderer.resize(800, 600);
+    renderer.apply(hidden);
+    const displayedScene = calls.render.mock.calls.at(-1)![0];
+    const visibleMeshes = () => {
+      let count = 0;
+      displayedScene.traverseVisible((object: unknown) => {
+        if (object instanceof Mesh) count++;
+      });
+      return count;
+    };
+    expect(visibleMeshes()).toBe(0);
+    expect(
+      renderer.focusComment(
+        {
+          kind: "part",
+          label: "Hidden part",
+          occurrenceId: id,
+          preciseLocationLimitation: "Whole part",
+        },
+        { width: 800, height: 600, centerX: 400, centerY: 300 },
+        true,
+      ),
+    ).toContain("Location clipped");
+    expect(visibleMeshes()).toBe(0);
+    renderer.apply({ ...hidden, sectionPlanes: [] });
+    expect(visibleMeshes()).toBe(0);
+  } finally {
+    renderer.dispose();
+    parser.mockRestore();
+  }
+});
+
+it("chooses the angle that reveals visible targets even when hidden targets favor another angle", async () => {
+  vi.stubGlobal(
+    "OffscreenCanvas",
+    class {
+      getContext() {
+        return null;
+      }
+    },
+  );
+  const scene = await new GLTFLoader().parseAsync(geometry(), "");
+  scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+  const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+  const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+  const hiddenIds = ["3".repeat(64), "4".repeat(64)];
+  try {
+    await renderer.load(
+      {
+        ...manifest,
+        nodes: [id, ...hiddenIds].map((occurrenceId) => ({
+          ...manifest.nodes[0]!,
+          id: occurrenceId,
+          kind: "part" as const,
+          sourcePartKey: geometryKey,
+        })),
+      },
+      async () => geometry(),
+    );
+    renderer.resize(800, 600);
+    renderer.apply({
+      ...state,
+      visibility: Object.fromEntries(hiddenIds.map((id) => [id, false])),
+    });
+    const hits = renderer.commentWork({
+      kind: "inspect",
+      targets: [
+        { candidateId: "underside", occurrenceId: id, point: [0, 0, -0.01] },
+        ...hiddenIds.map((occurrenceId) => ({
+          candidateId: occurrenceId,
+          occurrenceId,
+          point: [0, 0, 0.01] as const,
+        })),
+      ],
+    });
+    expect(hits.map((hit) => hit.reason)).toEqual(["visible", "occluded", "occluded"]);
   } finally {
     renderer.dispose();
     parser.mockRestore();
