@@ -133,6 +133,21 @@ describe("cached CAD mesh geometry", () => {
       { nodes: [{ mesh: 0, skin: 0 }] },
       { meshes: [{ primitives: [{ attributes: { POSITION: 0 }, targets: [] }] }] },
       { extensionsRequired: ["KHR_draco_mesh_compression"] },
+      { extensionsUsed: ["EXT_mesh_gpu_instancing"] },
+      {
+        extensionsUsed: ["KHR_materials_specular"],
+        extensionsRequired: ["KHR_materials_specular"],
+      },
+      { nodes: [{ mesh: 0, extensions: { EXT_mesh_gpu_instancing: {} } }] },
+      {
+        meshes: [
+          {
+            primitives: [
+              { attributes: { POSITION: 0 }, extensions: { KHR_draco_mesh_compression: {} } },
+            ],
+          },
+        ],
+      },
     ]) {
       expect(() => readCadMeshTriangles(meshFixture(change), identity)).toThrow(
         "unsupported-geometry",
@@ -142,6 +157,32 @@ describe("cached CAD mesh geometry", () => {
       readCadMeshTriangles(meshFixture({ nodes: [], scenes: [{ nodes: [] }] }), identity),
     ).toThrow("empty-geometry");
   });
+  it.effect("reads normalized meshes with optional material and lighting extensions", () =>
+    Effect.gen(function* () {
+      const bytes = yield* normalizeCadGeometry(
+        meshFixture({
+          accessors: [
+            {
+              bufferView: 0,
+              componentType: 5126,
+              count: 3,
+              type: "VEC3",
+              min: [0, 0, 0],
+              max: [2, 1, 0],
+            },
+          ],
+          extensionsUsed: ["KHR_materials_emissive_strength", "KHR_lights_punctual"],
+          extensions: { KHR_lights_punctual: { lights: [{ type: "point" }] } },
+          materials: [{ extensions: { KHR_materials_emissive_strength: { emissiveStrength: 2 } } }],
+          meshes: [{ primitives: [{ attributes: { POSITION: 0 }, material: 0 }] }],
+          nodes: [{ mesh: 0, extensions: { KHR_lights_punctual: { light: 0 } } }],
+        }),
+      );
+      expect(readCadMeshTriangles(bytes, identity)).toEqual(
+        readCadMeshTriangles(meshFixture(), identity),
+      );
+    }),
+  );
   it("rejects cycles, invalid accessors, non-finite positions and truncated GLB", () => {
     for (const bytes of [
       meshFixture({ nodes: [{ mesh: 0, children: [0] }] }),

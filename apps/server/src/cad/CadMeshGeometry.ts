@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 export type CadMeshPoint = readonly [number, number, number];
 export type CadMeshTriangle = readonly [CadMeshPoint, CadMeshPoint, CadMeshPoint];
 export const CAD_MESH_MAX_TRIANGLES = 100_000;
+export const CAD_MESH_MAX_BYTES = 128 * 1024 ** 2;
 export class CadMeshGeometryError extends Error {
   readonly _tag = "CadMeshGeometryError";
   readonly reason: "invalid-geometry" | "unsupported-geometry" | "too-large" | "empty-geometry";
@@ -100,7 +101,7 @@ export function readCadMeshTriangles(
   occurrenceTransform: readonly number[],
 ): readonly CadMeshTriangle[] {
   try {
-    if (bytes.length > 128 * 1024 ** 2) throw new CadMeshGeometryError("too-large");
+    if (bytes.length > CAD_MESH_MAX_BYTES) throw new CadMeshGeometryError("too-large");
     const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (
       bytes.length < 28 ||
@@ -122,14 +123,19 @@ export function readCadMeshTriangles(
     const doc = decode(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(20, end)));
     if (object(doc.asset).version !== "2.0") throw invalid();
     if (doc.animations !== undefined || doc.skins !== undefined) throw unsupported();
-    const extensions = [
-      ...strings(doc.extensionsUsed ?? []),
-      ...strings(doc.extensionsRequired ?? []),
-    ];
+    // Bulk exports retain optional material/texture declarations on every split part.
+    // They do not affect positions. Required extensions and geometry extensions still gate reads.
     if (
-      extensions.some(
+      strings(doc.extensionsRequired ?? []).some(
         (name) =>
           !["KHR_mesh_quantization", "KHR_materials_unlit", "PTC_onshape_metadata"].includes(name),
+      ) ||
+      strings(doc.extensionsUsed ?? []).some((name) =>
+        [
+          "KHR_draco_mesh_compression",
+          "EXT_meshopt_compression",
+          "EXT_mesh_gpu_instancing",
+        ].includes(name),
       )
     )
       throw unsupported();
@@ -148,7 +154,8 @@ export function readCadMeshTriangles(
     const accessor = (index: unknown, width: 1 | 3) => {
       const acc = accessors[integer(index)];
       if (!acc || acc.type !== (width === 1 ? "SCALAR" : "VEC3")) throw invalid();
-      if (acc.sparse !== undefined || acc.bufferView === undefined) throw unsupported();
+      if (acc.sparse !== undefined || acc.bufferView === undefined || acc.extensions !== undefined)
+        throw unsupported();
       const view = views[integer(acc.bufferView)];
       if (!view || integer(view.buffer) !== 0 || view.extensions !== undefined) throw unsupported();
       const type = integer(acc.componentType);
@@ -225,7 +232,9 @@ export function readCadMeshTriangles(
         node.skin !== undefined ||
         node.weights !== undefined ||
         (node.extensions !== undefined &&
-          Object.keys(object(node.extensions)).some((key) => key !== "PTC_onshape_metadata"))
+          Object.keys(object(node.extensions)).some(
+            (key) => key !== "PTC_onshape_metadata" && key !== "KHR_lights_punctual",
+          ))
       )
         throw unsupported();
       const world = multiply(entry.parent, nodeMatrix(node));
@@ -234,7 +243,7 @@ export function readCadMeshTriangles(
       if (node.mesh === undefined) continue;
       const mesh = meshes[integer(node.mesh)];
       if (!mesh) throw invalid();
-      if (mesh.weights !== undefined) throw unsupported();
+      if (mesh.weights !== undefined || mesh.extensions !== undefined) throw unsupported();
       for (const primitive of objects(mesh.primitives)) {
         if (
           (primitive.mode ?? 4) !== 4 ||
