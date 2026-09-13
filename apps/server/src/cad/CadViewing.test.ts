@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CadSnapshotManifest,
+  CadModelDiagnosticsResult,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
@@ -60,6 +61,51 @@ import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
+const decodeDiagnostics = Schema.decodeUnknownSync(CadModelDiagnosticsResult);
+it.effect(
+  "dispatches diagnostics under the snapshot pin without asset reads and checks revisions",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const tools = yield* makeCadProviderTools(threadId).pipe(
+        Effect.provideService(CadViewing, h.service),
+      );
+      const turnId = TurnId.make("native-diagnostics");
+      yield* tools.invoke(null, turnId, "cad_context", {});
+      const input = { expectedRevision: 0, snapshotId: snapshot.snapshotId };
+      const first = decodeDiagnostics(
+        (yield* tools.invoke(null, turnId, "cad_model_diagnostics", input)).result,
+      );
+      assert.equal(first.coverage.nodesScanned, snapshot.nodes.length);
+      assert.deepEqual(first.coverage.assetIntegrity, { status: "not-checked", assetsChecked: 0 });
+      assert.equal(h.pins(), 1);
+      yield* tools.invoke(null, turnId, "cad_update_view", {
+        expectedRevision: 0,
+        operations: [{ type: "explode", amount: 1 }],
+      });
+      assert.equal(
+        (yield* tools.invoke(null, turnId, "cad_model_diagnostics", input).pipe(Effect.flip))
+          .reason,
+        "revision-conflict",
+      );
+      const second = decodeDiagnostics(
+        (yield* tools.invoke(null, turnId, "cad_model_diagnostics", {
+          ...input,
+          expectedRevision: 1,
+        })).result,
+      );
+      assert.equal(second.revision, 1);
+      assert.deepEqual(second.summary, first.summary);
+      yield* tools.end(null, turnId);
+      assert.equal(h.pins(), 0);
+      assert.equal(
+        (yield* tools.invoke(null, turnId, "cad_model_diagnostics", input).pipe(Effect.flip))
+          .reason,
+        "capability-unavailable",
+      );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
 it.effect(
   "returns a fitted capture pose that the agent can recenter and zoom without changing angle",
   () =>

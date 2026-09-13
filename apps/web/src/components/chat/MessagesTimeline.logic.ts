@@ -274,6 +274,7 @@ export function normalizeCompactToolLabel(value: string): string {
 
 const toolActionLabels: Readonly<Record<string, string>> = {
   cad_context: "Reading CAD context",
+  cad_model_diagnostics: "Checking CAD model",
   cad_hierarchy: "Exploring CAD structure",
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",

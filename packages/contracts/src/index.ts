@@ -35,3 +35,4 @@ export * from "./cadPanel.ts";
 export * from "./cadStorage.ts";
 
 export * from "./cadComments.ts";
+export * from "./cadModelDiagnostics.ts";
