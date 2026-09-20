@@ -12,6 +12,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import wire from "../testFixtures/codexMultiAgentWire.json" with { type: "json" };
 import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
+import { CAD_REVIEW_INSTRUCTIONS } from "../CadReviewInstructions.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeResponses = Schema.decodeUnknownSync(
@@ -118,6 +119,10 @@ it.effect.each([
     assert.include(requests, '"method":"thread/resume"');
     assert.notInclude(requests, '"method":"thread/start"');
     assert.strictEqual(requests.includes("## Local CAD tools"), attached && registered);
+    assert.strictEqual(
+      requests.includes(encodeJson(CAD_REVIEW_INSTRUCTIONS).slice(1, -1)),
+      attached && registered,
+    );
     yield* runtime.close;
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
