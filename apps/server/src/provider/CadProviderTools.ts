@@ -16,12 +16,14 @@ const descriptions = {
   cad_comment_inspect:
     "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use whole-part fallback only after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
   cad_comments_publish: [
+    "Before publishing, check each comment against the CAD review instructions: one useful issue at its marked location, consistent with the intended motion, supported by observations rather than assumptions, and written so the user understands the next decision without the chat. Rewrite or omit comments that fail this check.",
     'Publish complete verified findings incrementally. Input: {expectedCatalogVersion,items:[{kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}]}. Each new item requires all six fields shown. Use expectedCatalogVersion from cad_comments_list and inspectedSnapshotId from the inspected cad_capture.snapshotId (or cad_context.state.snapshotId for a whole-part finding).',
     'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
     'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
-  cad_context: "Read your private CAD view revision, state, and locally available scene roots.",
+  cad_context:
+    "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
   cad_update_view: [

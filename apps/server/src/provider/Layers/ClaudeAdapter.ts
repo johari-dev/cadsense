@@ -6,6 +6,7 @@
  *
  * @module ClaudeAdapterLive
  */
+import { CAD_REVIEW_INSTRUCTIONS } from "../CadReviewInstructions.ts";
 import {
   type CanUseTool,
   query,
@@ -4452,7 +4453,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          ...(cad ? { append: CAD_REVIEW_INSTRUCTIONS } : {}),
+        },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
