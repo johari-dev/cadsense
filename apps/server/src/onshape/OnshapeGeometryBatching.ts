@@ -29,8 +29,12 @@ const sizes = new Map([
 
 /** Batch face primitives by material without changing vertices, normals, triangles, or placement.
  * Input has already passed the self-contained GLB validator. Unsupported layouts stay unchanged.
+ * Bulk 3MF imports opt into two-sided materials for their synchronous fallback geometry too.
  */
-export function batchOnshapeGeometry(input: Uint8Array): Uint8Array {
+export function batchOnshapeGeometry(
+  input: Uint8Array,
+  options: { readonly doubleSided?: boolean } = {},
+): Uint8Array {
   const header = new DataView(input.buffer, input.byteOffset, input.byteLength);
   const jsonEnd = 20 + header.getUint32(12, true);
   const document = decode(new TextDecoder().decode(input.subarray(20, jsonEnd)));
@@ -205,6 +209,14 @@ export function batchOnshapeGeometry(input: Uint8Array): Uint8Array {
   const json = new TextEncoder().encode(
     encode({
       ...document,
+      ...(options.doubleSided
+        ? {
+            materials: objects(document.materials ?? []).map((material) => ({
+              ...material,
+              doubleSided: true,
+            })),
+          }
+        : {}),
       meshes: outputMeshes,
       accessors: outputAccessors,
       bufferViews: outputViews,

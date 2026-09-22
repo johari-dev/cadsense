@@ -190,7 +190,7 @@ export const make = Effect.gen(function* () {
       catch: geometryFailure,
     });
     const studioRequest = (part: CadPartStudioSource) => onshapePartStudioRequest(root, part);
-    if (root.kind === "assembly") draft = yield* acquireSnapshotMetadata(draft, read);
+    if (root.kind === "assembly") draft = yield* acquireSnapshotMetadata(draft, read, response);
     const cachedAssets = new Map(
       (yield* store.findGeometry(
         draft.parts.filter((part) => part.geometryRequired).map((part) => part.geometryKey),
