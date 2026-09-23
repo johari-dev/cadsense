@@ -107,6 +107,32 @@ it("does not credit CAD use from an earlier run to a new run", () => {
   ).toEqual({ message: "Locked while this chat runs.", agent: false });
 });
 
+it("does not credit the previous turn's CAD use while a new run is starting", () => {
+  const previous = shell("self", "This chat", "turn-1");
+  const starting: ThreadShell = {
+    ...previous,
+    latestTurn: { ...previous.latestTurn!, state: "completed", completedAt: now },
+    session: {
+      threadId: self,
+      status: "starting",
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: now,
+    },
+  };
+  const blocker = findCadProjectRunBlocker(project, [starting], self);
+  expect(
+    cadPanelLockStatus({
+      threadId: self,
+      blocker,
+      panel: { ...idle, agentActivityTurnId: TurnId.make("turn-1") },
+      operation: null,
+    }),
+  ).toEqual({ message: "Locked while this chat runs.", agent: false });
+});
+
 it("explains the agent's captured view while its presentation is pending", () => {
   const captureId = CadSnapshotId.make("00000000-0000-4000-8000-000000000001");
   const pending = {
@@ -125,8 +151,18 @@ it("explains the agent's captured view while its presentation is pending", () =>
   };
   const blocker = findCadProjectRunBlocker(pending, [shell("self", "This chat", null)], self);
   expect(blocker?.threadId).toBe("self");
+  // The run has ended, so the strip must not promise an unlock "when the run ends".
   expect(
     cadPanelLockStatus({ threadId: self, blocker, panel: { ...idle, captureId }, operation: null }),
+  ).toEqual({ message: "Showing the agent's last view.", agent: true });
+  const running = findCadProjectRunBlocker(pending, [shell("self", "This chat", "turn-1")], self);
+  expect(
+    cadPanelLockStatus({
+      threadId: self,
+      blocker: running,
+      panel: { ...idle, captureId },
+      operation: null,
+    }),
   ).toEqual({
     message: "Showing the agent's last view. Controls unlock when the run ends.",
     agent: true,

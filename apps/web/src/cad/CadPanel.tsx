@@ -358,9 +358,10 @@ export function CadScene({
       ref={sceneContainer}
       className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* The wrapper holds the viewer's minimum height so the strip never pushes it over the tree. */}
+      <div className={`flex ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 flex-col`}>
         <div
-          className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
+          className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
         >
           <div
             ref={canvas}
@@ -557,9 +558,10 @@ export function CadPanel({
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
   });
-  const agentControl = showActivity || !!lockStatus?.agent;
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;
+  // Keep the outline for a live tool call or a locked viewer the agent owns, not a usable one.
+  const agentControl = showActivity || (viewerLocked && !!lockStatus?.agent);
   const [edits] = useState(() =>
     createCadViewEdits(
       async (view, expectedRevision) => {

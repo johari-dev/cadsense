@@ -71,17 +71,23 @@ export function cadPanelLockStatus({
 }): CadPanelLockStatus | null {
   const ownRun = blocker?.threadId === threadId ? blocker : null;
   if (ownRun || panel?.agentControlling) {
+    const thread = ownRun?.thread;
+    const running = thread !== undefined && isCadThreadRunActive(thread);
+    // After the run, a pending presentation holds the lock until it settles; no run is left to end.
     if (panel?.captureId)
       return {
-        message: "Showing the agent's last view. Controls unlock when the run ends.",
+        message: running
+          ? "Showing the agent's last view. Controls unlock when the run ends."
+          : "Showing the agent's last view.",
         agent: true,
       };
+    // A starting run still reports the previous turn as latestTurn, so only the active turn, or a
+    // latest turn that is actually running, counts as this run.
+    const currentTurnId =
+      thread?.session?.activeTurnId ??
+      (thread?.latestTurn?.state === "running" ? thread.latestTurn.turnId : null);
     const turnId = panel?.agentActivityTurnId;
-    const usedCadThisRun =
-      panel?.agentControlling ||
-      (turnId != null &&
-        (turnId === ownRun?.thread?.session?.activeTurnId ||
-          turnId === ownRun?.thread?.latestTurn?.turnId));
+    const usedCadThisRun = panel?.agentControlling || (turnId != null && turnId === currentTurnId);
     if (usedCadThisRun)
       return {
         message: "Agent is looking at CAD. Controls unlock when the run ends.",
