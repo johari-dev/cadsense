@@ -32,6 +32,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { CadViewing, make } from "./CadViewing.ts";
+import { CadComments } from "./CadComments.ts";
 import { makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
@@ -102,6 +103,49 @@ it.effect(
         turnId,
       );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("shows agent CAD control while a comment tool renders", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const h = yield* harness(false, false, false, undefined, {
+      activate: () =>
+        Effect.succeed({
+          invoke: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as({ result: { ok: true } }),
+            ),
+        }),
+      watch: () => Stream.empty,
+      review: () => Effect.die("unused"),
+    });
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("comment-activity");
+    const controlling = () =>
+      h.service.watchActivity(threadId).pipe(
+        Stream.runHead,
+        Effect.map((state) => Option.getOrThrow(state)),
+      );
+    const inspect = yield* tools
+      .invoke(null, turnId, "cad_comment_inspect", {})
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(started);
+    assert.deepEqual(yield* controlling(), {
+      agentControlling: true,
+      agentActivityTurnId: turnId,
+    });
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(inspect);
+    assert.deepEqual(yield* controlling(), {
+      agentControlling: false,
+      agentActivityTurnId: turnId,
+    });
+    yield* tools.end(null, turnId);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
 it.effect("cancels a native in-flight capture before releasing its snapshot pin", () =>
@@ -336,6 +380,7 @@ const harness = Effect.fn(function* (
   advanceDuringCapture = false,
   loseCaptureReceipt = false,
   renderGate?: { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> },
+  comments?: CadComments["Service"],
 ) {
   const engine = yield* OrchestrationEngineService;
   let sequence = 0;
@@ -500,6 +545,7 @@ const harness = Effect.fn(function* (
   const service = yield* make.pipe(
     Effect.provideService(CadSnapshotStore, store),
     Effect.provideService(CadCaptureArtifacts, artifacts),
+    comments ? Effect.provideService(CadComments, comments) : (effect) => effect,
   );
   const presentation = yield* makePresentation.pipe(Effect.provideService(CadSnapshotStore, store));
   return {
