@@ -27,6 +27,7 @@ const decode = Schema.decodeUnknownSync(
             name: Schema.String,
             description: Schema.String,
             inputSchema: Schema.Struct({ type: Schema.Literal("object") }),
+            annotations: Schema.Struct({ readOnlyHint: Schema.Boolean }),
           }),
         ),
       ),
@@ -114,6 +115,9 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_update_view",
       "cad_capture",
     ]);
+    expect(
+      listedTools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name),
+    ).toEqual(["cad_comments_list", "cad_context", "cad_hierarchy"]);
     // Claude must receive the same review guidance as native Codex tool registration.
     expect(listedTools.map(({ name, description }) => ({ name, description }))).toEqual(
       cadToolDefinitions.map(({ name, description }) => ({ name, description })),

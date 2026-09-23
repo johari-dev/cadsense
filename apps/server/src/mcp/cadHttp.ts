@@ -7,7 +7,7 @@ import {
   ClaudeCadCapabilities,
   CLAUDE_CAD_CAPABILITY_FIELD,
 } from "../provider/ClaudeCadCapabilities.ts";
-import { cadToolDefinitions } from "../provider/CadProviderTools.ts";
+import { CAD_READ_ONLY_TOOLS, cadToolDefinitions } from "../provider/CadProviderTools.ts";
 import { McpSessionRegistry } from "./McpSessionRegistry.ts";
 
 const Request = Schema.Struct({
@@ -55,7 +55,7 @@ const handle = Effect.gen(function* () {
         tools: cadToolDefinitions.map(({ type: _type, ...tool }) => ({
           ...tool,
           annotations: {
-            readOnlyHint: tool.name === "cad_context" || tool.name === "cad_hierarchy",
+            readOnlyHint: CAD_READ_ONLY_TOOLS.has(tool.name),
             destructiveHint: false,
             openWorldHint: false,
           },

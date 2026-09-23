@@ -22,6 +22,7 @@ import {
   type CadCommentRenderWork,
   type ThreadId,
   type TurnId,
+  CAD_CAPTURE_SIZE,
 } from "@cadsense/contracts";
 import { canonicalCadJson, cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import * as Context from "effect/Context";
@@ -64,7 +65,7 @@ const inputGuidance = (schema: Schema.Top) =>
   schema === CadCommentPublication
     ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
     : schema === CadCommentLocateInput
-      ? "Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original 1280 by 960 image pixels, not pixelX/pixelY."
+      ? `Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original ${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height} image pixels, not pixelX/pixelY.`
       : "";
 const decode = <S extends Schema.Top>(schema: S, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input, { errors: "all" }).pipe(
@@ -435,7 +436,7 @@ export const make = Effect.gen(function* () {
         });
         return { ...hit, candidateId: id };
       });
-      return { result: { width: 1280, height: 960, results }, png: rendered.png };
+      return { result: { ...CAD_CAPTURE_SIZE, results }, png: rendered.png };
     });
     const inspect = Effect.fn("CadComments.inspect")(function* (input: unknown) {
       const request = yield* decode(CadCommentInspectInput, input);
@@ -500,7 +501,7 @@ export const make = Effect.gen(function* () {
       return {
         result: {
           inspectionId,
-          artifact: { path: file, mimeType: "image/png", width: 1280, height: 960 },
+          artifact: { path: file, mimeType: "image/png", ...CAD_CAPTURE_SIZE },
           results: rendered.receipt.commentHits?.map((h, i) => ({ ...h, marker: i + 1 })),
           summary:
             "Verify each yellow marker's surface and depth. Publish verified holes as separate precise comments. Inspect remaining red/occluded candidates individually to choose a better angle; if still uncertain, capture a closer alternate view and locate a reliable rim. A render error is a technical failure: retry inspection before whole-part fallback. Previously verified candidates remain usable during this turn.",
