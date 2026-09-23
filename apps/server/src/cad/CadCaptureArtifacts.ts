@@ -41,7 +41,10 @@ export const make = Effect.gen(function* () {
   const capture = Effect.fn("CadCaptureArtifacts.capture")(function* (
     input: CadRenderRequest & { readonly threadId: ThreadId; readonly turnId: TurnId },
   ) {
-    const rendered = yield* broker.capture(input).pipe(Effect.mapError(unavailable));
+    // Distinct render reasons tell the agent to retry instead of reporting CAD as unavailable.
+    const rendered = yield* broker
+      .capture(input)
+      .pipe(Effect.mapError((cause) => new CadViewError({ reason: `render-${cause.reason}` })));
     const captureId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable));
     const artifactPath = path.join(config.attachmentsDir, `cad-${captureId}.png`);
     const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));

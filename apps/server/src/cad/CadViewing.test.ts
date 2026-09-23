@@ -50,7 +50,7 @@ import { make as makePanel } from "./CadPanel.ts";
 import { CadPanel } from "./CadPanel.ts";
 import { make as makeStorage } from "./CadStorage.ts";
 import { CadProjectQuiescence } from "./CadUserOperations.ts";
-import { CadUserOperationError } from "@cadsense/contracts";
+import { CadRenderError, CadUserOperationError } from "@cadsense/contracts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
@@ -102,6 +102,44 @@ it.effect(
         turnId,
       );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("tells the agent why a capture or view update failed", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("tool-errors");
+    const failure = (name: string, input: unknown) =>
+      tools.invoke(null, turnId, name, input).pipe(Effect.flip);
+    yield* tools.invoke(null, turnId, "cad_context", {});
+
+    // Render failures are retryable and must not read as CAD being off.
+    h.failRenders("busy");
+    assert.equal((yield* failure("cad_capture", { expectedRevision: 0 })).reason, "render-busy");
+    h.failRenders("unavailable");
+    assert.equal(
+      (yield* failure("cad_capture", { expectedRevision: 0 })).reason,
+      "render-unavailable",
+    );
+    h.failRenders(null);
+    yield* tools.invoke(null, turnId, "cad_capture", { expectedRevision: 0 });
+
+    const malformed = yield* failure("cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "camera-pose" }],
+    });
+    assert.equal(malformed.reason, "invalid-operation");
+    assert.include(malformed.details, "pose");
+    const unknown = yield* failure("cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "hide", occurrenceIds: ["f".repeat(64)] }],
+    });
+    assert.equal(unknown.reason, "invalid-operation");
+    assert.include(unknown.details, "operations[0]");
+    yield* tools.end(null, turnId);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
 it.effect("cancels a native in-flight capture before releasing its snapshot pin", () =>
@@ -434,6 +472,7 @@ const harness = Effect.fn(function* (
   });
   const renderRequests: CadRenderRequest[] = [];
   const renderedBytes = new Uint8Array([1, 2, 3]);
+  let renderFailure: CadRenderError["reason"] | null = null;
   const artifacts = yield* makeArtifacts.pipe(
     Effect.provideService(OrchestrationEngineService, {
       ...engine,
@@ -464,6 +503,7 @@ const harness = Effect.fn(function* (
         capture: (input) =>
           Effect.gen(function* () {
             renderRequests.push(input);
+            if (renderFailure) return yield* new CadRenderError({ reason: renderFailure });
             if (renderGate) {
               yield* Deferred.succeed(renderGate.started, undefined);
               yield* Deferred.await(renderGate.release);
@@ -510,6 +550,9 @@ const harness = Effect.fn(function* (
     ),
     recreate: make.pipe(Effect.provideService(CadSnapshotStore, store)),
     pins: () => pins,
+    failRenders: (reason: CadRenderError["reason"] | null) => {
+      renderFailure = reason;
+    },
     dispatch,
     renderRequests,
     renderedBytes,

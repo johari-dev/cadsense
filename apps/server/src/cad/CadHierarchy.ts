@@ -5,10 +5,8 @@ import {
   type CadViewState,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
-import { indexCadSnapshot } from "./CadViewState.ts";
+import { decodeCadToolInput, indexCadSnapshot } from "./CadViewState.ts";
 
-const decodeInput = Schema.decodeUnknownEffect(CadHierarchyInput);
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
 
 /** Cursors are bound to an immutable snapshot and parent, not browser focus or mutable list offsets. */
@@ -17,9 +15,13 @@ export const readCadHierarchy = Effect.fn("readCadHierarchy")(function* (
   state: CadViewState,
   rawInput: unknown,
 ): Effect.fn.Return<CadHierarchyResult, CadViewError> {
-  const input = yield* decodeInput(rawInput).pipe(Effect.mapError(invalid));
+  const input = yield* decodeCadToolInput(CadHierarchyInput, rawInput);
   const parent = input.parentOccurrenceId ?? null;
-  if (parent !== null && !index.nodes.has(parent)) return yield* invalid();
+  if (parent !== null && !index.nodes.has(parent))
+    return yield* new CadViewError({
+      reason: "invalid-operation",
+      details: "parentOccurrenceId is not in the selected root. Omit it to read the top level.",
+    });
   const prefix = `${state.snapshotId}:${parent ?? "root"}:`;
   const suffix = input.cursor?.slice(prefix.length);
   if (

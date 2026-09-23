@@ -29,7 +29,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
-import { initialCadView, rebaseCadView, updateCadView, indexCadSnapshot } from "./CadViewState.ts";
+import {
+  decodeCadToolInput,
+  initialCadView,
+  rebaseCadView,
+  updateCadView,
+  indexCadSnapshot,
+} from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -38,8 +44,6 @@ import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivit
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
 const conflict = () => new CadViewError({ reason: "revision-conflict" });
 const decodeView = Schema.decodeUnknownEffect(CadViewState);
-const decodeUpdate = Schema.decodeUnknownEffect(CadUpdateViewInput);
-const decodeCapture = Schema.decodeUnknownEffect(CadCaptureInput);
 export interface CadAgentTools {
   readonly comments?: (
     name: string,
@@ -312,9 +316,7 @@ export const make = Effect.gen(function* () {
               let initialized = yield* initialize();
               const { roots } = yield* availableRoots();
               // Load only roots explicitly requested by the validated batch, never every cached root.
-              const update = yield* decodeUpdate(input).pipe(
-                Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
-              );
+              const update = yield* decodeCadToolInput(CadUpdateViewInput, input);
               if (
                 update.expectedRevision !==
                 (initialized?.state.revision ?? currentSession.revision ?? 0)
@@ -366,9 +368,7 @@ export const make = Effect.gen(function* () {
         const capture: CadAgentTools["capture"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
-              const requested = yield* decodeCapture(input).pipe(
-                Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
-              );
+              const requested = yield* decodeCadToolInput(CadCaptureInput, input);
               const initialized = yield* initialize();
               if (!initialized || turnId === undefined || Option.isNone(artifacts))
                 return yield* unavailable();
