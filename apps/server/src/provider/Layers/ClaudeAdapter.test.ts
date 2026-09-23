@@ -1309,6 +1309,60 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("titles MCP tool calls with their server and tool names", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "review", attachments: [] });
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-mcp-title",
+        uuid: "start-capture",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "tool-capture",
+            name: "mcp__cadsense_cad__cad_capture",
+            input: { expectedRevision: 0 },
+          },
+        },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-mcp-title",
+        uuid: "result-mcp-title",
+      } as unknown as SDKMessage);
+
+      const started = Array.from(yield* Fiber.join(runtimeEventsFiber)).find(
+        (event) => event.type === "item.started",
+      );
+      assert.equal(started?.type, "item.started");
+      if (started?.type === "item.started") {
+        assert.equal(started.payload.itemType, "mcp_tool_call");
+        assert.equal(started.payload.title, "cadsense_cad · cad_capture");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("maps Claude reasoning deltas, streamed tool inputs, and tool results", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -1481,60 +1535,6 @@ describe("ClaudeAdapterLive", () => {
           ).result?.content,
           "src/example.ts:1:foo",
         );
-      }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("titles MCP tool calls with their server and tool names", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.takeUntil((event) => event.type === "turn.completed"),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-      yield* adapter.sendTurn({ threadId: session.threadId, input: "review", attachments: [] });
-      harness.query.emit({
-        type: "stream_event",
-        session_id: "sdk-session-mcp-title",
-        uuid: "start-capture",
-        parent_tool_use_id: null,
-        event: {
-          type: "content_block_start",
-          index: 0,
-          content_block: {
-            type: "tool_use",
-            id: "tool-capture",
-            name: "mcp__cadsense_cad__cad_capture",
-            input: { expectedRevision: 0 },
-          },
-        },
-      } as unknown as SDKMessage);
-      harness.query.emit({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        errors: [],
-        session_id: "sdk-session-mcp-title",
-        uuid: "result-mcp-title",
-      } as unknown as SDKMessage);
-
-      const started = Array.from(yield* Fiber.join(runtimeEventsFiber)).find(
-        (event) => event.type === "item.started",
-      );
-      assert.equal(started?.type, "item.started");
-      if (started?.type === "item.started") {
-        assert.equal(started.payload.itemType, "mcp_tool_call");
-        assert.equal(started.payload.title, "cadsense_cad · cad_capture");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
