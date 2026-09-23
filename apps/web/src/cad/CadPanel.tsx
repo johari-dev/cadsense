@@ -29,7 +29,11 @@ import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { loadCadAssetDelivery } from "./CadAssetDelivery";
 import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
-import { isCadProjectRunActive } from "./CadProjectState";
+import {
+  cadPanelLockStatus,
+  findCadProjectRunBlocker,
+  type CadPanelLockStatus,
+} from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
@@ -48,6 +52,22 @@ import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
+
+/** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
+function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
+  return (
+    <div
+      role="status"
+      className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-1.5 text-xs text-secondary-label"
+    >
+      <span
+        aria-hidden="true"
+        className={`size-1.5 shrink-0 rounded-full ${status.agent ? "bg-emerald-400" : "bg-muted-foreground"}`}
+      />
+      <span className="truncate">{status.message}</span>
+    </div>
+  );
+}
 
 function PendingCadScene({ environmentId }: { environmentId: string }) {
   const container = useRef<HTMLDivElement>(null);
@@ -83,6 +103,7 @@ export function CadScene({
   compact,
   commentsCard,
   framing,
+  lockStatus = null,
 }: {
   threadRef: ScopedThreadRef;
   view: CadViewState;
@@ -94,6 +115,7 @@ export function CadScene({
   compact: boolean;
   framing: { x: number; y: number } | null;
   commentsCard: Omit<CadCommentsCardProps, "manifest" | "displayedSnapshotId">;
+  lockStatus?: CadPanelLockStatus | null;
 }) {
   const sceneAtom = cadPanelEnvironment.scene({
     environmentId: threadRef.environmentId,
@@ -336,30 +358,33 @@ export function CadScene({
       ref={sceneContainer}
       className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}
     >
-      <div
-        className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
-      >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
-          ref={canvas}
-          className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
-          style={{ pointerEvents: disabled ? "none" : "auto" }}
-        />
-        {(!manifest || unavailable) && (
+          className={`relative ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
+        >
           <div
-            className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
-            role="status"
-          >
-            {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
-          </div>
-        )}
-        <CadCommentsCard
-          {...commentsCard}
-          manifest={manifest}
-          displayedSnapshotId={view.snapshotId}
-        />
-        {manifest && !unavailable && !compact && (
-          <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
-        )}
+            ref={canvas}
+            className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
+            style={{ pointerEvents: disabled ? "none" : "auto" }}
+          />
+          {(!manifest || unavailable) && (
+            <div
+              className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
+              role="status"
+            >
+              {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
+            </div>
+          )}
+          <CadCommentsCard
+            {...commentsCard}
+            manifest={manifest}
+            displayedSnapshotId={view.snapshotId}
+          />
+          {manifest && !unavailable && !compact && (
+            <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
+          )}
+        </div>
+        {lockStatus && <CadLockStrip status={lockStatus} />}
       </div>
       {manifest && !compact && (
         <Collapsible
@@ -517,7 +542,7 @@ export function CadPanel({
     useCadCommentReviewStore.getState().consume(threadRef);
   }, [compact, pendingReview, threadRef, updateReview]);
   const threads = useThreadShells();
-  const runActive = isCadProjectRunActive(project, threads);
+  const runBlocker = findCadProjectRunBlocker(project, threads, threadRef.threadId);
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
@@ -525,7 +550,16 @@ export function CadPanel({
     scopedThreadKey(threadRef),
     !!data?.agentControlling,
   );
-  const locked = runActive || data?.agentControlling || !!project.cad?.operation || !data;
+  const locked = !!runBlocker || data?.agentControlling || !!project.cad?.operation || !data;
+  const lockStatus = cadPanelLockStatus({
+    threadId: threadRef.threadId,
+    blocker: runBlocker,
+    panel: data,
+    operation: project.cad?.operation?.kind ?? null,
+  });
+  const agentControl = showActivity || !!lockStatus?.agent;
+  // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
+  const viewerLocked = locked && !commentsOpen && !historicalView;
   const [edits] = useState(() =>
     createCadViewEdits(
       async (view, expectedRevision) => {
@@ -637,7 +671,7 @@ export function CadPanel({
   return (
     <section
       aria-label="CAD panel"
-      data-cad-agent-controlling={showActivity}
+      data-cad-agent-controlling={agentControl}
       className="relative flex min-h-0 flex-1 flex-col"
     >
       {!compact && (
@@ -677,13 +711,6 @@ export function CadPanel({
           />
         </div>
       )}
-      {runActive && (
-        <div role="status" className="sr-only">
-          {data?.captureId
-            ? "Agent’s captured view · controls locked"
-            : "Agent running · CAD controls locked"}
-        </div>
-      )}
       {error && (
         <p role="alert" className="border-b px-3 py-2 text-xs text-destructive">
           {error}
@@ -697,8 +724,9 @@ export function CadPanel({
             key={`${threadRef.threadId}:${view.snapshotId}`}
             threadRef={threadRef}
             view={view}
-            disabled={locked && !commentsOpen && !historicalView}
-            cadDimmed={locked && !showActivity && !commentsOpen && !historicalView}
+            disabled={viewerLocked}
+            cadDimmed={viewerLocked && !agentControl}
+            lockStatus={viewerLocked ? lockStatus : null}
             commentsCard={{
               threadRef,
               comments,
@@ -738,6 +766,7 @@ export function CadPanel({
           )}
         </div>
       )}
+      {!view && viewerLocked && lockStatus && <CadLockStrip status={lockStatus} />}
       {!view && comments.length > 0 && (
         <CadCommentsCard
           threadRef={threadRef}
