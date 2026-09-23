@@ -1225,10 +1225,9 @@ function titleForTool(itemType: CanonicalItemType, toolName: string): string {
     case "file_change":
       return "File change";
     case "mcp_tool_call": {
-      const [prefix, server, ...tool] = toolName.split("__");
-      return prefix === "mcp" && server && tool.length > 0
-        ? `${server} · ${tool.join("__")}`
-        : "MCP tool call";
+      const [prefix, server, ...rest] = toolName.split("__");
+      const tool = rest.join("__");
+      return prefix === "mcp" && server && tool ? `${server} · ${tool}` : "MCP tool call";
     }
     case "collab_agent_tool_call":
       return "Subagent task";
