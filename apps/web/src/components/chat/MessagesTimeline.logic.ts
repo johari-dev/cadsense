@@ -510,7 +510,8 @@ function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): ToolGroupSu
 /**
  * Merges each turn's comment publications into the turn's last publication entry, keyed by that
  * timeline entry id. Agents publish incrementally and retry rejected findings, so a rejection is
- * dropped once the same turn publishes its key or title.
+ * dropped only when a later publication in the same turn publishes its key or title. Same-call and
+ * earlier matches stay visible: they are different findings or conflicts, not fixed retries.
  */
 function mergeCadCommentCards(
   entries: ReadonlyArray<TimelineEntry>,
@@ -528,16 +529,17 @@ function mergeCadCommentCards(
         publications.flatMap(({ card }) => card.published).map((c) => [c.commentId, c]),
       ).values(),
     ];
-    const resolved = new Set(published.flatMap((c) => [c.publicationKey, c.title]));
-    const rejected = [
-      ...new Map(
-        publications.flatMap(({ card }) => card.rejected).map((r) => [r.publicationKey, r]),
-      ).values(),
-    ].filter(
-      (r) => !resolved.has(r.publicationKey) && (r.title === null || !resolved.has(r.title)),
-    );
-    if (published.length > 0 || rejected.length > 0)
-      merged.set(publications.at(-1)!.id, { published, rejected });
+    const rejected = publications.flatMap(({ card }, index) => {
+      const later = publications.slice(index + 1).flatMap(({ card: next }) => next.published);
+      const fixed = new Set(later.flatMap((c) => [c.publicationKey, c.title.trim()]));
+      return card.rejected.filter(
+        (r) => !fixed.has(r.publicationKey) && (r.title === null || !fixed.has(r.title.trim())),
+      );
+    });
+    // A key rejected again in a later call keeps only its latest reason.
+    const latestRejected = [...new Map(rejected.map((r) => [r.publicationKey, r])).values()];
+    if (published.length > 0 || latestRejected.length > 0)
+      merged.set(publications.at(-1)!.id, { published, rejected: latestRejected });
   }
   return merged;
 }
@@ -915,6 +917,18 @@ export function deriveMessagesTimelineRows(input: {
   const appendActiveWorkRows = () => {
     if (activeWorkRow === null) return;
     nextRows.push(activeWorkRow);
+    if (activeWorkRow.expanded)
+      for (const [entryIndex, workEntry] of activeWorkRow.groupedEntries.entries()) {
+        nextRows.push({
+          kind: "work",
+          id: workEntry.id,
+          createdAt: workEntry.createdAt,
+          groupedEntries: [workEntry],
+          isExpandedToolGroupEntry: true,
+          isLastExpandedToolGroupEntry: entryIndex === activeWorkRow.groupedEntries.length - 1,
+        });
+      }
+    // Like settled groups, the filmstrip follows the group's rows so it never splits them.
     if (activeCaptures.length > 0)
       nextRows.push({
         kind: "cad-filmstrip",
@@ -922,17 +936,6 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: activeWorkRow.createdAt,
         captures: activeCaptures,
       });
-    if (!activeWorkRow.expanded) return;
-    for (const [entryIndex, workEntry] of activeWorkRow.groupedEntries.entries()) {
-      nextRows.push({
-        kind: "work",
-        id: workEntry.id,
-        createdAt: workEntry.createdAt,
-        groupedEntries: [workEntry],
-        isExpandedToolGroupEntry: true,
-        isLastExpandedToolGroupEntry: entryIndex === activeWorkRow.groupedEntries.length - 1,
-      });
-    }
   };
 
   const cadCommentRows = mergeCadCommentCards(input.timelineEntries);
@@ -1050,7 +1053,6 @@ export function deriveMessagesTimelineRows(input: {
             groupId,
             expanded,
           });
-          pushFilmstrip();
           if (expanded) {
             for (const [entryIndex, workEntry] of steps.entries()) {
               nextRows.push({
@@ -1063,6 +1065,7 @@ export function deriveMessagesTimelineRows(input: {
               });
             }
           }
+          pushFilmstrip();
         } else if (onlyToolEntries) {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
           const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
@@ -1079,7 +1082,6 @@ export function deriveMessagesTimelineRows(input: {
             summaryKind,
             hasFailure: workEntryDisplayIndicatesToolFailure(steps.at(-1)!),
           });
-          pushFilmstrip();
           if (expanded) {
             for (const [entryIndex, workEntry] of steps.entries()) {
               nextRows.push({
@@ -1092,6 +1094,7 @@ export function deriveMessagesTimelineRows(input: {
               });
             }
           }
+          pushFilmstrip();
         } else if (steps.length <= MAX_VISIBLE_WORK_LOG_ENTRIES) {
           nextRows.push({
             kind: "work",

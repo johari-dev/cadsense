@@ -528,6 +528,8 @@ export const make = Effect.gen(function* () {
       const seen = new Set<string>();
       // Titles of rejected items, when the agent supplied one, so chat can name what failed.
       const titles = new Map<string, string>();
+      // Reused findings already appeared in an earlier turn, so chat does not count them as written.
+      const reusedKeys = new Set<string>();
       for (const raw of request.items) {
         const key =
           typeof raw === "object" && raw !== null && "publicationKey" in raw
@@ -573,6 +575,7 @@ export const make = Effect.gen(function* () {
             );
             if (!old) return yield* fail("model-equivalence-unverified");
             commentId = old.id;
+            reusedKeys.add(item.publicationKey);
           } else {
             if (
               item.link &&
@@ -716,7 +719,11 @@ export const make = Effect.gen(function* () {
           originalSequence: sequence[0]?.sequence,
         });
       }
-      yield* recordPublication(results, latest, titles);
+      yield* recordPublication(
+        results.filter((result) => !reusedKeys.has(result.publicationKey)),
+        latest,
+        titles,
+      );
       return { result: { results: delivered, catalogVersion: latest.length } };
     });
     /** Appends the chat activity for this call. Display only, so failures never fail the tool. */
@@ -771,9 +778,11 @@ export const make = Effect.gen(function* () {
             tone: "info",
             kind: CAD_COMMENTS_PUBLISHED_ACTIVITY,
             summary:
-              card.published.length === 1
-                ? "Wrote 1 comment"
-                : `Wrote ${card.published.length} comments`,
+              card.published.length === 0
+                ? "Comments not published"
+                : card.published.length === 1
+                  ? "Wrote 1 comment"
+                  : `Wrote ${card.published.length} comments`,
             payload: card,
             turnId,
             createdAt,

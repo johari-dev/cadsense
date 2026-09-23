@@ -517,6 +517,12 @@ it.effect(
       assert.equal(model.cadComments?.length, 1);
       assert.equal(model.cadComments?.[0]?.state, "resolved");
       assert.equal(model.cadCommentReceipts?.length, 2);
+      // Reusing a finding from an earlier turn does not add a "wrote" row to this turn.
+      const sql = yield* SqlClient.SqlClient;
+      const secondTurnRows = yield* sql`
+        SELECT activity_id FROM projection_thread_activities
+        WHERE kind = ${CAD_COMMENTS_PUBLISHED_ACTIVITY} AND turn_id = 'second'`;
+      assert.equal(secondTurnRows.length, 0);
       // The deletion list may have been calculated before publication. Final deletion rechecks durable references.
       yield* h.store.remove([snapshot.snapshotId], []);
       assert.equal((yield* h.store.load(snapshot.snapshotId)).snapshotId, snapshot.snapshotId);

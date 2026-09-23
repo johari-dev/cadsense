@@ -330,6 +330,47 @@ describe("CAD review rows", () => {
     expect(live?.kind === "work-live" && live.entry.toolTitle).toBe("cad_update_view");
   });
 
+  it("keeps rejections that no later publication fixed", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        published("published-5", {
+          // Same call: a different finding that happens to share a published title.
+          published: [comment("fillet", 5)],
+          rejected: [{ publicationKey: "fillet-2", title: "Finding 5", reason: "invalid-input" }],
+        }),
+        // A later conflict on an already-published key is a new failure, not a fix.
+        published("published-6", {
+          published: [],
+          rejected: [{ publicationKey: "fillet", title: "Other", reason: "idempotency-conflict" }],
+        }),
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      expandedTurnIds: new Set([turnId]),
+    });
+    const row = rows.find((candidate) => candidate.kind === "cad-comments");
+    expect(row?.kind === "cad-comments" && row.card.rejected.map((r) => r.publicationKey)).toEqual([
+      "fillet-2",
+      "fillet",
+    ]);
+  });
+
+  it("lists an expanded group's steps before its filmstrip", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [tool("look", "cad_capture"), capture("capture-07")],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      expandedTurnIds: new Set([turnId]),
+      expandedWorkGroupIds: new Set(["work-group:look"]),
+    });
+    expect(rows.map((row) => row.kind)).toEqual([
+      "turn-fold",
+      "work-toggle",
+      "work",
+      "cad-filmstrip",
+    ]);
+  });
+
   it("merges a turn's publications into one comments row that stays visible when folded", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
