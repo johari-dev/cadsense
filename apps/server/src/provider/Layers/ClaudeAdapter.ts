@@ -70,7 +70,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Scope from "effect/Scope";
-import { compactClaudeCadMessage } from "../CadProviderContent.ts";
+import { CLAUDE_CAD_TOOL_PREFIX, compactClaudeCadMessage } from "../CadProviderContent.ts";
 import * as Option from "effect/Option";
 import { CadViewing } from "../../cad/CadViewing.ts";
 import { makeCadProviderTools, type CadProviderTools } from "../CadProviderTools.ts";
@@ -2763,7 +2763,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       message,
       new Set(
         Array.from(context.inFlightTools.values())
-          .filter((tool) => tool.toolName === "mcp__cadsense_cad__cad_capture")
+          .filter((tool) => tool.toolName.startsWith(CLAUDE_CAD_TOOL_PREFIX))
           .map((tool) => tool.itemId),
       ),
     );
@@ -4131,7 +4131,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
-        if (toolName.startsWith("mcp__cadsense_cad__")) {
+        if (toolName.startsWith(CLAUDE_CAD_TOOL_PREFIX)) {
           if (!context.cad || Option.isNone(cadCapabilities))
             return {
               behavior: "deny",
@@ -4158,7 +4158,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               context.cad.providerSessionId,
               childKey,
               turnId,
-              toolName.slice("mcp__cadsense_cad__".length),
+              toolName.slice(CLAUDE_CAD_TOOL_PREFIX.length),
               toolInput,
             )
             .pipe(

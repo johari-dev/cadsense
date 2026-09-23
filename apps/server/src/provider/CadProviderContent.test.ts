@@ -17,9 +17,15 @@ it("retains capture metadata without copying native Codex images into event hist
   expect(compactCodexCadItem(item).contentItems).toEqual([item.contentItems[0]]);
   expect(item.contentItems).toHaveLength(2);
   expect(compactCodexCadItem({ ...item, tool: "other_tool" }).contentItems).toHaveLength(2);
+  expect(
+    compactCodexCadItem({ ...item, tool: "cad_capture", namespace: "other" }).contentItems,
+  ).toHaveLength(2);
+  // Comment locate and inspect return renders too.
+  for (const tool of ["cad_comment_locate", "cad_comment_inspect"])
+    expect(compactCodexCadItem({ ...item, tool }).contentItems).toEqual([item.contentItems[0]]);
 });
 
-it("removes only CAD capture image echoes from Claude history, preserving native input", () => {
+it("removes only CAD tool image echoes from Claude history, preserving native input", () => {
   const message: Extract<SDKMessage, { type: "user" }> = {
     type: "user",
     session_id: "session",
