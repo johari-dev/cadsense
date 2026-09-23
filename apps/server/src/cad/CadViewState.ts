@@ -9,8 +9,16 @@ import * as Schema from "effect/Schema";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
 export { indexCadSnapshot } from "@cadsense/shared/cadScene";
 
-const decodeUpdate = Schema.decodeUnknownEffect(CadUpdateViewInput);
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
+
+/** Decodes agent input, returning the schema's field errors so the agent can correct and retry. */
+export const decodeCadToolInput = <S extends Schema.Top>(schema: S, input: unknown) =>
+  Schema.decodeUnknownEffect(schema)(input, { errors: "all" }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new CadViewError({ reason: "invalid-operation", details: cause.message.slice(0, 4000) }),
+    ),
+  );
 
 export const initialCadView = (snapshot: CadSnapshotManifest, revision = 0): CadViewState => ({
   rootId: snapshot.rootId,
@@ -28,7 +36,7 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
   input: unknown,
   snapshots: ReadonlyMap<string, CadSnapshotManifest>,
 ) {
-  const update = yield* decodeUpdate(input).pipe(Effect.mapError(invalid));
+  const update = yield* decodeCadToolInput(CadUpdateViewInput, input);
   if (update.expectedRevision !== current.revision)
     return yield* new CadViewError({ reason: "revision-conflict" });
   let state = current;
@@ -36,9 +44,16 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
   if (!snapshot || snapshot.snapshotId !== state.snapshotId)
     return yield* new CadViewError({ reason: "capability-unavailable" });
   let index = indexCadSnapshot(snapshot);
-  for (const operation of update.operations) {
-    if ("occurrenceIds" in operation && operation.occurrenceIds.some((id) => !index.nodes.has(id)))
-      return yield* invalid();
+  for (const [position, operation] of update.operations.entries()) {
+    const unknown =
+      "occurrenceIds" in operation
+        ? operation.occurrenceIds.filter((id) => !index.nodes.has(id))
+        : [];
+    if (unknown.length > 0)
+      return yield* new CadViewError({
+        reason: "invalid-operation",
+        details: `operations[${position}] has occurrence IDs not in the selected root: ${unknown.slice(0, 5).join(", ")}. Read IDs from cad_hierarchy.`,
+      });
     switch (operation.type) {
       case "select-root": {
         snapshot = snapshots.get(operation.rootId);

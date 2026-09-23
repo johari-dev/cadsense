@@ -80,6 +80,19 @@ export const CadUpdateViewInput = Schema.Struct({
   operations: Schema.Array(CadViewOperation).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 });
 export type CadUpdateViewInput = typeof CadUpdateViewInput.Type;
+/**
+ * Agents act on `reason`: retry busy or interrupted renders, correct invalid input using
+ * `details`, and treat capability-unavailable as CAD being off for this chat.
+ */
 export class CadViewError extends Schema.TaggedErrorClass<CadViewError>()("CadViewError", {
-  reason: Schema.Literals(["revision-conflict", "invalid-operation", "capability-unavailable"]),
+  reason: Schema.Literals([
+    "revision-conflict",
+    "invalid-operation",
+    "capability-unavailable",
+    "render-unavailable",
+    "render-busy",
+    "render-interrupted",
+    "render-invalid-result",
+  ]),
+  details: Schema.optionalKey(Schema.String),
 }) {}
