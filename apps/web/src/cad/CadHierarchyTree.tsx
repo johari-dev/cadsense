@@ -1,6 +1,6 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
-import { ChevronDown, ChevronRight, Focus } from "lucide-react";
+import { ChevronDown, ChevronRight, Focus, Highlighter, Blend } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -22,6 +22,14 @@ export function CadHierarchyTree({
   fullHeight?: boolean;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
+  const highlighted = useMemo(
+    () => index.subtree(view.highlightedOccurrenceIds ?? []),
+    [index, view.highlightedOccurrenceIds],
+  );
+  const ghosted = useMemo(
+    () => index.subtree(view.ghost?.occurrenceIds ?? []),
+    [index, view.ghost?.occurrenceIds],
+  );
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [scrollTop, setScrollTop] = useState(0);
@@ -158,6 +166,38 @@ export function CadHierarchyTree({
                   </TooltipTrigger>
                   <TooltipPopup>{node.name}</TooltipPopup>
                 </Tooltip>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Highlight ${node.name}`}
+                  aria-pressed={highlighted.has(row.id)}
+                  className="aria-pressed:bg-accent"
+                  disabled={disabled || node.suppressed}
+                  onClick={() =>
+                    onChange({
+                      ...view,
+                      highlightedOccurrenceIds: highlighted.has(row.id) ? [] : [row.id],
+                    })
+                  }
+                >
+                  <Highlighter size={12} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Ghost ${node.name}`}
+                  aria-pressed={ghosted.has(row.id)}
+                  className="aria-pressed:bg-accent"
+                  disabled={disabled || node.suppressed}
+                  onClick={() =>
+                    onChange({
+                      ...view,
+                      ghost: ghosted.has(row.id) ? null : { occurrenceIds: [row.id], opacity: 0.2 },
+                    })
+                  }
+                >
+                  <Blend size={12} />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon-xs"

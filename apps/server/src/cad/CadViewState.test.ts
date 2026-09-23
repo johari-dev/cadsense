@@ -1,4 +1,4 @@
-import { CadSnapshotManifest, ProjectId } from "@cadsense/contracts";
+import { CadSnapshotManifest, CadViewState, ProjectId } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -49,6 +49,8 @@ const snapshot = Schema.decodeUnknownSync(CadSnapshotManifest)({
   assets: [],
 });
 const snapshots = new Map([[rootId, snapshot]]);
+const encodeViewJson = Schema.encodeEffect(Schema.fromJsonString(CadViewState));
+const decodeViewJson = Schema.decodeUnknownEffect(Schema.fromJsonString(CadViewState));
 
 describe("private CAD semantic state", () => {
   it.effect("rejects invalid camera geometry and zoom without applying earlier operations", () =>
@@ -261,3 +263,74 @@ describe("private CAD semantic state", () => {
     assert.equal(state.snapshotId, next.snapshotId);
   });
 });
+
+it.effect(
+  "persists bounded inspection state, rebases selections, and resets without changing framing",
+  () =>
+    Effect.gen(function* () {
+      const legacy = initialCadView(snapshot);
+      assert.deepEqual(yield* decodeViewJson(yield* encodeViewJson(legacy)), legacy);
+      const inspected = yield* updateCadView(
+        legacy,
+        {
+          expectedRevision: 0,
+          operations: [
+            { type: "highlight", occurrenceIds: [id(3), id(5)] },
+            { type: "ghost", occurrenceIds: [id(3), id(5)], opacity: 0.25 },
+            { type: "section", planes: [{ normal: [1, 0, 0], constant: -0.01 }] },
+          ],
+        },
+        snapshots,
+      );
+      const persisted = yield* decodeViewJson(yield* encodeViewJson(inspected));
+      assert.deepEqual(persisted, inspected);
+      const rebased = rebaseCadView(persisted, {
+        ...snapshot,
+        nodes: snapshot.nodes.filter((node) => node.id !== id(3)),
+      });
+      assert.deepEqual(rebased.highlightedOccurrenceIds, [id(5)]);
+      assert.deepEqual(rebased.ghost?.occurrenceIds, [id(5)]);
+      assert.deepEqual(rebased.sectionPlanes, inspected.sectionPlanes);
+      const cleared = yield* updateCadView(
+        inspected,
+        { expectedRevision: 1, operations: [{ type: "reset-inspection" }] },
+        snapshots,
+      );
+      assert.deepEqual(cleared.highlightedOccurrenceIds, []);
+      assert.isNull(cleared.ghost);
+      assert.deepEqual(cleared.sectionPlanes, []);
+      assert.deepEqual(cleared.camera, legacy.camera);
+      assert.equal(cleared.revision, 2);
+    }),
+);
+
+it.effect("rejects invalid inspection batches without partial changes", () =>
+  Effect.gen(function* () {
+    const before = initialCadView(snapshot);
+    for (const operation of [
+      { type: "highlight", occurrenceIds: [id(99)] },
+      { type: "ghost", occurrenceIds: [id(99)], opacity: 0.3 },
+      { type: "ghost", occurrenceIds: [], opacity: 0 },
+      { type: "ghost", occurrenceIds: [], opacity: 1 },
+      { type: "highlight", occurrenceIds: Array(257).fill(id(3)) },
+      ...[
+        [0, 0, 0],
+        [2, 0, 0],
+        [Infinity, 0, 0],
+      ].map((normal) => ({ type: "section", planes: [{ normal, constant: 0 }] })),
+      { type: "section", planes: [{ normal: [1, 0, 0], constant: Infinity }] },
+      {
+        type: "section",
+        planes: Array.from({ length: 7 }, () => ({ normal: [1, 0, 0], constant: 0 })),
+      },
+    ]) {
+      const error = yield* updateCadView(
+        before,
+        { expectedRevision: 0, operations: [{ type: "hide", occurrenceIds: [id(2)] }, operation] },
+        snapshots,
+      ).pipe(Effect.flip);
+      assert.equal(error.reason, "invalid-operation");
+      assert.deepEqual(before, initialCadView(snapshot));
+    }
+  }),
+);

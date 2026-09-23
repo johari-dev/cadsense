@@ -55,6 +55,27 @@ export const buildCadSceneModel = (
     }
     entry.offset.normalize().multiplyScalar(scale * 0.45);
   }
+  let planes: THREE.Plane[] = [];
+  const overrides = new Map<
+    THREE.Mesh | THREE.Line | THREE.Points,
+    { original: THREE.Material | THREE.Material[]; copies: THREE.Material[] }
+  >();
+  let materialStyle = "";
+  const clearOverrides = () => {
+    const disposed = new Set<THREE.Material>();
+    for (const [object, entry] of overrides) {
+      object.material = entry.original;
+      for (const copy of entry.copies)
+        if (!disposed.has(copy)) {
+          disposed.add(copy);
+          copy.dispose();
+        }
+    }
+    overrides.clear();
+    materialStyle = "";
+  };
+  const isClipped = (point: THREE.Vector3) =>
+    planes.some((plane) => plane.distanceToPoint(point) < 0);
   const apply = (input: CadViewState) => {
     let state: CadViewState;
     try {
@@ -67,15 +88,60 @@ export const buildCadSceneModel = (
     const ids = [
       ...Object.keys(state.visibility),
       ...state.isolatedOccurrenceIds,
+      ...(state.highlightedOccurrenceIds ?? []),
+      ...(state.ghost?.occurrenceIds ?? []),
       ...(state.camera.fit ?? []),
     ];
     if (ids.some((id) => !index.nodes.has(id))) throw new CadRendererError("invalid-view");
+    const nextStyle = JSON.stringify([state.highlightedOccurrenceIds ?? [], state.ghost ?? null]);
+    const changedStyle = materialStyle !== nextStyle;
+    if (changedStyle) {
+      clearOverrides();
+      materialStyle = nextStyle;
+    }
+    const styledMaterials = new Map<THREE.Material, Map<string, THREE.Material>>();
+    planes = (state.sectionPlanes ?? []).map(
+      (plane) => new THREE.Plane(new THREE.Vector3(...plane.normal), plane.constant),
+    );
+    const highlighted = index.subtree(state.highlightedOccurrenceIds ?? []);
+    const ghosted = index.subtree(state.ghost?.occurrenceIds ?? []);
     const visible = index.visible(state);
     const selected = state.camera.fit?.length ? index.subtree(state.camera.fit) : null;
     const fitBounds = new THREE.Box3();
     const visibleBounds = new THREE.Box3();
     for (const [id, entry] of objects) {
       entry.object.visible = visible.get(id) ?? false;
+      if (changedStyle && (highlighted.has(id) || ghosted.has(id)))
+        entry.object.traverse((object) => {
+          if (
+            !(
+              object instanceof THREE.Mesh ||
+              object instanceof THREE.Line ||
+              object instanceof THREE.Points
+            )
+          )
+            return;
+          const original = object.material;
+          const copies = (Array.isArray(original) ? original : [original]).map((material) => {
+            const style = `${highlighted.has(id)}:${ghosted.has(id)}`;
+            const variants = styledMaterials.get(material) ?? new Map<string, THREE.Material>();
+            styledMaterials.set(material, variants);
+            const existing = variants.get(style);
+            if (existing) return existing;
+            const copy = material.clone();
+            variants.set(style, copy);
+            if (highlighted.has(id) && "color" in copy && copy.color instanceof THREE.Color)
+              copy.color.set(0xffbf36);
+            if (ghosted.has(id)) {
+              copy.opacity = Math.min(copy.opacity, state.ghost!.opacity);
+              copy.transparent = true;
+              copy.depthWrite = false;
+            }
+            return copy;
+          });
+          object.material = Array.isArray(original) ? copies : copies[0]!;
+          overrides.set(object, { original, copies });
+        });
       entry.object.matrix.copy(entry.base);
       const offset = entry.offset.clone().multiplyScalar(state.explosion);
       entry.object.matrix.elements[12]! += offset.x;
@@ -95,7 +161,15 @@ export const buildCadSceneModel = (
         : visibleBounds
       : fitBounds;
   };
-  return { group, bounds, objects, apply };
+  return {
+    group,
+    bounds,
+    objects,
+    apply,
+    isClipped,
+    clippingPlanes: () => planes,
+    dispose: clearOverrides,
+  };
 };
 export type CadSceneModel = ReturnType<typeof buildCadSceneModel>;
 

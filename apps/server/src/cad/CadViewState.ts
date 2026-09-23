@@ -77,6 +77,24 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
       case "reset-visibility":
         state = { ...state, visibility: {}, isolatedOccurrenceIds: [] };
         break;
+      case "highlight":
+        state = { ...state, highlightedOccurrenceIds: [...new Set(operation.occurrenceIds)] };
+        break;
+      case "ghost":
+        state = {
+          ...state,
+          ghost: {
+            occurrenceIds: [...new Set(operation.occurrenceIds)],
+            opacity: operation.opacity,
+          },
+        };
+        break;
+      case "section":
+        state = { ...state, sectionPlanes: operation.planes };
+        break;
+      case "reset-inspection":
+        state = { ...state, highlightedOccurrenceIds: [], ghost: null, sectionPlanes: [] };
+        break;
       case "explode":
         state = { ...state, explosion: operation.amount };
         break;
@@ -95,6 +113,17 @@ export const rebaseCadView = (state: CadViewState, snapshot: CadSnapshotManifest
   return {
     ...state,
     snapshotId: snapshot.snapshotId,
+    ...(state.highlightedOccurrenceIds
+      ? { highlightedOccurrenceIds: state.highlightedOccurrenceIds.filter((id) => ids.has(id)) }
+      : {}),
+    ...(state.ghost
+      ? {
+          ghost: {
+            ...state.ghost,
+            occurrenceIds: state.ghost.occurrenceIds.filter((id) => ids.has(id)),
+          },
+        }
+      : {}),
     visibility: Object.fromEntries(Object.entries(state.visibility).filter(([id]) => ids.has(id))),
     isolatedOccurrenceIds: state.isolatedOccurrenceIds.filter((id) => ids.has(id)),
     camera: framingLost ? { kind: "preset", preset: "isometric", fit: [] } : state.camera,
