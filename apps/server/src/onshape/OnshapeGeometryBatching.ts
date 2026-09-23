@@ -209,9 +209,10 @@ export function batchOnshapeGeometry(
   const json = new TextEncoder().encode(
     encode({
       ...document,
-      ...(options.doubleSided
+      // glTF forbids empty arrays, so a material-less document keeps no materials key.
+      ...(options.doubleSided && document.materials !== undefined
         ? {
-            materials: objects(document.materials ?? []).map((material) => ({
+            materials: objects(document.materials).map((material) => ({
               ...material,
               doubleSided: true,
             })),
