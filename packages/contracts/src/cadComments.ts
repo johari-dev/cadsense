@@ -56,6 +56,31 @@ export const CadComment = Schema.Struct({
   turnId: TurnId,
 });
 export type CadComment = typeof CadComment.Type;
+/**
+ * Chat record of one `cad_comments_publish` call: the findings that became comments and the
+ * items the server rejected. Replayed publications are omitted because they were already shown.
+ */
+export const CadCommentsPublishedCard = Schema.Struct({
+  published: Schema.Array(
+    Schema.Struct({
+      publicationKey: Schema.String,
+      commentId: CadComment.fields.id,
+      number: CadComment.fields.number,
+      title: CadComment.fields.title,
+      location: Schema.String,
+    }),
+  ),
+  rejected: Schema.Array(
+    Schema.Struct({
+      publicationKey: Schema.String,
+      title: Schema.NullOr(Schema.String),
+      reason: Schema.String,
+    }),
+  ),
+});
+export type CadCommentsPublishedCard = typeof CadCommentsPublishedCard.Type;
+export const CAD_COMMENTS_PUBLISHED_ACTIVITY = "cad.comments.published";
+
 const { modelDescriptor: _modelDescriptor, ...summaryFields } = CadComment.fields;
 export const CadCommentsCatalog = Schema.Struct({
   comments: Schema.Array(Schema.Struct(summaryFields)),

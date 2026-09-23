@@ -13,7 +13,10 @@ import {
   CadCommentReviewInput,
   CadCaptureRecord,
   CadViewState,
+  CAD_COMMENTS_PUBLISHED_ACTIVITY,
   CommandId,
+  EventId,
+  type CadCommentsPublishedCard,
   ProjectId,
   type CadComment,
   type CadCommentReceipt,
@@ -524,6 +527,10 @@ export const make = Effect.gen(function* () {
         placement?: string;
       }[] = [];
       const seen = new Set<string>();
+      // Titles of rejected items, when the agent supplied one, so chat can name what failed.
+      const titles = new Map<string, string>();
+      // Reused findings already appeared in an earlier turn, so chat does not count them as written.
+      const reusedKeys = new Set<string>();
       for (const raw of request.items) {
         const key =
           typeof raw === "object" && raw !== null && "publicationKey" in raw
@@ -532,6 +539,9 @@ export const make = Effect.gen(function* () {
         if (typeof key !== "string") continue;
         if (seen.has(key)) return yield* fail("duplicate-publication-key");
         seen.add(key);
+        const title =
+          typeof raw === "object" && raw !== null && "title" in raw ? raw.title : undefined;
+        if (typeof title === "string" && title.trim()) titles.set(key, title.trim().slice(0, 160));
       }
       for (const raw of request.items) {
         yield* Effect.gen(function* () {
@@ -566,6 +576,7 @@ export const make = Effect.gen(function* () {
             );
             if (!old) return yield* fail("model-equivalence-unverified");
             commentId = old.id;
+            reusedKeys.add(item.publicationKey);
           } else {
             if (
               item.link &&
@@ -709,8 +720,81 @@ export const make = Effect.gen(function* () {
           originalSequence: sequence[0]?.sequence,
         });
       }
+      yield* recordPublication(
+        results.filter((result) => !reusedKeys.has(result.publicationKey)),
+        latest,
+        titles,
+      );
       return { result: { results: delivered, catalogVersion: latest.length } };
     });
+    /** Appends the chat activity for this call. Display only, so failures never fail the tool. */
+    const recordPublication = (
+      results: ReadonlyArray<{
+        publicationKey: string;
+        commentId?: string;
+        reason?: string;
+        replayed?: boolean;
+      }>,
+      latest: readonly CadComment[],
+      titles: ReadonlyMap<string, string>,
+    ) =>
+      Effect.gen(function* () {
+        const card: CadCommentsPublishedCard = {
+          published: results.flatMap((result) => {
+            const comment =
+              result.replayed === false ? latest.find((c) => c.id === result.commentId) : undefined;
+            return comment
+              ? [
+                  {
+                    publicationKey: result.publicationKey,
+                    commentId: comment.id,
+                    number: comment.number,
+                    title: comment.title,
+                    location: comment.targets[0]?.label ?? "",
+                  },
+                ]
+              : [];
+          }),
+          rejected: results.flatMap((result) =>
+            result.reason === undefined
+              ? []
+              : [
+                  {
+                    publicationKey: result.publicationKey,
+                    title: titles.get(result.publicationKey) ?? null,
+                    reason: result.reason,
+                  },
+                ],
+          ),
+        };
+        if (card.published.length === 0 && card.rejected.length === 0) return;
+        const id = uuid();
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        yield* engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(id),
+          threadId,
+          activity: {
+            id: EventId.make(`cad-comments-${id}`),
+            tone: "info",
+            kind: CAD_COMMENTS_PUBLISHED_ACTIVITY,
+            summary:
+              card.published.length === 0
+                ? "Comments not published"
+                : card.published.length === 1
+                  ? "Wrote 1 comment"
+                  : `Wrote ${card.published.length} comments`,
+            payload: card,
+            turnId,
+            createdAt,
+          },
+          createdAt,
+        });
+      }).pipe(
+        Effect.catch(() =>
+          Effect.logWarning("CAD comment chat activity was not recorded", { threadId }),
+        ),
+      );
     return {
       invoke: (name: string, input: unknown) =>
         Effect.suspend((): Effect.Effect<CadCommentDelivery, CadCommentError> => {

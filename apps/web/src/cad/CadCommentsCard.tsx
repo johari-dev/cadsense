@@ -445,7 +445,7 @@ export function CadCommentsCard({
   );
 }
 
-function CommentBadge({ number, reviewed = false }: { number: number; reviewed?: boolean }) {
+export function CommentBadge({ number, reviewed = false }: { number: number; reviewed?: boolean }) {
   return (
     <span
       data-comment-badge
