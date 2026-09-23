@@ -117,7 +117,9 @@ it.effect("tells the agent why a capture or view update failed", () =>
 
     // Render failures are retryable and must not read as CAD being off.
     h.failRenders("busy");
-    assert.equal((yield* failure("cad_capture", { expectedRevision: 0 })).reason, "render-busy");
+    const busy = yield* failure("cad_capture", { expectedRevision: 0 });
+    assert.equal(busy.reason, "render-busy");
+    assert.include(busy.details, "Retry");
     h.failRenders("unavailable");
     assert.equal(
       (yield* failure("cad_capture", { expectedRevision: 0 })).reason,

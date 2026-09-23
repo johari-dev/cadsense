@@ -35,7 +35,7 @@ const descriptions = {
     "An invalid-operation error includes details naming the field or operation to correct; fix it and retry.",
   ].join(" "),
   cad_capture:
-    "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-busy and render-interrupted are temporary: retry the same capture. render-unavailable means no open Cadsense window can render right now; ask the user to keep Cadsense open instead of saying CAD is unavailable.",
+    "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-* errors are rendering failures, not CAD being off: follow their details to recover.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
