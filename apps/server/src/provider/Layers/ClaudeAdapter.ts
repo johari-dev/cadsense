@@ -1214,14 +1214,21 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   return `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
-function titleForTool(itemType: CanonicalItemType): string {
+/**
+ * MCP titles name the server and tool (`cadsense_cad · cad_capture`), matching Codex, so clients
+ * can recognize specific tools instead of seeing a generic "MCP tool call".
+ */
+function titleForTool(itemType: CanonicalItemType, toolName: string): string {
   switch (itemType) {
     case "command_execution":
       return "Command run";
     case "file_change":
       return "File change";
-    case "mcp_tool_call":
-      return "MCP tool call";
+    case "mcp_tool_call": {
+      const [prefix, server, ...rest] = toolName.split("__");
+      const tool = rest.join("__");
+      return prefix === "mcp" && server && tool ? `${server} · ${tool}` : "MCP tool call";
+    }
     case "collab_agent_tool_call":
       return "Subagent task";
     case "web_search":
@@ -2690,7 +2697,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         itemId,
         itemType,
         toolName,
-        title: titleForTool(itemType),
+        title: titleForTool(itemType, toolName),
         detail,
         input: toolInput,
         partialInputJson: "",

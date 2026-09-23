@@ -4,16 +4,33 @@ import type { TimelineEntry } from "../../session-logic";
 import {
   deriveMessagesTimelineRows,
   computeMessageDurationStart,
+  knownToolActionLabel,
   normalizeCompactToolLabel,
   timelineShowsCadActivity,
   resolveAssistantMessageCopyState,
   shouldPreserveAssistantLineBreaks,
 } from "./MessagesTimeline.logic";
 
+it("labels CAD tools the same way for every provider title format", () => {
+  for (const title of [
+    "cad_capture",
+    "cadsense_cad · cad_capture",
+    "mcp__cadsense_cad__cad_capture",
+  ])
+    expect(knownToolActionLabel(title)).toBe("Looking at CAD");
+  expect(knownToolActionLabel("MCP tool call")).toBeUndefined();
+});
+
 it("keeps CAD activity tied to the live chat row, including completed tool gaps", () => {
   const turnId = TurnId.make("cad-turn");
   const createdAt = "2026-09-07T00:00:00Z";
-  for (const toolTitle of ["cad_capture", "cad_comments_publish", "mcp__cad__cad_update_view"]) {
+  // Codex dynamic tools, prefixed MCP names, and Claude's `server · tool` MCP titles.
+  for (const toolTitle of [
+    "cad_capture",
+    "cad_comments_publish",
+    "mcp__cad__cad_update_view",
+    "cadsense_cad · cad_capture",
+  ]) {
     for (const toolLifecycleStatus of ["inProgress", "completed"] as const) {
       const timelineEntries: TimelineEntry[] = [
         {
