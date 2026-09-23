@@ -57,7 +57,7 @@ export const make = Effect.gen(function* () {
         byteLength: rendered.png.byteLength,
         createdAt,
       },
-      summary: "CAD view captured.",
+      summary: `Captured view revision ${input.state.revision} as a ${CAD_CAPTURE_SIZE.width}x${CAD_CAPTURE_SIZE.height} PNG. Use this captureId and image pixel coordinates with cad_comment_locate.`,
     };
     // Once file publication starts, wait for the durable record receipt before returning or cancelling.
     yield* Effect.uninterruptible(

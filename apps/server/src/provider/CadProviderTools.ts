@@ -1,4 +1,10 @@
-import { CAD_TOOL_INPUTS, CadViewError, type ThreadId, type TurnId } from "@cadsense/contracts";
+import {
+  CAD_CAPTURE_SIZE,
+  CAD_TOOL_INPUTS,
+  CadViewError,
+  type ThreadId,
+  type TurnId,
+} from "@cadsense/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -11,8 +17,7 @@ import { CadViewing, type CadAgentTools } from "../cad/CadViewing.ts";
 const descriptions = {
   cad_comments_list:
     "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them.",
-  cad_comment_locate:
-    'Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (1280 by 960), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.',
+  cad_comment_locate: `Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height}), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.`,
   cad_comment_inspect:
     "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use whole-part fallback only after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
   cad_comments_publish: [
@@ -36,6 +41,13 @@ const descriptions = {
   cad_capture:
     "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
+
+/** Tools that change no view, comment, or evidence state. MCP clients receive this as readOnlyHint. */
+export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD_TOOL_INPUTS>([
+  "cad_comments_list",
+  "cad_context",
+  "cad_hierarchy",
+]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
   const document = Schema.toJsonSchemaDocument(schema);
