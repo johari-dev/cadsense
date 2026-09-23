@@ -104,46 +104,6 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
-it.effect("tells the agent why a capture or view update failed", () =>
-  Effect.gen(function* () {
-    const h = yield* harness();
-    const tools = yield* makeCadProviderTools(threadId).pipe(
-      Effect.provideService(CadViewing, h.service),
-    );
-    const turnId = TurnId.make("tool-errors");
-    const failure = (name: string, input: unknown) =>
-      tools.invoke(null, turnId, name, input).pipe(Effect.flip);
-    yield* tools.invoke(null, turnId, "cad_context", {});
-
-    // Render failures are retryable and must not read as CAD being off.
-    h.failRenders("busy");
-    const busy = yield* failure("cad_capture", { expectedRevision: 0 });
-    assert.equal(busy.reason, "render-busy");
-    assert.include(busy.details, "Retry");
-    h.failRenders("unavailable");
-    assert.equal(
-      (yield* failure("cad_capture", { expectedRevision: 0 })).reason,
-      "render-unavailable",
-    );
-    h.failRenders(null);
-    yield* tools.invoke(null, turnId, "cad_capture", { expectedRevision: 0 });
-
-    const malformed = yield* failure("cad_update_view", {
-      expectedRevision: 0,
-      operations: [{ type: "camera-pose" }],
-    });
-    assert.equal(malformed.reason, "invalid-operation");
-    assert.include(malformed.details, "pose");
-    const unknown = yield* failure("cad_update_view", {
-      expectedRevision: 0,
-      operations: [{ type: "hide", occurrenceIds: ["f".repeat(64)] }],
-    });
-    assert.equal(unknown.reason, "invalid-operation");
-    assert.include(unknown.details, "operations[0]");
-    yield* tools.end(null, turnId);
-  }).pipe(Effect.scoped, Effect.provide(dependencies)),
-);
-
 it.effect("cancels a native in-flight capture before releasing its snapshot pin", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();
@@ -642,6 +602,46 @@ it.effect("keeps native descendant rendering alive until the thread becomes quie
     yield* releaseCompletedCadRuns(threadId).pipe(Effect.provideService(CadRenderBroker, broker));
     assert.equal((yield* Fiber.join(capture)).reason, "interrupted");
     assert.deepEqual(yield* broker.runsForThread(threadId), []);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("tells the agent why a capture or view update failed", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("tool-errors");
+    const failure = (name: string, input: unknown) =>
+      tools.invoke(null, turnId, name, input).pipe(Effect.flip);
+    yield* tools.invoke(null, turnId, "cad_context", {});
+
+    // Render failures are retryable and must not read as CAD being off.
+    h.failRenders("busy");
+    const busy = yield* failure("cad_capture", { expectedRevision: 0 });
+    assert.equal(busy.reason, "render-busy");
+    assert.include(busy.details, "Retry");
+    h.failRenders("unavailable");
+    assert.equal(
+      (yield* failure("cad_capture", { expectedRevision: 0 })).reason,
+      "render-unavailable",
+    );
+    h.failRenders(null);
+    yield* tools.invoke(null, turnId, "cad_capture", { expectedRevision: 0 });
+
+    const malformed = yield* failure("cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "camera-pose" }],
+    });
+    assert.equal(malformed.reason, "invalid-operation");
+    assert.include(malformed.details, "pose");
+    const unknown = yield* failure("cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "hide", occurrenceIds: ["f".repeat(64)] }],
+    });
+    assert.equal(unknown.reason, "invalid-operation");
+    assert.include(unknown.details, "operations[0]");
+    yield* tools.end(null, turnId);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
