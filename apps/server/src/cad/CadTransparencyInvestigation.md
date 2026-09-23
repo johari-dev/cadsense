@@ -27,6 +27,11 @@ temporary `transparentOccurrences` set was empty, so this is authored appearance
 
 ## Import behavior
 
+September 22 update: assembly imports first request appearance through one expanded
+BOM. Only unresolved sources use the studio reads described below. The
+[request experiment report](../onshape/OnshapeRequestExperiments.md) documents the
+nine-request live import and its geometry comparisons.
+
 Previously, bulk assembly imports set appearance metadata to null. The browser
 preserved transparency embedded in geometry but did not apply metadata opacity.
 An opaque export therefore stayed opaque, even when metadata was available.

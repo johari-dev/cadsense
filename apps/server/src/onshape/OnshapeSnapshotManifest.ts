@@ -52,15 +52,18 @@ const Occurrence = Schema.Struct({
   transform: CadTransform,
   hidden: Schema.Boolean,
 });
+export const OnshapeAssemblyPart = Schema.Struct({
+  ...Reference,
+  partId: Text,
+  bodyType: Schema.optionalKey(Text),
+});
 const Definition = Schema.Struct({
   rootAssembly: Schema.Struct({
     ...Assembly.fields,
     occurrences: Schema.Array(Occurrence).check(Schema.isMaxLength(100_000)),
   }),
   subAssemblies: Schema.Array(Assembly).check(Schema.isMaxLength(10_000)),
-  parts: Schema.Array(
-    Schema.Struct({ ...Reference, partId: Text, bodyType: Schema.optionalKey(Text) }),
-  ).check(Schema.isMaxLength(100_000)),
+  parts: Schema.Array(OnshapeAssemblyPart).check(Schema.isMaxLength(100_000)),
 });
 const Metadata = Schema.Array(
   Schema.Struct({

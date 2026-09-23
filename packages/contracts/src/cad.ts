@@ -86,8 +86,9 @@ export const CadPartMaterial = Schema.Struct({
 export const CadPartMetadata = Schema.Struct({
   name: Text,
   bodyType: Text,
-  isHidden: Schema.Boolean,
-  isMesh: Schema.Boolean,
+  // Assembly-wide metadata omits these Part Studio flags. Occurrences own assembly visibility.
+  isHidden: Schema.NullOr(Schema.Boolean),
+  isMesh: Schema.NullOr(Schema.Boolean),
   partIdentity: Schema.NullOr(Text),
   configurationId: Schema.NullOr(Text),
   appearance: Schema.NullOr(CadPartAppearance),
