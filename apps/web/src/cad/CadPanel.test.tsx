@@ -28,6 +28,7 @@ const boundary = vi.hoisted(() => ({
   mount: vi.fn(),
   panelState: null as unknown,
   commentState: null as unknown,
+  threads: [] as unknown[],
 }));
 vi.mock("react", async (original) => {
   const actual = await original<typeof import("react")>();
@@ -65,7 +66,7 @@ vi.mock("../state/cadPanel", () => ({
   cadPanelEnvironment: { scene: () => "scene", watch: () => "watch", comments: () => "comments" },
 }));
 vi.mock("../state/environments", () => ({ useEnvironmentHttpBaseUrl: () => "http://localhost/" }));
-vi.mock("../state/entities", () => ({ useThreadShells: () => [] }));
+vi.mock("../state/entities", () => ({ useThreadShells: () => boundary.threads }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
 vi.mock("../hooks/useResizableWidth", () => ({ useResizableWidth: () => ({ cancelResize() {} }) }));
 vi.mock("./CadVisibleViewer", () => ({ cadVisibleViewer: boundary }));
@@ -97,6 +98,7 @@ afterEach(() => {
   hooks.reset();
   boundary.effects.length = 0;
   boundary.commentsManifest = null;
+  boundary.threads = [];
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   useCadCommentReviewStore.setState({ pending: {}, sessions: {}, sessionOrder: [] });
@@ -472,4 +474,44 @@ it("returns to a newer current snapshot if CAD changed while the historical pane
   expect(restored.view.snapshotId).toBe("new-current");
   expect(restored.framing).toBeNull();
   expect(restored.commentsCard.historical).toBe(false);
+});
+
+const runningShell = (id: string, title: string, turnId: string) => ({
+  environmentId: "test",
+  id,
+  projectId: "project",
+  title,
+  latestTurn: { turnId, state: "running" },
+  session: null,
+});
+
+it("keeps this chat's viewer undimmed and explained between CAD tool calls in one run", () => {
+  const { render, current } = reviewHarness();
+  boundary.threads = [runningShell("thread", "This chat", "turn-1")];
+  boundary.panelState = AsyncResult.success({
+    view: current,
+    userRevision: 1,
+    agentControlling: false,
+    agentActivityTurnId: "turn-1",
+    captureId: null,
+  });
+  const scene = render();
+  expect(scene.disabled).toBe(true);
+  expect(scene.cadDimmed).toBe(false);
+  expect(scene.lockStatus).toEqual({
+    message: "Agent is looking at CAD. Controls unlock when the run ends.",
+    agent: true,
+  });
+});
+
+it("grays out the viewer and names the other chat while it runs", () => {
+  const { render } = reviewHarness();
+  boundary.threads = [runningShell("other", "Gearbox review", "turn-9")];
+  const scene = render();
+  expect(scene.disabled).toBe(true);
+  expect(scene.cadDimmed).toBe(true);
+  expect(scene.lockStatus).toEqual({
+    message: 'Locked while "Gearbox review" runs.',
+    agent: false,
+  });
 });
