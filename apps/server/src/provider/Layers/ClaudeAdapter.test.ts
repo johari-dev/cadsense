@@ -1488,6 +1488,98 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("keeps CAD comment render images out of tool events", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "review", attachments: [] });
+      // Locate and inspect return renders just like cad_capture does.
+      for (const [index, tool] of ["cad_comment_locate", "cad_comment_inspect"].entries()) {
+        harness.query.emit({
+          type: "stream_event",
+          session_id: "sdk-session-cad-images",
+          uuid: `start-${tool}`,
+          parent_tool_use_id: null,
+          event: {
+            type: "content_block_start",
+            index,
+            content_block: {
+              type: "tool_use",
+              id: `tool-${tool}`,
+              name: `mcp__cadsense_cad__${tool}`,
+              input: { captureId: "capture" },
+            },
+          },
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "stream_event",
+          session_id: "sdk-session-cad-images",
+          uuid: `stop-${tool}`,
+          parent_tool_use_id: null,
+          event: { type: "content_block_stop", index },
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "user",
+          session_id: "sdk-session-cad-images",
+          uuid: `result-${tool}`,
+          parent_tool_use_id: null,
+          tool_use_result: { image: "native-render-bytes" },
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: `tool-${tool}`,
+                content: [
+                  { type: "text", text: `${tool} metadata` },
+                  {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: "image/png",
+                      data: "native-render-bytes",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        } as unknown as SDKMessage);
+      }
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-cad-images",
+        uuid: "result-cad-images",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const completed = runtimeEvents.filter((event) => event.type === "item.completed");
+      assert.equal(completed.length, 2);
+      const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
+        runtimeEvents,
+      );
+      assert.include(serialized, "cad_comment_locate metadata");
+      assert.include(serialized, "cad_comment_inspect metadata");
+      assert.notInclude(serialized, "native-render-bytes");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("falls back to a default plan step label for blank TodoWrite content", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
