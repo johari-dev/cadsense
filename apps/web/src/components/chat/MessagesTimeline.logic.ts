@@ -9,7 +9,13 @@ import {
   type WorkLogEntry,
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan } from "../../types";
-import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@cadsense/contracts";
+import {
+  type CadCaptureCard,
+  type CadCommentsPublishedCard,
+  type MessageId,
+  type OrchestrationLatestTurn,
+  type TurnId,
+} from "@cadsense/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
@@ -179,6 +185,20 @@ export type TimelineLatestTurn = Pick<
 
 export type MessagesTimelineRow =
   | {
+      /** Thumbnails of the captures one CAD tool group recorded, in capture order. */
+      kind: "cad-filmstrip";
+      id: string;
+      createdAt: string;
+      captures: CadCaptureCard[];
+    }
+  | {
+      /** Every comment a turn published, merged into one row that stays visible when the turn folds. */
+      kind: "cad-comments";
+      id: string;
+      createdAt: string;
+      card: CadCommentsPublishedCard;
+    }
+  | {
       kind: "work";
       id: string;
       createdAt: string;
@@ -277,18 +297,42 @@ const toolActionLabels: Readonly<Record<string, string>> = {
   cad_hierarchy: "Exploring CAD structure",
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",
+  cad_comments_list: "Reading CAD comments",
+  cad_comment_locate: "Placing comment markers",
+  cad_comment_inspect: "Checking comment markers",
   cad_comments_publish: "Publishing comments",
 };
 
-export function knownToolActionLabel(value: string): string | undefined {
-  const label = normalizeCompactToolLabel(value);
-  // Providers can qualify names as `server · tool`, `namespace.tool`, or `mcp__server__tool`.
-  const toolName =
-    label
+/** Providers qualify tool names as `server · tool`, `namespace.tool`, or `mcp__server__tool`. */
+function providerToolName(value: string): string {
+  return (
+    normalizeCompactToolLabel(value)
       .split(/\s*·\s*|\.|__/u)
       .at(-1)
-      ?.toLowerCase() ?? "";
+      ?.toLowerCase() ?? ""
+  );
+}
+
+export function knownToolActionLabel(value: string): string | undefined {
+  const toolName = providerToolName(value);
   return Object.hasOwn(toolActionLabels, toolName) ? toolActionLabels[toolName] : undefined;
+}
+
+/** CAD tool calls and the captures they record. Chat summarizes these as "Checked CAD". */
+export function workEntryIsCadStep(entry: WorkLogEntry): boolean {
+  return (
+    entry.cadCapture !== undefined ||
+    (workLogEntryIsToolLike(entry) &&
+      providerToolName(entry.toolTitle ?? entry.label).startsWith("cad_"))
+  );
+}
+
+/** Captures stay in the tool group that produced them instead of splitting it. */
+function workEntryJoinsToolGroup(entry: WorkLogEntry): boolean {
+  return (
+    entry.cadCapture !== undefined ||
+    (workLogEntryIsToolLike(entry) && entry.agentSpawn === undefined && entry.tone !== "error")
+  );
 }
 
 export function formatToolActionLabel(value: string): string {
@@ -311,7 +355,7 @@ export function timelineShowsCadActivity(rows: readonly MessagesTimelineRow[]): 
   });
 }
 
-type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other";
+type ToolGroupAction = "cad" | "read" | "edit" | "command" | "code-search" | "search" | "other";
 type ToolGroupSummaryKind = ToolGroupAction | "dynamic-tool" | "agent-tool" | "tone-tool" | "mixed";
 
 export function workLogEntryIsLocalCodeSearch(entry: WorkLogEntry): boolean {
@@ -322,6 +366,7 @@ export function workLogEntryIsLocalCodeSearch(entry: WorkLogEntry): boolean {
 }
 
 export function toolGroupAction(entry: WorkLogEntry): ToolGroupAction {
+  if (workEntryIsCadStep(entry)) return "cad";
   if (
     entry.requestKind === "file-read" ||
     entry.itemType === "image_view" ||
@@ -348,6 +393,8 @@ function toolGroupActionCount(
   action: ToolGroupAction,
   entries: ReadonlyArray<WorkLogEntry>,
 ): number {
+  // CAD groups count the views the agent captured, not individual tool calls.
+  if (action === "cad") return entries.filter((entry) => entry.cadCapture !== undefined).length;
   if (action !== "edit") return entries.length;
 
   const changedFiles = new Set<string>();
@@ -364,6 +411,10 @@ function toolGroupActionCount(
 
 function toolGroupActionLabel(action: ToolGroupAction, count: number): string {
   switch (action) {
+    case "cad":
+      return count === 0
+        ? "Checked CAD"
+        : `Checked CAD in ${count} ${count === 1 ? "view" : "views"}`;
     case "read":
       return `Read ${count} ${count === 1 ? "file" : "files"}`;
     case "edit":
@@ -454,6 +505,41 @@ function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): ToolGroupSu
     }),
   );
   return fallbackKinds.size === 1 ? fallbackKinds.values().next().value! : "mixed";
+}
+
+/**
+ * Merges each turn's comment publications into the turn's last publication entry, keyed by that
+ * timeline entry id. Agents publish incrementally and retry rejected findings, so a rejection is
+ * dropped once the same turn publishes its key or title.
+ */
+function mergeCadCommentCards(
+  entries: ReadonlyArray<TimelineEntry>,
+): ReadonlyMap<string, CadCommentsPublishedCard> {
+  const turns = new Map<string, Array<{ id: string; card: CadCommentsPublishedCard }>>();
+  for (const entry of entries) {
+    if (entry.kind !== "work" || entry.entry.cadComments === undefined) continue;
+    const key = entry.entry.turnId ?? entry.id;
+    turns.set(key, [...(turns.get(key) ?? []), { id: entry.id, card: entry.entry.cadComments }]);
+  }
+  const merged = new Map<string, CadCommentsPublishedCard>();
+  for (const publications of turns.values()) {
+    const published = [
+      ...new Map(
+        publications.flatMap(({ card }) => card.published).map((c) => [c.commentId, c]),
+      ).values(),
+    ];
+    const resolved = new Set(published.flatMap((c) => [c.publicationKey, c.title]));
+    const rejected = [
+      ...new Map(
+        publications.flatMap(({ card }) => card.rejected).map((r) => [r.publicationKey, r]),
+      ).values(),
+    ].filter(
+      (r) => !resolved.has(r.publicationKey) && (r.title === null || !resolved.has(r.title)),
+    );
+    if (published.length > 0 || rejected.length > 0)
+      merged.set(publications.at(-1)!.id, { published, rejected });
+  }
+  return merged;
 }
 
 function workGroupIdentity(timelineEntryId: string, entry: WorkLogEntry): string {
@@ -645,6 +731,10 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
         continue;
       }
+      // Published comments are the result of a CAD review, so they stay visible too.
+      if (entry.kind === "work" && entry.entry.cadComments !== undefined) {
+        continue;
+      }
       hiddenEntryIds.add(entry.id);
     }
     if (hiddenEntryIds.size === 0) {
@@ -777,13 +867,12 @@ export function deriveMessagesTimelineRows(input: {
       entry.kind !== "work" ||
       entry.entry.agentSpawn !== undefined ||
       entry.entry.tone === "error" ||
-      !workLogEntryIsToolLike(entry.entry)
+      !workEntryJoinsToolGroup(entry.entry)
     ) {
       break;
     }
     activeToolEntries.unshift(entry);
   }
-  const activeWorkEntryIds = new Set(activeToolEntries.map((entry) => entry.id));
   const visibleActiveToolEntries = omitSupersededLifecycleMarkers(
     activeToolEntries.filter((entry) => isVisibleActiveToolEntry(entry.entry)),
     (entry) => entry.entry,
@@ -806,6 +895,15 @@ export function deriveMessagesTimelineRows(input: {
           };
         })()
       : null;
+  // Captures only belong to the live row when it renders; otherwise their own group shows them.
+  const activeWorkEntryIds = new Set(
+    activeToolEntries
+      .filter((entry) => activeWorkRow !== null || entry.entry.cadCapture === undefined)
+      .map((entry) => entry.id),
+  );
+  const activeCaptures = activeToolEntries.flatMap((entry) =>
+    entry.entry.cadCapture ? [entry.entry.cadCapture] : [],
+  );
   const appendWorkingRow = () => {
     nextRows.push({
       kind: "working",
@@ -817,6 +915,13 @@ export function deriveMessagesTimelineRows(input: {
   const appendActiveWorkRows = () => {
     if (activeWorkRow === null) return;
     nextRows.push(activeWorkRow);
+    if (activeCaptures.length > 0)
+      nextRows.push({
+        kind: "cad-filmstrip",
+        id: `cad-filmstrip:${activeWorkRow.id}`,
+        createdAt: activeWorkRow.createdAt,
+        captures: activeCaptures,
+      });
     if (!activeWorkRow.expanded) return;
     for (const [entryIndex, workEntry] of activeWorkRow.groupedEntries.entries()) {
       nextRows.push({
@@ -829,6 +934,8 @@ export function deriveMessagesTimelineRows(input: {
       });
     }
   };
+
+  const cadCommentRows = mergeCadCommentCards(input.timelineEntries);
 
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
@@ -864,14 +971,38 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "work" && timelineEntry.entry.cadComments !== undefined) {
+      const card = cadCommentRows.get(timelineEntry.id);
+      if (card)
+        nextRows.push({
+          kind: "cad-comments",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          card,
+        });
+      continue;
+    }
+
     if (timelineEntry.kind === "work") {
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
       while (cursor < input.timelineEntries.length) {
         const nextEntry = input.timelineEntries[cursor];
+        // A publication merged into a later comments row renders nothing, so it must not split
+        // the tool group around it. The row that shows the merged comments ends the group.
+        if (
+          nextEntry?.kind === "work" &&
+          nextEntry.entry.cadComments !== undefined &&
+          !cadCommentRows.has(nextEntry.id) &&
+          !collapsedEntryIds.has(nextEntry.id)
+        ) {
+          cursor += 1;
+          continue;
+        }
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
+          nextEntry.entry.cadComments !== undefined ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
@@ -887,14 +1018,25 @@ export function deriveMessagesTimelineRows(input: {
         ),
         (entry) => entry,
       );
-      if (visibleGroupedEntries.length > 0) {
-        const onlyToolEntries = visibleGroupedEntries.every(
-          (entry) =>
-            workLogEntryIsToolLike(entry) &&
-            entry.agentSpawn === undefined &&
-            entry.tone !== "error",
-        );
-        const activeInProgressToolEntries = visibleGroupedEntries.filter(workEntryIsInActiveRun);
+      // Captures render once, as a filmstrip under their group, instead of as rows inside it.
+      const captures = visibleGroupedEntries.flatMap((entry) =>
+        entry.cadCapture ? [entry.cadCapture] : [],
+      );
+      const steps = visibleGroupedEntries.filter((entry) => entry.cadCapture === undefined);
+      const pushFilmstrip = () => {
+        if (captures.length > 0)
+          nextRows.push({
+            kind: "cad-filmstrip",
+            id: `cad-filmstrip:${timelineEntry.id}`,
+            createdAt: timelineEntry.createdAt,
+            captures,
+          });
+      };
+      if (steps.length === 0) {
+        pushFilmstrip();
+      } else {
+        const onlyToolEntries = visibleGroupedEntries.every(workEntryJoinsToolGroup);
+        const activeInProgressToolEntries = steps.filter(workEntryIsInActiveRun);
         if (onlyToolEntries && activeInProgressToolEntries.length > 0) {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
           const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
@@ -904,19 +1046,20 @@ export function deriveMessagesTimelineRows(input: {
             id: `work-live:${workGroupIdentity(timelineEntry.id, timelineEntry.entry)}`,
             createdAt: timelineEntry.createdAt,
             entry: latestActiveToolEntry,
-            groupedEntries: visibleGroupedEntries,
+            groupedEntries: steps,
             groupId,
             expanded,
           });
+          pushFilmstrip();
           if (expanded) {
-            for (const [entryIndex, workEntry] of visibleGroupedEntries.entries()) {
+            for (const [entryIndex, workEntry] of steps.entries()) {
               nextRows.push({
                 kind: "work",
                 id: workEntry.id,
                 createdAt: workEntry.createdAt,
                 groupedEntries: [workEntry],
                 isExpandedToolGroupEntry: true,
-                isLastExpandedToolGroupEntry: entryIndex === visibleGroupedEntries.length - 1,
+                isLastExpandedToolGroupEntry: entryIndex === steps.length - 1,
               });
             }
           }
@@ -929,34 +1072,36 @@ export function deriveMessagesTimelineRows(input: {
             id: `work-toggle:${timelineEntry.id}`,
             createdAt: timelineEntry.createdAt,
             groupId,
-            hiddenCount: visibleGroupedEntries.length,
+            hiddenCount: steps.length,
             expanded,
             onlyToolEntries: true,
             summary: summarizeToolGroup(visibleGroupedEntries),
             summaryKind,
-            hasFailure: workEntryDisplayIndicatesToolFailure(visibleGroupedEntries.at(-1)!),
+            hasFailure: workEntryDisplayIndicatesToolFailure(steps.at(-1)!),
           });
+          pushFilmstrip();
           if (expanded) {
-            for (const [entryIndex, workEntry] of visibleGroupedEntries.entries()) {
+            for (const [entryIndex, workEntry] of steps.entries()) {
               nextRows.push({
                 kind: "work",
                 id: workEntry.id,
                 createdAt: workEntry.createdAt,
                 groupedEntries: [workEntry],
                 isExpandedToolGroupEntry: true,
-                isLastExpandedToolGroupEntry: entryIndex === visibleGroupedEntries.length - 1,
+                isLastExpandedToolGroupEntry: entryIndex === steps.length - 1,
               });
             }
           }
-        } else if (visibleGroupedEntries.length <= MAX_VISIBLE_WORK_LOG_ENTRIES) {
+        } else if (steps.length <= MAX_VISIBLE_WORK_LOG_ENTRIES) {
           nextRows.push({
             kind: "work",
             id: timelineEntry.id,
             createdAt: timelineEntry.createdAt,
-            groupedEntries: visibleGroupedEntries,
+            groupedEntries: steps,
             isExpandedToolGroupEntry: false,
             isLastExpandedToolGroupEntry: false,
           });
+          pushFilmstrip();
         } else {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
           const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
@@ -966,18 +1111,13 @@ export function deriveMessagesTimelineRows(input: {
           // chronological order in both collapsed and expanded states
           // (review finding: concatenating two filtered lists moved a
           // mid-group spawn row above earlier tool rows).
-          const overflowCandidates = visibleGroupedEntries.filter(
-            (entry) => entry.agentSpawn === undefined && entry.cadCapture === undefined,
-          );
+          const overflowCandidates = steps.filter((entry) => entry.agentSpawn === undefined);
           const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
           const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
-          const visibleEntries = visibleGroupedEntries.filter(
-            (entry) =>
-              entry.agentSpawn !== undefined ||
-              entry.cadCapture !== undefined ||
-              !hiddenIds.has(entry.id),
+          const visibleEntries = steps.filter(
+            (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
           );
-          const renderedEntries = expanded ? visibleGroupedEntries : visibleEntries;
+          const renderedEntries = expanded ? steps : visibleEntries;
 
           for (const workEntry of renderedEntries) {
             nextRows.push({
@@ -991,7 +1131,7 @@ export function deriveMessagesTimelineRows(input: {
           }
 
           if (hiddenEntries.length > 0) {
-            const latestToolEntry = visibleGroupedEntries.findLast(workLogEntryIsToolLike);
+            const latestToolEntry = steps.findLast(workLogEntryIsToolLike);
 
             nextRows.push({
               kind: "work-toggle",
@@ -1009,6 +1149,7 @@ export function deriveMessagesTimelineRows(input: {
                 hiddenEntries.some(workEntryDisplayIndicatesToolFailure),
             });
           }
+          pushFilmstrip();
         }
       }
       index = cursor - 1;
@@ -1095,6 +1236,18 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
+    case "cad-filmstrip": {
+      const bf = b as typeof a;
+      return (
+        a.createdAt === bf.createdAt &&
+        a.captures.length === bf.captures.length &&
+        a.captures.every((capture, index) => capture.captureId === bf.captures[index]?.captureId)
+      );
+    }
+
+    case "cad-comments":
+      return Equal.equals(a.card, (b as typeof a).card);
+
     case "working":
       return (
         a.createdAt === (b as typeof a).createdAt && a.showThinking === (b as typeof a).showThinking

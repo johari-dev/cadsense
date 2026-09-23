@@ -5,6 +5,8 @@ import {
 } from "../onshape/OnshapeSnapshotManifest.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CAD_COMMENTS_PUBLISHED_ACTIVITY,
+  CadCommentsPublishedCard,
   CadSnapshotManifest,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -49,6 +51,7 @@ const decodeReasons = Schema.decodeUnknownEffect(
     results: Schema.Array(Schema.Struct({ reason: Schema.String })),
   }),
 );
+const decodePublishedCard = Schema.decodeUnknownEffect(CadCommentsPublishedCard);
 const decodePublicationFailure = Schema.decodeUnknownEffect(
   Schema.Struct({
     results: Schema.Array(Schema.Struct({ reason: Schema.String, details: Schema.String })),
@@ -363,6 +366,48 @@ it.effect("explains malformed publication fields so an agent can correct and ret
       items: [{ ...makeFinding(h.snapshot), publicationKey: "missing-screws-top-flange" }],
     });
     assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 1);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect("records each publication in chat, including rejected findings, but not replays", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const turnId = TurnId.make("turn");
+    const a = yield* h.service.activate(threadId, "test", turnId);
+    const request = {
+      expectedCatalogVersion: 0,
+      items: [
+        makeFinding(h.snapshot),
+        { publicationKey: "malformed", title: "Loose cable", body: "No targets." },
+      ],
+    };
+    yield* a.invoke("cad_comments_publish", request);
+    // Retrying the same keys replays the receipt and must not add a second chat row.
+    yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 1,
+      items: [makeFinding(h.snapshot)],
+    });
+    const thread = yield* h.query.getThreadDetailById(threadId);
+    assert.equal(thread._tag, "Some");
+    if (thread._tag !== "Some") return;
+    const cards = thread.value.activities.filter(
+      (activity) => activity.kind === CAD_COMMENTS_PUBLISHED_ACTIVITY,
+    );
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.turnId, turnId);
+    assert.equal(cards[0]?.summary, "Wrote 1 comment");
+    const comment = (yield* h.query.getCommandReadModel()).cadComments![0]!;
+    assert.deepEqual(yield* decodePublishedCard(cards[0]?.payload), {
+      published: [
+        {
+          publicationKey: "missing-fastener",
+          commentId: comment.id,
+          number: 1,
+          title: "Check this fastener",
+          location: "Intake",
+        },
+      ],
+      rejected: [{ publicationKey: "malformed", title: "Loose cable", reason: "invalid-input" }],
+    });
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 it.effect(
