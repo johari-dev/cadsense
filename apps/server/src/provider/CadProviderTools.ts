@@ -30,7 +30,7 @@ const descriptions = {
   cad_context:
     "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
-    "Read a bounded page of the selected CAD component tree with occurrence visibility.",
+    "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
