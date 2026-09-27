@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CommandId, IsoDateTime, ThreadId, TurnId } from "./baseSchemas.ts";
@@ -14,6 +15,24 @@ export const CadCommentPoint = Schema.Tuple([
   Schema.Number.check(Schema.isFinite()),
 ]);
 export const CadCommentState = Schema.Literals(["open", "resolved", "dismissed"]);
+/** Ordered from most to least consequential for the mechanism; the card sorts open findings by it. */
+export const CAD_COMMENT_SEVERITIES = ["blocker", "concern", "question", "nit"] as const;
+export const CadCommentSeverity = Schema.Literals(CAD_COMMENT_SEVERITIES);
+export type CadCommentSeverity = typeof CadCommentSeverity.Type;
+/** The lifecycle stage a finding belongs to, for filtering and counting across reviews. */
+export const CadCommentCategory = Schema.Literals([
+  "interference",
+  "access",
+  "assembly",
+  "wiring",
+  "structure",
+  "manufacturing",
+  "other",
+]);
+export type CadCommentCategory = typeof CadCommentCategory.Type;
+/** Comments and chat cards written before these labels existed decode as null and show no label. */
+const legacyNull = <S extends Schema.Top>(schema: S) =>
+  Schema.NullOr(schema).pipe(Schema.withDecodingDefault(Effect.succeed(null)));
 export const CadCommentTarget = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("point"),
@@ -47,6 +66,8 @@ export const CadComment = Schema.Struct({
   modelDescriptor: Schema.String,
   title: text(160),
   body: text(4000),
+  severity: legacyNull(CadCommentSeverity),
+  category: legacyNull(CadCommentCategory),
   targets: Schema.Array(CadCommentTarget).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   link: Schema.NullOr(CadCommentLink),
   state: CadCommentState,
@@ -67,6 +88,8 @@ export const CadCommentsPublishedCard = Schema.Struct({
       commentId: CadComment.fields.id,
       number: CadComment.fields.number,
       title: CadComment.fields.title,
+      severity: CadComment.fields.severity,
+      category: CadComment.fields.category,
       location: Schema.String,
     }),
   ),
@@ -100,6 +123,8 @@ export const CadCommentPublication = Schema.Union([
     inspectedSnapshotId: CadSnapshotId,
     title: text(160),
     body: text(4000),
+    severity: CadCommentSeverity,
+    category: CadCommentCategory,
     targets: Schema.Array(
       Schema.Union([
         Schema.Struct({

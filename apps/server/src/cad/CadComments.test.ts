@@ -6,6 +6,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
+  CadCommentsListResult,
   CadCommentsPublishedCard,
   CadSnapshotManifest,
   CommandId,
@@ -29,6 +30,7 @@ import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
+import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
@@ -52,6 +54,7 @@ const decodeReasons = Schema.decodeUnknownEffect(
   }),
 );
 const decodePublishedCard = Schema.decodeUnknownEffect(CadCommentsPublishedCard);
+const decodeListing = Schema.decodeUnknownEffect(CadCommentsListResult);
 const decodePublicationFailure = Schema.decodeUnknownEffect(
   Schema.Struct({
     results: Schema.Array(Schema.Struct({ reason: Schema.String, details: Schema.String })),
@@ -302,6 +305,8 @@ const makeFinding = (snapshot: CadSnapshotManifest) => ({
   inspectedSnapshotId: snapshot.snapshotId,
   title: "Check this fastener",
   body: "The inspected attachment appears empty.",
+  severity: "concern",
+  category: "assembly",
   targets: [
     {
       kind: "part",
@@ -403,11 +408,55 @@ it.effect("records each publication in chat, including rejected findings, but no
           commentId: comment.id,
           number: 1,
           title: "Check this fastener",
+          severity: "concern",
+          category: "assembly",
           location: "Intake",
         },
       ],
       rejected: [{ publicationKey: "malformed", title: "Loose cable", reason: "invalid-input" }],
     });
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect("requires severity and category on new findings and lists them back", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+    const { severity: _severity, ...unrated } = makeFinding(h.snapshot);
+    const rejected = yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [unrated, { ...makeFinding(h.snapshot), publicationKey: "typo", severity: "warning" }],
+    });
+    const failures = yield* decodePublicationFailure(rejected.result);
+    for (const failure of failures.results) {
+      assert.equal(failure.reason, "invalid-input");
+      assert.include(failure.details, '["severity"]');
+      assert.include(failure.details, "blocker|concern|question|nit");
+    }
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 0);
+    yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [
+        makeFinding(h.snapshot),
+        { ...makeFinding(h.snapshot), publicationKey: "nit", severity: "nit", category: "other" },
+      ],
+    });
+    const listed = yield* decodeListing((yield* a.invoke("cad_comments_list", {})).result);
+    assert.deepEqual(
+      listed.comments.map((c) => [c.severity, c.category]),
+      [
+        ["concern", "assembly"],
+        ["nit", "other"],
+      ],
+    );
+    // The persisted record round-trips the labels for the viewer subscription too.
+    const stored = yield* readThreadCadComments(threadId);
+    assert.deepEqual(
+      stored.sort((a, b) => a.number - b.number).map((c) => [c.severity, c.category]),
+      [
+        ["concern", "assembly"],
+        ["nit", "other"],
+      ],
+    );
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 it.effect(
@@ -516,6 +565,8 @@ it.effect(
       model = yield* h.query.getCommandReadModel();
       assert.equal(model.cadComments?.length, 1);
       assert.equal(model.cadComments?.[0]?.state, "resolved");
+      assert.equal(model.cadComments?.[0]?.severity, "concern");
+      assert.equal(model.cadComments?.[0]?.category, "assembly");
       assert.equal(model.cadCommentReceipts?.length, 2);
       // Reusing a finding from an earlier turn does not add a "wrote" row to this turn.
       const sql = yield* SqlClient.SqlClient;

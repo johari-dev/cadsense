@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vite-plus/test";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { CadPublishedComments, describeCadCommentRejection } from "./CadChatRows";
+import { CadSeverityLabel } from "./CadCommentsCard";
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("env"),
@@ -37,6 +38,8 @@ const card = {
       commentId: "comment-1",
       number: 1,
       title: "Can this motor come out without removing the roller shaft?",
+      severity: "blocker" as const,
+      category: "access" as const,
       location: "Motor mount",
     },
   ],
@@ -50,6 +53,8 @@ it("opens a published comment at its location in the CAD panel", () => {
   expect(text(tree)).toContain('"Add bolt heads" was not published');
 
   const commentButton = buttons.find((button) => text(button).includes("roller shaft"));
+  const label = elements(commentButton).find((element) => element.type === CadSeverityLabel);
+  expect(label?.props.severity).toBe("blocker");
   (commentButton?.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-1",

@@ -26,7 +26,7 @@ vi.mock("../state/cadPanel", () => ({ cadPanelEnvironment: { review: "review" } 
 const commands = vi.hoisted(() => ({ review: vi.fn() }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => commands.review }));
 
-import { CadCommentsCard } from "./CadCommentsCard";
+import { CadCommentsCard, CadSeverityLabel } from "./CadCommentsCard";
 
 afterEach(() => {
   hooks.reset();
@@ -195,4 +195,70 @@ it("updates comment markers after scene changes without repeating idle projectio
   hooks.reset();
   expect(frames.size).toBe(0);
   expect(listeners.size).toBe(0);
+});
+
+it("orders open findings by severity then number and labels each one", () => {
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const comment = (number: number, severity: CadComment["severity"], state = "open") =>
+    ({
+      id: `c${number}`,
+      number,
+      state,
+      severity,
+      category: severity === null ? null : "access",
+      snapshotId: "snapshot",
+      modelDescriptor: "model",
+      title: `Finding ${number}`,
+      body: "Body",
+      targets: [{ kind: "part", occurrenceId: "part", label: "Part" }],
+    }) as unknown as CadComment;
+  const comments = [
+    comment(1, "nit"),
+    comment(2, "blocker"),
+    comment(3, null),
+    comment(4, "concern"),
+    comment(5, "blocker"),
+    comment(6, "blocker", "resolved"),
+  ];
+  const props = {
+    threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
+    comments,
+    manifest: null,
+    displayedSnapshotId: "snapshot",
+    renderer: { current: null },
+    open: true,
+    setOpen() {},
+    selection: { id: "c2", target: 0, request: 1 },
+    clearSelection() {},
+    choose() {},
+    historical: false,
+    back() {},
+  };
+  hooks.beginRender();
+  const tree = CadCommentsCard(props);
+  const listed = elements(tree).filter((element) => element.type === "article");
+  expect(listed.map((element) => element.key)).toEqual(["c2", "c5", "c4", "c1", "c3"]);
+  const labels = elements(tree).filter((element) => element.type === CadSeverityLabel);
+  // Each listed finding shows its label once, and the expanded finding repeats it above the body.
+  expect(labels.map((element) => element.props.severity)).toEqual([
+    "blocker",
+    "blocker",
+    "blocker",
+    "concern",
+    "nit",
+    null,
+  ]);
+  expect(CadSeverityLabel({ severity: "blocker" })?.props.className).toContain("text-foreground");
+  expect(CadSeverityLabel({ severity: "nit" })?.props.className).toContain(
+    "text-muted-foreground/60",
+  );
+  expect(CadSeverityLabel({ severity: null })).toBeNull();
+  hooks.reset();
+  hooks.beginRender();
+  const closed = elements(CadCommentsCard({ ...props, open: false, selection: null }));
+  const toggle = closed.find((element) => element.props["aria-expanded"] === false);
+  expect(toggle?.props["aria-label"]).toBe("Comments (5 unresolved, 2 blocking)");
+  expect(toggle?.props.title).toBe("2 blocking");
 });
