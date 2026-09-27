@@ -31,6 +31,8 @@ const descriptions = {
     "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility.",
+  cad_diff:
+    "Compare two retained snapshots of the selected root and list what changed: added, removed, moved (placement relative to the parent), geometry-changed, renamed, suppression-changed, and visibility-changed occurrences with IDs on both sides. targetSnapshotId defaults to the current snapshot; baseSnapshotId defaults to the newest earlier retained snapshot, such as the one earlier comments inspected, and baseSelection explains the choice. retainedSnapshots lists the bases available with createdAt and microversion. Page with nextCursor. Use it when earlier comments exist to focus on changed components and reuse unchanged findings; it changes no view state.",
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -48,6 +50,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_comments_list",
   "cad_context",
   "cad_hierarchy",
+  "cad_diff",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -80,6 +83,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.context() };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
+    case "cad_diff":
+      return { result: yield* tools.diff(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":

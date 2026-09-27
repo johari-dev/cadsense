@@ -5,9 +5,10 @@ import {
   CadCommentsPublishToolInput,
 } from "./cadComments.ts";
 import * as Schema from "effect/Schema";
-import { CadHash, CadSnapshotId } from "./cad.ts";
+import { CadHash, CadSnapshotId, CadSnapshotNode } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
+import { OnshapeWorkspaceId } from "./onshape.ts";
 
 export const CadHierarchyInput = Schema.Struct({
   parentOccurrenceId: Schema.optionalKey(CadHash),
@@ -61,6 +62,71 @@ export const CadCaptureResult = Schema.Struct({
   summary: Schema.String,
 });
 
+/** Both snapshot IDs default: target to the selected root's current snapshot, base to the newest earlier retained one. */
+export const CadDiffInput = Schema.Struct({
+  baseSnapshotId: Schema.optionalKey(CadSnapshotId),
+  targetSnapshotId: Schema.optionalKey(CadSnapshotId),
+  cursor: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))),
+});
+export type CadDiffInput = typeof CadDiffInput.Type;
+export const CadDiffChange = Schema.Literals([
+  "moved",
+  "geometry-changed",
+  "renamed",
+  "suppression-changed",
+  "visibility-changed",
+]);
+export type CadDiffChange = typeof CadDiffChange.Type;
+/** One occurrence path matched across both snapshots. Added and removed entries carry no changes. */
+export const CadDiffEntry = Schema.Struct({
+  status: Schema.Literals(["added", "removed", "modified"]),
+  occurrencePath: CadSnapshotNode.fields.occurrencePath,
+  name: Schema.String,
+  previousName: Schema.NullOr(Schema.String),
+  kind: CadSnapshotNode.fields.kind,
+  baseOccurrenceId: Schema.NullOr(CadHash),
+  targetOccurrenceId: Schema.NullOr(CadHash),
+  changes: Schema.Array(CadDiffChange),
+});
+export type CadDiffEntry = typeof CadDiffEntry.Type;
+export const CadDiffCounts = Schema.Struct({
+  added: Schema.Int,
+  removed: Schema.Int,
+  modified: Schema.Int,
+  moved: Schema.Int,
+  geometryChanged: Schema.Int,
+  renamed: Schema.Int,
+  suppressionChanged: Schema.Int,
+  visibilityChanged: Schema.Int,
+  unchanged: Schema.Int,
+});
+export type CadDiffCounts = typeof CadDiffCounts.Type;
+export const CadDiffSnapshot = Schema.Struct({
+  snapshotId: CadSnapshotId,
+  createdAt: IsoDateTime,
+  microversionId: OnshapeWorkspaceId,
+});
+export type CadDiffSnapshot = typeof CadDiffSnapshot.Type;
+/** Retention keeps the root's current and rollback snapshots and any this chat's comments inspected. */
+export const CadRetainedSnapshot = Schema.Struct({
+  ...CadDiffSnapshot.fields,
+  retainedBy: Schema.Array(Schema.Literals(["current", "rollback", "comments"])),
+  commentNumbers: Schema.Array(Schema.Int),
+});
+export type CadRetainedSnapshot = typeof CadRetainedSnapshot.Type;
+export const CadDiffResult = Schema.Struct({
+  rootId: CadHash,
+  base: CadDiffSnapshot,
+  target: CadDiffSnapshot,
+  baseSelection: Schema.String,
+  counts: CadDiffCounts,
+  entries: Schema.Array(CadDiffEntry),
+  nextCursor: Schema.NullOr(Schema.String),
+  retainedSnapshots: Schema.Array(CadRetainedSnapshot),
+});
+export type CadDiffResult = typeof CadDiffResult.Type;
+
 /** Live tool feedback includes the rendered pose; historical capture records keep their own pose. */
 export const CadCaptureToolResult = Schema.Struct({
   ...CadCaptureResult.fields,
@@ -75,6 +141,7 @@ export const CAD_TOOL_INPUTS = {
   cad_comments_publish: CadCommentsPublishToolInput,
   cad_context: Schema.Struct({}),
   cad_hierarchy: CadHierarchyInput,
+  cad_diff: CadDiffInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;

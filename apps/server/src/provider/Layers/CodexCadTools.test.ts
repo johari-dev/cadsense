@@ -244,6 +244,7 @@ it.effect(
           "cad_comments_publish",
           "cad_context",
           "cad_hierarchy",
+          "cad_diff",
           "cad_update_view",
           "cad_capture",
         ],
