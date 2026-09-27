@@ -1,6 +1,8 @@
+import type { CadDesignBrief } from "../cad/CadDesignBrief.ts";
+
 export const CAD_REVIEW_INSTRUCTIONS = [
   "CAD review defaults: A request to review a design is enough to inspect it and leave useful CAD comments. Use the user's context to choose what to investigate; the user need not specify review criteria or writing style.",
-  "Understand the intended motion and the reason for the design choices before suggesting changes. Distinguish what the user said, what you observed, and what you inferred. Inspect the model to resolve uncertainty first. If an ambiguity changes the recommendation, ask a specific question and continue independent checks. A motor moving with a stage is not evidence of a loose mount. Compact packaging may be intentional; understand the constraint before proposing a different layout.",
+  "Understand the intended motion and the reason for the design choices before suggesting changes. Distinguish what the user said, what you observed, and what you inferred. When a project design brief is provided below, prefer it over inference about intent, constraints, and purchased parts, and ask when the brief and the model disagree. Inspect the model to resolve uncertainty first. If an ambiguity changes the recommendation, ask a specific question and continue independent checks. A motor moving with a stage is not evidence of a loose mount. Compact packaging may be intentional; understand the constraint before proposing a different layout.",
   "Walk through how this mechanism will be manufactured, assembled, wired, operated, and repaired. Follow the relevant steps on the actual parts: can a tool reach the bolt, can the motor come out without removing a shaft, where does the cable bend through travel, and what must be dismantled to replace a damaged part? Use these questions to investigate, not as a checklist to paste into the review. Lead with the most consequential supported concern, such as stability or repair access, and explain its effect on use. If the evidence does not establish a main concern, say what still needs checking instead of inventing one.",
   "Suggest changes with reasons and relevant tradeoffs. Added support can add weight; tighter packaging can obstruct repairs. Use the team's stated operating and repair goals. A five-minute motor change, a material choice, or a particular retainer is not a universal requirement. When alternatives depend on missing information, ask the local design question rather than prescribing a fix.",
   "Known unfinished work is context. Mention it when it blocks a particular decision, and explain the dependency: 'Add the bolt heads and washers here before choosing the cutout edge; they may need this space.' An empty hole alone does not prove a missing screw. Avoid repeating the student's to-do list as findings.",
@@ -9,3 +11,16 @@ export const CAD_REVIEW_INSTRUCTIONS = [
   "A verified marker proves location, not the finding. Support claims about clearance, rubbing, strength, or safe material removal with inspection, measurements, or analysis. Without analysis or a stated load case, never label an area low-stress, approve a support as strong enough, or prescribe a safe cutout region or size. Visible ribs alone do not establish strength. Ask about the load, material, and remaining thickness when those determine the recommendation.",
   "Before publishing, check that each finding follows from the design's intended use, distinguishes observation from assumption, adds useful information, matches its location, and helps the designer make a decision. Rewrite or omit findings that fail. There is no target comment count. Finish with a brief explanation of the main concern and next decisions, without repeating every comment or adding unsupported reassurance. Expand only when the user needs more detail.",
 ].join("\n\n");
+
+/**
+ * Review guidance for one session or turn. The project design brief, when the workspace has one,
+ * follows the shared instructions so both Codex and Claude read the designer's stated intent.
+ */
+export function buildCadReviewInstructions(designBrief: CadDesignBrief | null): string {
+  if (!designBrief) return CAD_REVIEW_INSTRUCTIONS;
+  return `${CAD_REVIEW_INSTRUCTIONS}
+
+Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:
+
+${designBrief.content}`;
+}

@@ -6,7 +6,8 @@
  *
  * @module ClaudeAdapterLive
  */
-import { CAD_REVIEW_INSTRUCTIONS } from "../CadReviewInstructions.ts";
+import { buildCadReviewInstructions } from "../CadReviewInstructions.ts";
+import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import {
   type CanUseTool,
   query,
@@ -4429,6 +4430,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ended: new Set<string>(),
         };
       }).pipe(Effect.orElseSucceed(() => undefined));
+      // The SDK fixes the system prompt for the life of the process, so the brief is read here and
+      // edits reach Claude when the session restarts. Codex re-reads it on every turn.
+      const designBrief =
+        cad && input.cwd
+          ? yield* readCadDesignBrief(input.cwd).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            )
+          : null;
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment
@@ -4463,7 +4473,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(cad ? { append: CAD_REVIEW_INSTRUCTIONS } : {}),
+          ...(cad ? { append: buildCadReviewInstructions(designBrief) } : {}),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is

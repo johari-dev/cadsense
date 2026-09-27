@@ -41,6 +41,7 @@ import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
+import type { CadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import { handleCodexCadCall, codexCadFailure } from "./CodexCadTools.ts";
 import { compactCodexCadItem } from "../CadProviderContent.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
@@ -168,6 +169,8 @@ export interface CodexProcessReceipt {
 
 export interface CodexSessionRuntimeOptions {
   readonly cad?: CadProviderTools;
+  /** Reads the workspace design brief; run before each CAD turn so edits apply without a restart. */
+  readonly designBrief?: Effect.Effect<CadDesignBrief | null>;
   readonly onProcessSpawned?: (receipt: CodexProcessReceipt) => void;
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
@@ -636,6 +639,7 @@ function buildCodexCollaborationMode(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
+  readonly designBrief?: CadDesignBrief | null;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -652,6 +656,7 @@ function buildCodexCollaborationMode(input: {
         { model, reasoningEffort },
         input.browserToolsAvailable ?? true,
         input.cadToolsAvailable ?? false,
+        input.designBrief ?? null,
       ),
     },
   };
@@ -673,6 +678,7 @@ export function buildTurnStartParams(input: {
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
+  readonly designBrief?: CadDesignBrief | null;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -698,6 +704,7 @@ export function buildTurnStartParams(input: {
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
     cadToolsAvailable: input.cadToolsAvailable ?? false,
+    designBrief: input.designBrief ?? null,
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2529,6 +2536,9 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
+          const cadToolsAvailable = !!options.cad && cadToolsEnabled;
+          const designBrief =
+            cadToolsAvailable && options.designBrief ? yield* options.designBrief : null;
           const resolvedInput = input.input?.match(SLASH_SKILL_REFERENCE_REGEX)
             ? extractCodexSkillInputs(
                 input.input,
@@ -2551,7 +2561,8 @@ export const makeCodexSessionRuntime = (
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
-            cadToolsAvailable: !!options.cad && cadToolsEnabled,
+            cadToolsAvailable,
+            designBrief,
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

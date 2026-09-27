@@ -4,7 +4,7 @@ Agent findings belong to the originating chat and the exact downloaded CAD they 
 
 ## Agent workflow
 
-`CadReviewInstructions.ts` supplies shared review guidance to Codex and Claude sessions with CAD tools. `CadProviderTools.ts` reinforces it with a publication check in `cad_comments_publish`. When changing that guidance, use [the review evaluation](CadReviewEvaluation.md) to assess comment wording, evidence, and placement with ordinary user prompts.
+`CadReviewInstructions.ts` supplies shared review guidance to Codex and Claude sessions with CAD tools, followed by the [project design brief](CadDesignBrief.md) when the workspace has one. `CadProviderTools.ts` reinforces it with a publication check in `cad_comments_publish`. When changing that guidance, use [the review evaluation](CadReviewEvaluation.md) to assess comment wording, evidence, and placement with ordinary user prompts.
 
 1. `cad_comments_list` reads existing findings, including reviewed findings, and returns the creation catalog version. Walk `nextCursor` before deciding an issue is new. A changed creation catalog invalidates a cursor; review changes do not advance that catalog.
 2. Capture the private view with the existing `cad_capture` tool. `cad_comment_locate` takes that capture ID and explicit intended occurrence IDs with original 1280 ? 960 image coordinates (top-left origin, continuous pixels). The nearest visible surface wins. An intervening part returns `occurrence-mismatch`; the ray never searches through it for the intended part.
