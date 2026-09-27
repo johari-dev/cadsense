@@ -63,6 +63,10 @@ export const SERVER_RUNTIME_EXTERNAL_PREFIXES = [
 export const SERVER_BUILD_ONLY_EXTERNAL_PREFIXES = [
   "@effect/platform-bun",
   "@effect/sql-sqlite-bun",
+  // Dynamically imported only by `cadsense mcp`, which the packaged desktop app
+  // never runs. It has no dependencies and locates its own files on disk, so
+  // bundling it would break it.
+  "playwright-core",
 ] as const;
 
 export const SERVER_EXTERNAL_PACKAGE_PREFIXES = [
