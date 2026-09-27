@@ -93,6 +93,9 @@ export const CadPartMetadata = Schema.Struct({
   configurationId: Schema.NullOr(Text),
   appearance: Schema.NullOr(CadPartAppearance),
   material: Schema.NullOr(CadPartMaterial),
+  // Onshape's BOM mass, from material density or a manual override. Absent when Onshape
+  // reported none, including snapshots acquired before mass was read.
+  massKg: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
 });
 export type CadPartMetadata = typeof CadPartMetadata.Type;
 export const CadSnapshotPart = Schema.Struct({

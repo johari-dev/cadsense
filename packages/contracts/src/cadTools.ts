@@ -23,6 +23,9 @@ export const CadHierarchyEntry = Schema.Struct({
   hasChildren: Schema.Boolean,
   visible: Schema.Boolean,
   suppressed: Schema.Boolean,
+  // Parts only, when Onshape supplied them. Mass is per occurrence, not rolled up.
+  material: Schema.optionalKey(Schema.String),
+  massKg: Schema.optionalKey(Schema.Number),
 });
 export const CadHierarchyResult = Schema.Struct({
   revision: Schema.Int,
