@@ -451,7 +451,7 @@ it.effect("requires severity and category on new findings and lists them back", 
     // The persisted record round-trips the labels for the viewer subscription too.
     const stored = yield* readThreadCadComments(threadId);
     assert.deepEqual(
-      stored.sort((a, b) => a.number - b.number).map((c) => [c.severity, c.category]),
+      stored.toSorted((a, b) => a.number - b.number).map((c) => [c.severity, c.category]),
       [
         ["concern", "assembly"],
         ["nit", "other"],
