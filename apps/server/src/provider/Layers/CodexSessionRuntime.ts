@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  type CadReviewScope,
   DEFAULT_MODEL,
   EventId,
   ProviderDriverKind,
@@ -636,6 +637,7 @@ function buildCodexCollaborationMode(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
+  readonly cadReviewScopes?: ReadonlyArray<CadReviewScope>;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -652,6 +654,7 @@ function buildCodexCollaborationMode(input: {
         { model, reasoningEffort },
         input.browserToolsAvailable ?? true,
         input.cadToolsAvailable ?? false,
+        input.cadReviewScopes ?? [],
       ),
     },
   };
@@ -673,6 +676,7 @@ export function buildTurnStartParams(input: {
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
+  readonly cadReviewScopes?: ReadonlyArray<CadReviewScope>;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -698,6 +702,7 @@ export function buildTurnStartParams(input: {
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
     cadToolsAvailable: input.cadToolsAvailable ?? false,
+    ...(input.cadReviewScopes ? { cadReviewScopes: input.cadReviewScopes } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2537,6 +2542,9 @@ export const makeCodexSessionRuntime = (
                 })).data.flatMap((entry) => entry.skills),
               )
             : { prompt: input.input ?? "", skills: [] };
+          // Read per turn so cadsense.json edits reach the next turn without a restart.
+          const cadReviewScopes =
+            options.cad && cadToolsEnabled ? yield* options.cad.reviewScopes : [];
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -2552,6 +2560,7 @@ export const makeCodexSessionRuntime = (
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
             cadToolsAvailable: !!options.cad && cadToolsEnabled,
+            cadReviewScopes,
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

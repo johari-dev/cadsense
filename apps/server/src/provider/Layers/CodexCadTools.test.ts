@@ -79,6 +79,7 @@ it.effect.each([
               close: Effect.void,
               invoke: () => Effect.succeed({ result: {} }),
               end: () => Effect.void,
+              reviewScopes: Effect.succeed([]),
             },
           }
         : {}),
@@ -177,6 +178,7 @@ it.effect(
             return { result: { revision: 0 }, png: new Uint8Array([1, 2, 3]) };
           }),
         end: () => Effect.void,
+        reviewScopes: Effect.succeed([]),
       };
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const runtime = yield* makeCodexSessionRuntime({

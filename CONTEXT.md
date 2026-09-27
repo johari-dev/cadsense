@@ -33,3 +33,7 @@ A new CAD comment that corrects an earlier finding while preserving the original
 
 **Linked follow-up**:
 A new CAD comment with materially new evidence about an existing finding. Rediscovering the same issue without new evidence reuses the existing comment instead.
+
+**Review scope**:
+A `cadsense.json` rule that matches occurrences by path, name, or material and either excludes them from review or attaches review instructions to them. Ignoring an assembly ignores everything inside it; ignored geometry remains visible as context.
+_Avoid_: Path filter, exclusion list

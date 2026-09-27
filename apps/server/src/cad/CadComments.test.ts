@@ -144,10 +144,13 @@ const harness = Effect.fn(function* ({
   unavailable,
   beforeCommit,
   beforeInspect,
+  workspaceRoot = "C:/cad-view-test",
 }: {
   unavailable?: "suppressed" | "geometryless";
   beforeCommit?: Effect.Effect<void>;
   beforeInspect?: Effect.Effect<void>;
+  /** Defaults to a path that does not exist, so the project has no cadsense.json. */
+  workspaceRoot?: string;
 } = {}) {
   const sourceSnapshot = yield* makeSnapshot;
   const snapshot: CadSnapshotManifest = {
@@ -171,7 +174,7 @@ const harness = Effect.fn(function* ({
     type: "project.onshape.create",
     projectId,
     title: "CAD",
-    workspaceRoot: "C:/cad-view-test",
+    workspaceRoot,
     defaultModelSelection: null,
     onshapeSource: source,
     createdAt: now,
@@ -326,6 +329,39 @@ for (const unavailable of ["suppressed", "geometryless"] as const) {
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
   );
 }
+it.effect("rejects targets on occurrences that cadsense.json review scopes ignore", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-scopes-" });
+    const projectFile = path.join(workspaceRoot, "cadsense.json");
+    yield* fs.writeFileString(
+      projectFile,
+      '{ "reviewScopes": [{ "match": { "name": "intake" }, "ignore": true }] }',
+    );
+    const h = yield* harness({ workspaceRoot });
+    const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+    const rejected = yield* decodePublicationFailure(
+      (yield* a.invoke("cad_comments_publish", {
+        expectedCatalogVersion: 0,
+        items: [makeFinding(h.snapshot)],
+      })).result,
+    );
+    assert.equal(rejected.results[0]?.reason, "occurrence-ignored");
+    assert.include(rejected.results[0]?.details, "cadsense.json excludes Intake from review");
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 0);
+    // Removing the scope applies to the next publication without restarting anything.
+    yield* fs.writeFileString(projectFile, "{}");
+    const published = yield* decodeReasons(
+      (yield* a.invoke("cad_comments_publish", {
+        expectedCatalogVersion: 0,
+        items: [makeFinding(h.snapshot)],
+      })).result,
+    ).pipe(Effect.flip);
+    assert.isDefined(published);
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 1);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 it.effect("explains malformed publication fields so an agent can correct and retry", () =>
   Effect.gen(function* () {
     const h = yield* harness();

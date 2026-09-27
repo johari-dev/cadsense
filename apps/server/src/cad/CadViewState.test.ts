@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { indexCadSnapshot, initialCadView, rebaseCadView, updateCadView } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewScopes";
 
 const id = (value: number) => value.toString(16).padStart(64, "0");
 const rootId = id(20);
@@ -125,6 +126,38 @@ describe("private CAD semantic state", () => {
             (yield* readCadHierarchy(index, state, input).pipe(Effect.flip)).reason,
             "invalid-operation",
           );
+      }),
+  );
+  it.effect(
+    "marks occurrences ignored by review scopes, including children of an ignored assembly",
+    () =>
+      Effect.gen(function* () {
+        const index = indexCadSnapshot(snapshot);
+        const state = initialCadView(snapshot);
+        const ignored = ignoredCadOccurrences(
+          [{ match: { name: "intake LEFT" }, ignore: true }],
+          snapshot,
+        );
+        const top = yield* readCadHierarchy(index, state, { parentOccurrenceId: id(1) }, ignored);
+        assert.deepEqual(
+          top.entries.map((entry) => [entry.occurrenceId, entry.ignored]),
+          [
+            [id(2), true],
+            [id(4), undefined],
+          ],
+        );
+        const inherited = yield* readCadHierarchy(
+          index,
+          state,
+          { parentOccurrenceId: id(2) },
+          ignored,
+        );
+        assert.deepEqual(
+          inherited.entries.map((entry) => entry.ignored),
+          [true],
+        );
+        const unscoped = yield* readCadHierarchy(index, state, { parentOccurrenceId: id(1) });
+        assert.isFalse(unscoped.entries.some((entry) => "ignored" in entry));
       }),
   );
   it.effect("rejects a whole ordered batch without modifying the caller's state", () =>

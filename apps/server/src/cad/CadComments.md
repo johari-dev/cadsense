@@ -18,6 +18,24 @@ Retry identical publications with the same keys. Receipts are checked before tra
 
 Malformed input returns `invalid-input` with `details` identifying invalid or missing fields. Publication items and location picks also include a compact expected shape so resumed provider sessions can recover without guessing field names. A successful tool transport response can contain rejected items: agents must check each result, correct rejected inputs, and retry. Rejected items create no comments or receipts.
 
+## Review scopes
+
+A project's `cadsense.json` (workspace root, schema at https://cadsense.app/schema/cadsense.json) can carry a top-level `reviewScopes` array. Each scope has a `match` object and exactly one of `ignore: true` or `instructions`. `match` lists any of `path`, `name`, and `material`; every listed field must match. Globs are case-insensitive: `*` and `?` stay within one `/` segment, `**` spans segments, and `Drivetrain <1>/**` covers that assembly and everything inside it. `path` is the chain of instance names from the top level down to the component joined with `/`, `name` is the instance name, and `material` is the source part's Onshape material display name (parts without one never match a material glob). Invalid scopes fail the whole file decode, so the project behaves as if it had no `cadsense.json`.
+
+```jsonc
+{
+  "reviewScopes": [
+    { "match": { "material": "*purchased*" }, "ignore": true },
+    {
+      "match": { "path": "Drivetrain <1>/**" },
+      "instructions": "The gearbox ratio is fixed by the team; do not question it.",
+    },
+  ],
+}
+```
+
+`CadReviewScopes.ts` reads the file on every use, so edits apply to the next tool call or turn without a restart. Ignore scopes exclude an occurrence and, for assemblies, its whole subtree: `cad_hierarchy` entries gain `ignored: true`, `cad_comments_publish` rejects any target there with `occurrence-ignored`, and the assembled guidance lists the ignored matches on one line so agents skip them before capturing. Ignored geometry stays in the viewer and captures as context. Instruction scopes append one line per scope to the shared guidance (`cadReviewInstructions` in `CadReviewInstructions.ts`). Codex receives the assembled text with every turn's developer instructions; the Claude SDK fixes the system prompt for the life of a query, so Claude sessions pick up scope edits when the session next starts.
+
 ## Persistence and ownership
 
 `cadComments.ts` defines the schemas. The comments service validates ownership, candidates, images, geometry, and model equivalence. Internal orchestration commands serialize publication and review; the existing CAD projection transaction writes comments and receipts. Only the user-facing review RPC can resolve, dismiss, or reopen a published finding, using an expected review version and idempotent command ID. Published text and targets are immutable.

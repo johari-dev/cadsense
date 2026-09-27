@@ -52,6 +52,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
               }),
             end: () => Effect.void,
             close: Effect.void,
+            reviewScopes: Effect.succeed([]),
           },
           () => active,
         );

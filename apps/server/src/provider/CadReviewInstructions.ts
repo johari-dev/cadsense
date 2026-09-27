@@ -1,3 +1,7 @@
+import type { CadReviewScope } from "@cadsense/contracts";
+import { describeCadReviewScopeMatch } from "@cadsense/shared/cadReviewScopes";
+
+/** Review guidance shared by every project. Projects add review scopes through {@link cadReviewInstructions}. */
 export const CAD_REVIEW_INSTRUCTIONS = [
   "CAD review defaults: A request to review a design is enough to inspect it and leave useful CAD comments. Use the user's context to choose what to investigate; the user need not specify review criteria or writing style.",
   "Understand the intended motion and the reason for the design choices before suggesting changes. Distinguish what the user said, what you observed, and what you inferred. Inspect the model to resolve uncertainty first. If an ambiguity changes the recommendation, ask a specific question and continue independent checks. A motor moving with a stage is not evidence of a loose mount. Compact packaging may be intentional; understand the constraint before proposing a different layout.",
@@ -9,3 +13,34 @@ export const CAD_REVIEW_INSTRUCTIONS = [
   "A verified marker proves location, not the finding. Support claims about clearance, rubbing, strength, or safe material removal with inspection, measurements, or analysis. Without analysis or a stated load case, never label an area low-stress, approve a support as strong enough, or prescribe a safe cutout region or size. Visible ribs alone do not establish strength. Ask about the load, material, and remaining thickness when those determine the recommendation.",
   "Before publishing, check that each finding follows from the design's intended use, distinguishes observation from assumption, adds useful information, matches its location, and helps the designer make a decision. Rewrite or omit findings that fail. There is no target comment count. Finish with a brief explanation of the main concern and next decisions, without repeating every comment or adding unsupported reassurance. Expand only when the user needs more detail.",
 ].join("\n\n");
+
+// Values come from trusted config, but keep each scope on one line regardless.
+const singleLine = (value: string) => value.replaceAll(/\s+/g, " ").trim();
+
+/**
+ * The full review guidance for one project: the shared instructions followed by the
+ * project's cadsense.json review scopes, when it has any. Ignore scopes become one line so
+ * the agent skips those components before capturing; instruction scopes are quoted verbatim.
+ */
+export function cadReviewInstructions(scopes: ReadonlyArray<CadReviewScope>): string {
+  if (scopes.length === 0) return CAD_REVIEW_INSTRUCTIONS;
+  const ignored = scopes
+    .filter((scope) => scope.ignore === true)
+    .map((scope) => describeCadReviewScopeMatch(scope.match));
+  const lines = [
+    "Review scopes from this project's cadsense.json:",
+    ...(ignored.length > 0
+      ? [
+          `Ignored components (do not capture, inspect, or comment on them; cad_hierarchy marks them ignored and publication rejects targets there): ${ignored.join("; ")}.`,
+        ]
+      : []),
+    ...scopes.flatMap((scope) =>
+      scope.instructions === undefined
+        ? []
+        : [
+            `Components matching ${describeCadReviewScopeMatch(scope.match)}: ${singleLine(scope.instructions)}`,
+          ],
+    ),
+  ];
+  return `${CAD_REVIEW_INSTRUCTIONS}\n\n${lines.join("\n")}`;
+}

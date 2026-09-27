@@ -23,6 +23,8 @@ export const CadHierarchyEntry = Schema.Struct({
   hasChildren: Schema.Boolean,
   visible: Schema.Boolean,
   suppressed: Schema.Boolean,
+  /** Present when a cadsense.json review scope excludes this occurrence (or an ancestor) from review. */
+  ignored: Schema.optionalKey(Schema.Literal(true)),
 });
 export const CadHierarchyResult = Schema.Struct({
   revision: Schema.Int,

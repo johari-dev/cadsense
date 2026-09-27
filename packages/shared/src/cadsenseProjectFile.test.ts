@@ -31,9 +31,17 @@ describe("buildCadsenseProjectFileJsonSchema", () => {
       required?: ReadonlyArray<string>;
     };
 
-    expect(Object.keys(schema.properties).sort()).toEqual(["$schema", "iconPath"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["$schema", "iconPath", "reviewScopes"]);
     expect(schema.required).toBeUndefined();
     expect(schema.properties.iconPath?.description).toContain("Workspace-relative path");
+    const scope = schema.properties.reviewScopes?.items;
+    expect(scope?.required).toEqual(["match"]);
+    expect(Object.keys(scope?.properties ?? {}).sort()).toEqual([
+      "ignore",
+      "instructions",
+      "match",
+    ]);
+    expect(JSON.stringify(scope)).toContain("Case-insensitive glob");
   });
 
   it("stays JSON-serializable", () => {
@@ -67,5 +75,8 @@ describe("parseCadsenseProjectFile", () => {
   it("returns null for malformed or invalid contents", () => {
     expect(parseCadsenseProjectFile("{ not json")).toBeNull();
     expect(parseCadsenseProjectFile('{ "iconPath": "" }')).toBeNull();
+    expect(
+      parseCadsenseProjectFile('{ "reviewScopes": [{ "match": { "name": "Bolt" } }] }'),
+    ).toBeNull();
   });
 });

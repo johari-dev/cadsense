@@ -9,6 +9,7 @@ import {
   type CadViewerSession,
   type CadContextResult,
   type CadHierarchyResult,
+  type CadReviewScope,
   type CadSnapshotManifest,
   type OrchestrationCommand,
   type ThreadId,
@@ -19,8 +20,10 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -37,6 +40,8 @@ import {
   indexCadSnapshot,
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import { readCadReviewScopes } from "./CadReviewScopes.ts";
+import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewScopes";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
@@ -73,6 +78,10 @@ export interface CadViewingShape {
     view: unknown,
   ) => Effect.Effect<CadViewState, CadViewError>;
   readonly getUserView: (threadId: ThreadId) => Effect.Effect<CadViewState | null, CadViewError>;
+  /** The thread's project cadsense.json review scopes, read fresh on each call. */
+  readonly reviewScopes: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<CadReviewScope>, CadViewError>;
 }
 export class CadViewing extends Context.Service<CadViewing, CadViewingShape>()(
   "@cadsense/server/cad/CadViewing",
@@ -84,6 +93,8 @@ export const make = Effect.gen(function* () {
   const query = yield* ProjectionSnapshotQuery;
   const store = yield* CadSnapshotStore;
   const crypto = yield* Crypto.Crypto;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
   const commentService = yield* Effect.serviceOption(CadComments);
   const active = new Set<string>();
@@ -119,6 +130,15 @@ export const make = Effect.gen(function* () {
     )
       return yield* unavailable();
     return project.value;
+  });
+  const projectReviewScopes = (workspaceRoot: string) =>
+    readCadReviewScopes(workspaceRoot).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    );
+  const reviewScopes = Effect.fn("CadViewing.reviewScopes")(function* (threadId: ThreadId) {
+    const project = yield* projectFor(threadId);
+    return yield* projectReviewScopes(project.workspaceRoot);
   });
   const resolveContext = Effect.fn("CadViewing.resolveContext")(function* (
     threadId: ThreadId,
@@ -307,7 +327,14 @@ export const make = Effect.gen(function* () {
               const initialized = yield* initialize();
               if (!initialized) return yield* unavailable();
               const { binding, state } = initialized;
-              return yield* readCadHierarchy(indexCadSnapshot(binding.snapshot), state, input);
+              const { project } = yield* availableRoots();
+              const scopes = yield* projectReviewScopes(project.workspaceRoot);
+              return yield* readCadHierarchy(
+                indexCadSnapshot(binding.snapshot),
+                state,
+                input,
+                ignoredCadOccurrences(scopes, binding.snapshot),
+              );
             }),
           );
         const updateView: CadAgentTools["updateView"] = (input) =>
@@ -423,6 +450,7 @@ export const make = Effect.gen(function* () {
     withActivation,
     saveUserView,
     getUserView,
+    reviewScopes,
     watchActivity: activity.watch,
   });
 });

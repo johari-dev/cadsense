@@ -588,6 +588,30 @@ describe("cadsense browser developer instructions", () => {
       NodeAssert.doesNotMatch(buildCodexDeveloperInstructions(mode, runtime, false), /cad_capture/);
     }
   });
+  it("adds the project's review scopes to the CAD guidance for each turn", () => {
+    const runtime = { model: "test", reasoningEffort: "low" };
+    const scopes = [
+      { match: { name: "*bolt*" }, ignore: true as const },
+      { match: { path: "Drivetrain*/**" }, instructions: "Gearbox ratio is fixed." },
+    ];
+    for (const mode of ["default", "plan"] as const) {
+      const scoped = buildCodexDeveloperInstructions(mode, runtime, false, true, scopes);
+      NodeAssert.match(scoped, /Ignored components .*: name \*bolt\*\./);
+      NodeAssert.match(
+        scoped,
+        /Components matching path Drivetrain\*\/\*\*: Gearbox ratio is fixed\./,
+      );
+      NodeAssert.doesNotMatch(
+        buildCodexDeveloperInstructions(mode, runtime, false, true),
+        /Review scopes/,
+      );
+      // Scopes only matter alongside the CAD tools that act on them.
+      NodeAssert.doesNotMatch(
+        buildCodexDeveloperInstructions(mode, runtime, false, false, scopes),
+        /Review scopes/,
+      );
+    }
+  });
   it("prefers the product-native preview tools in both collaboration modes", () => {
     for (const instructions of [
       codexDefaultModeDeveloperInstructions(true),

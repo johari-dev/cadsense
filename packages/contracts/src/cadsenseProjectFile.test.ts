@@ -20,6 +20,35 @@ describe("CadsenseProjectFile", () => {
     expect(decode({ futureField: true })).toEqual({});
   });
 
+  it("decodes review scopes", () => {
+    const decoded = decode({
+      reviewScopes: [
+        { match: { path: "Drivetrain <1>/**" }, instructions: " Gearbox ratio is fixed. " },
+        { match: { name: "*bolt*", material: "*steel*" }, ignore: true },
+      ],
+    });
+
+    expect(decoded.reviewScopes).toEqual([
+      { match: { path: "Drivetrain <1>/**" }, instructions: "Gearbox ratio is fixed." },
+      { match: { name: "*bolt*", material: "*steel*" }, ignore: true },
+    ]);
+  });
+
+  it.each([
+    [
+      "ignore and instructions together",
+      { match: { name: "Bolt" }, ignore: true, instructions: "x" },
+    ],
+    ["neither ignore nor instructions", { match: { name: "Bolt" } }],
+    ["ignore: false", { match: { name: "Bolt" }, ignore: false }],
+    ["an empty match", { match: {}, ignore: true }],
+    ["an unknown match field", { match: { pth: "Drivetrain/**" }, ignore: true }],
+    ["an unknown scope field", { match: { name: "Bolt" }, ignore: true, note: "x" }],
+    ["an empty instruction", { match: { name: "Bolt" }, instructions: " " }],
+  ])("rejects a review scope with %s", (_label, scope) => {
+    expect(() => decode({ reviewScopes: [scope] })).toThrow();
+  });
+
   it("trims icon paths", () => {
     const decoded = decode({
       iconPath: " assets/logo.svg ",

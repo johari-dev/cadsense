@@ -6,7 +6,7 @@
  *
  * @module ClaudeAdapterLive
  */
-import { CAD_REVIEW_INSTRUCTIONS } from "../CadReviewInstructions.ts";
+import { cadReviewInstructions } from "../CadReviewInstructions.ts";
 import {
   type CanUseTool,
   query,
@@ -4455,6 +4455,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           updatedAt: startedAt,
         } satisfies ProviderSession,
       };
+      // The SDK fixes the system prompt for the life of the query, so cadsense.json review
+      // scopes are read when the session starts rather than per turn.
+      const reviewInstructions = cad ? cadReviewInstructions(yield* cad.tools.reviewScopes) : null;
       const queryOptions: ClaudeQueryOptions = {
         spawnClaudeCodeProcess: processExit.spawn,
         ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -4463,7 +4466,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(cad ? { append: CAD_REVIEW_INSTRUCTIONS } : {}),
+          ...(reviewInstructions === null ? {} : { append: reviewInstructions }),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
