@@ -5,6 +5,8 @@ import {
   CadCommentsCommitted,
   CadCommentsCommitCommand,
   CadCommentReviewCommand,
+  CadCommentsOutdateCommand,
+  CadCommentsOutdated,
 } from "./cadComments.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -1016,6 +1018,7 @@ const ThreadTurnLifecycleSettleCommand = Schema.Struct({
 const InternalOrchestrationCommand = Schema.Union([
   CadCommentsCommitCommand,
   CadCommentReviewCommand,
+  CadCommentsOutdateCommand,
   Schema.Struct({
     type: Schema.Literal("project.onshape.remove"),
     commandId: CommandId,
@@ -1076,6 +1079,7 @@ export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 export const OrchestrationEventType = Schema.Literals([
   "thread.cad-comments-committed",
   "thread.cad-comment-reviewed",
+  "thread.cad-comments-outdated",
   "thread.cad-capture-recorded",
   "thread.cad-presentation-settled",
   "thread.cad-context-ensured",
@@ -1363,6 +1367,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.cad-comment-reviewed"),
     payload: CadCommentReviewed,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.cad-comments-outdated"),
+    payload: CadCommentsOutdated,
   }),
   Schema.Struct({
     ...EventBaseFields,

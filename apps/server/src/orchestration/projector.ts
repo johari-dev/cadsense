@@ -133,22 +133,41 @@ export function projectEvent(
             : project,
         ),
       });
-    case "thread.cad-comments-committed":
+    case "thread.cad-comments-committed": {
+      const proposals = new Map(event.payload.proposals.map((p) => [p.commentId, p.proposal]));
       return Effect.succeed({
         ...nextBase,
-        cadComments: [...(model.cadComments ?? []), ...event.payload.comments],
+        cadComments: [
+          ...(model.cadComments ?? []).map((c) => {
+            const proposal = proposals.get(c.id);
+            return proposal ? { ...c, proposal } : c;
+          }),
+          ...event.payload.comments,
+        ],
         cadCommentReceipts: [...(model.cadCommentReceipts ?? []), ...event.payload.receipts],
       });
+    }
     case "thread.cad-comment-reviewed":
+      // The user's judgment supersedes any agent proposal.
       return Effect.succeed({
         ...nextBase,
         cadComments: (model.cadComments ?? []).map((c) =>
           c.id === event.payload.commentId
-            ? { ...c, state: event.payload.state, version: event.payload.version }
+            ? { ...c, state: event.payload.state, version: event.payload.version, proposal: null }
             : c,
         ),
         cadCommentReviews: [...(model.cadCommentReviews ?? []), event.payload],
       });
+    case "thread.cad-comments-outdated": {
+      const entries = new Map(event.payload.entries.map((e) => [e.commentId, e.outdated]));
+      return Effect.succeed({
+        ...nextBase,
+        cadComments: (model.cadComments ?? []).map((c) => {
+          const outdated = entries.get(c.id);
+          return outdated === undefined ? c : { ...c, outdated };
+        }),
+      });
+    }
     case "thread.cad-context-ensured":
       return Effect.succeed({
         ...nextBase,

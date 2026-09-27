@@ -11,8 +11,9 @@ Agent findings belong to the originating chat and the exact downloaded CAD they 
 3. `cad_comment_inspect` returns numbered candidate markers from a different camera angle. Yellow candidates are visible; red candidates cannot be confirmed. The agent must verify the actual surface/depth, then cite the inspection and explain its confirmation when publishing. A same-part inner wall can still be the wrong location. If the exact location is uncertain, publish a whole-part target with `preciseLocationLimitation`.
 4. `cad_comments_publish` takes `expectedCatalogVersion` and up to 20 complete items. New items contain `publicationKey`, `inspectedSnapshotId`, title, body, and 1?20 targets. Point targets cite candidate/inspection IDs; whole-part targets cite explicit occurrence IDs. Every target must pass before its comment appears. Valid items and their receipts commit together; invalid items return individual errors.
 5. Reuse a prior finding with `kind: "reuse"`, a new publication key, the inspected snapshot, and `reuseCommentId`. Reuse preserves review state. Material new evidence can be a new finding linked with `correction` or `follow-up`, an existing same-chat/root comment ID, and an explanation. Neither link closes the original.
+6. On a later review, `cad_comments_list` shows `outdated` on open comments whose targets changed in the current model. Propose resolution with `kind: "propose-resolve"`, a publication key, the inspected snapshot, `commentId`, and an `explanation` citing the new geometry. The proposal is stored on the comment and shown to the user beside Resolve; review state does not change. Proposals are rejected with `comment-unavailable` (another chat or unknown), `comment-not-open`, or `snapshot-not-newer` (inspected snapshot not created after the comment's snapshot, or another root).
 
-Each publish call that creates comments or rejects items appends a `cad.comments.published` thread activity with the new comments' numbers, titles, and first locations, plus any rejected items. Chat merges a turn's activities into one comments row that stays visible when the turn folds. Replays add nothing.
+Each publish call that creates comments, proposes resolutions, or rejects items appends a `cad.comments.published` thread activity with the new comments' numbers, titles, and first locations, proposed comments, plus any rejected items. Chat merges a turn's activities into one comments row that stays visible when the turn folds. Replays add nothing.
 
 Retry identical publications with the same keys. Receipts are checked before transient candidate handles, so a lost response can be retried after activation ends. Changing a successful key's payload conflicts. Responses include the current review state, placement, original event sequence, and current creation catalog version.
 
@@ -20,7 +21,13 @@ Malformed input returns `invalid-input` with `details` identifying invalid or mi
 
 ## Persistence and ownership
 
-`cadComments.ts` defines the schemas. The comments service validates ownership, candidates, images, geometry, and model equivalence. Internal orchestration commands serialize publication and review; the existing CAD projection transaction writes comments and receipts. Only the user-facing review RPC can resolve, dismiss, or reopen a published finding, using an expected review version and idempotent command ID. Published text and targets are immutable.
+`cadComments.ts` defines the schemas. The comments service validates ownership, candidates, images, geometry, and model equivalence. Internal orchestration commands serialize publication and review; the existing CAD projection transaction writes comments and receipts. Only the user-facing review RPC can resolve, dismiss, or reopen a published finding, using an expected review version and idempotent command ID. Published text and targets are immutable. `outdated` and `proposal` are projection state beside review state: a review clears the proposal, and records written before these fields decode as null.
+
+## Outdated findings
+
+When a snapshot becomes current for a root (`project.cad-state-set`), the comments service compares every open comment on that root between the comment's snapshot and the current one (`CadCommentOutdated.ts`). Each target's occurrence is matched by occurrence path, so repeated instances are checked individually. A missing, suppressed, or geometry-less instance is `removed`; a different asset hash for its source part is `geometry-changed`; a different placement is `moved`. Geometry keys are not compared because a resync rekeys untouched parts. The most severe reason across targets wins, and unchanged targets leave the comment current, including after a rollback restores the original placement. A comment published against an older snapshot while a newer one is current is checked when it commits.
+
+The service dispatches `thread.cad.comments.outdate` per chat with the recomputed reasons; the decider requires the snapshot to be current for the comment's root and emits `thread.cad-comments-outdated` only for annotations that change. Startup repeats the comparison for every root so a restart between sync and annotation loses nothing. Reviewed findings are not re-checked. The card shows an "Outdated" line with the reason; the agent instructions ask for re-verification of outdated comments before proposing resolution or a follow-up.
 
 Points are stored in source-part local meters after inverting the full captured occurrence transform, including explosion. `comment-model-v1` compares canonical source microversion/configuration, dependencies, nodes/transforms, part references, and asset hashes. Import UUIDs and timestamps do not determine equivalence. The same verified model can reuse comments after reimport.
 
@@ -50,7 +57,8 @@ Comment subscriptions query only the owning chat and refresh only on comment or 
 
 ## Verification
 
-- Real SQLite/orchestration tests cover partial publication, receipt replay, review conflicts, cross-chat rejection, required inspection, publication against an older inspected snapshot, evidence retention, and stale deletion requests.
+- Real SQLite/orchestration tests cover partial publication, receipt replay, review conflicts, cross-chat rejection, required inspection, publication against an older inspected snapshot, evidence retention, stale deletion requests, outdated annotation and clearing through the sync lifecycle, and resolution proposals with each rejection.
+- Outdated comparison tests cover removed, suppressed, geometry-less, moved, and reshaped instances, repeated instances, rekeyed but unchanged parts, whole-part targets, and severity across several targets.
 - Geometry tests exercise source/GLTF/explosion transforms, repeated instances, opening misses, nearest occluders, image bounds, orthographic visibility, and model identity.
 - Provider transport tests enumerate the eight CAD tools and preserve native image delivery.
 - Local browser checks cover selecting locations, resolving/reopening, history/back, and reload. A real imported spacer verifies rim picking and the numbered alternate view.

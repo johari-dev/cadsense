@@ -4,7 +4,11 @@ import { isValidElement, type ReactNode } from "react";
 import { afterEach, expect, it } from "vite-plus/test";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
-import { CadPublishedComments, describeCadCommentRejection } from "./CadChatRows";
+import {
+  CadPublishedComments,
+  describeCadCommentRejection,
+  describeCadCommentsPublished,
+} from "./CadChatRows";
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("env"),
@@ -41,6 +45,7 @@ const card = {
     },
   ],
   rejected: [{ publicationKey: "gusset", title: "Add bolt heads", reason: "candidate-expired" }],
+  proposed: [],
 };
 
 it("opens a published comment at its location in the CAD panel", () => {
@@ -68,4 +73,28 @@ it("describes unknown rejection reasons without leaking codes", () => {
   expect(describeCadCommentRejection({ title: "Wire slack", reason: "something-new" })).toBe(
     '"Wire slack" was not published: the server rejected it.',
   );
+});
+
+it("lists resolution proposals apart from written comments and opens their comment", () => {
+  const proposals = {
+    published: [],
+    rejected: [],
+    proposed: [
+      { publicationKey: "fixed", commentId: "comment-2", number: 2, title: "Loose cable" },
+    ],
+  };
+  expect(describeCadCommentsPublished(proposals)).toBe("Proposed 1 resolution");
+  expect(describeCadCommentsPublished({ ...card, proposed: proposals.proposed })).toBe(
+    "Wrote 1 comment, proposed 1 resolution",
+  );
+  const tree = CadPublishedComments({ card: proposals, threadRef });
+  expect(text(tree)).toContain("resolution proposed");
+  const button = elements(tree)
+    .filter((element) => element.type === "button")
+    .find((element) => text(element).includes("Loose cable"));
+  (button!.props.onClick as () => void)();
+  expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
+    id: "comment-2",
+    target: 0,
+  });
 });

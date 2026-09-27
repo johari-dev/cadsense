@@ -19,6 +19,8 @@ import {
   type CadCommentsPublishedCard,
   ProjectId,
   type CadComment,
+  type CadCommentOutdatedReason,
+  type CadCommentProposed,
   type CadCommentReceipt,
   type CadCommentTarget,
   type CadSnapshotManifest,
@@ -48,6 +50,7 @@ import { forkParked } from "../serverActivation.ts";
 import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
+import { cadCommentOutdatedReason } from "./CadCommentOutdated.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
 const isCommentError = Schema.is(CadCommentError);
@@ -66,7 +69,7 @@ const uuid = () => NodeCrypto.randomUUID();
 // Include recovery guidance in responses: resumed providers can retain older descriptions.
 const inputGuidance = (schema: Schema.Top) =>
   schema === CadCommentPublication
-    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
+    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}. Resolution proposal: {kind:"propose-resolve",publicationKey,inspectedSnapshotId,commentId,explanation}.'
     : schema === CadCommentLocateInput
       ? `Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original ${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height} image pixels, not pixelX/pixelY.`
       : "";
@@ -144,6 +147,119 @@ export const make = Effect.gen(function* () {
     Stream.fromSubscription(events).pipe(
       Stream.filter((e) => e.type === "thread.deleted" || e.type === "project.deleted"),
       Stream.runForEach(() => removeDeletedEvidence),
+    ),
+  );
+  // Current snapshot last compared per project root, so unrelated CAD state changes cost nothing.
+  const compared = new Map<string, string>();
+  /**
+   * Annotates open comments on each root whose current snapshot changed since the last pass, or
+   * only the given comments when they were just published against an older snapshot.
+   */
+  const reconcileOutdated = Effect.fn("CadComments.reconcileOutdated")(
+    function* (projectId: ProjectId, only?: ReadonlySet<string>) {
+      const model = yield* query.getCommandReadModel();
+      const project = model.projects.find((p) => p.id === projectId && p.deletedAt === null);
+      if (!project?.cad) return;
+      const threads = new Set(
+        model.threads
+          .filter((t) => t.projectId === projectId && t.deletedAt === null)
+          .map((t) => t.id),
+      );
+      const manifests = new Map<string, CadSnapshotManifest | null>();
+      const load = Effect.fn("CadComments.loadManifest")(function* (snapshotId: string) {
+        const cached = manifests.get(snapshotId);
+        if (cached !== undefined) return cached;
+        const loaded = yield* store
+          .withPinned(snapshotId, (m) => Effect.succeed(m))
+          .pipe(
+            Effect.tapError((cause) =>
+              Effect.logWarning("CAD comment snapshot unavailable for outdated check", {
+                snapshotId,
+                cause,
+              }),
+            ),
+            Effect.option,
+          );
+        manifests.set(snapshotId, Option.getOrNull(loaded));
+        return Option.getOrNull(loaded);
+      });
+      for (const root of project.cad.roots) {
+        const current = root.current?.snapshotId;
+        const key = `${projectId}:${root.rootId}`;
+        if (!current || (!only && compared.get(key) === current)) continue;
+        const to = yield* load(current);
+        if (!to) continue;
+        const entries = new Map<
+          ThreadId,
+          { commentId: string; reason: CadCommentOutdatedReason | null }[]
+        >();
+        for (const comment of model.cadComments ?? []) {
+          if (
+            comment.state !== "open" ||
+            comment.rootId !== root.rootId ||
+            !threads.has(comment.threadId) ||
+            (only && !only.has(comment.id))
+          )
+            continue;
+          let reason: CadCommentOutdatedReason | null = null;
+          if (comment.snapshotId !== current) {
+            const from = yield* load(comment.snapshotId);
+            if (!from) continue;
+            reason = cadCommentOutdatedReason(comment, from, to);
+          }
+          if (reason === (comment.outdated?.reason ?? null)) continue;
+          entries.set(comment.threadId, [
+            ...(entries.get(comment.threadId) ?? []),
+            { commentId: comment.id, reason },
+          ]);
+        }
+        for (const [threadId, list] of entries)
+          yield* engine
+            .dispatch({
+              type: "thread.cad.comments.outdate",
+              commandId: CommandId.make(uuid()),
+              threadId,
+              snapshotId: current,
+              entries: list,
+            })
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("CAD comment outdated annotation was not recorded", {
+                  threadId,
+                  cause,
+                }),
+              ),
+            );
+        if (!only) compared.set(key, current);
+      }
+    },
+    Effect.catch((cause) => Effect.logWarning("CAD comment outdated check remains pending", cause)),
+  );
+  const snapshotChanges = yield* engine.subscribeDomainEvents;
+  yield* forkParked(
+    Effect.gen(function* () {
+      const model = yield* query.getCommandReadModel();
+      for (const project of model.projects) yield* reconcileOutdated(project.id);
+    }).pipe(
+      Effect.andThen(
+        Stream.fromSubscription(snapshotChanges).pipe(
+          Stream.runForEach((e) =>
+            e.type === "project.cad-state-set"
+              ? reconcileOutdated(e.payload.projectId)
+              : e.type === "thread.cad-comments-committed" && e.payload.comments.length
+                ? Effect.gen(function* () {
+                    const model = yield* query.getCommandReadModel();
+                    const thread = model.threads.find((t) => t.id === e.payload.threadId);
+                    if (thread)
+                      yield* reconcileOutdated(
+                        thread.projectId,
+                        new Set(e.payload.comments.map((c) => c.id)),
+                      );
+                  })
+                : Effect.void,
+          ),
+        ),
+      ),
     ),
   );
   const owner = Effect.fn("CadComments.owner")(function* (threadId: ThreadId) {
@@ -518,7 +634,8 @@ export const make = Effect.gen(function* () {
       const model = yield* query.getCommandReadModel();
       const existing = (model.cadComments ?? []).filter((c) => c.threadId === threadId);
       const comments: CadComment[] = [],
-        receipts: CadCommentReceipt[] = [];
+        receipts: CadCommentReceipt[] = [],
+        proposals: CadCommentProposed[] = [];
       const results: {
         publicationKey: string;
         commentId?: string;
@@ -531,6 +648,8 @@ export const make = Effect.gen(function* () {
       const titles = new Map<string, string>();
       // Reused findings already appeared in an earlier turn, so chat does not count them as written.
       const reusedKeys = new Set<string>();
+      // Proposals change no comment text; chat lists them apart from written findings.
+      const proposedKeys = new Set<string>();
       for (const raw of request.items) {
         const key =
           typeof raw === "object" && raw !== null && "publicationKey" in raw
@@ -577,6 +696,30 @@ export const make = Effect.gen(function* () {
             if (!old) return yield* fail("model-equivalence-unverified");
             commentId = old.id;
             reusedKeys.add(item.publicationKey);
+          } else if (item.kind === "propose-resolve") {
+            const old = existing.find((c) => c.id === item.commentId);
+            if (!old) return yield* fail("comment-unavailable");
+            if (old.state !== "open") return yield* fail("comment-not-open");
+            // Evidence must come from a later revision of the same root than the finding describes.
+            const original = yield* store
+              .withPinned(old.snapshotId, (m) => Effect.succeed(m.createdAt))
+              .pipe(Effect.mapError(() => fail("snapshot-unavailable")));
+            if (
+              binding.manifest.rootId !== old.rootId ||
+              Date.parse(binding.manifest.createdAt) <= Date.parse(original)
+            )
+              return yield* fail("snapshot-not-newer");
+            commentId = old.id;
+            proposals.push({
+              commentId,
+              proposal: {
+                snapshotId: item.inspectedSnapshotId,
+                explanation: item.explanation,
+                turnId,
+                createdAt: DateTime.formatIso(yield* DateTime.now),
+              },
+            });
+            proposedKeys.add(item.publicationKey);
           } else {
             if (
               item.link &&
@@ -636,6 +779,8 @@ export const make = Effect.gen(function* () {
               number: existing.length + comments.length + 1,
               createdAt: DateTime.formatIso(yield* DateTime.now),
               turnId,
+              outdated: null,
+              proposal: null,
             });
           }
           receipts.push({ threadId, key: item.publicationKey, hash, commentId });
@@ -674,6 +819,7 @@ export const make = Effect.gen(function* () {
             expectedCatalogVersion: request.expectedCatalogVersion,
             comments,
             receipts,
+            proposals,
           })
           .pipe(
             Effect.uninterruptible,
@@ -724,6 +870,7 @@ export const make = Effect.gen(function* () {
         results.filter((result) => !reusedKeys.has(result.publicationKey)),
         latest,
         titles,
+        proposedKeys,
       );
       return { result: { results: delivered, catalogVersion: latest.length } };
     });
@@ -737,12 +884,14 @@ export const make = Effect.gen(function* () {
       }>,
       latest: readonly CadComment[],
       titles: ReadonlyMap<string, string>,
+      proposedKeys: ReadonlySet<string>,
     ) =>
       Effect.gen(function* () {
+        const committed = (result: (typeof results)[number]) =>
+          result.replayed === false ? latest.find((c) => c.id === result.commentId) : undefined;
         const card: CadCommentsPublishedCard = {
           published: results.flatMap((result) => {
-            const comment =
-              result.replayed === false ? latest.find((c) => c.id === result.commentId) : undefined;
+            const comment = proposedKeys.has(result.publicationKey) ? undefined : committed(result);
             return comment
               ? [
                   {
@@ -766,8 +915,28 @@ export const make = Effect.gen(function* () {
                   },
                 ],
           ),
+          proposed: results.flatMap((result) => {
+            const comment = proposedKeys.has(result.publicationKey) ? committed(result) : undefined;
+            return comment
+              ? [
+                  {
+                    publicationKey: result.publicationKey,
+                    commentId: comment.id,
+                    number: comment.number,
+                    title: comment.title,
+                  },
+                ]
+              : [];
+          }),
         };
-        if (card.published.length === 0 && card.rejected.length === 0) return;
+        if (!card.published.length && !card.rejected.length && !card.proposed.length) return;
+        const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+        const summary = [
+          card.published.length ? `wrote ${count(card.published.length, "comment")}` : "",
+          card.proposed.length ? `proposed ${count(card.proposed.length, "resolution")}` : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
         const id = uuid();
         const createdAt = DateTime.formatIso(yield* DateTime.now);
         yield* engine.dispatch({
@@ -778,12 +947,9 @@ export const make = Effect.gen(function* () {
             id: EventId.make(`cad-comments-${id}`),
             tone: "info",
             kind: CAD_COMMENTS_PUBLISHED_ACTIVITY,
-            summary:
-              card.published.length === 0
-                ? "Comments not published"
-                : card.published.length === 1
-                  ? "Wrote 1 comment"
-                  : `Wrote ${card.published.length} comments`,
+            summary: summary
+              ? summary.charAt(0).toUpperCase() + summary.slice(1)
+              : "Comments not published",
             payload: card,
             turnId,
             createdAt,
