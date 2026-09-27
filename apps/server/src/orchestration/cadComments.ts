@@ -26,6 +26,7 @@ export const decideCadComments = Effect.fn("decideCadComments")(function* (
         commentId: comment.id,
         state: command.state,
         version: comment.version + 1,
+        ...(command.reason === undefined ? {} : { reason: command.reason }),
         commandId: command.commandId,
         payloadHash: command.payloadHash,
       },

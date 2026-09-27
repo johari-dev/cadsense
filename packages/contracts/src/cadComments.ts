@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
-import { CommandId, IsoDateTime, ThreadId, TurnId } from "./baseSchemas.ts";
+import { CommandId, IsoDateTime, ProjectId, ThreadId, TurnId } from "./baseSchemas.ts";
 
 const text = (max: number) =>
   Schema.String.check(
@@ -8,6 +8,8 @@ const text = (max: number) =>
     Schema.makeFilter((s) => [...s].length <= max),
   );
 const Id = text(160);
+/** Why a user dismissed a finding. Also the text of the review learning it creates. */
+export const CadReviewReason = text(500);
 export const CadCommentPoint = Schema.Tuple([
   Schema.Number.check(Schema.isFinite()),
   Schema.Number.check(Schema.isFinite()),
@@ -51,6 +53,8 @@ export const CadComment = Schema.Struct({
   link: Schema.NullOr(CadCommentLink),
   state: CadCommentState,
   version: Schema.Int,
+  /** Present only while the latest review carried a reason; reopening clears it. */
+  reviewReason: Schema.optionalKey(CadReviewReason),
   number: Schema.Int,
   createdAt: IsoDateTime,
   turnId: TurnId,
@@ -165,7 +169,40 @@ export const CadCommentReviewInput = Schema.Struct({
   commentId: Id,
   expectedVersion: Schema.Int,
   state: CadCommentState,
+  reason: Schema.optionalKey(CadReviewReason),
   commandId: CommandId,
+});
+/**
+ * User feedback the project keeps from dismissals with a reason. Agents receive every learning
+ * with the review guidance so later reviews do not repeat findings the user rejected.
+ */
+export const CadReviewLearning = Schema.Struct({
+  id: Id,
+  projectId: ProjectId,
+  text: CadReviewReason,
+  sourceCommentId: Id,
+  sourceThreadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+export type CadReviewLearning = typeof CadReviewLearning.Type;
+/** Oldest learnings beyond this count are dropped per project. */
+export const CAD_REVIEW_LEARNINGS_LIMIT = 50;
+export const CadReviewLearningRemoveInput = Schema.Struct({
+  projectId: ProjectId,
+  learningId: Id,
+  commandId: CommandId,
+});
+export const CadReviewLearningRemoveCommand = Schema.Struct({
+  ...CadReviewLearningRemoveInput.fields,
+  type: Schema.Literal("project.cad.review-learning.remove"),
+});
+export const CadReviewLearningAdded = Schema.Struct({
+  projectId: ProjectId,
+  learning: CadReviewLearning,
+});
+export const CadReviewLearningRemoved = Schema.Struct({
+  projectId: ProjectId,
+  learningId: Id,
 });
 export const CadCommentReceipt = Schema.Struct({
   key: Id,
@@ -197,6 +234,7 @@ export const CadCommentReviewed = Schema.Struct({
   commentId: Id,
   state: CadCommentState,
   version: Schema.Int,
+  reason: Schema.optionalKey(CadReviewReason),
   commandId: CommandId,
   payloadHash: CadHash,
 });

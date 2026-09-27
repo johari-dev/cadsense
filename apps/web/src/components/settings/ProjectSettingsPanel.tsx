@@ -51,6 +51,7 @@ import {
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { OnshapeProjectSettings } from "./OnshapeProjectSettings";
 import { CadProjectSettings } from "./CadProjectSettings";
+import { CadReviewLearnings } from "./CadReviewLearnings";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -313,6 +314,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
               busy={cadBusy}
             />
             <CadProjectSettings project={project} runActive={cadRunActive} />
+            <CadReviewLearnings project={project} />
           </>
         )}
 

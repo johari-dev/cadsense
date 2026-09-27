@@ -11,6 +11,7 @@ import {
   CadCommentLocateInput,
   CadCommentInspectInput,
   CadCommentReviewInput,
+  CadReviewLearningRemoveInput,
   CadCaptureRecord,
   CadViewState,
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
@@ -21,6 +22,7 @@ import {
   type CadComment,
   type CadCommentReceipt,
   type CadCommentTarget,
+  type CadReviewLearning,
   type CadSnapshotManifest,
   type CadCommentRenderWork,
   type ThreadId,
@@ -102,6 +104,12 @@ export class CadComments extends Context.Service<
     readonly review: (
       input: typeof CadCommentReviewInput.Type,
     ) => Effect.Effect<CadComment, CadCommentError>;
+    readonly learnings: (
+      projectId: ProjectId,
+    ) => Stream.Stream<readonly CadReviewLearning[], CadCommentError>;
+    readonly removeLearning: (
+      input: typeof CadReviewLearningRemoveInput.Type,
+    ) => Effect.Effect<void, CadCommentError>;
   }
 >()("@cadsense/server/cad/CadComments") {}
 
@@ -182,8 +190,12 @@ export const make = Effect.gen(function* () {
       }),
     ).pipe(Stream.mapError(error));
   const review = Effect.fn("CadComments.review")(function* (
-    input: typeof CadCommentReviewInput.Type,
+    rawInput: typeof CadCommentReviewInput.Type,
   ) {
+    // A whitespace-only reason is no reason: it neither persists nor becomes a learning.
+    const { reason: rawReason, ...rest } = rawInput;
+    const reason = rawReason?.trim();
+    const input = { ...rest, ...(reason ? { reason } : {}) };
     yield* owner(input.threadId);
     const model = yield* query.getCommandReadModel();
     const hash = digest(
@@ -191,6 +203,7 @@ export const make = Effect.gen(function* () {
         commentId: input.commentId,
         expectedVersion: input.expectedVersion,
         state: input.state,
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
       }),
     );
     const prior = model.cadCommentReviews?.find((r) => r.commandId === input.commandId);
@@ -216,6 +229,36 @@ export const make = Effect.gen(function* () {
     const result = (yield* read(input.threadId)).find((c) => c.id === input.commentId);
     if (!result) return yield* fail("comment-unavailable");
     return prior ? { ...result, state: prior.state, version: prior.version } : result;
+  }, Effect.mapError(error));
+  const readLearnings = Effect.fn("CadComments.readLearnings")(function* (projectId: ProjectId) {
+    if (Option.isNone(yield* query.getProjectShellById(projectId)))
+      return yield* fail("project-unavailable");
+    return yield* query.getCadReviewLearnings(projectId);
+  });
+  const learnings = (projectId: ProjectId) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const events = yield* engine.subscribeDomainEvents;
+        return Stream.concat(
+          Stream.fromEffect(readLearnings(projectId)),
+          Stream.fromSubscription(events).pipe(
+            Stream.filter(
+              (e) =>
+                e.aggregateId === projectId &&
+                (e.type === "project.cad-review-learning-added" ||
+                  e.type === "project.cad-review-learning-removed" ||
+                  e.type === "project.deleted"),
+            ),
+            Stream.mapEffect(() => readLearnings(projectId)),
+          ),
+        );
+      }),
+    ).pipe(Stream.mapError(error));
+  const removeLearning = Effect.fn("CadComments.removeLearning")(function* (
+    input: typeof CadReviewLearningRemoveInput.Type,
+  ) {
+    yield* readLearnings(input.projectId);
+    yield* engine.dispatch({ ...input, type: "project.cad.review-learning.remove" });
   }, Effect.mapError(error));
 
   const activate = Effect.fn("CadComments.activate")(function* (
@@ -824,6 +867,6 @@ export const make = Effect.gen(function* () {
         ),
     };
   }, Effect.mapError(error));
-  return CadComments.of({ activate, watch, review });
+  return CadComments.of({ activate, watch, review, learnings, removeLearning });
 });
 export const layer = Layer.effect(CadComments, make);
