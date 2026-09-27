@@ -38,7 +38,7 @@ import {
   indexCadSnapshot,
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
-import { loadCadBounds, readCadChecks, type CadBounds } from "./CadChecks.ts";
+import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
@@ -321,16 +321,16 @@ export const make = Effect.gen(function* () {
               const initialized = yield* initialize();
               if (!initialized) return yield* unavailable();
               const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
               return yield* readCadChecks(
                 binding.snapshot,
                 state,
-                (keys) =>
-                  loadCadBounds(
-                    binding.snapshot,
-                    (sha256) => binding.readAsset(sha256).pipe(Effect.mapError(unavailable)),
-                    boundsCache,
-                    keys,
-                  ),
+                {
+                  bounds: (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
+                  // Triangles are only needed while intersecting, so they are read per call, not cached.
+                  meshes: (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                },
                 input,
               );
             }),

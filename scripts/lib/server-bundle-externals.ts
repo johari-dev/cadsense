@@ -47,6 +47,9 @@ export const SERVER_RUNTIME_EXTERNAL_PREFIXES = [
   // becoming real if either is ever declared as a dependency.
   "bufferutil",
   "utf-8-validate",
+  // Loads manifold.wasm from its own package directory by path, which a bundle
+  // chunk cannot provide. No runtime dependencies, so the closure is just this.
+  "manifold-3d",
 ] as const;
 
 /**

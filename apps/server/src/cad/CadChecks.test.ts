@@ -5,10 +5,13 @@ import * as Schema from "effect/Schema";
 import {
   CAD_CHECK_LIMITS,
   loadCadBounds,
+  loadCadSolidKernel,
   readCadChecks,
   readCadGeometryBounds,
+  readCadTriangleMesh,
   runCadChecks,
   type CadBounds,
+  type CadTriangleMesh,
 } from "./CadChecks.ts";
 import { initialCadView } from "./CadViewState.ts";
 
@@ -71,6 +74,94 @@ const glb = (document: unknown) => {
   output.set(json, 20);
   return output;
 };
+type Point = readonly [number, number, number];
+/** Outward-wound triangles of an axis-aligned box; vertex i has bit 0 = X max, bit 1 = Y max, bit 2 = Z max. */
+const BOX_TRIANGLES = [
+  0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0, 6, 2, 1, 3, 7,
+  1, 7, 5,
+];
+const boxPrimitive = (min: Point, max: Point, faces = 12) => ({
+  positions: Array.from({ length: 8 }, (_, i) => [
+    i & 1 ? max[0] : min[0],
+    i & 2 ? max[1] : min[1],
+    i & 4 ? max[2] : min[2],
+  ]).flat(),
+  indices: BOX_TRIANGLES.slice(0, faces * 3),
+});
+interface Primitive {
+  readonly positions: readonly number[];
+  readonly indices?: readonly number[];
+  readonly indexType?: 5121 | 5123 | 5125;
+  readonly mode?: number;
+}
+/** GLB with a binary chunk: one mesh per primitive, each on its own root node unless `nodes` is given. */
+const meshGlb = (primitives: readonly Primitive[], nodes?: readonly object[]) => {
+  const chunks: Uint8Array[] = [];
+  const bufferViews: object[] = [];
+  const accessors: object[] = [];
+  let byteLength = 0;
+  const push = (bytes: Uint8Array) => {
+    bufferViews.push({ buffer: 0, byteOffset: byteLength, byteLength: bytes.byteLength });
+    chunks.push(bytes);
+    byteLength += Math.ceil(bytes.byteLength / 4) * 4;
+    return bufferViews.length - 1;
+  };
+  const meshes = primitives.map((primitive) => {
+    const positions = new Float32Array(primitive.positions);
+    const axis = (k: number) => primitive.positions.filter((_, i) => i % 3 === k);
+    accessors.push({
+      bufferView: push(new Uint8Array(positions.buffer)),
+      componentType: 5126,
+      count: positions.length / 3,
+      type: "VEC3",
+      min: [0, 1, 2].map((k) => Math.min(...axis(k))),
+      max: [0, 1, 2].map((k) => Math.max(...axis(k))),
+    });
+    const attributes = { POSITION: accessors.length - 1 };
+    if (!primitive.indices) return { primitives: [{ attributes, mode: primitive.mode }] };
+    const type = primitive.indexType ?? 5125;
+    const Array_ = type === 5121 ? Uint8Array : type === 5123 ? Uint16Array : Uint32Array;
+    const indices = new Array_(primitive.indices);
+    accessors.push({
+      bufferView: push(new Uint8Array(indices.buffer)),
+      componentType: type,
+      count: indices.length,
+      type: "SCALAR",
+    });
+    return { primitives: [{ attributes, indices: accessors.length - 1, mode: primitive.mode }] };
+  });
+  const json = new TextEncoder().encode(
+    encodeJson({
+      asset: { version: "2.0" },
+      scene: 0,
+      scenes: [{ nodes: nodes ? [0] : primitives.map((_, i) => i) }],
+      nodes: nodes ?? primitives.map((_, i) => ({ mesh: i })),
+      meshes,
+      accessors,
+      bufferViews,
+      buffers: [{ byteLength }],
+    }),
+  );
+  const jsonLength = Math.ceil(json.length / 4) * 4;
+  const output = new Uint8Array(20 + jsonLength + 8 + byteLength);
+  const view = new DataView(output.buffer);
+  view.setUint32(0, 0x46546c67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, output.length, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, 0x4e4f534a, true);
+  output.fill(0x20, 20, 20 + jsonLength);
+  output.set(json, 20);
+  view.setUint32(20 + jsonLength, byteLength, true);
+  view.setUint32(24 + jsonLength, 0x004e4942, true);
+  let offset = 28 + jsonLength;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += Math.ceil(chunk.byteLength / 4) * 4;
+  }
+  return output;
+};
+const solidBox = (min: Point, max: Point) => meshGlb([boxPrimitive(min, max)]);
 interface Occurrence {
   readonly number: number;
   readonly name?: string;
@@ -216,6 +307,7 @@ describe("CAD checks", () => {
       totalFindings: 1,
       partOccurrences: 4,
       boundsUnknown: 0,
+      meshUnknown: 0,
       pairsEvaluated: 2,
       pairBudget: CAD_CHECK_LIMITS.pairBudget,
       budgetExhausted: false,
@@ -419,6 +511,193 @@ describe("CAD checks", () => {
   );
 });
 
+describe("CAD triangle meshes", () => {
+  it("composes node matrices and TRS onto indexed and unindexed triangles", () => {
+    const mesh = readCadTriangleMesh(
+      meshGlb(
+        [boxPrimitive([0, 0, 0], [1, 1, 1])],
+        [
+          { translation: [0.1, 0, 0], children: [1, 2] },
+          { mesh: 0, matrix: [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+          { mesh: 0, rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2] },
+        ],
+      ),
+    );
+    assert.isNotNull(mesh);
+    assert.equal(mesh!.indices.length, 72);
+    const xs = [...mesh!.positions].filter((_, i) => i % 3 === 0);
+    assert.deepEqual(rounded([Math.min(...xs), Math.max(...xs)]), [-0.9, 2.1]);
+    const flat = boxPrimitive([0, 0, 0], [1, 1, 1]);
+    const unindexed = readCadTriangleMesh(
+      meshGlb([{ positions: flat.indices.flatMap((i) => flat.positions.slice(i * 3, i * 3 + 3)) }]),
+    );
+    assert.equal(unindexed!.indices.length, 36);
+    for (const indexType of [5121, 5123, 5125] as const)
+      assert.deepEqual(
+        [...readCadTriangleMesh(meshGlb([{ ...flat, indexType }]))!.indices],
+        flat.indices,
+      );
+  });
+  it("returns null instead of misreading geometry it does not support", () => {
+    const flat = boxPrimitive([0, 0, 0], [1, 1, 1]);
+    assert.isNull(readCadTriangleMesh(new Uint8Array([1, 2, 3])));
+    // JSON-only container: no binary chunk to read triangles from.
+    assert.isNull(
+      readCadTriangleMesh(
+        glb({
+          scenes: [{ nodes: [0] }],
+          nodes: [{ mesh: 0 }],
+          meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+          accessors: [{ min: [0, 0, 0], max: [1, 1, 1] }],
+        }),
+      ),
+    );
+    // Lines are not triangles.
+    assert.isNull(readCadTriangleMesh(meshGlb([{ ...flat, mode: 1 }])));
+    // An index past the vertex count.
+    assert.isNull(
+      readCadTriangleMesh(meshGlb([{ ...flat, indices: [...flat.indices, 0, 1, 99] }])),
+    );
+  });
+});
+
+describe("mesh interference", () => {
+  const checks = new Set(["mesh-interference"] as const);
+  /** Runs one snapshot whose part N uses the GLB at index N - 10 of `assets`. */
+  const run = (
+    occurrences: readonly Occurrence[],
+    assets: readonly Uint8Array[],
+    selection: ReadonlySet<"mesh-interference" | "overlapping-bounds"> = checks,
+  ) =>
+    Effect.gen(function* () {
+      const parts = assets.map((_, index) => index + 10);
+      const snapshot = manifest(occurrences, parts);
+      const bounds = new Map(parts.map((part, i) => [id(part), readCadGeometryBounds(assets[i]!)]));
+      const meshes = new Map(parts.map((part, i) => [id(part), readCadTriangleMesh(assets[i]!)]));
+      const kernel = yield* loadCadSolidKernel;
+      return runCadChecks(snapshot, bounds, selection, undefined, { meshes, kernel });
+    });
+  const interference = (result: ReturnType<typeof runCadChecks>) =>
+    result.findings.flatMap((finding) => (finding.check === "mesh-interference" ? [finding] : []));
+
+  it.effect("reports the exact intersection volume and skips solids that only touch", () =>
+    Effect.gen(function* () {
+      const cube = solidBox([0, 0, 0], [0.1, 0.1, 0.1]);
+      const result = yield* run(
+        [
+          { number: 1, part: 10 },
+          { number: 2, part: 10, transform: translate(0.05, 0.05, 0.05) },
+          { number: 3, part: 10, transform: translate(-0.1, 0, 0) },
+        ],
+        [cube],
+      );
+      const found = interference(result);
+      assert.equal(found.length, 1);
+      assert.equal(pairKey(found[0]!), `${id(1)}|${id(2)}`);
+      // GLB vertices are float32, so 0.05 m carries about 1e-7 relative error.
+      assert.closeTo(found[0]!.intersectionVolume, 0.05 ** 3, 1e-10);
+      assert.closeTo(found[0]!.intersectionFraction, 0.125, 1e-6);
+      assert.isFalse(found[0]!.withinSubassembly);
+      assert.equal(result.summary.meshUnknown, 0);
+    }),
+  );
+  it.effect("ignores a part sitting in the gap of another even though their boxes overlap", () =>
+    Effect.gen(function* () {
+      // Two separated lugs in one part, and a block between them with clearance on both sides.
+      const lugs = meshGlb([
+        boxPrimitive([0, 0, 0], [0.1, 0.1, 0.1]),
+        boxPrimitive([0.3, 0, 0], [0.4, 0.1, 0.1]),
+      ]);
+      const block = solidBox([0.15, 0, 0], [0.25, 0.1, 0.1]);
+      const occurrences = [
+        { number: 1, part: 10 },
+        { number: 2, part: 11 },
+      ];
+      assert.lengthOf(interference(yield* run(occurrences, [lugs, block])), 0);
+      const both = yield* run(
+        occurrences,
+        [lugs, block],
+        new Set(["mesh-interference", "overlapping-bounds"] as const),
+      );
+      assert.lengthOf(overlaps(both), 1);
+      assert.lengthOf(interference(both), 0);
+    }),
+  );
+  it.effect(
+    "places solids with glTF node transforms, occurrence rotation, and repeated instances",
+    () =>
+      Effect.gen(function* () {
+        // A 0.2 x 0.02 x 0.02 bar lifted 0.01 on Z by its glTF node.
+        const bar = meshGlb(
+          [boxPrimitive([0, 0, 0], [0.2, 0.02, 0.02])],
+          [{ translation: [0, 0, 0.01], mesh: 0 }],
+        );
+        // Only the bar rotated a quarter turn about Z reaches this block, and only its upper half.
+        const block = solidBox([-0.01, 0.05, 0], [0.01, 0.07, 0.02]);
+        const result = yield* run(
+          [
+            { number: 1, part: 10, transform: rotateZ90(0, 0, 0) },
+            { number: 2, part: 11 },
+            { number: 3, part: 11, transform: translate(1, 0, 0) },
+            { number: 4, part: 10, transform: rotateZ90(1, 0, 0) },
+            { number: 5, part: 10, transform: translate(0, 0, 0) },
+          ],
+          [bar, block],
+        );
+        const found = interference(result);
+        assert.deepEqual(found.map(pairKey).sort(), [`${id(1)}|${id(2)}`, `${id(3)}|${id(4)}`]);
+        for (const finding of found) assert.closeTo(finding.intersectionVolume, 2e-6, 1e-12);
+      }),
+  );
+  it.effect("counts open, unreadable, and suppressed parts without reporting them clear", () =>
+    Effect.gen(function* () {
+      const cube = solidBox([0, 0, 0], [0.1, 0.1, 0.1]);
+      const open = meshGlb([boxPrimitive([0, 0, 0], [0.1, 0.1, 0.1], 10)]);
+      const result = yield* run(
+        [
+          { number: 1, part: 10 },
+          { number: 2, part: 11, transform: translate(0.05, 0, 0) },
+          { number: 3, part: 12, transform: translate(0, 0.05, 0) },
+          { number: 4, part: 10, transform: translate(0, 0, 0.05), suppressed: true },
+        ],
+        [cube, open, glb({ scenes: [{ nodes: [] }] })],
+      );
+      assert.lengthOf(interference(result), 0);
+      // The open box and the unreadable part; the suppressed cube is not a candidate at all.
+      assert.equal(result.summary.meshUnknown, 2);
+    }),
+  );
+  it.effect("ranks cross-subassembly pairs before larger pairs inside one subassembly", () =>
+    Effect.gen(function* () {
+      const cube = solidBox([0, 0, 0], [0.1, 0.1, 0.1]);
+      const result = yield* run(
+        [
+          { number: 100 },
+          { number: 200, parent: 100 },
+          { number: 300, parent: 200 },
+          // Kit screw two levels down and kit body one level down: same subassembly 200.
+          { number: 1, part: 10, parent: 300 },
+          { number: 2, part: 10, parent: 200, transform: translate(0.01, 0, 0) },
+          // A top-level part barely touching the kit screw.
+          { number: 3, part: 10, parent: 100, transform: translate(0.099, 0, 0) },
+        ],
+        [cube],
+      );
+      const found = interference(result);
+      assert.deepEqual(found.map(pairKey), [
+        `${id(2)}|${id(3)}`,
+        `${id(1)}|${id(3)}`,
+        `${id(1)}|${id(2)}`,
+      ]);
+      assert.deepEqual(
+        found.map((finding) => finding.withinSubassembly),
+        [false, false, true],
+      );
+      assert.isAbove(found[2]!.intersectionVolume, found[0]!.intersectionVolume);
+    }),
+  );
+});
+
 describe("cad_checks tool", () => {
   const snapshot = manifest(
     [
@@ -434,32 +713,42 @@ describe("cad_checks tool", () => {
     [id(10), box([0.1, 0.05, 0.01])],
     [id(11), box([0.05, 0.05, 0.05])],
   ]);
+  const meshes = new Map<string, CadTriangleMesh | null>([
+    [id(10), readCadTriangleMesh(solidBox([0, 0, 0], [0.1, 0.05, 0.01]))],
+    [id(11), readCadTriangleMesh(solidBox([0, 0, 0], [0.05, 0.05, 0.05]))],
+  ]);
   const loads: ReadonlySet<string>[] = [];
   const loadBounds = (keys: ReadonlySet<string>) => {
     loads.push(keys);
     return Effect.succeed(bounds);
   };
+  const loadMeshes = (keys: ReadonlySet<string>) => {
+    loads.push(keys);
+    return Effect.succeed(meshes);
+  };
+  const geometry = { bounds: loadBounds, meshes: loadMeshes };
   it.effect(
     "pages deterministic findings with cursors bound to the snapshot and check selection",
     () =>
       Effect.gen(function* () {
-        const whole = yield* readCadChecks(snapshot, state, loadBounds, { expectedRevision: 3 });
+        const whole = yield* readCadChecks(snapshot, state, geometry, { expectedRevision: 3 });
         assert.equal(whole.snapshotId, snapshotId);
+        // Exact interference replaces bounding-box leads by default; these boxes are their own solids.
         assert.deepEqual(whole.checks, [
-          "overlapping-bounds",
+          "mesh-interference",
           "coincident-instances",
           "degenerate-geometry",
         ]);
         assert.deepEqual(
           whole.findings.map((finding) => finding.check),
-          [...Array.from({ length: 6 }, () => "overlapping-bounds"), "coincident-instances"],
+          [...Array.from({ length: 6 }, () => "mesh-interference"), "coincident-instances"],
         );
         assert.isNull(whole.nextCursor);
         assert.equal(whole.summary.totalFindings, 7);
         const paged: (typeof whole.findings)[number][] = [];
         let cursor: string | undefined;
         do {
-          const page = yield* readCadChecks(snapshot, state, loadBounds, {
+          const page = yield* readCadChecks(snapshot, state, geometry, {
             expectedRevision: 3,
             limit: 4,
             ...(cursor === undefined ? {} : { cursor }),
@@ -469,7 +758,7 @@ describe("cad_checks tool", () => {
         } while (cursor !== undefined);
         assert.deepEqual(paged, whole.findings);
         const loadsBefore = loads.length;
-        const subset = yield* readCadChecks(snapshot, state, loadBounds, {
+        const subset = yield* readCadChecks(snapshot, state, geometry, {
           expectedRevision: 3,
           checks: ["coincident-instances"],
           limit: 1,
@@ -478,13 +767,19 @@ describe("cad_checks tool", () => {
         assert.equal(subset.findings[0]?.check, "coincident-instances");
         // Coincidence needs transforms only, so no geometry is read.
         assert.equal(loads.length, loadsBefore);
+        const leads = yield* readCadChecks(snapshot, state, geometry, {
+          expectedRevision: 3,
+          checks: ["overlapping-bounds"],
+        });
+        assert.deepEqual(leads.checks, ["overlapping-bounds"]);
+        assert.lengthOf(leads.findings, 6);
         for (const cursor of [
-          `${snapshotId}:overlapping-bounds+coincident-instances+degenerate-geometry:4`,
+          `${snapshotId}:mesh-interference+coincident-instances+degenerate-geometry:4`,
           `${snapshotId}:coincident-instances:9`,
           `00000000-0000-4000-8000-000000000002:coincident-instances:0`,
         ])
           assert.equal(
-            (yield* readCadChecks(snapshot, state, loadBounds, {
+            (yield* readCadChecks(snapshot, state, geometry, {
               expectedRevision: 3,
               checks: ["coincident-instances"],
               cursor,
@@ -497,12 +792,11 @@ describe("cad_checks tool", () => {
     Effect.gen(function* () {
       const before = loads.length;
       assert.equal(
-        (yield* readCadChecks(snapshot, state, loadBounds, { expectedRevision: 2 }).pipe(
-          Effect.flip,
-        )).reason,
+        (yield* readCadChecks(snapshot, state, geometry, { expectedRevision: 2 }).pipe(Effect.flip))
+          .reason,
         "revision-conflict",
       );
-      const malformed = yield* readCadChecks(snapshot, state, loadBounds, {
+      const malformed = yield* readCadChecks(snapshot, state, geometry, {
         expectedRevision: 3,
         checks: ["interference"],
       }).pipe(Effect.flip);

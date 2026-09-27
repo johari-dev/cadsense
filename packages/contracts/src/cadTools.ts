@@ -32,6 +32,7 @@ export const CadHierarchyResult = Schema.Struct({
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
 export const CAD_CHECK_NAMES = [
+  "mesh-interference",
   "overlapping-bounds",
   "coincident-instances",
   "degenerate-geometry",
@@ -49,6 +50,17 @@ const CadCheckOccurrence = Schema.Struct({ occurrenceId: CadHash, name: Schema.S
 const Meters3 = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
 /** Deterministic leads for the agent to verify visually. Every number is in meters. */
 export const CadCheckFinding = Schema.Union([
+  Schema.Struct({
+    check: Schema.Literal("mesh-interference"),
+    occurrences: Schema.Array(CadCheckOccurrence),
+    // Cubic meters of solid shared by both parts, from exact mesh booleans.
+    intersectionVolume: Schema.Number,
+    // Intersection volume divided by the smaller solid's volume.
+    intersectionFraction: Schema.Number,
+    // Both parts sit in one subassembly below the root, such as a vendor kit's own screw and nut.
+    withinSubassembly: Schema.Boolean,
+    explanation: Schema.String,
+  }),
   Schema.Struct({
     check: Schema.Literal("overlapping-bounds"),
     occurrences: Schema.Array(CadCheckOccurrence),
@@ -83,6 +95,8 @@ export const CadChecksResult = Schema.Struct({
     totalFindings: Schema.Int,
     partOccurrences: Schema.Int,
     boundsUnknown: Schema.Int,
+    // Parts whose mesh is not a closed solid, so mesh-interference cannot clear or report them.
+    meshUnknown: Schema.Int,
     pairsEvaluated: Schema.Int,
     pairBudget: Schema.Int,
     budgetExhausted: Schema.Boolean,
