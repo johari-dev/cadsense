@@ -4,9 +4,11 @@
  *
  * Provider catalogs and legacy classification live in `model-manifest.json`.
  * The bundled copy ships with every release; at runtime the service refreshes
- * it from the same file on `main`. Preference order is remote, then the last
- * successful on-disk copy, then the bundle. A failed fetch never fails a
- * provider check.
+ * it from upstream t3code's copy on `main`, so new Claude and Codex releases
+ * appear once upstream publishes them, with no edit needed here. Preference
+ * order is remote, then the last successful on-disk copy, then the bundle. A
+ * failed fetch or a manifest this build cannot decode never fails a provider
+ * check.
  *
  * Providers with authoritative discovery can use only the classification
  * overlay. Providers with static catalogs can resolve presentation and
@@ -36,7 +38,7 @@ import bundledManifestJson from "./model-manifest.json" with { type: "json" };
 import type { ServerProviderDraft } from "./providerSnapshot.ts";
 
 const MODEL_MANIFEST_URL =
-  "https://raw.githubusercontent.com/johari-dev/cadsense/main/apps/server/src/provider/model-manifest.json";
+  "https://raw.githubusercontent.com/pingdotgg/t3code/main/apps/server/src/provider/model-manifest.json";
 
 /** How long a fetched manifest stays fresh before the next probe re-fetches. */
 const MANIFEST_TTL_MS = 60 * 60 * 1000;
