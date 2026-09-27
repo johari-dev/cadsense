@@ -8,10 +8,12 @@ import { useRef, useState } from "react";
 
 import { onshapeProjectUrl } from "../../lib/onshapeProjects";
 import { onshapeProjectEnvironment } from "../../state/onshapeProjects";
+import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { useOnshapeConnectionsController } from "./useOnshapeConnectionsController";
 
@@ -28,10 +30,29 @@ export function OnshapeProjectSettings({
   const setConnection = useAtomCommand(onshapeProjectEnvironment.setConnection, {
     reportFailure: false,
   });
+  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewPending, setReviewPending] = useState(false);
+  const autoReviewVersions = source.autoReviewVersions === true;
+  const setAutoReviewVersions = async (enabled: boolean) => {
+    if (reviewPending) return;
+    setReviewPending(true);
+    setError(null);
+    try {
+      const result = await updateProject({
+        environmentId: project.environmentId,
+        input: { projectId: project.id, onshapeAutoReviewVersions: enabled },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        setError("Could not change version reviews. Try again.");
+      }
+    } finally {
+      setReviewPending(false);
+    }
+  };
   const compatible = catalog.connections.filter((connection) => connection.host === source.host);
   const current = compatible.find((connection) => connection.connectionId === source.connectionId);
   const selected = compatible.find(
@@ -131,6 +152,18 @@ export function OnshapeProjectSettings({
               {pending ? "Saving…" : "Save connection"}
             </Button>
           </div>
+        }
+      />
+      <SettingsRow
+        title="Review new Onshape versions"
+        description="Every 5 minutes the server checks this document for new named versions and starts a review thread for each one. Versions that already exist when this is turned on are not reviewed."
+        control={
+          <Switch
+            aria-label="Review new Onshape versions"
+            checked={autoReviewVersions}
+            disabled={reviewPending}
+            onCheckedChange={(checked) => void setAutoReviewVersions(checked)}
+          />
         }
       />
       <div className="space-y-2 px-4 pb-4 text-sm">

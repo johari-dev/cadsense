@@ -66,6 +66,9 @@ export const OnshapeProjectSource = Schema.Struct({
   configuration: Schema.String.check(Schema.isMaxLength(MAX_ONSHAPE_CONFIGURATION_LENGTH)),
   // Optional for events written before managed workspace provisioning became reactor-owned.
   managedWorkspaceReady: Schema.optionalKey(Schema.Boolean),
+  // When true, the server polls this document for new named versions and starts a review
+  // thread for each one. Absent means off.
+  autoReviewVersions: Schema.optionalKey(Schema.Boolean),
 });
 export type OnshapeProjectSource = typeof OnshapeProjectSource.Type;
 

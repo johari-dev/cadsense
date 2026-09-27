@@ -659,6 +659,8 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  // Only valid for Onshape projects; the decider rejects it elsewhere.
+  onshapeAutoReviewVersions: Schema.optional(Schema.Boolean),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -1152,6 +1154,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   onshapeConnectionId: Schema.optional(OnshapeConnectionId),
   onshapeManagedWorkspaceReady: Schema.optional(Schema.Boolean),
+  onshapeAutoReviewVersions: Schema.optional(Schema.Boolean),
   updatedAt: IsoDateTime,
 });
 

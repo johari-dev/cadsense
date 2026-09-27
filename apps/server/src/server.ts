@@ -74,6 +74,7 @@ import * as NetService from "@cadsense/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import * as OnshapeVersionReviews from "./onshape/OnshapeVersionReviews.ts";
 import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
@@ -249,7 +250,7 @@ const OnshapeWorkspaceReactorLayerLive = OnshapeWorkspaceReactorLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
 );
 
-const OnshapeLayerLive = OnshapeProjects.layer.pipe(
+const OnshapeLayerLive = Layer.mergeAll(OnshapeProjects.layer, OnshapeVersionReviews.layer).pipe(
   Layer.provideMerge(ManagedWorkspaceAllocator.layer),
   Layer.provideMerge(OnshapeConnectionsLayerLive),
   Layer.provideMerge(OnshapeWorkspaceReactorLayerLive),

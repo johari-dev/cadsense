@@ -436,7 +436,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),
             ...((event.payload.onshapeConnectionId !== undefined ||
-              event.payload.onshapeManagedWorkspaceReady !== undefined) &&
+              event.payload.onshapeManagedWorkspaceReady !== undefined ||
+              event.payload.onshapeAutoReviewVersions !== undefined) &&
             existingRow.value.onshapeSource !== null
               ? {
                   onshapeSource: {
@@ -448,6 +449,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                       ? {
                           managedWorkspaceReady: event.payload.onshapeManagedWorkspaceReady,
                         }
+                      : {}),
+                    ...(event.payload.onshapeAutoReviewVersions !== undefined
+                      ? { autoReviewVersions: event.payload.onshapeAutoReviewVersions }
                       : {}),
                   },
                 }
