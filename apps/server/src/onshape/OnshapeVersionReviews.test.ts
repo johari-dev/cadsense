@@ -5,8 +5,11 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CadUserOperationError,
+  type CadRootIdentity,
   CommandId,
   OnshapeConnectionId,
+  OnshapeElementId,
   OnshapeDocumentId,
   OnshapeNetworkError,
   OnshapeProjectSource,
@@ -22,6 +25,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
+import { CadUserOperations } from "../cad/CadUserOperations.ts";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -115,6 +119,7 @@ describe("planVersionReviews", () => {
   it("titles and prompts the review from the version metadata", () => {
     assert.strictEqual(versionReviewTitle(v2, 2), "Review v2: Gearbox check");
     const prompt = versionReviewPrompt({
+      sync: { status: "synced", microversionId: "e".repeat(24) },
       project: {
         id: projectId,
         title: "FRC intake",
@@ -124,7 +129,7 @@ describe("planVersionReviews", () => {
         createdAt: now,
         updatedAt: now,
       },
-      version: { ...v2, description: "Swapped the 40T gear" },
+      version: { ...v2, description: "Swapped the 40T gear", microversion: "f".repeat(24) },
     });
     assert.include(
       prompt,
@@ -132,6 +137,30 @@ describe("planVersionReviews", () => {
     );
     assert.include(prompt, "Version note: Swapped the 40T gear.");
     assert.include(prompt, "Review this version of FRC intake and leave CAD comments.");
+    assert.include(
+      prompt,
+      `synced just now from the bound workspace at microversion ${"e".repeat(24)}`,
+    );
+    assert.include(
+      prompt,
+      `The workspace has moved on since this version (version microversion ${"f".repeat(24)})`,
+    );
+    assert.include(
+      versionReviewPrompt({
+        sync: { status: "failed", reason: "CAD is busy" },
+        project: {
+          id: projectId,
+          title: "FRC intake",
+          workspaceRoot: "/managed",
+          defaultModelSelection: null,
+          onshapeSource: source,
+          createdAt: now,
+          updatedAt: now,
+        },
+        version: v2,
+      }),
+      "The CAD download failed (CAD is busy), so the CAD panel may show an older revision.",
+    );
     assert.include(prompt, `https://cad.onshape.com/documents/${source.documentId}/v/${v2.id}`);
   });
 });
@@ -140,7 +169,75 @@ interface Onshape {
   readonly versions: Ref.Ref<ReadonlyArray<OnshapeVersion>>;
   readonly failure: Ref.Ref<OnshapeConnectionError | null>;
   readonly requests: Ref.Ref<number>;
+  /** Whether a fake CAD sync completes or ends failed, plus how many syncs were requested. */
+  readonly syncMode: Ref.Ref<"succeed" | "fail">;
+  readonly syncs: Ref.Ref<number>;
 }
+
+const root: CadRootIdentity = {
+  rootId: "a".repeat(64),
+  elementId: OnshapeElementId.make("b53dde24ab8b46d679af9944"),
+  kind: "assembly",
+  configuration: "default",
+};
+const snapshot = (index: number) => ({
+  snapshotId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+  microversionId: OnshapeWorkspaceId.make(String(index).padStart(24, "0")),
+  createdAt: now,
+  manifestBytes: 1,
+  assetBytes: 1,
+});
+
+// Reserves, then settles the operation through the real CAD lifecycle commands, like the real
+// service does at the end of its forked job. Runs inline so ordering is deterministic.
+const fakeCadOperations = (onshape: Onshape) =>
+  Layer.effect(
+    CadUserOperations,
+    Effect.map(OrchestrationEngineService, (engine) =>
+      CadUserOperations.of({
+        start: (input) =>
+          Effect.gen(function* () {
+            const count = yield* Ref.updateAndGet(onshape.syncs, (n) => n + 1);
+            const operationId = `00000000-0000-4000-9000-${String(count).padStart(12, "0")}`;
+            yield* engine
+              .dispatch({
+                type: "project.cad.operation.reserve",
+                commandId: CommandId.make(`server:test:reserve:${count}`),
+                projectId: input.projectId,
+                operationId,
+                kind: input.kind,
+                root: input.kind === "sync" ? { ...input.root, rootId: root.rootId } : null,
+              })
+              .pipe(Effect.mapError(() => new CadUserOperationError({ reason: "busy" })));
+            const mode = yield* Ref.get(onshape.syncMode);
+            yield* engine
+              .dispatch(
+                mode === "succeed"
+                  ? {
+                      type: "project.cad.operation.complete",
+                      commandId: CommandId.make(`server:test:complete:${count}`),
+                      projectId: input.projectId,
+                      operationId,
+                      result: { kind: "sync", snapshot: snapshot(count) },
+                    }
+                  : {
+                      type: "project.cad.operation.end",
+                      commandId: CommandId.make(`server:test:end:${count}`),
+                      projectId: input.projectId,
+                      operationId,
+                      status: "failed",
+                      reason: "Could not reach Onshape. Existing downloaded CAD is unchanged.",
+                    },
+              )
+              .pipe(Effect.orDie);
+            return { operationId };
+          }),
+        cancel: unsupported,
+        setEnabled: unsupported,
+        recoverInterrupted: unsupported(),
+      }),
+    ),
+  );
 
 // Real engine and projections over a SQLite file, with Onshape replaced by a version list.
 function makeLayer(baseDir: string, onshape: Onshape) {
@@ -180,6 +277,7 @@ function makeLayer(baseDir: string, onshape: Onshape) {
   );
   return versionReviewsLayer.pipe(
     Layer.provideMerge(connections),
+    Layer.provideMerge(fakeCadOperations(onshape)),
     Layer.provideMerge(orchestration),
   );
 }
@@ -203,6 +301,11 @@ const createEnabledProject = Effect.fn(function* (enabled: boolean) {
   });
   if (enabled) yield* setEnabled(true, "server:test:enable");
 });
+
+// A user already synced one root from project settings; the poller refreshes that root.
+const seedSyncedRoot = Effect.flatMap(CadUserOperations, (cadOperations) =>
+  cadOperations.start({ projectId, kind: "sync", root }),
+);
 
 const setEnabled = (enabled: boolean, commandId: string) =>
   Effect.flatMap(OrchestrationEngineService, (engine) =>
@@ -235,6 +338,8 @@ const makeOnshape = Effect.gen(function* () {
     versions: yield* Ref.make<ReadonlyArray<OnshapeVersion>>([start]),
     failure: yield* Ref.make<OnshapeConnectionError | null>(null),
     requests: yield* Ref.make(0),
+    syncMode: yield* Ref.make<"succeed" | "fail">("succeed"),
+    syncs: yield* Ref.make(0),
   } satisfies Onshape;
 });
 
@@ -287,8 +392,10 @@ describe("OnshapeVersionReviews", () => {
                 detail.value.messages[0]?.text ?? "",
                 'Onshape version "Gearbox check"',
               );
+              assert.include(detail.value.messages[0]?.text ?? "", "No CAD root has been synced");
               assert.strictEqual(detail.value.turnAdmission?.pending.length, 1);
             }
+            assert.strictEqual(yield* Ref.get(onshape.syncs), 0);
 
             yield* reviews.pollAll();
             assert.strictEqual((yield* reviewThreads).length, 2);
@@ -334,6 +441,78 @@ describe("OnshapeVersionReviews", () => {
             (yield* reviewThreads).map((thread) => thread.title),
             ["Review v1: Bracket rev"],
           );
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("syncs the project's CAD root before each review and reports the outcome", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          yield* seedSyncedRoot;
+          const reviews = yield* OnshapeVersionReviews;
+          const query = yield* ProjectionSnapshotQuery;
+          yield* reviews.pollAll();
+
+          const promptFor = (id: string) =>
+            Effect.map(
+              query.getThreadDetailById(ThreadId.make(`onshape-version-review:${projectId}:${id}`)),
+              (detail) => Option.getOrThrow(detail).messages[0]?.text ?? "",
+            );
+
+          // v1 syncs first, so its prompt names the fresh snapshot. v2 is handled in the same
+          // poll while v1's run is pending, so the CAD lifecycle refuses its sync as busy and
+          // the review still starts with the failure spelled out.
+          yield* Ref.set(onshape.versions, [start, v1, v2]);
+          yield* reviews.pollAll();
+          assert.strictEqual(yield* Ref.get(onshape.syncs), 3);
+          const project = Option.getOrThrow(yield* query.getProjectShellById(projectId));
+          const current = project.cad?.roots[0]?.current;
+          assert.strictEqual(current?.snapshotId, snapshot(2).snapshotId);
+          assert.include(
+            yield* promptFor(v1.id),
+            `synced just now from the bound workspace at microversion ${current?.microversionId}`,
+          );
+          assert.include(
+            yield* promptFor(v2.id),
+            "The CAD download failed (CAD is busy with an agent run or another CAD operation)",
+          );
+          assert.strictEqual(project.cad?.operation, null);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("starts the review with a warning when the CAD sync ends failed", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          yield* seedSyncedRoot;
+          const reviews = yield* OnshapeVersionReviews;
+          const query = yield* ProjectionSnapshotQuery;
+          yield* reviews.pollAll();
+
+          yield* Ref.set(onshape.syncMode, "fail");
+          yield* Ref.set(onshape.versions, [start, v1]);
+          yield* reviews.pollAll();
+          assert.strictEqual(yield* Ref.get(onshape.syncs), 2);
+          const detail = Option.getOrThrow(
+            yield* query.getThreadDetailById(
+              ThreadId.make(`onshape-version-review:${projectId}:${v1.id}`),
+            ),
+          );
+          assert.include(
+            detail.messages[0]?.text ?? "",
+            "The CAD download failed (Could not reach Onshape. Existing downloaded CAD is unchanged.), so the CAD panel may show an older revision.",
+          );
+          assert.strictEqual(detail.turnAdmission?.pending.length, 1);
+          const project = Option.getOrThrow(yield* query.getProjectShellById(projectId));
+          assert.strictEqual(project.cad?.roots[0]?.current?.snapshotId, snapshot(1).snapshotId);
         }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
       }),
     ),

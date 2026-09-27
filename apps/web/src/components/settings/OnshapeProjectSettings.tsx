@@ -156,7 +156,7 @@ export function OnshapeProjectSettings({
       />
       <SettingsRow
         title="Review new Onshape versions"
-        description="Every 5 minutes the server checks this document for new named versions and starts a review thread for each one. Versions that already exist when this is turned on are not reviewed."
+        description="Every 5 minutes the server checks this document for new named versions. Each new version syncs the CAD snapshot and starts a review thread, using Onshape API requests. Versions that already exist when this is turned on are not reviewed."
         control={
           <Switch
             aria-label="Review new Onshape versions"

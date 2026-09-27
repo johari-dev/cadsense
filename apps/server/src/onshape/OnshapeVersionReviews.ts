@@ -1,10 +1,13 @@
 import {
+  type CadRootIdentity,
+  type CadUserOperationError,
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   MessageId,
   OnshapeWorkspaceId,
+  type OrchestrationEvent,
   type OrchestrationProjectShell,
   ProviderInstanceId,
   type ProjectId,
@@ -17,12 +20,14 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type * as Scope from "effect/Scope";
 
+import { CadUserOperations } from "../cad/CadUserOperations.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -32,6 +37,8 @@ import { OnshapeConnections } from "./OnshapeConnections.ts";
 /** Every enabled project lists its document versions this often; jitter spreads the requests. */
 export const ONSHAPE_VERSION_POLL_INTERVAL = "5 minutes";
 const MAX_RETRY_BACKOFF_MS = 60 * 60 * 1_000;
+/** A CAD sync that has not settled by then is reported as failed and the review starts anyway. */
+const SYNC_TIMEOUT = "30 minutes";
 const MAX_TITLE_LENGTH = 120;
 
 /** The subset of Onshape's BTVersionInfo the poller reads. Unknown fields are ignored. */
@@ -43,6 +50,7 @@ export const OnshapeVersion = Schema.Struct({
   creator: Schema.optionalKey(
     Schema.NullOr(Schema.Struct({ name: Schema.optionalKey(Schema.NullOr(Schema.String)) })),
   ),
+  microversion: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type OnshapeVersion = typeof OnshapeVersion.Type;
 const OnshapeVersionList = Schema.Union([
@@ -106,11 +114,44 @@ export function versionReviewTitle(version: OnshapeVersion, ordinal: number): st
   return title.length > MAX_TITLE_LENGTH ? `${title.slice(0, MAX_TITLE_LENGTH - 1)}…` : title;
 }
 
+/** What the CAD panel will show when the review starts. */
+export type VersionSyncOutcome =
+  | { readonly status: "no-roots" }
+  | { readonly status: "synced"; readonly microversionId: string | null }
+  | { readonly status: "failed"; readonly reason: string };
+
+const syncLine = (version: OnshapeVersion, sync: VersionSyncOutcome): ReadonlyArray<string> => {
+  switch (sync.status) {
+    case "no-roots":
+      return [
+        "No CAD root has been synced for this project yet, so the CAD panel has nothing to show until one is synced in project settings.",
+      ];
+    case "failed":
+      return [
+        `The CAD download failed (${sync.reason}), so the CAD panel may show an older revision.`,
+      ];
+    case "synced":
+      return [
+        sync.microversionId
+          ? `The CAD panel shows a snapshot synced just now from the bound workspace at microversion ${sync.microversionId}.`
+          : "The CAD panel shows a snapshot synced just now from the bound workspace.",
+        ...(version.microversion &&
+        sync.microversionId &&
+        version.microversion !== sync.microversionId
+          ? [
+              `The workspace has moved on since this version (version microversion ${version.microversion}), so some geometry may be newer than the version.`,
+            ]
+          : []),
+      ];
+  }
+};
+
 export function versionReviewPrompt(input: {
   readonly project: OrchestrationProjectShell;
   readonly version: OnshapeVersion;
+  readonly sync: VersionSyncOutcome;
 }): string {
-  const { project, version } = input;
+  const { project, version, sync } = input;
   const source = project.onshapeSource;
   const link = source
     ? new URL(`/documents/${source.documentId}/v/${version.id}`, source.host).href
@@ -121,6 +162,7 @@ export function versionReviewPrompt(input: {
     `Onshape version "${version.name.trim() || version.id}" was created on ${version.createdAt} by ${creator}.`,
     `Version note: ${note}.`,
     `Review this version of ${project.title} and leave CAD comments.`,
+    ...syncLine(version, sync),
     ...(link ? [`Version link: ${link}`] : []),
   ].join("\n");
 }
@@ -144,6 +186,28 @@ interface CursorRow {
   readonly createdAt: string;
 }
 
+const syncFailureReason = (error: CadUserOperationError): string => {
+  switch (error.reason) {
+    case "busy":
+      return "CAD is busy with an agent run or another CAD operation";
+    case "throttled":
+      return "Onshape requests are throttled";
+    case "disk-space":
+      return "not enough free disk space";
+    case "not-found":
+    case "unavailable":
+    case "invalid-root":
+      return "the CAD root is unavailable";
+    case "operation-failed":
+      return "the CAD operation failed";
+  }
+};
+
+const isCadStateSet = (
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "project.cad-state-set" }> =>
+  event.type === "project.cad-state-set";
+
 const enabled = (project: OrchestrationProjectShell) =>
   project.onshapeSource?.autoReviewVersions === true &&
   project.onshapeSource.managedWorkspaceReady === true;
@@ -153,6 +217,7 @@ export const make = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
   const engine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
+  const cadOperations = yield* CadUserOperations;
   const crypto = yield* Crypto.Crypto;
   // Overlap guard and failure backoff live in memory; the version cursor is the durable state.
   const inflight = new Set<ProjectId>();
@@ -202,13 +267,76 @@ export const make = Effect.gen(function* () {
   const commandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((id) => CommandId.make(`server:${tag}:${id}`)));
 
-  // Mirrors the client's bootstrap turn start: create the thread, then start its first turn.
-  // The thread id is derived from the version so a retried start reuses the same thread.
+  // Runs the same sync the settings page triggers for one already-synced root and waits for its
+  // outcome event. The sync targets the bound workspace; snapshots cannot be pinned to a version.
+  const syncRoot = Effect.fn("OnshapeVersionReviews.syncRoot")(function* (
+    project: OrchestrationProjectShell,
+    root: CadRootIdentity,
+  ): Effect.fn.Return<VersionSyncOutcome> {
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const subscription = yield* engine.subscribeDomainEvents;
+        const started = yield* cadOperations
+          .start({
+            projectId: project.id,
+            kind: "sync",
+            root: { elementId: root.elementId, kind: root.kind, configuration: root.configuration },
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(started))
+          return { status: "failed" as const, reason: syncFailureReason(started.failure) };
+        const settled = yield* Stream.fromSubscription(subscription).pipe(
+          Stream.filter(isCadStateSet),
+          Stream.filter(
+            (event) =>
+              event.payload.projectId === project.id &&
+              event.payload.cad.operation === null &&
+              event.payload.cad.lastOutcome?.operationId === started.success.operationId,
+          ),
+          Stream.runHead,
+          Effect.timeoutOption(SYNC_TIMEOUT),
+          Effect.map(Option.flatten),
+        );
+        if (Option.isNone(settled))
+          return { status: "failed" as const, reason: "the CAD sync timed out" };
+        const cad = settled.value.payload.cad;
+        if (cad.lastOutcome?.status !== "succeeded")
+          return {
+            status: "failed" as const,
+            reason: cad.lastOutcome?.reason ?? "the CAD operation failed",
+          };
+        return {
+          status: "synced" as const,
+          microversionId:
+            cad.roots.find((entry) => entry.rootId === root.rootId)?.current?.microversionId ??
+            null,
+        };
+      }),
+    );
+  });
+
+  const syncSnapshots = Effect.fn("OnshapeVersionReviews.syncSnapshots")(function* (
+    project: OrchestrationProjectShell,
+  ): Effect.fn.Return<VersionSyncOutcome> {
+    const roots = project.cad?.roots ?? [];
+    if (roots.length === 0) return { status: "no-roots" as const };
+    let outcome: VersionSyncOutcome = { status: "no-roots" };
+    for (const root of roots) {
+      const result = yield* syncRoot(project, root);
+      if (result.status === "failed") return result;
+      outcome = result;
+    }
+    return outcome;
+  });
+
+  // Mirrors the client's bootstrap turn start: sync the CAD snapshot, create the thread, then
+  // start its first turn. The thread id is derived from the version so a retry reuses the thread.
   const startReview = Effect.fn("OnshapeVersionReviews.startReview")(function* (
     project: OrchestrationProjectShell,
     version: OnshapeVersion,
     ordinal: number,
   ) {
+    const sync = yield* syncSnapshots(project);
     const threadId = ThreadId.make(`onshape-version-review:${project.id}:${version.id}`);
     const modelSelection = project.defaultModelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
@@ -236,7 +364,7 @@ export const make = Effect.gen(function* () {
       message: {
         messageId: MessageId.make(`onshape-version-review:${project.id}:${version.id}`),
         role: "user",
-        text: versionReviewPrompt({ project, version }),
+        text: versionReviewPrompt({ project, version, sync }),
         attachments: [],
       },
       runtimeMode: DEFAULT_RUNTIME_MODE,
@@ -247,6 +375,7 @@ export const make = Effect.gen(function* () {
       projectId: project.id,
       versionId: version.id,
       threadId,
+      sync: sync.status,
     });
   });
 

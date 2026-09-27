@@ -250,7 +250,7 @@ const OnshapeWorkspaceReactorLayerLive = OnshapeWorkspaceReactorLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
 );
 
-const OnshapeLayerLive = Layer.mergeAll(OnshapeProjects.layer, OnshapeVersionReviews.layer).pipe(
+const OnshapeLayerLive = OnshapeProjects.layer.pipe(
   Layer.provideMerge(ManagedWorkspaceAllocator.layer),
   Layer.provideMerge(OnshapeConnectionsLayerLive),
   Layer.provideMerge(OnshapeWorkspaceReactorLayerLive),
@@ -273,11 +273,12 @@ const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
 );
 const AgentRuntimeLayerLive = Layer.mergeAll(
-  CadUserOperations.layer,
+  OnshapeVersionReviews.layer,
   CadStorage.layer,
   CadPresentation.reactorLayer,
   CadRenderLifecycle.layer,
 ).pipe(
+  Layer.provideMerge(CadUserOperations.layer),
   Layer.provideMerge(CadPresentation.layer),
   Layer.provideMerge(CadViewingLayerLive),
   Layer.provideMerge(CadProjectQuiescence.layer),

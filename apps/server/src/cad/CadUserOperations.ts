@@ -118,7 +118,10 @@ const failureReason = (error: unknown): string => {
   return `${detail} Existing downloaded CAD is unchanged.`;
 };
 
-/** Only user RPC handlers receive this service. Accepted jobs outlive route and socket changes. */
+/**
+ * User RPC handlers and the opt-in Onshape version review poller receive this service. Accepted
+ * jobs outlive route and socket changes.
+ */
 export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const query = yield* ProjectionSnapshotQuery;
