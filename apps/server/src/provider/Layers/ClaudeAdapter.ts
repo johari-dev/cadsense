@@ -4421,9 +4421,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
+        // The system prompt is fixed for the session, so learnings and cadsense.json review
+        // scopes changed later reach Claude when its next session starts. A failed learnings
+        // read only costs this session its learnings.
+        const learnings = yield* cadQuery.value
+          .getCadReviewLearnings(project.value.id)
+          .pipe(Effect.orElseSucceed(() => []));
         return {
           scope,
           tools,
+          reviewInstructions: cadReviewInstructions({
+            learnings,
+            scopes: yield* tools.reviewScopes,
+          }),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,
           ended: new Set<string>(),
@@ -4455,9 +4465,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           updatedAt: startedAt,
         } satisfies ProviderSession,
       };
-      // The SDK fixes the system prompt for the life of the query, so cadsense.json review
-      // scopes are read when the session starts rather than per turn.
-      const reviewInstructions = cad ? cadReviewInstructions(yield* cad.tools.reviewScopes) : null;
       const queryOptions: ClaudeQueryOptions = {
         spawnClaudeCodeProcess: processExit.spawn,
         ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -4466,7 +4473,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(reviewInstructions === null ? {} : { append: reviewInstructions }),
+          ...(cad ? { append: cad.reviewInstructions } : {}),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is

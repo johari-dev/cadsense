@@ -4,9 +4,14 @@ import {
   CadViewState,
   CadUpdateViewInput,
   CadCaptureInput,
+  CadDiffInput,
   CadRenderError,
   CommandId,
+  type CadDiffResult,
+  type CadDiffSnapshot,
+  type CadRetainedSnapshot,
   type CadViewerSession,
+  type CadChecksResult,
   type CadContextResult,
   type CadHierarchyResult,
   type CadReviewScope,
@@ -34,6 +39,7 @@ import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifa
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
 import {
   decodeCadToolInput,
+  defaultCadRoot,
   initialCadView,
   rebaseCadView,
   updateCadView,
@@ -42,6 +48,16 @@ import {
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import { readCadReviewScopes } from "./CadReviewScopes.ts";
 import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewScopes";
+import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
+import {
+  cadDiffSnapshot,
+  chooseCadDiffBase,
+  diffCadManifests,
+  pageCadDiff,
+  retainedCadCandidates,
+  type CadDiff,
+} from "./CadDiff.ts";
+import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
@@ -56,6 +72,8 @@ export interface CadAgentTools {
   ) => Effect.Effect<CadCommentDelivery, CadViewError>;
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
+  readonly checks: (input: unknown) => Effect.Effect<CadChecksResult, CadViewError>;
+  readonly diff: (input: unknown) => Effect.Effect<CadDiffResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -179,6 +197,8 @@ export const make = Effect.gen(function* () {
             [
               ...Object.keys(view.visibility),
               ...view.isolatedOccurrenceIds,
+              ...(view.highlightedOccurrenceIds ?? []),
+              ...(view.ghost?.occurrenceIds ?? []),
               ...(view.camera.fit ?? []),
             ].some((id) => !ids.has(id))
           )
@@ -274,15 +294,7 @@ export const make = Effect.gen(function* () {
           const saved = currentSession.view ?? (yield* getUserView(session.threadId));
           const selected = saved
             ? roots.find((root) => root.rootId === saved.rootId)
-            : project.onshapeSource?.elementId
-              ? roots.find(
-                  (root) =>
-                    root.elementId === project.onshapeSource?.elementId &&
-                    root.configuration === (project.onshapeSource.configuration ?? "default"),
-                )
-              : roots.length === 1
-                ? roots[0]
-                : undefined;
+            : defaultCadRoot(project.onshapeSource, roots);
           if (!selected?.current) return null;
           const next = yield* bind(selected.current.snapshotId).pipe(
             Effect.orElseSucceed(() => null),
@@ -335,6 +347,135 @@ export const make = Effect.gen(function* () {
                 input,
                 ignoredCadOccurrences(scopes, binding.snapshot),
               );
+            }),
+          );
+        // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
+        const boundsCache = new Map<string, CadBounds | null>();
+        const checks: CadAgentTools["checks"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* readCadChecks(
+                binding.snapshot,
+                state,
+                {
+                  bounds: (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
+                  // Triangles are only needed while intersecting, so they are read per call, not cached.
+                  meshes: (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                },
+                input,
+              );
+            }),
+          );
+        // Diffs and manifest headers are cached for this activation so paging never reloads a snapshot.
+        const diffs = new Map<string, CadDiff>();
+        const headers = new Map<string, CadDiffSnapshot>();
+        const diff: CadAgentTools["diff"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const requested = yield* decodeCadToolInput(CadDiffInput, input);
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              const selected = initialized.binding.snapshot;
+              const rootId = selected.rootId;
+              const { roots } = yield* availableRoots();
+              const lineage = roots.find((root) => root.rootId === rootId);
+              const comments = yield* db(readThreadCadComments(session.threadId));
+              const candidates = retainedCadCandidates(lineage, comments, rootId);
+              for (const [snapshotId, entry] of candidates)
+                if (entry.header) headers.set(snapshotId, entry.header);
+              const loaded = new Map<string, CadSnapshotManifest>([
+                [selected.snapshotId, selected],
+              ]);
+              const retainedList = () =>
+                [...candidates.keys()].filter((id) => headers.has(id)).join(", ") || "none";
+              const load = Effect.fn("CadViewing.diff.load")(function* (
+                field: "baseSnapshotId" | "targetSnapshotId",
+                snapshotId: string,
+              ) {
+                const cached = loaded.get(snapshotId);
+                if (cached) return cached;
+                const manifest = yield* store
+                  .withPinned(snapshotId, (manifest) => Effect.succeed(manifest))
+                  .pipe(
+                    Effect.mapError(
+                      () =>
+                        new CadViewError({
+                          reason: "invalid-operation",
+                          details: `${field} is not a retained snapshot. Retained snapshots of this root: ${retainedList()}.`,
+                        }),
+                    ),
+                  );
+                if (manifest.rootId !== rootId)
+                  return yield* new CadViewError({
+                    reason: "invalid-operation",
+                    details: `${field} belongs to a different root than the selected one.`,
+                  });
+                loaded.set(snapshotId, manifest);
+                headers.set(snapshotId, cadDiffSnapshot(manifest));
+                return manifest;
+              });
+              const retained: CadRetainedSnapshot[] = [];
+              for (const [snapshotId, entry] of candidates) {
+                const header =
+                  headers.get(snapshotId) ??
+                  // A comment snapshot that vanished from disk is not offered as a base.
+                  (yield* load("baseSnapshotId", snapshotId).pipe(
+                    Effect.map(cadDiffSnapshot),
+                    Effect.orElseSucceed(() => null),
+                  ));
+                if (header)
+                  retained.push({
+                    ...header,
+                    retainedBy: entry.retainedBy,
+                    commentNumbers: entry.commentNumbers,
+                  });
+              }
+              retained.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+              const targetId = requested.targetSnapshotId ?? selected.snapshotId;
+              const targetHeader =
+                headers.get(targetId) ?? cadDiffSnapshot(yield* load("targetSnapshotId", targetId));
+              let baseId = requested.baseSnapshotId;
+              let baseSelection = "Requested baseSnapshotId.";
+              if (baseId === undefined) {
+                const chosen = chooseCadDiffBase(retained, targetHeader);
+                if (!chosen)
+                  return yield* new CadViewError({
+                    reason: "invalid-operation",
+                    details: `No retained snapshot of this root was created before the target, so this is the first review of this model; inspect it in full. Retained snapshots: ${retained.map((snapshot) => `${snapshot.snapshotId} (${snapshot.retainedBy.join(", ")})`).join(", ") || "none"}.`,
+                  });
+                baseId = chosen.snapshot.snapshotId;
+                baseSelection = chosen.reason;
+              } else if (!retained.some((snapshot) => snapshot.snapshotId === baseId))
+                baseSelection =
+                  "Requested baseSnapshotId. It is not retained for this root and may disappear after the next sync.";
+              if (baseId === targetId)
+                return yield* new CadViewError({
+                  reason: "invalid-operation",
+                  details: "baseSnapshotId and targetSnapshotId are the same snapshot.",
+                });
+              const pair = `${baseId}:${targetId}`;
+              let computed = diffs.get(pair);
+              if (!computed) {
+                const target = yield* load("targetSnapshotId", targetId);
+                const base = yield* load("baseSnapshotId", baseId);
+                computed = diffCadManifests(base, target);
+                diffs.set(pair, computed);
+              }
+              const page = yield* pageCadDiff(computed, baseId, targetId, requested);
+              return {
+                rootId,
+                base: headers.get(baseId)!,
+                target: targetHeader,
+                baseSelection,
+                counts: computed.counts,
+                ...page,
+                retainedSnapshots: retained,
+              };
             }),
           );
         const updateView: CadAgentTools["updateView"] = (input) =>
@@ -440,6 +581,8 @@ export const make = Effect.gen(function* () {
             : {}),
           context: () => activity.track(session.threadId, turnId, context()),
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
+          checks: (input) => activity.track(session.threadId, turnId, checks(input)),
+          diff: (input) => activity.track(session.threadId, turnId, diff(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });

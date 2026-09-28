@@ -78,6 +78,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.cad.operation.reserve":
     case "project.cad.operation.complete":
     case "project.cad.operation.end":
+    case "project.cad.review-learning.remove":
     case "project.meta.update":
     case "project.delete":
       return {

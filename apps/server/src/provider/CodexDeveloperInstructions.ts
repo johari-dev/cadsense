@@ -191,7 +191,9 @@ export function buildCodexDeveloperInstructions(
    */
   browserToolsAvailable = true,
   cadToolsAvailable = false,
-  /** The project's cadsense.json review scopes, read for this turn. */
+  /** The project's review learnings, read at turn start. Ignored without CAD tools. */
+  cadReviewLearnings: ReadonlyArray<{ readonly text: string }> = [],
+  /** The project's cadsense.json review scopes, read for this turn. Ignored without CAD tools. */
   cadReviewScopes: ReadonlyArray<CadReviewScope> = [],
 ): string {
   const base =
@@ -203,9 +205,9 @@ export function buildCodexDeveloperInstructions(
 
 ## Local CAD tools
 
-${cadReviewInstructions(cadReviewScopes)}
+${cadReviewInstructions({ learnings: cadReviewLearnings, scopes: cadReviewScopes })}
 
-When using CAD tools through exec, cad_context, cad_hierarchy, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
+When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
 
 \`\`\`javascript
 const result = await tools.cad_capture({expectedRevision: revision});

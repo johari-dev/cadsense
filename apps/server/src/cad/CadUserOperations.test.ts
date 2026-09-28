@@ -81,6 +81,7 @@ const harness = Effect.fn(function* (options?: {
     }),
     Layer.succeed(ProjectionSnapshotQuery, {
       getProjectShellById: () => Effect.succeed(Option.some(project)),
+      getCadReviewLearnings: () => Effect.succeed([]),
       getCommandReadModel: () =>
         Effect.succeed({
           snapshotSequence: 0,

@@ -14,6 +14,7 @@ import {
   codexDefaultModeDeveloperInstructions,
   codexPlanModeDeveloperInstructions,
 } from "../CodexDeveloperInstructions.ts";
+import { CAD_REVIEW_LEARNINGS_HEADING } from "../CadReviewInstructions.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
@@ -595,7 +596,7 @@ describe("cadsense browser developer instructions", () => {
       { match: { path: "Drivetrain*/**" }, instructions: "Gearbox ratio is fixed." },
     ];
     for (const mode of ["default", "plan"] as const) {
-      const scoped = buildCodexDeveloperInstructions(mode, runtime, false, true, scopes);
+      const scoped = buildCodexDeveloperInstructions(mode, runtime, false, true, [], scopes);
       NodeAssert.match(scoped, /Ignored components .*: name \*bolt\*\./);
       NodeAssert.match(
         scoped,
@@ -607,7 +608,7 @@ describe("cadsense browser developer instructions", () => {
       );
       // Scopes only matter alongside the CAD tools that act on them.
       NodeAssert.doesNotMatch(
-        buildCodexDeveloperInstructions(mode, runtime, false, false, scopes),
+        buildCodexDeveloperInstructions(mode, runtime, false, false, [], scopes),
         /Review scopes/,
       );
     }
@@ -962,4 +963,30 @@ describe("openCodexThread", () => {
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
     }),
   );
+});
+
+describe("CAD review learnings in developer instructions", () => {
+  const runtime = { model: "test", reasoningEffort: "low" };
+  const learnings = [
+    { text: "Vent holes are intentional." },
+    { text: "The motor is a placeholder; skip its mount." },
+  ];
+  it("lists each learning under the heading, in order, only with CAD tools attached", () => {
+    for (const mode of ["default", "plan"] as const) {
+      const text = buildCodexDeveloperInstructions(mode, runtime, false, true, learnings);
+      const heading = text.indexOf(CAD_REVIEW_LEARNINGS_HEADING);
+      const first = text.indexOf("- Vent holes are intentional.");
+      const second = text.indexOf("- The motor is a placeholder; skip its mount.");
+      NodeAssert.ok(heading > 0 && first > heading && second > first);
+      NodeAssert.ok(text.indexOf("cad_capture") > second);
+      NodeAssert.doesNotMatch(
+        buildCodexDeveloperInstructions(mode, runtime, false, true),
+        /past dismissals/,
+      );
+      NodeAssert.doesNotMatch(
+        buildCodexDeveloperInstructions(mode, runtime, false, false, learnings),
+        /Vent holes/,
+      );
+    }
+  });
 });

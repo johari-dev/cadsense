@@ -28,6 +28,10 @@ A finding the user considers addressed across all of its targets. Resolution rec
 **Dismissed CAD comment**:
 A finding the user considers to need no action across all of its targets. Dismissal preserves the finding in review history.
 
+**Review learning**:
+The reason a user gave when dismissing a CAD comment, kept by the project and delivered to agents with the review guidance so later reviews do not repeat the dismissed finding. Users can remove a learning; a dismissal without a reason creates none.
+_Avoid_: Memory, note
+
 **Linked correction**:
 A new CAD comment that corrects an earlier finding while preserving the original for review. The link does not change either comment's review state.
 

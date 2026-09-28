@@ -7,6 +7,7 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  CadReviewLearning,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -119,6 +120,13 @@ export interface ProjectionSnapshotQueryShape {
   readonly getProjectShellById: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, ProjectionRepositoryError>;
+
+  /**
+   * Read a project's review learnings, oldest first. Injected into CAD review guidance.
+   */
+  readonly getCadReviewLearnings: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ReadonlyArray<CadReviewLearning>, ProjectionRepositoryError>;
 
   /**
    * Read the earliest active thread for a project.
