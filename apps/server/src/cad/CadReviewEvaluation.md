@@ -192,3 +192,16 @@ the motor and pivot prompts to assess whether the new guidance prevents the
 motion-to-looseness inference and unsupported cutout recommendations. Also test
 repair-access and compactness cases on suitable CAD before claiming those review
 skills work reliably.
+
+## Recorded check: September 28, 2026 (part names)
+
+Onshape names each copy of a part with a suffix such as `Tube plug <7>`, and reviews copied the bare `<7>` into comment text. The guidance now keeps full names in target labels and describes parts by what and where they are in titles and bodies.
+
+Claude Opus 5.5, medium reasoning, fresh chat, using the student's elevator cascade prompt without coaching. The assembly has 361 components, 360 of them with a copy number.
+
+| Run                 | Comments | Comments with a bare tag | Bare tags |
+| ------------------- | -------: | -----------------------: | --------: |
+| Before (`fd0654a3`) |       11 |                        4 |        18 |
+| After (`14caf736`)  |        9 |                        0 |         0 |
+
+After the change, text reads "bearing 13 is on top of bearing 12" and "screws 3 and 10", and every target label keeps its full Onshape name. One run per side; this is a spot check of wording, not of consistency across models.
