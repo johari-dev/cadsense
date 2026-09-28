@@ -25,6 +25,23 @@ vi.mock("react/compiler-runtime", () => ({ c: hooks.useMemoCache }));
 vi.mock("../state/cadPanel", () => ({ cadPanelEnvironment: { review: "review" } }));
 const commands = vi.hoisted(() => ({ review: vi.fn() }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => commands.review }));
+const chat = vi.hoisted(() => ({
+  params: {} as Record<string, string>,
+  navigate: vi.fn(),
+  seedPrompt: vi.fn(),
+  composer: { readSnapshot: vi.fn(), focusAt: vi.fn(), focusAtEnd: vi.fn() },
+}));
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => chat.navigate,
+  useParams: ({ select }: { select: (params: Record<string, string>) => unknown }) =>
+    select(chat.params),
+}));
+vi.mock("../composerDraftStore", () => ({
+  useComposerDraftStore: { getState: () => ({ seedPrompt: chat.seedPrompt }) },
+}));
+vi.mock("../composerHandleContext", () => ({
+  useComposerHandleContext: () => ({ current: chat.composer }),
+}));
 
 import { CadCommentsCard } from "./CadCommentsCard";
 
@@ -32,6 +49,12 @@ afterEach(() => {
   hooks.reset();
   vi.unstubAllGlobals();
   commands.review.mockReset();
+  chat.params = {};
+  chat.navigate.mockReset();
+  chat.seedPrompt.mockReset();
+  chat.composer.readSnapshot.mockReset();
+  chat.composer.focusAt.mockReset();
+  chat.composer.focusAtEnd.mockReset();
 });
 
 function elements(node: ReactNode): Array<React.ReactElement<Record<string, unknown>>> {
@@ -195,4 +218,105 @@ it("updates comment markers after scene changes without repeating idle projectio
   hooks.reset();
   expect(frames.size).toBe(0);
   expect(listeners.size).toBe(0);
+});
+
+it("seeds the active thread's composer at its cursor for a point finding", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  chat.params = { environmentId: "test", threadId: "thread" };
+  chat.composer.readSnapshot.mockReturnValue({ value: "why is", cursor: 3, expandedCursor: 3 });
+  chat.seedPrompt.mockReturnValue(42);
+  const comment = {
+    id: "point-comment",
+    number: 7,
+    state: "open",
+    snapshotId: "snapshot",
+    modelDescriptor: "model",
+    title: "Missing screw",
+    body: "No screw in the rim hole.",
+    targets: [
+      { kind: "point", occurrenceId: "rim", label: "Rim hole A" },
+      { kind: "point", occurrenceId: "rim", label: "Rim hole B" },
+    ],
+  } as unknown as CadComment;
+  const setOpen = vi.fn();
+  hooks.beginRender();
+  const tree = CadCommentsCard({
+    threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
+    comments: [comment],
+    manifest: null,
+    displayedSnapshotId: "snapshot",
+    renderer: { current: null },
+    open: true,
+    setOpen,
+    selection: { id: comment.id, target: 1, request: 1 },
+    clearSelection() {},
+    choose() {},
+    historical: true,
+    back() {},
+  });
+  const discuss = elements(tree).find((element) => element.props.children === "Discuss");
+  (discuss!.props.onClick as () => void)();
+  expect(chat.seedPrompt).toHaveBeenCalledWith(
+    { environmentId: "test", threadId: "thread" },
+    'About CAD comment #7 "Missing screw" (Rim hole A): ',
+    3,
+  );
+  expect(chat.navigate).not.toHaveBeenCalled();
+  expect(setOpen).not.toHaveBeenCalled();
+  frames.forEach((callback) => callback(0));
+  expect(chat.composer.focusAt).toHaveBeenCalledWith(42);
+});
+
+it("opens the finding's thread from the floating card for a whole-part finding", () => {
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  chat.params = { environmentId: "test", threadId: "other-thread" };
+  chat.seedPrompt.mockReturnValue(null);
+  const comment = {
+    id: "part-comment",
+    number: 2,
+    state: "resolved",
+    snapshotId: "snapshot",
+    modelDescriptor: "model",
+    title: "Battery location",
+    body: "Battery",
+    targets: [
+      { kind: "part", occurrenceId: "battery", label: "Battery", preciseLocationLimitation: "x" },
+    ],
+  } as unknown as CadComment;
+  const setOpen = vi.fn();
+  hooks.beginRender();
+  const tree = CadCommentsCard({
+    threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
+    comments: [comment],
+    manifest: null,
+    displayedSnapshotId: "snapshot",
+    renderer: { current: null },
+    open: true,
+    setOpen,
+    selection: { id: comment.id, target: 0, request: 1 },
+    clearSelection() {},
+    choose() {},
+    historical: true,
+    back() {},
+    floating: true,
+  });
+  const discuss = elements(tree).find((element) => element.props.children === "Discuss");
+  (discuss!.props.onClick as () => void)();
+  expect(chat.composer.readSnapshot).not.toHaveBeenCalled();
+  expect(chat.seedPrompt).toHaveBeenCalledWith(
+    { environmentId: "test", threadId: "thread" },
+    'About CAD comment #2 "Battery location" (Battery): ',
+    null,
+  );
+  expect(chat.navigate).toHaveBeenCalledWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId: "test", threadId: "thread" },
+  });
+  expect(setOpen).toHaveBeenCalledWith(false);
+  expect(chat.composer.focusAt).not.toHaveBeenCalled();
 });

@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button";
 import { cadPanelEnvironment } from "../state/cadPanel";
 import { useAtomCommand } from "../state/use-atom-command";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
+import { useDiscussCadComment } from "./useDiscussCadComment";
 
 export interface CadCommentSelection {
   id: string;
@@ -26,6 +27,8 @@ export interface CadCommentsCardProps {
   choose: (comment: CadComment, target: number) => void;
   historical: boolean;
   back: () => void;
+  /** True in the picture-in-picture preview, where the open card can cover the composer. */
+  floating?: boolean;
 }
 export function CadCommentsCard({
   threadRef,
@@ -40,6 +43,7 @@ export function CadCommentsCard({
   choose,
   historical,
   back,
+  floating = false,
 }: CadCommentsCardProps) {
   const [filter, setFilter] = useState<"open" | "reviewed" | "history">(
     historical ? "history" : "open",
@@ -52,6 +56,7 @@ export function CadCommentsCard({
     markers = useRef<HTMLDivElement>(null),
     host = useRef<HTMLDivElement>(null);
   const review = useAtomCommand(cadPanelEnvironment.review, { reportFailure: false });
+  const discussComment = useDiscussCadComment(threadRef);
   const descriptor = useMemo(
     () => (manifest ? cadCommentModelDescriptor(manifest) : null),
     [manifest],
@@ -204,6 +209,10 @@ export function CadCommentsCard({
       inFlightReviews.current.delete(c.id);
       setPendingReviews(new Set(inFlightReviews.current));
     }
+  };
+  const discuss = (c: CadComment) => {
+    discussComment(c);
+    if (floating) setOpen(false);
   };
   return (
     <div
@@ -422,6 +431,9 @@ export function CadCommentsCard({
                               Reopen
                             </Button>
                           )}
+                          <Button size="compact" variant="ghost" onClick={() => discuss(c)}>
+                            Discuss
+                          </Button>
                         </div>
                       </div>
                     )}

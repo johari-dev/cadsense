@@ -740,6 +740,7 @@ export function CadPanel({
               choose,
               historical: !!historicalView,
               back,
+              floating: compact,
             }}
             fullscreen={fullscreen}
             compact={compact}
@@ -783,6 +784,7 @@ export function CadPanel({
           choose={choose}
           historical={false}
           back={back}
+          floating={compact}
         />
       )}
     </section>
