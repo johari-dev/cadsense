@@ -80,6 +80,7 @@ const harness = Effect.fn(function* (
     updatedAt: now,
   }));
   const query = ProjectionSnapshotQuery.of({
+    getCadReviewLearnings: () => Effect.succeed([]),
     getCommandReadModel: () =>
       Effect.sync(() => {
         reads++;

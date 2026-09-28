@@ -86,12 +86,16 @@ export const CadPartMaterial = Schema.Struct({
 export const CadPartMetadata = Schema.Struct({
   name: Text,
   bodyType: Text,
-  isHidden: Schema.Boolean,
-  isMesh: Schema.Boolean,
+  // Assembly-wide metadata omits these Part Studio flags. Occurrences own assembly visibility.
+  isHidden: Schema.NullOr(Schema.Boolean),
+  isMesh: Schema.NullOr(Schema.Boolean),
   partIdentity: Schema.NullOr(Text),
   configurationId: Schema.NullOr(Text),
   appearance: Schema.NullOr(CadPartAppearance),
   material: Schema.NullOr(CadPartMaterial),
+  // Onshape's BOM mass, from material density or a manual override. Absent when Onshape
+  // reported none, including snapshots acquired before mass was read.
+  massKg: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
 });
 export type CadPartMetadata = typeof CadPartMetadata.Type;
 export const CadSnapshotPart = Schema.Struct({

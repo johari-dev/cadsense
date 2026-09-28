@@ -268,6 +268,8 @@ it.effect("registers the typed provider tool and dispatches a measurement", () =
     const tools = {
       context: unused,
       hierarchy: unused,
+      checks: unused,
+      diff: unused,
       partInfo: unused,
       findParts: unused,
       capture: unused,

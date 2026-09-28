@@ -11,17 +11,23 @@ import {
   CadCommentLocateInput,
   CadCommentInspectInput,
   CadCommentReviewInput,
+  CadReviewLearningRemoveInput,
   CadCaptureRecord,
   CadViewState,
+  CAD_COMMENTS_PUBLISHED_ACTIVITY,
   CommandId,
+  EventId,
+  type CadCommentsPublishedCard,
   ProjectId,
   type CadComment,
   type CadCommentReceipt,
   type CadCommentTarget,
+  type CadReviewLearning,
   type CadSnapshotManifest,
   type CadCommentRenderWork,
   type ThreadId,
   type TurnId,
+  CAD_CAPTURE_SIZE,
 } from "@cadsense/contracts";
 import { canonicalCadJson, cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import * as Context from "effect/Context";
@@ -58,13 +64,16 @@ const error = (cause: unknown) =>
         ? fail(`render-${cause.reason}`)
         : fail(cause instanceof Error && cause.message ? cause.message : "unavailable");
 const digest = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
+/** A chat's retained evidence: `<inspectionId>.png` and `.json` for each published inspection. */
+export const cadCommentEvidenceDirectory = (path: Path.Path, stateDir: string, threadId: string) =>
+  path.join(stateDir, "cad", "comment-evidence", digest(threadId));
 const uuid = () => NodeCrypto.randomUUID();
 // Include recovery guidance in responses: resumed providers can retain older descriptions.
 const inputGuidance = (schema: Schema.Top) =>
   schema === CadCommentPublication
-    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
+    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,severity,category,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. severity is blocker|concern|question|nit; category is interference|access|assembly|wiring|structure|manufacturing|other. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
     : schema === CadCommentLocateInput
-      ? "Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original 1280 by 960 image pixels, not pixelX/pixelY."
+      ? `Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original ${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height} image pixels, not pixelX/pixelY.`
       : "";
 const decode = <S extends Schema.Top>(schema: S, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input, { errors: "all" }).pipe(
@@ -98,6 +107,12 @@ export class CadComments extends Context.Service<
     readonly review: (
       input: typeof CadCommentReviewInput.Type,
     ) => Effect.Effect<CadComment, CadCommentError>;
+    readonly learnings: (
+      projectId: ProjectId,
+    ) => Stream.Stream<readonly CadReviewLearning[], CadCommentError>;
+    readonly removeLearning: (
+      input: typeof CadReviewLearningRemoveInput.Type,
+    ) => Effect.Effect<void, CadCommentError>;
   }
 >()("@cadsense/server/cad/CadComments") {}
 
@@ -126,7 +141,7 @@ export const make = Effect.gen(function* () {
         thread.deletedAt !== null ||
         model.projects.some((p) => p.id === thread.projectId && p.deletedAt !== null)
       )
-        yield* fs.remove(path.join(config.stateDir, "cad", "comment-evidence", digest(thread.id)), {
+        yield* fs.remove(cadCommentEvidenceDirectory(path, config.stateDir, thread.id), {
           recursive: true,
           force: true,
         });
@@ -178,8 +193,12 @@ export const make = Effect.gen(function* () {
       }),
     ).pipe(Stream.mapError(error));
   const review = Effect.fn("CadComments.review")(function* (
-    input: typeof CadCommentReviewInput.Type,
+    rawInput: typeof CadCommentReviewInput.Type,
   ) {
+    // A whitespace-only reason is no reason: it neither persists nor becomes a learning.
+    const { reason: rawReason, ...rest } = rawInput;
+    const reason = rawReason?.trim();
+    const input = { ...rest, ...(reason ? { reason } : {}) };
     yield* owner(input.threadId);
     const model = yield* query.getCommandReadModel();
     const hash = digest(
@@ -187,6 +206,7 @@ export const make = Effect.gen(function* () {
         commentId: input.commentId,
         expectedVersion: input.expectedVersion,
         state: input.state,
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
       }),
     );
     const prior = model.cadCommentReviews?.find((r) => r.commandId === input.commandId);
@@ -212,6 +232,36 @@ export const make = Effect.gen(function* () {
     const result = (yield* read(input.threadId)).find((c) => c.id === input.commentId);
     if (!result) return yield* fail("comment-unavailable");
     return prior ? { ...result, state: prior.state, version: prior.version } : result;
+  }, Effect.mapError(error));
+  const readLearnings = Effect.fn("CadComments.readLearnings")(function* (projectId: ProjectId) {
+    if (Option.isNone(yield* query.getProjectShellById(projectId)))
+      return yield* fail("project-unavailable");
+    return yield* query.getCadReviewLearnings(projectId);
+  });
+  const learnings = (projectId: ProjectId) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const events = yield* engine.subscribeDomainEvents;
+        return Stream.concat(
+          Stream.fromEffect(readLearnings(projectId)),
+          Stream.fromSubscription(events).pipe(
+            Stream.filter(
+              (e) =>
+                e.aggregateId === projectId &&
+                (e.type === "project.cad-review-learning-added" ||
+                  e.type === "project.cad-review-learning-removed" ||
+                  e.type === "project.deleted"),
+            ),
+            Stream.mapEffect(() => readLearnings(projectId)),
+          ),
+        );
+      }),
+    ).pipe(Stream.mapError(error));
+  const removeLearning = Effect.fn("CadComments.removeLearning")(function* (
+    input: typeof CadReviewLearningRemoveInput.Type,
+  ) {
+    yield* readLearnings(input.projectId);
+    yield* engine.dispatch({ ...input, type: "project.cad.review-learning.remove" });
   }, Effect.mapError(error));
 
   const activate = Effect.fn("CadComments.activate")(function* (
@@ -261,12 +311,7 @@ export const make = Effect.gen(function* () {
       inspectionIds: Set<string>;
     };
     const candidates = new Map<string, Candidate>();
-    const evidenceDirectory = path.join(
-      config.stateDir,
-      "cad",
-      "comment-evidence",
-      digest(threadId),
-    );
+    const evidenceDirectory = cadCommentEvidenceDirectory(path, config.stateDir, threadId);
     const evidenceIds = new Set<string>();
     const cleanupEvidence = Effect.gen(function* () {
       const model = yield* query.getCommandReadModel();
@@ -435,7 +480,7 @@ export const make = Effect.gen(function* () {
         });
         return { ...hit, candidateId: id };
       });
-      return { result: { width: 1280, height: 960, results }, png: rendered.png };
+      return { result: { ...CAD_CAPTURE_SIZE, results }, png: rendered.png };
     });
     const inspect = Effect.fn("CadComments.inspect")(function* (input: unknown) {
       const request = yield* decode(CadCommentInspectInput, input);
@@ -500,7 +545,7 @@ export const make = Effect.gen(function* () {
       return {
         result: {
           inspectionId,
-          artifact: { path: file, mimeType: "image/png", width: 1280, height: 960 },
+          artifact: { path: file, mimeType: "image/png", ...CAD_CAPTURE_SIZE },
           results: rendered.receipt.commentHits?.map((h, i) => ({ ...h, marker: i + 1 })),
           summary:
             "Verify each yellow marker's surface and depth. Publish verified holes as separate precise comments. Inspect remaining red/occluded candidates individually to choose a better angle; if still uncertain, capture a closer alternate view and locate a reliable rim. A render error is a technical failure: retry inspection before whole-part fallback. Previously verified candidates remain usable during this turn.",
@@ -523,6 +568,10 @@ export const make = Effect.gen(function* () {
         placement?: string;
       }[] = [];
       const seen = new Set<string>();
+      // Titles of rejected items, when the agent supplied one, so chat can name what failed.
+      const titles = new Map<string, string>();
+      // Reused findings already appeared in an earlier turn, so chat does not count them as written.
+      const reusedKeys = new Set<string>();
       for (const raw of request.items) {
         const key =
           typeof raw === "object" && raw !== null && "publicationKey" in raw
@@ -531,6 +580,9 @@ export const make = Effect.gen(function* () {
         if (typeof key !== "string") continue;
         if (seen.has(key)) return yield* fail("duplicate-publication-key");
         seen.add(key);
+        const title =
+          typeof raw === "object" && raw !== null && "title" in raw ? raw.title : undefined;
+        if (typeof title === "string" && title.trim()) titles.set(key, title.trim().slice(0, 160));
       }
       for (const raw of request.items) {
         yield* Effect.gen(function* () {
@@ -565,6 +617,7 @@ export const make = Effect.gen(function* () {
             );
             if (!old) return yield* fail("model-equivalence-unverified");
             commentId = old.id;
+            reusedKeys.add(item.publicationKey);
           } else {
             if (
               item.link &&
@@ -617,6 +670,8 @@ export const make = Effect.gen(function* () {
               modelDescriptor: descriptor,
               title: item.title,
               body: item.body,
+              severity: item.severity,
+              category: item.category,
               targets,
               link: item.link ?? null,
               state: "open",
@@ -708,8 +763,83 @@ export const make = Effect.gen(function* () {
           originalSequence: sequence[0]?.sequence,
         });
       }
+      yield* recordPublication(
+        results.filter((result) => !reusedKeys.has(result.publicationKey)),
+        latest,
+        titles,
+      );
       return { result: { results: delivered, catalogVersion: latest.length } };
     });
+    /** Appends the chat activity for this call. Display only, so failures never fail the tool. */
+    const recordPublication = (
+      results: ReadonlyArray<{
+        publicationKey: string;
+        commentId?: string;
+        reason?: string;
+        replayed?: boolean;
+      }>,
+      latest: readonly CadComment[],
+      titles: ReadonlyMap<string, string>,
+    ) =>
+      Effect.gen(function* () {
+        const card: CadCommentsPublishedCard = {
+          published: results.flatMap((result) => {
+            const comment =
+              result.replayed === false ? latest.find((c) => c.id === result.commentId) : undefined;
+            return comment
+              ? [
+                  {
+                    publicationKey: result.publicationKey,
+                    commentId: comment.id,
+                    number: comment.number,
+                    title: comment.title,
+                    severity: comment.severity,
+                    category: comment.category,
+                    location: comment.targets[0]?.label ?? "",
+                  },
+                ]
+              : [];
+          }),
+          rejected: results.flatMap((result) =>
+            result.reason === undefined
+              ? []
+              : [
+                  {
+                    publicationKey: result.publicationKey,
+                    title: titles.get(result.publicationKey) ?? null,
+                    reason: result.reason,
+                  },
+                ],
+          ),
+        };
+        if (card.published.length === 0 && card.rejected.length === 0) return;
+        const id = uuid();
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        yield* engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(id),
+          threadId,
+          activity: {
+            id: EventId.make(`cad-comments-${id}`),
+            tone: "info",
+            kind: CAD_COMMENTS_PUBLISHED_ACTIVITY,
+            summary:
+              card.published.length === 0
+                ? "Comments not published"
+                : card.published.length === 1
+                  ? "Wrote 1 comment"
+                  : `Wrote ${card.published.length} comments`,
+            payload: card,
+            turnId,
+            createdAt,
+          },
+          createdAt,
+        });
+      }).pipe(
+        Effect.catch(() =>
+          Effect.logWarning("CAD comment chat activity was not recorded", { threadId }),
+        ),
+      );
     return {
       invoke: (name: string, input: unknown) =>
         Effect.suspend((): Effect.Effect<CadCommentDelivery, CadCommentError> => {
@@ -739,6 +869,6 @@ export const make = Effect.gen(function* () {
         ),
     };
   }, Effect.mapError(error));
-  return CadComments.of({ activate, watch, review });
+  return CadComments.of({ activate, watch, review, learnings, removeLearning });
 });
 export const layer = Layer.effect(CadComments, make);

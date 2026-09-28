@@ -108,6 +108,10 @@ it.effect(
       );
       yield* broker.complete(ticket, receipt, pngEnvelope());
       assert.equal((yield* Fiber.join(capture)).png.byteLength, 57);
+      // A connected renderer that gives up is a failed render, not a missing window.
+      const failed = yield* broker.capture(request).pipe(Effect.flip, Effect.forkChild);
+      yield* broker.fail(yield* takeTicket(events));
+      assert.equal((yield* Fiber.join(failed)).reason, "invalid-result");
       assert.equal(
         (yield* broker.complete(ticket, receipt, pngEnvelope()).pipe(Effect.flip)).reason,
         "interrupted",
