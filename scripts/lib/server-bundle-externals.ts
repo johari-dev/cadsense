@@ -47,6 +47,9 @@ export const SERVER_RUNTIME_EXTERNAL_PREFIXES = [
   // becoming real if either is ever declared as a dependency.
   "bufferutil",
   "utf-8-validate",
+  // Loads manifold.wasm from its own package directory by path, which a bundle
+  // chunk cannot provide. No runtime dependencies, so the closure is just this.
+  "manifold-3d",
 ] as const;
 
 /**
@@ -60,6 +63,10 @@ export const SERVER_RUNTIME_EXTERNAL_PREFIXES = [
 export const SERVER_BUILD_ONLY_EXTERNAL_PREFIXES = [
   "@effect/platform-bun",
   "@effect/sql-sqlite-bun",
+  // Dynamically imported only by `cadsense mcp`, which the packaged desktop app
+  // never runs. It has no dependencies and locates its own files on disk, so
+  // bundling it would break it.
+  "playwright-core",
 ] as const;
 
 export const SERVER_EXTERNAL_PACKAGE_PREFIXES = [

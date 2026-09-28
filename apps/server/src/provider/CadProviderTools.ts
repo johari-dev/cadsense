@@ -19,10 +19,11 @@ const descriptions = {
     "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them.",
   cad_comment_locate: `Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height}), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.`,
   cad_comment_inspect:
-    "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use whole-part fallback only after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
+    "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use a whole-part target when the issue concerns the whole part, such as a duplicate or misplaced part, or after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
   cad_comments_publish: [
-    "Before publishing, check each comment against the CAD review instructions: one useful issue at its marked location, consistent with the intended motion, supported by observations rather than assumptions, and written so the user understands the next decision without the chat. Rewrite or omit comments that fail this check.",
-    'Publish complete verified findings incrementally. Input: {expectedCatalogVersion,items:[{kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}]}. Each new item requires all six fields shown. Use expectedCatalogVersion from cad_comments_list and inspectedSnapshotId from the inspected cad_capture.snapshotId (or cad_context.state.snapshotId for a whole-part finding).',
+    "Before publishing, check each comment against the CAD review instructions: one useful issue at its marked location, consistent with the intended motion, supported by observations rather than assumptions, and written so the user understands the next decision without the chat. Rewrite comments that fail this check; drop only findings you cannot support.",
+    'Publish complete verified findings incrementally. Input: {expectedCatalogVersion,items:[{kind:"new",publicationKey,inspectedSnapshotId,title,body,severity,category,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}]}. Each new item requires all eight fields shown. Use expectedCatalogVersion from cad_comments_list and inspectedSnapshotId from the inspected cad_capture.snapshotId (or cad_context.state.snapshotId for a whole-part finding).',
+    "severity rates the consequence to the mechanism: blocker breaks function or safety, concern likely causes a problem, question needs the designer's answer, nit is cosmetic. category names the lifecycle stage the finding affects: interference (parts collide or rub), access (tools, service, or removal), assembly (fastening and build order), wiring (cable routing and strain), structure (stiffness, load, or mounting), manufacturing (making the part), or other.",
     'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
     'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
@@ -30,7 +31,12 @@ const descriptions = {
   cad_context:
     "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
-    "Read a bounded page of the selected CAD component tree with occurrence visibility.",
+    "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
+  cad_checks: [
+    'Run deterministic geometry checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: mesh-interference, coincident-instances, degenerate-geometry.',
+    "mesh-interference lists part pairs whose solids actually intersect, with the shared volume in cubic meters, ordered by volume with pairs inside one subassembly last. Intended fits touch at zero volume, so a listed pair is usually a duplicate part, a misplaced gear or shaft, or a real collision; parts modeled undeformed on purpose (a squeezed game piece, press fits, threads) also appear. coincident-instances lists duplicate placements of one part; degenerate-geometry lists parts with unknown or near-zero bounds.",
+    "Treat each mesh-interference finding as a problem to explain, not a hint: capture the pair isolated and say what is wrong or ask why it is intended. summary.meshUnknown counts parts that are not closed solids; request overlapping-bounds for bounding-box leads on those. Read summary.budgetExhausted to know whether every pair was evaluated. Each page states every selected check's explanation once in explanations; a page may hold fewer findings than limit to stay small, so follow nextCursor.",
+  ].join(" "),
   cad_diff:
     "Compare two retained snapshots of the selected root and list what changed: added, removed, moved (placement relative to the parent), geometry-changed, renamed, suppression-changed, and visibility-changed occurrences with IDs on both sides. targetSnapshotId defaults to the current snapshot; baseSnapshotId defaults to the newest earlier retained snapshot, such as the one earlier comments inspected, and baseSelection explains the choice. retainedSnapshots lists the bases available with createdAt and microversion. Page with nextCursor. Use it when earlier comments exist to focus on changed components and reuse unchanged findings; it changes no view state.",
   cad_update_view: [
@@ -50,6 +56,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_comments_list",
   "cad_context",
   "cad_hierarchy",
+  "cad_checks",
   "cad_diff",
 ]);
 
@@ -63,10 +70,47 @@ export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, sc
     inputSchema: { ...document.schema, type: "object" as const, $defs: document.definitions },
   };
 });
+/** `tools/list` entries for MCP clients, with read-only hints. */
+export const mcpCadToolDefinitions = cadToolDefinitions.map(({ type: _type, ...tool }) => ({
+  ...tool,
+  annotations: {
+    readOnlyHint: CAD_READ_ONLY_TOOLS.has(tool.name),
+    destructiveHint: false,
+    openWorldHint: false,
+  },
+}));
 export interface CadToolDelivery {
   readonly result: unknown;
   readonly png?: Uint8Array;
 }
+const encodeDeliveryResult = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const encodeCadViewError = Schema.encodeSync(Schema.fromJsonString(CadViewError));
+/** MCP `tools/call` result for a CAD tool: the result as JSON text and structured content, plus any render. */
+export const mcpCadToolResult = (delivery: CadToolDelivery) =>
+  encodeDeliveryResult(delivery.result).pipe(
+    Effect.mapError(() => new CadViewError({ reason: "capability-unavailable" })),
+    Effect.map((text) => ({
+      isError: false,
+      structuredContent: delivery.result,
+      content: [
+        { type: "text" as const, text },
+        ...(delivery.png
+          ? [
+              {
+                type: "image" as const,
+                mimeType: "image/png",
+                data: Buffer.from(delivery.png).toString("base64"),
+              },
+            ]
+          : []),
+      ],
+    })),
+  );
+/** MCP `tools/call` result for a failed CAD tool. Agents read `reason` and `details` to recover. */
+export const mcpCadToolError = (error: CadViewError) => ({
+  isError: true,
+  content: [{ type: "text" as const, text: encodeCadViewError(error) }],
+});
 export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
   tools: CadAgentTools,
   name: string,
@@ -83,6 +127,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.context() };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
+    case "cad_checks":
+      return { result: yield* tools.checks(input) };
     case "cad_diff":
       return { result: yield* tools.diff(input) };
     case "cad_update_view":
