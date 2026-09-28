@@ -42,6 +42,15 @@ Ways this can fail, each covered by `CadChecks.test.ts`:
 
 The overlap check sorts boxes by minimum X and sweeps, so a 577-part assembly evaluates a few thousand candidate pairs instead of 166k. Candidate evaluations stop at `summary.pairBudget` (250k) and `summary.budgetExhausted` tells the agent the pass was partial. Findings are deterministic for a given snapshot and check selection, so cursors are plain offsets bound to `snapshotId` and the selected checks, the same scheme as `cad_hierarchy`. Pages default to 50 findings and cap at 100. `expectedRevision` must match the private view revision.
 
+Every page must come back inline. Claude saves an MCP result over its output limit to a file, and reading that file takes a shell command that waits on a permission prompt; a 100-finding `overlapping-bounds` page was 68 KB and stalled a review for 57 minutes that way. So each page states each selected check's explanation once in `explanations` instead of on every finding (that alone was 20 KB), rounds its numbers to four significant digits, and stops adding findings before its JSON passes `CAD_CHECK_LIMITS.pageBytes` (32 KiB). A capped page holds fewer findings than `limit` and its `nextCursor` continues from the first one left out.
+
+Ways paging can fail, each covered by `CadChecks.test.ts`:
+
+- A page, even at `limit: 100` with long part names, serializes past `pageBytes`.
+- Explanation text repeats on every finding.
+- Numbers carry float noise such as `0.00012500001117587118`.
+- The byte cap drops or repeats a finding across pages, or returns an empty page when one finding alone is large.
+
 ## Registration
 
 `CAD_TOOL_INPUTS` in `packages/contracts/src/cadTools.ts` declares the input; `CadProviderTools.ts` describes it, lists it as read-only, and routes it to `CadAgentTools.checks`, which `CadViewing.ts` implements inside the activation. Codex and Claude receive it with the other CAD tools; `CAD_REVIEW_INSTRUCTIONS` tells agents to run it early, explain each exact interference finding, and never publish an interference comment from bounds overlap alone. Without `checks`, a call runs `mesh-interference`, `coincident-instances`, and `degenerate-geometry`; `overlapping-bounds` runs only on request.

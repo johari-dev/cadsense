@@ -1,10 +1,10 @@
 import {
   CAD_CHECK_NAMES,
+  CadCheckFinding,
   CadChecksInput,
+  CadChecksResult,
   CadViewError,
-  type CadCheckFinding,
   type CadCheckName,
-  type CadChecksResult,
   type CadSnapshotManifest,
   type CadViewState,
 } from "@cadsense/contracts";
@@ -27,6 +27,8 @@ export const CAD_CHECK_LIMITS = {
   // Triangles per part mesh; larger meshes are reported as unknown instead of intersected.
   meshTriangles: 500_000,
   pageSize: 50,
+  // Serialized page budget, well under Claude's MCP output limit so a page is never spilled to a file.
+  pageBytes: 32 * 1024,
 } as const;
 
 type Vector3 = readonly [number, number, number];
@@ -410,7 +412,8 @@ const byPair = (a: CadCheckFinding, b: CadCheckFinding) =>
   compare(a.occurrences[0]!.occurrenceId, b.occurrences[0]!.occurrenceId) ||
   compare(a.occurrences[1]?.occurrenceId ?? "", b.occurrences[1]?.occurrenceId ?? "");
 const pair = (a: PartOccurrence, b: PartOccurrence) => [a, b].sort(byId).map(ref);
-const explanations = {
+/** What each check does and does not prove. Pages state these once instead of on every finding. */
+export const CAD_CHECK_EXPLANATIONS = {
   "mesh-interference":
     "The two solids share this volume in their original placements. Intended fits touch at zero volume, so this is usually a modeling error or a real collision: a duplicate part, a gear or shaft in the wrong spot, a plate through a tube. Parts modeled undeformed on purpose (a compressed game piece, press fits, threads) also appear. Pairs inside one subassembly are listed last because they are usually the kit author's modeling choice.",
   "overlapping-bounds":
@@ -514,7 +517,6 @@ const overlappingBounds = (pairs: readonly BoxPair[]) =>
           contained: ([0, 1, 2] as const).every(
             (axis) => overlapSize[axis] === Math.min(sizeA[axis], sizeB[axis]),
           ),
-          explanation: explanations["overlapping-bounds"],
         };
       },
     )
@@ -610,7 +612,6 @@ const meshInterference = (
               intersectionVolume / Math.min(placedA.volume(), placedB.volume()),
             ),
             withinSubassembly: within(a.occurrence.occurrenceId, b.occurrence.occurrenceId),
-            explanation: explanations["mesh-interference"],
           },
         ];
       },
@@ -648,7 +649,6 @@ const coincidentInstances = (occurrences: readonly PartOccurrence[]) => {
           check: "coincident-instances",
           occurrences: pair(a, b),
           maxDeviation,
-          explanation: explanations["coincident-instances"],
         });
       }
   }
@@ -670,7 +670,6 @@ const degenerateGeometry = (
           check: "degenerate-geometry",
           occurrences: [ref(occurrence)],
           size: dimensions,
-          explanation: explanations["degenerate-geometry"],
         },
       ];
     });
@@ -718,6 +717,32 @@ export const runCadChecks = (
 };
 
 const invalid = (details: string) => new CadViewError({ reason: "invalid-operation", details });
+const encodeFindingJson = Schema.encodeSync(Schema.fromJsonString(CadCheckFinding));
+const encodeResultJson = Schema.encodeSync(Schema.fromJsonString(CadChecksResult));
+const significant = (value: number) => Number(value.toPrecision(4));
+const significant3 = ([x, y, z]: Vector3): Vector3 => [significant(x), significant(y), significant(z)];
+/** A finding as sent to the agent: four significant digits, since float noise only costs tokens. */
+const presentFinding = (finding: CadCheckFinding): CadCheckFinding => {
+  switch (finding.check) {
+    case "mesh-interference":
+      return {
+        ...finding,
+        intersectionVolume: significant(finding.intersectionVolume),
+        intersectionFraction: significant(finding.intersectionFraction),
+      };
+    case "overlapping-bounds":
+      return {
+        ...finding,
+        overlapSize: significant3(finding.overlapSize),
+        overlapVolume: significant(finding.overlapVolume),
+        overlapFraction: significant(finding.overlapFraction),
+      };
+    case "coincident-instances":
+      return { ...finding, maxDeviation: significant(finding.maxDeviation) };
+    case "degenerate-geometry":
+      return { ...finding, size: finding.size && significant3(finding.size) };
+  }
+};
 /** Exact interference replaces bounding-box leads unless the agent asks for them. */
 export const CAD_DEFAULT_CHECKS: readonly CadCheckName[] = CAD_CHECK_NAMES.filter(
   (name) => name !== "overlapping-bounds",
@@ -771,12 +796,40 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
   );
   if (!Number.isSafeInteger(offset) || offset > findings.length)
     return yield* invalid("cursor is past the end of the findings. Start again without a cursor.");
-  const end = Math.min(offset + (input.limit ?? CAD_CHECK_LIMITS.pageSize), findings.length);
+  const explanations = Object.fromEntries(
+    checks.map((check) => [check, CAD_CHECK_EXPLANATIONS[check]]),
+  );
+  const limit = input.limit ?? CAD_CHECK_LIMITS.pageSize;
+  const bytes = (value: CadCheckFinding | CadChecksResult) =>
+    new TextEncoder().encode(
+      "check" in value ? encodeFindingJson(value) : encodeResultJson(value),
+    ).byteLength;
+  // Reserve room for the longest cursor this page could carry, then add findings until the budget runs out.
+  let used = bytes({
+    revision: state.revision,
+    snapshotId: state.snapshotId,
+    checks,
+    explanations,
+    findings: [],
+    nextCursor: `${prefix}${findings.length}`,
+    summary,
+  });
+  const page: CadCheckFinding[] = [];
+  let end = offset;
+  while (end < findings.length && page.length < limit) {
+    const finding = presentFinding(findings[end]!);
+    const cost = bytes(finding) + (page.length > 0 ? 1 : 0);
+    if (page.length > 0 && used + cost > CAD_CHECK_LIMITS.pageBytes) break;
+    page.push(finding);
+    used += cost;
+    end++;
+  }
   return {
     revision: state.revision,
     snapshotId: state.snapshotId,
     checks,
-    findings: findings.slice(offset, end),
+    explanations,
+    findings: page,
     nextCursor: end < findings.length ? `${prefix}${end}` : null,
     summary,
   };

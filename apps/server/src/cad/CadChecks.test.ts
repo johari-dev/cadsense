@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  CAD_CHECK_EXPLANATIONS,
   CAD_CHECK_LIMITS,
   loadCadBounds,
   loadCadSolidKernel,
@@ -321,7 +322,7 @@ describe("CAD checks", () => {
     assert.closeTo(finding!.overlapVolume, 0.02 * 0.045 * 0.01, 1e-12);
     assert.closeTo(finding!.overlapFraction, (0.02 * 0.045 * 0.01) / (0.1 * 0.05 * 0.01), 1e-9);
     assert.isFalse(finding!.contained);
-    assert.include(finding!.explanation, "not proof");
+    assert.include(CAD_CHECK_EXPLANATIONS["overlapping-bounds"], "not proof");
   });
   it("flags a part nested inside another as contained and applies occurrence rotation", () => {
     // Rotated 90 degrees about Z at x=0.15, the bar occupies x in [0.05, 0.15] and y in [0, 0.5].
@@ -803,6 +804,60 @@ describe("cad_checks tool", () => {
       assert.equal(malformed.reason, "invalid-operation");
       assert.include(malformed.details, "checks");
       assert.equal(loads.length, before);
+    }),
+  );
+  it.effect("states each explanation once per page and rounds numbers to four significant digits", () =>
+    Effect.gen(function* () {
+      const page = yield* readCadChecks(snapshot, state, geometry, { expectedRevision: 3 });
+      assert.deepEqual(Object.keys(page.explanations), [...page.checks]);
+      for (const check of page.checks)
+        assert.equal(page.explanations[check], CAD_CHECK_EXPLANATIONS[check]);
+      const numbers: number[] = [];
+      const collect = (value: unknown): void => {
+        if (typeof value === "number") numbers.push(value);
+        else if (value !== null && typeof value === "object") Object.values(value).forEach(collect);
+      };
+      for (const finding of page.findings) {
+        assert.notProperty(finding, "explanation");
+        collect(finding);
+      }
+      assert.isNotEmpty(numbers);
+      for (const value of numbers) assert.equal(value, Number(value.toPrecision(4)));
+    }),
+  );
+  it.effect("keeps every page under the byte cap and still returns each finding once", () =>
+    Effect.gen(function* () {
+      // 40 copies of one part at one placement: 780 coincident pairs with long names.
+      const crowded = manifest(
+        Array.from({ length: 40 }, (_, i) => ({
+          number: i + 1,
+          part: 10,
+          name: `Bracket ${i + 1} ${"x".repeat(180)}`,
+        })),
+      );
+      const crowdedState = { ...initialCadView(crowded), revision: 1 };
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      let pageCount = 0;
+      do {
+        const page = yield* readCadChecks(crowded, crowdedState, geometry, {
+          expectedRevision: 1,
+          checks: ["coincident-instances"],
+          limit: 100,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        pageCount++;
+        assert.isAtMost(new TextEncoder().encode(encodeJson(page)).length, CAD_CHECK_LIMITS.pageBytes);
+        assert.isNotEmpty(page.findings);
+        for (const finding of page.findings) {
+          assert.isFalse(seen.has(pairKey(finding)));
+          seen.add(pairKey(finding));
+        }
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor !== undefined);
+      assert.equal(seen.size, 780);
+      // The cap, not the limit, ended the pages: 100 of these findings would not fit.
+      assert.isAbove(pageCount, 8);
     }),
   );
 });

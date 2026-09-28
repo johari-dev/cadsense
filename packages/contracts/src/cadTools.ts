@@ -59,7 +59,6 @@ export const CadCheckFinding = Schema.Union([
     intersectionFraction: Schema.Number,
     // Both parts sit in one subassembly below the root, such as a vendor kit's own screw and nut.
     withinSubassembly: Schema.Boolean,
-    explanation: Schema.String,
   }),
   Schema.Struct({
     check: Schema.Literal("overlapping-bounds"),
@@ -69,19 +68,16 @@ export const CadCheckFinding = Schema.Union([
     // Overlap volume divided by the smaller box volume; 1 means one box lies inside the other.
     overlapFraction: Schema.Number,
     contained: Schema.Boolean,
-    explanation: Schema.String,
   }),
   Schema.Struct({
     check: Schema.Literal("coincident-instances"),
     occurrences: Schema.Array(CadCheckOccurrence),
     maxDeviation: Schema.Number,
-    explanation: Schema.String,
   }),
   Schema.Struct({
     check: Schema.Literal("degenerate-geometry"),
     occurrences: Schema.Array(CadCheckOccurrence),
     size: Schema.NullOr(Meters3),
-    explanation: Schema.String,
   }),
 ]);
 export type CadCheckFinding = typeof CadCheckFinding.Type;
@@ -89,6 +85,8 @@ export const CadChecksResult = Schema.Struct({
   revision: Schema.Int,
   snapshotId: CadSnapshotId,
   checks: Schema.Array(CadCheckName),
+  // What each selected check does and does not prove, stated once per page rather than per finding.
+  explanations: Schema.Record(Schema.String, Schema.String),
   findings: Schema.Array(CadCheckFinding),
   nextCursor: Schema.NullOr(Schema.String),
   summary: Schema.Struct({
