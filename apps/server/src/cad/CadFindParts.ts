@@ -144,6 +144,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
             ? null
             : text(metadata.material.displayName),
       },
+      massKg: metadata?.massKg ?? null,
       assemblyPath,
       omittedAncestorCount: Math.max(0, ancestorCount - 16),
       textTruncated,

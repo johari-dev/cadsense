@@ -42,6 +42,8 @@ export const CadFindPartsEntry = Schema.Struct({
     status: Schema.Literals(["available", "unavailable"]),
     name: Schema.NullOr(Text),
   }),
+  // Onshape's per-occurrence mass. Null means unknown, not zero.
+  massKg: Schema.NullOr(Schema.Finite),
   assemblyPath: Schema.Array(Schema.Struct({ occurrenceId: CadHash, name: Text })).check(
     Schema.isMaxLength(16),
   ),

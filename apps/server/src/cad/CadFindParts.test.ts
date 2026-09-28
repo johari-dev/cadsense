@@ -79,6 +79,7 @@ const snapshot = decodeSnapshot({
               key === 102
                 ? null
                 : { displayName: key === 101 ? "Aluminum 6061" : "Stainless Steel" },
+            ...(key === 100 ? { massKg: 0.012 } : {}),
           },
   })),
   assets: [],
@@ -128,14 +129,17 @@ describe("cad_find_parts", () => {
         bodyType: " SOLID ",
       });
       assert.deepEqual(ids(steel), [3, 5, 8].map(id));
+      assert.equal(steel.entries[0]!.massKg, 0.012);
       const surface = yield* findCadParts(snapshot, state, { ...request, bodyType: "surface" });
       assert.deepEqual(ids(surface), [id(6)]);
       const noMaterial = yield* findCadParts(snapshot, state, { ...request, nameQuery: "bracket" });
       assert.deepEqual(noMaterial.entries[0]!.material, { status: "unavailable", name: null });
       assert.isTrue(noMaterial.entries[0]!.metadataAvailable);
+      assert.isNull(noMaterial.entries[0]!.massKg);
       const noMetadata = yield* findCadParts(snapshot, state, { ...request, nameQuery: "unknown" });
       assert.isFalse(noMetadata.entries[0]!.metadataAvailable);
       assert.isNull(noMetadata.entries[0]!.bodyType);
+      assert.isNull(noMetadata.entries[0]!.massKg);
       assert.deepEqual(noMetadata.entries[0]!.material, { status: "unavailable", name: null });
       assert.equal(
         (yield* findCadParts(snapshot, state, { ...request, kind: "all" })).totalMatches,
