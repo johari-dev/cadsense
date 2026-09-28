@@ -1,3 +1,4 @@
+import { measureCad } from "./CadMeasure.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   CadViewError,
@@ -14,6 +15,7 @@ import {
   type CadChecksResult,
   type CadContextResult,
   type CadHierarchyResult,
+  type CadMeasureResult,
   type CadSnapshotManifest,
   type OrchestrationCommand,
   type ThreadId,
@@ -72,6 +74,7 @@ export interface CadAgentTools {
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
   readonly checks: (input: unknown) => Effect.Effect<CadChecksResult, CadViewError>;
   readonly diff: (input: unknown) => Effect.Effect<CadDiffResult, CadViewError>;
+  readonly measure: (input: unknown) => Effect.Effect<CadMeasureResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -461,6 +464,19 @@ export const make = Effect.gen(function* () {
               };
             }),
           );
+        const measure: CadAgentTools["measure"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              return yield* measureCad(
+                initialized.binding.snapshot,
+                initialized.state,
+                input,
+                initialized.binding.readAsset,
+              );
+            }),
+          );
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -566,6 +582,7 @@ export const make = Effect.gen(function* () {
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
           checks: (input) => activity.track(session.threadId, turnId, checks(input)),
           diff: (input) => activity.track(session.threadId, turnId, diff(input)),
+          measure: (input) => activity.track(session.threadId, turnId, measure(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });

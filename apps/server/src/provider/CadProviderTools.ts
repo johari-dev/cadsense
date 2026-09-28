@@ -39,6 +39,8 @@ const descriptions = {
   ].join(" "),
   cad_diff:
     "Compare two retained snapshots of the selected root and list what changed: added, removed, moved (placement relative to the parent), geometry-changed, renamed, suppression-changed, and visibility-changed occurrences with IDs on both sides. targetSnapshotId defaults to the current snapshot; baseSnapshotId defaults to the newest earlier retained snapshot, such as the one earlier comments inspected, and baseSelection explains the choice. retainedSnapshots lists the bases available with createdAt and microversion. Page with nextCursor. Use it when earlier comments exist to focus on changed components and reuse unchanged findings; it changes no view state.",
+  cad_measure:
+    'Read bounded measurements at {expectedRevision,snapshotId}. For points use {mode:"point-distance",from:{space:"world",point:[x,y,z]},to:{space:"part",occurrenceId,point:[x,y,z]}}. Coordinates are meters in original assembled Z-up world or part CAD coordinates before the occurrence transform. Points are caller-specified and unverified; never copy exploded display coordinates. For approximate unsigned triangle-surface separation use {mode:"surface-clearance",fromOccurrenceId,toOccurrenceId}, with part occurrence IDs from cad_hierarchy. Geometry uses original assembled placements regardless of visibility or explosion. Check status: unknown has no measurement. Positive surface distance does not exclude solid containment, and zero does not prove penetration. Results provide mesh provenance and uncertainty, not manufacturing tolerance.',
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -59,6 +61,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_hierarchy",
   "cad_checks",
   "cad_diff",
+  "cad_measure",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -132,6 +135,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.checks(input) };
     case "cad_diff":
       return { result: yield* tools.diff(input) };
+    case "cad_measure":
+      return { result: yield* tools.measure(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":
