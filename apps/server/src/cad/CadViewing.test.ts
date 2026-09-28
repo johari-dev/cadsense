@@ -579,25 +579,59 @@ const harness = Effect.fn(function* (
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 /** JSON-only GLB with one 50 mm cube; cad_checks reads accessor bounds, never the binary chunk. */
+/** A closed 5 cm cube with real triangles, so both bounds and exact interference can read it. */
 const cubeGlb = (() => {
+  const positions = new Float32Array(
+    Array.from({ length: 8 }, (_, i) => [
+      i & 1 ? 0.05 : 0,
+      i & 2 ? 0.05 : 0,
+      i & 4 ? 0.05 : 0,
+    ]).flat(),
+  );
+  // Outward-wound faces: -Z, +Z, -Y, +Y, -X, +X.
+  const indices = new Uint16Array([
+    0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0, 6, 2, 1, 3,
+    7, 1, 7, 5,
+  ]);
   const json = new TextEncoder().encode(
     encodeJson({
       asset: { version: "2.0" },
       scenes: [{ nodes: [0] }],
       nodes: [{ mesh: 0 }],
-      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
-      accessors: [{ min: [0, 0, 0], max: [0.05, 0.05, 0.05] }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      accessors: [
+        {
+          bufferView: 0,
+          componentType: 5126,
+          count: 8,
+          type: "VEC3",
+          min: [0, 0, 0],
+          max: [0.05, 0.05, 0.05],
+        },
+        { bufferView: 1, componentType: 5123, count: 36, type: "SCALAR" },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: positions.byteLength },
+        { buffer: 0, byteOffset: positions.byteLength, byteLength: indices.byteLength },
+      ],
+      buffers: [{ byteLength: positions.byteLength + indices.byteLength }],
     }),
   );
-  const glb = new Uint8Array(20 + Math.ceil(json.length / 4) * 4);
+  const jsonLength = Math.ceil(json.length / 4) * 4;
+  const binLength = positions.byteLength + indices.byteLength;
+  const glb = new Uint8Array(20 + jsonLength + 8 + binLength);
   const view = new DataView(glb.buffer);
   view.setUint32(0, 0x46546c67, true);
   view.setUint32(4, 2, true);
   view.setUint32(8, glb.length, true);
-  view.setUint32(12, glb.length - 20, true);
+  view.setUint32(12, jsonLength, true);
   view.setUint32(16, 0x4e4f534a, true);
-  glb.fill(0x20, 20);
+  glb.fill(0x20, 20, 20 + jsonLength);
   glb.set(json, 20);
+  view.setUint32(20 + jsonLength, binLength, true);
+  view.setUint32(24 + jsonLength, 0x004e4942, true);
+  glb.set(new Uint8Array(positions.buffer), 28 + jsonLength);
+  glb.set(new Uint8Array(indices.buffer), 28 + jsonLength + positions.byteLength);
   return glb;
 })();
 const decodeRevision = Schema.decodeUnknownEffect(Schema.Struct({ revision: Schema.Int }));
@@ -707,16 +741,28 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
         finding.check,
         finding.occurrences.map((occurrence) => occurrence.name),
       ]),
-      [["overlapping-bounds", ["Block A", "Block B"]]],
+      [["mesh-interference", ["Block A", "Block B"]]],
     );
-    const overlap = first.findings[0]!;
+    const interference = first.findings[0]!;
+    if (interference.check === "mesh-interference")
+      assert.closeTo(interference.intersectionVolume, 0.01 * 0.05 * 0.05, 1e-10);
+    assert.equal(first.summary.partOccurrences, 2);
+    assert.equal(first.summary.meshUnknown, 0);
+    // One bounds read, cached for the activation, and one triangle read for this call.
+    assert.equal(reads, 2);
+    const leads = yield* decodeChecks(
+      (yield* tools.invoke(null, turnId, "cad_checks", {
+        expectedRevision: context.revision,
+        checks: ["overlapping-bounds"],
+      })).result,
+    );
+    const overlap = leads.findings[0]!;
     if (overlap.check === "overlapping-bounds")
       assert.deepEqual(
         overlap.overlapSize.map((value) => Number(value.toFixed(9))),
         [0.01, 0.05, 0.05],
       );
-    assert.equal(first.summary.partOccurrences, 2);
-    assert.equal(reads, 1);
+    assert.equal(reads, 2);
     const second = yield* decodeChecks(
       (yield* tools.invoke(null, turnId, "cad_checks", {
         expectedRevision: context.revision,
@@ -724,7 +770,7 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
       })).result,
     );
     assert.deepEqual(second.findings, []);
-    assert.equal(reads, 1);
+    assert.equal(reads, 2);
     assert.equal(
       (yield* tools
         .invoke(null, turnId, "cad_checks", { expectedRevision: context.revision + 1 })

@@ -32,6 +32,7 @@ export const CadHierarchyResult = Schema.Struct({
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
 export const CAD_CHECK_NAMES = [
+  "mesh-interference",
   "overlapping-bounds",
   "coincident-instances",
   "degenerate-geometry",
@@ -50,6 +51,16 @@ const Meters3 = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
 /** Deterministic leads for the agent to verify visually. Every number is in meters. */
 export const CadCheckFinding = Schema.Union([
   Schema.Struct({
+    check: Schema.Literal("mesh-interference"),
+    occurrences: Schema.Array(CadCheckOccurrence),
+    // Cubic meters of solid shared by both parts, from exact mesh booleans.
+    intersectionVolume: Schema.Number,
+    // Intersection volume divided by the smaller solid's volume.
+    intersectionFraction: Schema.Number,
+    // Both parts sit in one subassembly below the root, such as a vendor kit's own screw and nut.
+    withinSubassembly: Schema.Boolean,
+  }),
+  Schema.Struct({
     check: Schema.Literal("overlapping-bounds"),
     occurrences: Schema.Array(CadCheckOccurrence),
     overlapSize: Meters3,
@@ -57,19 +68,16 @@ export const CadCheckFinding = Schema.Union([
     // Overlap volume divided by the smaller box volume; 1 means one box lies inside the other.
     overlapFraction: Schema.Number,
     contained: Schema.Boolean,
-    explanation: Schema.String,
   }),
   Schema.Struct({
     check: Schema.Literal("coincident-instances"),
     occurrences: Schema.Array(CadCheckOccurrence),
     maxDeviation: Schema.Number,
-    explanation: Schema.String,
   }),
   Schema.Struct({
     check: Schema.Literal("degenerate-geometry"),
     occurrences: Schema.Array(CadCheckOccurrence),
     size: Schema.NullOr(Meters3),
-    explanation: Schema.String,
   }),
 ]);
 export type CadCheckFinding = typeof CadCheckFinding.Type;
@@ -77,12 +85,16 @@ export const CadChecksResult = Schema.Struct({
   revision: Schema.Int,
   snapshotId: CadSnapshotId,
   checks: Schema.Array(CadCheckName),
+  // What each selected check does and does not prove, stated once per page rather than per finding.
+  explanations: Schema.Record(Schema.String, Schema.String),
   findings: Schema.Array(CadCheckFinding),
   nextCursor: Schema.NullOr(Schema.String),
   summary: Schema.Struct({
     totalFindings: Schema.Int,
     partOccurrences: Schema.Int,
     boundsUnknown: Schema.Int,
+    // Parts whose mesh is not a closed solid, so mesh-interference cannot clear or report them.
+    meshUnknown: Schema.Int,
     pairsEvaluated: Schema.Int,
     pairBudget: Schema.Int,
     budgetExhausted: Schema.Boolean,
