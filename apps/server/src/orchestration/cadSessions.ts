@@ -13,7 +13,8 @@ type CadCommand = Exclude<
     type:
       | "thread.cad.presentation.settle"
       | "thread.cad.comments.commit"
-      | "thread.cad.comment.review";
+      | "thread.cad.comment.review"
+      | "thread.cad.comments.outdate";
   }
 >;
 export const decideCadPresentation = Effect.fn("decideCadPresentation")(function* (

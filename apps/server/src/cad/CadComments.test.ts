@@ -447,6 +447,7 @@ it.effect("records each publication in chat, including rejected findings, but no
         },
       ],
       rejected: [{ publicationKey: "malformed", title: "Loose cable", reason: "invalid-input" }],
+      proposed: [],
     });
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
@@ -975,6 +976,283 @@ it.effect(
           );
         }),
       );
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+const decodeListed = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    comments: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        outdated: Schema.NullOr(
+          Schema.Struct({ snapshotId: Schema.String, reason: Schema.String }),
+        ),
+        proposal: Schema.NullOr(Schema.Struct({ explanation: Schema.String })),
+      }),
+    ),
+  }),
+);
+const decodeReceipts = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    results: Schema.Array(
+      Schema.Struct({
+        publicationKey: Schema.String,
+        reason: Schema.optionalKey(Schema.String),
+        commentId: Schema.optionalKey(Schema.String),
+        replayed: Schema.optionalKey(Schema.Boolean),
+      }),
+    ),
+  }),
+);
+/** A later snapshot of the same root, optionally with its only part placed elsewhere. */
+const laterSnapshot = (
+  snapshot: CadSnapshotManifest,
+  suffix: number,
+  { moved }: { moved: boolean },
+) =>
+  decodeSnapshot({
+    ...snapshot,
+    snapshotId: `00000000-0000-4000-8000-00000000000${suffix}`,
+    createdAt: `2026-09-05T0${suffix}:00:00Z`,
+    nodes: snapshot.nodes.map((node) =>
+      node.kind === "part" && moved
+        ? { ...node, transform: [1, 0, 0, 0.01, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
+        : node,
+    ),
+  });
+/** Publishes a later snapshot and makes it current for the harness root through the real lifecycle. */
+const makeCurrent = Effect.fn(function* (
+  h: Effect.Success<ReturnType<typeof harness>>,
+  manifest: CadSnapshotManifest,
+) {
+  yield* h.store.publish(manifest);
+  yield* h.dispatch({
+    type: "project.cad.operation.reserve",
+    projectId,
+    operationId: manifest.snapshotId,
+    kind: "sync",
+    root: {
+      rootId: manifest.rootId,
+      elementId: manifest.root.elementId,
+      kind: manifest.root.kind,
+      configuration: "default",
+    },
+  });
+  yield* h.dispatch({
+    type: "project.cad.operation.complete",
+    projectId,
+    operationId: manifest.snapshotId,
+    result: {
+      kind: "sync",
+      snapshot: {
+        snapshotId: manifest.snapshotId,
+        microversionId: source.workspaceId,
+        createdAt: manifest.createdAt,
+        manifestBytes: 1,
+        assetBytes: 0,
+      },
+    },
+  });
+});
+/** Resolves with the next outdated annotation event once `run` has triggered it. */
+const nextOutdated = Effect.fn(function* <E>(run: Effect.Effect<void, E>) {
+  const engine = yield* OrchestrationEngineService;
+  const events = yield* engine.subscribeDomainEvents;
+  yield* run;
+  const event = yield* Stream.fromSubscription(events).pipe(
+    Stream.filter((e) => e.type === "thread.cad-comments-outdated"),
+    Stream.runHead,
+    Effect.timeoutOption("5 seconds"),
+  );
+  assert.isTrue(event._tag === "Some" && event.value._tag === "Some");
+  return event._tag === "Some" && event.value._tag === "Some" ? event.value.value : undefined;
+});
+it.effect(
+  "annotates open comments when a changed snapshot becomes current and clears them when restored",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const sql = yield* SqlClient.SqlClient;
+      const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+      yield* a.invoke("cad_comments_publish", {
+        expectedCatalogVersion: 0,
+        items: [makeFinding(h.snapshot), { ...makeFinding(h.snapshot), publicationKey: "done" }],
+      });
+      const [first, second] = (yield* h.query.getCommandReadModel()).cadComments!;
+      yield* h.service.review({
+        threadId,
+        commentId: second!.id,
+        expectedVersion: 0,
+        state: "resolved",
+        commandId: CommandId.make("resolve-second"),
+      });
+      const moved = yield* laterSnapshot(h.snapshot, 5, { moved: true });
+      yield* nextOutdated(makeCurrent(h, moved));
+      let comments = (yield* h.query.getCommandReadModel()).cadComments!;
+      assert.deepEqual(comments.find((c) => c.id === first!.id)?.outdated, {
+        snapshotId: moved.snapshotId,
+        reason: "moved",
+      });
+      // Reviewed findings are not re-checked.
+      assert.equal(comments.find((c) => c.id === second!.id)?.outdated, null);
+      const rows = yield* sql`SELECT json_extract(record_json,'$.outdated.reason') AS reason
+        FROM projection_cad_comments WHERE comment_id=${first!.id}`;
+      assert.equal(rows[0]?.reason, "moved");
+      const listed = yield* decodeListed(
+        (yield* a.invoke("cad_comments_list", { state: "open" })).result,
+      );
+      assert.equal(listed.comments[0]?.outdated?.reason, "moved");
+      // Publishing against the older rollback snapshot while the moved one is current is outdated at once.
+      yield* nextOutdated(
+        a
+          .invoke("cad_comments_publish", {
+            expectedCatalogVersion: 2,
+            items: [{ ...makeFinding(h.snapshot), publicationKey: "late" }],
+          })
+          .pipe(Effect.asVoid),
+      );
+      comments = (yield* h.query.getCommandReadModel()).cadComments!;
+      assert.equal(comments.find((c) => c.number === 3)?.outdated?.reason, "moved");
+      // Restoring the original placement clears the annotation.
+      const restored = yield* laterSnapshot(h.snapshot, 6, { moved: false });
+      const cleared = yield* nextOutdated(makeCurrent(h, restored));
+      assert.equal(
+        cleared?.type === "thread.cad-comments-outdated" && cleared.payload.entries.length,
+        2,
+      );
+      comments = (yield* h.query.getCommandReadModel()).cadComments!;
+      assert.isTrue(comments.every((c) => c.outdated === null));
+      const restoredRows = yield* sql`SELECT COUNT(*) AS n FROM projection_cad_comments
+        WHERE json_type(record_json,'$.outdated')='null'`;
+      assert.equal(restoredRows[0]?.n, 3);
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.live("refreshes a watched comments card when a comment goes outdated", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+    yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [makeFinding(h.snapshot)],
+    });
+    // The first read is emitted after the watch subscribed, so later events cannot be missed.
+    const subscribed = yield* Deferred.make<void>();
+    const reads = yield* h.service.watch(threadId).pipe(
+      Stream.tap(() => Deferred.succeed(subscribed, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.timeoutOption("5 seconds"),
+      Effect.forkScoped,
+    );
+    yield* Deferred.await(subscribed);
+    const moved = yield* laterSnapshot(h.snapshot, 5, { moved: true });
+    yield* nextOutdated(makeCurrent(h, moved));
+    const collected = yield* Fiber.join(reads);
+    assert.isTrue(collected._tag === "Some", "the watch emitted no read after the outdate");
+    const [initial, refreshed] = collected._tag === "Some" ? collected.value : [];
+    assert.equal(initial?.[0]?.outdated, null);
+    assert.deepEqual(refreshed?.[0]?.outdated, { snapshotId: moved.snapshotId, reason: "moved" });
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect(
+  "records resolution proposals only with newer evidence on open comments of this chat",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const sql = yield* SqlClient.SqlClient;
+      const first = yield* h.service.activate(threadId, "test", TurnId.make("first"));
+      yield* first.invoke("cad_comments_publish", {
+        expectedCatalogVersion: 0,
+        items: [makeFinding(h.snapshot)],
+      });
+      const comment = (yield* h.query.getCommandReadModel()).cadComments![0]!;
+      const later = yield* laterSnapshot(h.snapshot, 5, { moved: false });
+      yield* makeCurrent(h, later);
+      const propose = (
+        activation: typeof first,
+        overrides: Record<string, unknown>,
+        expectedCatalogVersion = 1,
+      ) =>
+        Effect.gen(function* () {
+          const response = yield* activation.invoke("cad_comments_publish", {
+            expectedCatalogVersion,
+            items: [
+              {
+                kind: "propose-resolve",
+                publicationKey: "addressed",
+                inspectedSnapshotId: later.snapshotId,
+                commentId: comment.id,
+                explanation: "The new revision shows a screw in this hole.",
+                ...overrides,
+              },
+            ],
+          });
+          return (yield* decodeReceipts(response.result)).results[0]!;
+        });
+      const turnId = TurnId.make("second");
+      const a = yield* h.service.activate(threadId, "test", turnId);
+      assert.equal(
+        (yield* propose(a, { inspectedSnapshotId: h.snapshot.snapshotId })).reason,
+        "snapshot-not-newer",
+      );
+      assert.equal((yield* propose(a, { commentId: "missing" })).reason, "comment-unavailable");
+      const other = yield* h.service.activate(otherThreadId, "other", turnId);
+      assert.equal((yield* propose(other, {}, 0)).reason, "comment-unavailable");
+      assert.equal((yield* h.query.getCommandReadModel()).cadCommentReceipts?.length, 1);
+      const accepted = yield* propose(a, {});
+      assert.equal(accepted.commentId, comment.id);
+      assert.equal(accepted.replayed, false);
+      let model = yield* h.query.getCommandReadModel();
+      assert.equal(model.cadComments?.[0]?.state, "open");
+      assert.equal(
+        model.cadComments?.[0]?.proposal?.explanation,
+        "The new revision shows a screw in this hole.",
+      );
+      assert.equal(model.cadComments?.[0]?.proposal?.snapshotId, later.snapshotId);
+      assert.equal(model.cadCommentReceipts?.length, 2);
+      const listed = yield* decodeListed((yield* a.invoke("cad_comments_list", {})).result);
+      assert.equal(
+        listed.comments[0]?.proposal?.explanation,
+        "The new revision shows a screw in this hole.",
+      );
+      assert.equal((yield* propose(a, {})).replayed, true);
+      const thread = yield* h.query.getThreadDetailById(threadId);
+      const cards =
+        thread._tag === "Some"
+          ? thread.value.activities.filter(
+              (activity) =>
+                activity.kind === CAD_COMMENTS_PUBLISHED_ACTIVITY && activity.turnId === turnId,
+            )
+          : [];
+      // Both rejected proposals were recorded for chat as well as the accepted one.
+      assert.equal(cards.filter((card) => card.summary === "Comments not published").length, 2);
+      const proposedCard = cards.find((card) => card.summary === "Proposed 1 resolution");
+      assert.deepEqual(yield* decodePublishedCard(proposedCard?.payload), {
+        published: [],
+        rejected: [],
+        proposed: [
+          {
+            publicationKey: "addressed",
+            commentId: comment.id,
+            number: 1,
+            title: "Check this fastener",
+          },
+        ],
+      });
+      // The user's resolution supersedes the proposal, and a reviewed finding takes no new proposal.
+      yield* h.service.review({
+        threadId,
+        commentId: comment.id,
+        expectedVersion: 0,
+        state: "resolved",
+        commandId: CommandId.make("confirm"),
+      });
+      model = yield* h.query.getCommandReadModel();
+      assert.equal(model.cadComments?.[0]?.proposal, null);
+      const rows = yield* sql`SELECT json_type(record_json,'$.proposal') AS proposal
+      FROM projection_cad_comments WHERE comment_id=${comment.id}`;
+      assert.equal(rows[0]?.proposal, "null");
+      assert.equal((yield* propose(a, { publicationKey: "again" })).reason, "comment-not-open");
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 it.effect("turns a dismissal reason into a project review learning the user can remove", () =>

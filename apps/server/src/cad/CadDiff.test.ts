@@ -462,6 +462,8 @@ describe("retainedCadCandidates", () => {
     number,
     createdAt: "2026-09-01T00:00:00Z",
     turnId: TurnId.make("turn"),
+    outdated: null,
+    proposal: null,
   });
   it("merges lineage roles with this root's comment snapshots and ignores other roots", () => {
     const olderId = "00000000-0000-4000-8000-00000000000c";

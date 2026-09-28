@@ -258,6 +258,8 @@ it.effect(
           "cad_hierarchy",
           "cad_checks",
           "cad_diff",
+          "cad_measure",
+          "cad_find_parts",
           "cad_update_view",
           "cad_capture",
         ],

@@ -115,16 +115,66 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_hierarchy",
       "cad_checks",
       "cad_diff",
+      "cad_measure",
+      "cad_find_parts",
       "cad_update_view",
       "cad_capture",
     ]);
     expect(
       listedTools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name),
-    ).toEqual(["cad_comments_list", "cad_context", "cad_hierarchy", "cad_checks", "cad_diff"]);
+    ).toEqual([
+      "cad_comments_list",
+      "cad_context",
+      "cad_hierarchy",
+      "cad_checks",
+      "cad_diff",
+      "cad_measure",
+      "cad_find_parts",
+    ]);
     // Claude must receive the same review guidance as native Codex tool registration.
     expect(listedTools.map(({ name, description }) => ({ name, description }))).toEqual(
       cadToolDefinitions.map(({ name, description }) => ({ name, description })),
     );
+    const measurementInput = {
+      expectedRevision: 3,
+      snapshotId: "00000000-0000-4000-8000-000000000002",
+      mode: "point-distance",
+      from: { space: "world", point: [0, 0, 0] },
+      to: { space: "world", point: [3, 4, 0] },
+    };
+    const measurementToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_measure",
+      measurementInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_measure",
+        arguments: { _cadsenseCapability: measurementToken },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(measurementInput);
+    const searchInput = {
+      snapshotId: "00000000-0000-4000-8000-000000000001",
+      expectedRevision: 3,
+      nameQuery: "bolt",
+    };
+    const searchToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_find_parts",
+      searchInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_find_parts",
+        arguments: { _cadsenseCapability: searchToken, nameQuery: "forged" },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(searchInput);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",

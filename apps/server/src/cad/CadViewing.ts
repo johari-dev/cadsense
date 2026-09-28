@@ -1,3 +1,5 @@
+import { measureCad } from "./CadMeasure.ts";
+import { findCadParts } from "./CadFindParts.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   CadViewError,
@@ -15,6 +17,8 @@ import {
   type CadContextResult,
   type CadHierarchyResult,
   type CadReviewIgnoreMatch,
+  type CadMeasureResult,
+  type CadFindPartsResult,
   type CadSnapshotManifest,
   type OrchestrationCommand,
   type ThreadId,
@@ -26,9 +30,9 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -75,6 +79,8 @@ export interface CadAgentTools {
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
   readonly checks: (input: unknown) => Effect.Effect<CadChecksResult, CadViewError>;
   readonly diff: (input: unknown) => Effect.Effect<CadDiffResult, CadViewError>;
+  readonly measure: (input: unknown) => Effect.Effect<CadMeasureResult, CadViewError>;
+  readonly findParts: (input: unknown) => Effect.Effect<CadFindPartsResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -356,6 +362,7 @@ export const make = Effect.gen(function* () {
             }),
           );
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
+        // cad_checks and cad_find_parts share this cache.
         const boundsCache = new Map<string, CadBounds | null>();
         const checks: CadAgentTools["checks"] = (input) =>
           fifo.withPermits(1)(
@@ -484,6 +491,35 @@ export const make = Effect.gen(function* () {
               };
             }),
           );
+        const measure: CadAgentTools["measure"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              return yield* measureCad(
+                initialized.binding.snapshot,
+                initialized.state,
+                input,
+                initialized.binding.readAsset,
+              );
+            }),
+          );
+        const findParts: CadAgentTools["findParts"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* findCadParts(
+                binding.snapshot,
+                state,
+                (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
+                input,
+              );
+            }),
+          );
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -589,6 +625,8 @@ export const make = Effect.gen(function* () {
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
           checks: (input) => activity.track(session.threadId, turnId, checks(input)),
           diff: (input) => activity.track(session.threadId, turnId, diff(input)),
+          measure: (input) => activity.track(session.threadId, turnId, measure(input)),
+          findParts: (input) => activity.track(session.threadId, turnId, findParts(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });

@@ -134,13 +134,22 @@ export function projectEvent(
             : project,
         ),
       });
-    case "thread.cad-comments-committed":
+    case "thread.cad-comments-committed": {
+      const proposals = new Map(event.payload.proposals.map((p) => [p.commentId, p.proposal]));
       return Effect.succeed({
         ...nextBase,
-        cadComments: [...(model.cadComments ?? []), ...event.payload.comments],
+        cadComments: [
+          ...(model.cadComments ?? []).map((c) => {
+            const proposal = proposals.get(c.id);
+            return proposal ? { ...c, proposal } : c;
+          }),
+          ...event.payload.comments,
+        ],
         cadCommentReceipts: [...(model.cadCommentReceipts ?? []), ...event.payload.receipts],
       });
+    }
     case "thread.cad-comment-reviewed":
+      // The user's judgment supersedes any agent proposal.
       return Effect.succeed({
         ...nextBase,
         cadComments: (model.cadComments ?? []).map((c) => {
@@ -150,11 +159,22 @@ export function projectEvent(
             ...rest,
             state: event.payload.state,
             version: event.payload.version,
+            proposal: null,
             ...(event.payload.reason === undefined ? {} : { reviewReason: event.payload.reason }),
           };
         }),
         cadCommentReviews: [...(model.cadCommentReviews ?? []), event.payload],
       });
+    case "thread.cad-comments-outdated": {
+      const entries = new Map(event.payload.entries.map((e) => [e.commentId, e.outdated]));
+      return Effect.succeed({
+        ...nextBase,
+        cadComments: (model.cadComments ?? []).map((c) => {
+          const outdated = entries.get(c.id);
+          return outdated === undefined ? c : { ...c, outdated };
+        }),
+      });
+    }
     case "project.cad-review-learning-added": {
       // Newest last; the per-project cap drops the oldest learnings first.
       const others = (model.cadReviewLearnings ?? []).filter(

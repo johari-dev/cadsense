@@ -20,7 +20,10 @@ export interface CadDiff {
   readonly entries: readonly CadDiffEntry[];
 }
 
-const pathKey = (node: CadSnapshotNode) => JSON.stringify(node.occurrencePath);
+/** Occurrences are the same instance across snapshots when their occurrence paths match. */
+export const cadOccurrenceKey = (occurrencePath: readonly string[]) =>
+  JSON.stringify(occurrencePath);
+const pathKey = (node: CadSnapshotNode) => cadOccurrenceKey(node.occurrencePath);
 // Row-major affine 4x4 with the last row fixed to [0,0,0,1]; null when the linear part is singular.
 const invertAffine = (m: readonly number[]) => {
   const [a, b, c, tx, d, e, f, ty, g, h, i, tz] = m as [
@@ -105,19 +108,18 @@ const geometryChanged = (
   const targetSha = targetAssets.get(targetKey);
   return baseSha === undefined || targetSha === undefined || baseSha !== targetSha;
 };
-const shaByGeometryKey = (manifest: CadSnapshotManifest) =>
+/** The parts of a manifest a diff compares. */
+export type CadDiffManifest = Pick<CadSnapshotManifest, "nodes" | "assets">;
+const shaByGeometryKey = (manifest: CadDiffManifest) =>
   new Map(manifest.assets.map((asset) => [asset.geometryKey, asset.sha256]));
 const order = { added: 0, removed: 1, modified: 2 } as const;
 const compareEntries = (a: CadDiffEntry, b: CadDiffEntry) =>
   order[a.status] - order[b.status] ||
   a.occurrencePath.length - b.occurrencePath.length ||
-  (JSON.stringify(a.occurrencePath) < JSON.stringify(b.occurrencePath) ? -1 : 1);
+  (cadOccurrenceKey(a.occurrencePath) < cadOccurrenceKey(b.occurrencePath) ? -1 : 1);
 
 /** Occurrences match by occurrence path, which survives reimport; node IDs are root-qualified hashes of it. */
-export const diffCadManifests = (
-  base: CadSnapshotManifest,
-  target: CadSnapshotManifest,
-): CadDiff => {
+export const diffCadManifests = (base: CadDiffManifest, target: CadDiffManifest): CadDiff => {
   const baseNodes = new Map(base.nodes.map((node) => [node.id, node]));
   const targetNodes = new Map(target.nodes.map((node) => [node.id, node]));
   const baseByPath = new Map(base.nodes.map((node) => [pathKey(node), node]));

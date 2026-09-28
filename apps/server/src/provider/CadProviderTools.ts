@@ -16,7 +16,7 @@ import { CadViewing, type CadAgentTools } from "../cad/CadViewing.ts";
 
 const descriptions = {
   cad_comments_list:
-    "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them.",
+    "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them. A comment with outdated set describes a part that was removed, moved, or reshaped in the current model: re-verify it before proposing resolution or a follow-up.",
   cad_comment_locate: `Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height}), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.`,
   cad_comment_inspect:
     "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use a whole-part target when the issue concerns the whole part, such as a duplicate or misplaced part, or after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
@@ -26,6 +26,7 @@ const descriptions = {
     "severity rates the consequence to the mechanism: blocker breaks function or safety, concern likely causes a problem, question needs the designer's answer, nit is cosmetic. category names the lifecycle stage the finding affects: interference (parts collide or rub), access (tools, service, or removal), assembly (fastening and build order), wiring (cable routing and strain), structure (stiffness, load, or mounting), manufacturing (making the part), or other.",
     'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
     'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
+    'When a newer model shows an open comment was addressed, propose resolution: {kind:"propose-resolve",publicationKey,inspectedSnapshotId,commentId,explanation}. The inspected snapshot must be newer than the comment\'s and the explanation must cite what you verified in the new geometry. The user confirms; the comment stays open until then. Comments listed with outdated set need this re-verification first.',
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
   cad_context:
@@ -39,6 +40,10 @@ const descriptions = {
   ].join(" "),
   cad_diff:
     "Compare two retained snapshots of the selected root and list what changed: added, removed, moved (placement relative to the parent), geometry-changed, renamed, suppression-changed, and visibility-changed occurrences with IDs on both sides. targetSnapshotId defaults to the current snapshot; baseSnapshotId defaults to the newest earlier retained snapshot, such as the one earlier comments inspected, and baseSelection explains the choice. retainedSnapshots lists the bases available with createdAt and microversion. Page with nextCursor. Use it when earlier comments exist to focus on changed components and reuse unchanged findings; it changes no view state.",
+  cad_measure:
+    'Read bounded measurements at {expectedRevision,snapshotId}. For points use {mode:"point-distance",from:{space:"world",point:[x,y,z]},to:{space:"part",occurrenceId,point:[x,y,z]}}. Coordinates are meters in original assembled Z-up world or part CAD coordinates before the occurrence transform. Points are caller-specified and unverified; never copy exploded display coordinates. For approximate unsigned triangle-surface separation use {mode:"surface-clearance",fromOccurrenceId,toOccurrenceId}, with part occurrence IDs from cad_hierarchy. Geometry uses original assembled placements regardless of visibility or explosion. Check status: unknown has no measurement. Positive surface distance does not exclude solid containment, and zero does not prove penetration. Results provide mesh provenance and uncertainty, not manufacturing tolerance.',
+  cad_find_parts:
+    "Search the selected cached snapshot using snapshotId and expectedRevision from cad_context. nameQuery and materialName are case-insensitive substrings; bodyType is a case-insensitive exact match. sourcePartKey finds repeated instances of the same source/configuration. kind defaults to part; use all to include assemblies. visibility defaults to all and uses effective visibility, including hidden ancestors, isolation and suppression. All supplied filters combine. Results contain stable occurrence IDs, source identity, assembly paths, and bounds, the part's world box {min,max,size} in meters at its assembled placement (Z up, explosion ignored; null when suppressed, not a part, or unknown). No filters returns a bounded page. limit defaults to 25, maximum 50. Serialized results are capped at 64 KiB, so pages may contain fewer entries than limit. Continue with nextCursor and the same filters, limit, snapshot and revision. Order follows the immutable manifest. Missing metadata and material names are explicit; massKg is per occurrence and null means unknown, not zero. Text fields are capped at 256 characters; paths retain the nearest 16 ancestors, with truncation indicators. Reads only stored part bounds, never the network; the view is unchanged.",
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -59,6 +64,8 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_hierarchy",
   "cad_checks",
   "cad_diff",
+  "cad_measure",
+  "cad_find_parts",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -132,6 +139,10 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.checks(input) };
     case "cad_diff":
       return { result: yield* tools.diff(input) };
+    case "cad_measure":
+      return { result: yield* tools.measure(input) };
+    case "cad_find_parts":
+      return { result: yield* tools.findParts(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":

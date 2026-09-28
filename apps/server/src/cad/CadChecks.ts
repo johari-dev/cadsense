@@ -80,6 +80,16 @@ const size = (bounds: CadBounds): Vector3 => [
   bounds.max[2] - bounds.min[2],
 ];
 const volume = ([x, y, z]: Vector3) => x * y * z;
+/** A part occurrence's world box: its local asset bounds under the row-major occurrence transform.
+ * Null when the local bounds are unknown or the placed box is not finite. */
+export const worldCadBounds = (
+  transform: Matrix,
+  local: CadBounds | null | undefined,
+): CadBounds | null => {
+  if (!local) return null;
+  const world = transformBounds(transform, local);
+  return isFiniteBounds(world) ? world : null;
+};
 
 const nonnegative = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Numbers = Schema.Array(Schema.Number);
@@ -684,10 +694,8 @@ export const runCadChecks = (
 ) => {
   const occurrences = partOccurrences(manifest);
   const boxes = occurrences.flatMap((occurrence): WorldBox[] => {
-    const local = bounds.get(occurrence.geometryKey);
-    if (!local) return [];
-    const world = transformBounds(occurrence.transform, local);
-    return isFiniteBounds(world) ? [{ ...world, occurrence }] : [];
+    const world = worldCadBounds(occurrence.transform, bounds.get(occurrence.geometryKey));
+    return world ? [{ ...world, occurrence }] : [];
   });
   const broad =
     checks.has("overlapping-bounds") || checks.has("mesh-interference")
@@ -725,6 +733,15 @@ const significant3 = ([x, y, z]: Vector3): Vector3 => [
   significant(y),
   significant(z),
 ];
+/** A world box as sent to the agent, rounded like findings. Null if rounding overflows a coordinate. */
+export const presentCadBounds = (bounds: CadBounds) => {
+  const presented = {
+    min: significant3(bounds.min),
+    max: significant3(bounds.max),
+    size: significant3(size(bounds)),
+  };
+  return Object.values(presented).flat().every(Number.isFinite) ? presented : null;
+};
 /** A finding as sent to the agent: four significant digits, since float noise only costs tokens. */
 const presentFinding = (finding: CadCheckFinding): CadCheckFinding => {
   switch (finding.check) {

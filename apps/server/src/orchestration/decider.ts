@@ -238,7 +238,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return events;
     }
     case "thread.cad.comments.commit":
-    case "thread.cad.comment.review": {
+    case "thread.cad.comment.review":
+    case "thread.cad.comments.outdate": {
       const occurredAt = yield* nowIso;
       const event = {
         ...(yield* withEventBase({
