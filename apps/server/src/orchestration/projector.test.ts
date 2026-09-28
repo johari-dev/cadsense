@@ -1,4 +1,5 @@
 import {
+  CAD_REVIEW_LEARNINGS_LIMIT,
   CommandId,
   EventId,
   ProjectId,
@@ -533,5 +534,54 @@ describe("orchestration projector", () => {
     expect(thread?.messages).toHaveLength(2_000);
     expect(thread?.messages[0]?.id).toBe("msg-100");
     expect(thread?.messages.at(-1)?.id).toBe("msg-2099");
+  });
+
+  it("caps project review learnings at the limit and removes them by id", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const added = (sequence: number, projectId = "project-a") =>
+      makeEvent({
+        sequence,
+        type: "project.cad-review-learning-added",
+        occurredAt: now,
+        aggregateKind: "project",
+        aggregateId: projectId,
+        commandId: `learn-${sequence}`,
+        payload: {
+          projectId,
+          learning: {
+            id: `learning-${sequence}`,
+            projectId,
+            text: `Learning ${sequence}`,
+            sourceCommentId: "comment",
+            sourceThreadId: "thread",
+            createdAt: now,
+          },
+        },
+      });
+    let model = createEmptyReadModel(now);
+    for (let sequence = 1; sequence <= CAD_REVIEW_LEARNINGS_LIMIT + 2; sequence++)
+      model = await Effect.runPromise(projectEvent(model, added(sequence)));
+    model = await Effect.runPromise(projectEvent(model, added(900, "project-b")));
+    const own = model.cadReviewLearnings!.filter((l) => l.projectId === "project-a");
+    expect(own).toHaveLength(CAD_REVIEW_LEARNINGS_LIMIT);
+    expect(own[0]?.id).toBe("learning-3");
+    expect(own.at(-1)?.id).toBe(`learning-${CAD_REVIEW_LEARNINGS_LIMIT + 2}`);
+    expect(model.cadReviewLearnings!.filter((l) => l.projectId === "project-b")).toHaveLength(1);
+    model = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 901,
+          type: "project.cad-review-learning-removed",
+          occurredAt: now,
+          aggregateKind: "project",
+          aggregateId: "project-a",
+          commandId: "forget",
+          payload: { projectId: "project-a", learningId: "learning-3" },
+        }),
+      ),
+    );
+    expect(model.cadReviewLearnings!.some((l) => l.id === "learning-3")).toBe(false);
+    expect(model.cadReviewLearnings).toHaveLength(CAD_REVIEW_LEARNINGS_LIMIT);
   });
 });

@@ -39,6 +39,8 @@ export const readCadHierarchy = Effect.fn("readCadHierarchy")(function* (
     snapshotId: state.snapshotId,
     entries: children.slice(offset, end).map((occurrenceId) => {
       const node = index.nodes.get(occurrenceId)!;
+      const metadata = node.sourcePartKey ? index.parts.get(node.sourcePartKey)?.metadata : null;
+      const material = metadata?.material?.displayName;
       return {
         occurrenceId,
         parentOccurrenceId: node.parentId,
@@ -47,6 +49,8 @@ export const readCadHierarchy = Effect.fn("readCadHierarchy")(function* (
         hasChildren: (index.children.get(occurrenceId)?.length ?? 0) > 0,
         visible: visibility.get(occurrenceId) ?? false,
         suppressed: node.suppressed,
+        ...(material === undefined ? {} : { material }),
+        ...(metadata?.massKg === undefined ? {} : { massKg: metadata.massKg }),
       };
     }),
     nextCursor: end < children.length ? `${prefix}${end}` : null,

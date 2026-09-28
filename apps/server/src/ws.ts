@@ -898,6 +898,13 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.cadCommentReview]: (input) =>
           observeRpcEffect(WS_METHODS.cadCommentReview, cadComments.review(input)),
+        [WS_METHODS.cadReviewLearningsWatch]: (input) =>
+          observeRpcStream(
+            WS_METHODS.cadReviewLearningsWatch,
+            cadComments.learnings(input.projectId),
+          ),
+        [WS_METHODS.cadReviewLearningRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.cadReviewLearningRemove, cadComments.removeLearning(input)),
         [WS_METHODS.cadPanelWatch]: (input) =>
           observeRpcStream(WS_METHODS.cadPanelWatch, cadPanel.watch(input.threadId)),
         [WS_METHODS.cadStorageWatch]: () =>

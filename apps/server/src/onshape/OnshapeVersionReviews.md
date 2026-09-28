@@ -23,7 +23,7 @@ instead of receiving webhooks.
   `OnshapeConnections.readJson`, so it shares the connection's credentials,
   host allow list, and 429 cooldown.
 - The newest version seen per project is stored in
-  `onshape_version_review_cursors` (migration 054). The first poll after
+  `onshape_version_review_cursors` (migration 056). The first poll after
   enabling only records this baseline; pre-existing versions are not reviewed.
   Turning the setting off deletes the cursor, so re-enabling baselines again
   instead of reviewing the gap.

@@ -5,6 +5,10 @@ import {
   CadCommentsCommitted,
   CadCommentsCommitCommand,
   CadCommentReviewCommand,
+  CadReviewLearning,
+  CadReviewLearningAdded,
+  CadReviewLearningRemoveCommand,
+  CadReviewLearningRemoved,
 } from "./cadComments.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -439,6 +443,7 @@ export const OrchestrationReadModel = Schema.Struct({
   cadComments: Schema.optionalKey(Schema.Array(CadComment)),
   cadCommentReceipts: Schema.optionalKey(Schema.Array(CadCommentReceipt)),
   cadCommentReviews: Schema.optionalKey(Schema.Array(CadCommentReviewed)),
+  cadReviewLearnings: Schema.optionalKey(Schema.Array(CadReviewLearning)),
   cadSessions: Schema.optionalKey(Schema.Array(CadSessionIndex)),
   cadUserViews: Schema.optionalKey(Schema.Array(CadUserViewIndex)),
   snapshotSequence: NonNegativeInt,
@@ -1018,6 +1023,7 @@ const ThreadTurnLifecycleSettleCommand = Schema.Struct({
 const InternalOrchestrationCommand = Schema.Union([
   CadCommentsCommitCommand,
   CadCommentReviewCommand,
+  CadReviewLearningRemoveCommand,
   Schema.Struct({
     type: Schema.Literal("project.onshape.remove"),
     commandId: CommandId,
@@ -1078,6 +1084,8 @@ export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 export const OrchestrationEventType = Schema.Literals([
   "thread.cad-comments-committed",
   "thread.cad-comment-reviewed",
+  "project.cad-review-learning-added",
+  "project.cad-review-learning-removed",
   "thread.cad-capture-recorded",
   "thread.cad-presentation-settled",
   "thread.cad-context-ensured",
@@ -1366,6 +1374,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.cad-comment-reviewed"),
     payload: CadCommentReviewed,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.cad-review-learning-added"),
+    payload: CadReviewLearningAdded,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.cad-review-learning-removed"),
+    payload: CadReviewLearningRemoved,
   }),
   Schema.Struct({
     ...EventBaseFields,

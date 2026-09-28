@@ -3,6 +3,7 @@ import {
   CadViewError,
   CadViewState,
   type CadSnapshotManifest,
+  type OnshapeProjectSource,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -10,6 +11,24 @@ import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScen
 export { indexCadSnapshot } from "@cadsense/shared/cadScene";
 
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
+
+/**
+ * The root a thread opens when it has no saved view: the project's linked element, else its
+ * only root. The panel and agent tools share this so an agent always sees what the user sees.
+ * A link without a configuration stores "", which syncs as Onshape's "default".
+ */
+export const defaultCadRoot = <
+  R extends { readonly elementId: string; readonly configuration: string },
+>(
+  source: Pick<OnshapeProjectSource, "elementId" | "configuration"> | undefined,
+  roots: readonly R[],
+): R | undefined =>
+  roots.find(
+    (root) =>
+      source?.elementId !== undefined &&
+      root.elementId === source.elementId &&
+      root.configuration === (source.configuration || "default"),
+  ) ?? (roots.length === 1 ? roots[0] : undefined);
 
 /** Decodes agent input, returning the schema's field errors so the agent can correct and retry. */
 export const decodeCadToolInput = <S extends Schema.Top>(schema: S, input: unknown) =>
@@ -92,6 +111,24 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
       case "reset-visibility":
         state = { ...state, visibility: {}, isolatedOccurrenceIds: [] };
         break;
+      case "highlight":
+        state = { ...state, highlightedOccurrenceIds: [...new Set(operation.occurrenceIds)] };
+        break;
+      case "ghost":
+        state = {
+          ...state,
+          ghost: {
+            occurrenceIds: [...new Set(operation.occurrenceIds)],
+            opacity: operation.opacity,
+          },
+        };
+        break;
+      case "section":
+        state = { ...state, sectionPlanes: operation.planes };
+        break;
+      case "reset-inspection":
+        state = { ...state, highlightedOccurrenceIds: [], ghost: null, sectionPlanes: [] };
+        break;
       case "explode":
         state = { ...state, explosion: operation.amount };
         break;
@@ -110,6 +147,17 @@ export const rebaseCadView = (state: CadViewState, snapshot: CadSnapshotManifest
   return {
     ...state,
     snapshotId: snapshot.snapshotId,
+    ...(state.highlightedOccurrenceIds
+      ? { highlightedOccurrenceIds: state.highlightedOccurrenceIds.filter((id) => ids.has(id)) }
+      : {}),
+    ...(state.ghost
+      ? {
+          ghost: {
+            ...state.ghost,
+            occurrenceIds: state.ghost.occurrenceIds.filter((id) => ids.has(id)),
+          },
+        }
+      : {}),
     visibility: Object.fromEntries(Object.entries(state.visibility).filter(([id]) => ids.has(id))),
     isolatedOccurrenceIds: state.isolatedOccurrenceIds.filter((id) => ids.has(id)),
     camera: framingLost ? { kind: "preset", preset: "isometric", fit: [] } : state.camera,

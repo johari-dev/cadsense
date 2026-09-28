@@ -15,6 +15,15 @@ export const cadPanelEnvironment = {
     label: "cad-comments:review",
     tag: WS_METHODS.cadCommentReview,
   }),
+  learnings: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+    label: "cad-review-learnings:watch",
+    tag: WS_METHODS.cadReviewLearningsWatch,
+    idleTtlMs: 60000,
+  }),
+  removeLearning: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "cad-review-learnings:remove",
+    tag: WS_METHODS.cadReviewLearningRemove,
+  }),
   watch: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "cad-panel:watch",
     tag: WS_METHODS.cadPanelWatch,
