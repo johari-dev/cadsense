@@ -59,4 +59,4 @@ Ways paging can fail, each covered by `CadChecks.test.ts`:
 
 - `CadChecks.test.ts` covers the mesh interference failure list above against real triangle GLBs and the WASM kernel, plus glTF matrix and TRS composition, unreadable containers, overlap size and volume, touching faces, containment, occurrence rotation, suppressed subtrees, duplicate and near-miss placements, flat and unknown bounds, the sweep against brute force on 300 random boxes, the budget cutoff and its determinism, bounds caching, cursor binding, revision conflicts, and malformed input.
 - `CadViewing.test.ts` runs `cad_checks` through the real activation and provider tool path with a stored GLB, checking the default exact finding, that bounds are read once per activation while triangles are read per call, and that stale revisions conflict.
-- `cadHttp.test.ts` and `CodexCadTools.test.ts` enumerate the eleven registered tools and the read-only set.
+- `cadHttp.test.ts` and `CodexCadTools.test.ts` enumerate the twelve registered tools and the read-only set.

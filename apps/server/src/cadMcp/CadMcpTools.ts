@@ -20,7 +20,7 @@ const openSchema = Schema.toJsonSchemaDocument(CadOpenInput);
 
 export const CAD_MCP_INSTRUCTIONS = [
   "Cadsense reviews Onshape CAD. When the user shares a cad.onshape.com link or asks for feedback on a CAD design, call cad_open with that URL. Onshape links need this server's API key, so fetching them over HTTP only reaches a sign-in page. cad_open downloads the model, opens a review, and returns the review guidance to follow.",
-  "Then inspect the model with cad_context, cad_hierarchy, cad_checks, cad_diff, cad_find_parts, cad_update_view, and cad_capture, and leave findings on the model with cad_comments_list, cad_comment_locate, cad_comment_inspect, and cad_comments_publish.",
+  "Then inspect the model with cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, cad_find_parts, cad_update_view, and cad_capture, and leave findings on the model with cad_comments_list, cad_comment_locate, cad_comment_inspect, and cad_comments_publish.",
   "Published comments and an HTML report stay on disk after the session. cad_open returns the report path.",
 ].join(" ");
 
