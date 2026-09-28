@@ -19,7 +19,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { readCadUserView, readLatestCadCapture } from "./CadSessionPersistence.ts";
-import { initialCadView, rebaseCadView } from "./CadViewState.ts";
+import { defaultCadRoot, initialCadView, rebaseCadView } from "./CadViewState.ts";
 import { CadViewing } from "./CadViewing.ts";
 
 interface Scene {
@@ -97,11 +97,7 @@ export const make = Effect.gen(function* () {
     const roots = project.cad?.roots.filter((root) => root.current !== null) ?? [];
     const root = saved
       ? roots.find((root) => root.rootId === saved.view.rootId)
-      : (roots.find(
-          (root) =>
-            root.elementId === project.onshapeSource?.elementId &&
-            root.configuration === (project.onshapeSource.configuration ?? "default"),
-        ) ?? (roots.length === 1 ? roots[0] : undefined));
+      : defaultCadRoot(project.onshapeSource, roots);
     let view = saved?.view ?? null;
     if (root?.current && view?.snapshotId !== root.current.snapshotId) {
       view = yield* store

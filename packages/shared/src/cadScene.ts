@@ -3,6 +3,8 @@ import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 /** Shared hierarchy and visibility semantics for server commands and local renderers. */
 export const indexCadSnapshot = (snapshot: CadSnapshotManifest) => {
   const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
+  // Keyed by geometryKey, which part nodes reference as sourcePartKey.
+  const parts = new Map(snapshot.parts.map((part) => [part.geometryKey, part]));
   const children = new Map<string | null, string[]>();
   for (const node of snapshot.nodes) {
     const siblings = children.get(node.parentId) ?? [];
@@ -41,7 +43,7 @@ export const indexCadSnapshot = (snapshot: CadSnapshotManifest) => {
     }
     return result;
   };
-  return { nodes, children, subtree, visible };
+  return { nodes, parts, children, subtree, visible };
 };
 
 /** Reveal selected subtrees through hidden ancestors without changing sibling overrides. */

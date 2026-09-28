@@ -64,6 +64,9 @@ const error = (cause: unknown) =>
         ? fail(`render-${cause.reason}`)
         : fail(cause instanceof Error && cause.message ? cause.message : "unavailable");
 const digest = (value: string) => NodeCrypto.createHash("sha256").update(value).digest("hex");
+/** A chat's retained evidence: `<inspectionId>.png` and `.json` for each published inspection. */
+export const cadCommentEvidenceDirectory = (path: Path.Path, stateDir: string, threadId: string) =>
+  path.join(stateDir, "cad", "comment-evidence", digest(threadId));
 const uuid = () => NodeCrypto.randomUUID();
 // Include recovery guidance in responses: resumed providers can retain older descriptions.
 const inputGuidance = (schema: Schema.Top) =>
@@ -138,7 +141,7 @@ export const make = Effect.gen(function* () {
         thread.deletedAt !== null ||
         model.projects.some((p) => p.id === thread.projectId && p.deletedAt !== null)
       )
-        yield* fs.remove(path.join(config.stateDir, "cad", "comment-evidence", digest(thread.id)), {
+        yield* fs.remove(cadCommentEvidenceDirectory(path, config.stateDir, thread.id), {
           recursive: true,
           force: true,
         });
@@ -308,12 +311,7 @@ export const make = Effect.gen(function* () {
       inspectionIds: Set<string>;
     };
     const candidates = new Map<string, Candidate>();
-    const evidenceDirectory = path.join(
-      config.stateDir,
-      "cad",
-      "comment-evidence",
-      digest(threadId),
-    );
+    const evidenceDirectory = cadCommentEvidenceDirectory(path, config.stateDir, threadId);
     const evidenceIds = new Set<string>();
     const cleanupEvidence = Effect.gen(function* () {
       const model = yield* query.getCommandReadModel();
