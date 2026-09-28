@@ -206,10 +206,11 @@ export const make = Effect.gen(function* () {
     pending.delete(ticket.jobId);
     yield* Deferred.succeed(item.result, { receipt, png });
   });
+  /** A connected renderer could not produce this view, so the capture fails as an invalid result. */
   const fail = Effect.fn("CadRenderBroker.fail")(function* (ticket: CadRenderTicket) {
     const item = yield* lookup(ticket);
     pending.delete(ticket.jobId);
-    yield* Deferred.fail(item.result, error("unavailable"));
+    yield* Deferred.fail(item.result, error("invalid-result"));
   });
   const endRun = Effect.fn("CadRenderBroker.endRun")(function* (runId: string) {
     if (!runs.delete(runId)) return;

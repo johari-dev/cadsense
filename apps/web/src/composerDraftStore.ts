@@ -433,6 +433,18 @@ interface ComposerDraftStoreState {
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
+  /**
+   * Inserts reference text into a draft so a feature can hand the user a
+   * prompt to finish. Empty drafts take the seed as-is; otherwise it lands at
+   * `cursor` (a collapsed composer cursor) or, without a cursor or at the end,
+   * on its own line after the draft. Returns the cursor just after the seed,
+   * or null when the target has no draft key.
+   */
+  seedPrompt: (
+    threadRef: ComposerThreadTarget,
+    seed: string,
+    cursor?: number | null,
+  ) => number | null;
   setModelSelection: (
     threadRef: ComposerThreadTarget,
     modelSelection: ModelSelection | null | undefined,
@@ -675,6 +687,28 @@ export function composerFileMatchesReattachMarker(
     videoMimeType(marker) !== null &&
     videoMimeType(file) !== null
   );
+}
+
+/** Merge rule behind `seedPrompt`; see its docs for the cases. */
+export function mergeComposerSeed(
+  prompt: string,
+  seed: string,
+  cursor: number | null | undefined,
+): { prompt: string; cursor: number } {
+  if (prompt.trim().length === 0) {
+    return { prompt: seed, cursor: seed.length };
+  }
+  if (cursor === null || cursor === undefined || cursor < 0 || cursor >= prompt.length) {
+    const separator = prompt.endsWith("\n") ? "" : "\n";
+    const next = `${prompt}${separator}${seed}`;
+    return { prompt: next, cursor: next.length };
+  }
+  const boundary = /\s/.test(prompt[cursor - 1] ?? " ") ? "" : " ";
+  const insertion = `${boundary}${seed}`;
+  return {
+    prompt: `${prompt.slice(0, cursor)}${insertion}${prompt.slice(cursor)}`,
+    cursor: cursor + insertion.length,
+  };
 }
 
 function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
@@ -2502,6 +2536,21 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
+        },
+        seedPrompt: (threadRef, seed, cursor) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return null;
+          }
+          const existing = get().draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+          const merged = mergeComposerSeed(existing.prompt, seed, cursor);
+          set((state) => ({
+            draftsByThreadKey: {
+              ...state.draftsByThreadKey,
+              [threadKey]: { ...existing, prompt: merged.prompt },
+            },
+          }));
+          return merged.cursor;
         },
         setModelSelection: (threadRef, modelSelection, opts) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";

@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CadChecksResult,
   CadSnapshotManifest,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -32,6 +33,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { CadViewing, make } from "./CadViewing.ts";
+import { CadComments } from "./CadComments.ts";
 import { makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
@@ -50,7 +52,7 @@ import { make as makePanel } from "./CadPanel.ts";
 import { CadPanel } from "./CadPanel.ts";
 import { make as makeStorage } from "./CadStorage.ts";
 import { CadProjectQuiescence } from "./CadUserOperations.ts";
-import { CadUserOperationError } from "@cadsense/contracts";
+import { CadRenderError, CadUserOperationError } from "@cadsense/contracts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
@@ -102,6 +104,51 @@ it.effect(
         turnId,
       );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("shows agent CAD control while a comment tool renders", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const h = yield* harness(false, false, false, undefined, {
+      activate: () =>
+        Effect.succeed({
+          invoke: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as({ result: { ok: true } }),
+            ),
+        }),
+      watch: () => Stream.empty,
+      review: () => Effect.die("unused"),
+      learnings: () => Stream.empty,
+      removeLearning: () => Effect.die("unused"),
+    });
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("comment-activity");
+    const controlling = () =>
+      h.service.watchActivity(threadId).pipe(
+        Stream.runHead,
+        Effect.map((state) => Option.getOrThrow(state)),
+      );
+    const inspect = yield* tools
+      .invoke(null, turnId, "cad_comment_inspect", {})
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(started);
+    assert.deepEqual(yield* controlling(), {
+      agentControlling: true,
+      agentActivityTurnId: turnId,
+    });
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(inspect);
+    assert.deepEqual(yield* controlling(), {
+      agentControlling: false,
+      agentActivityTurnId: turnId,
+    });
+    yield* tools.end(null, turnId);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
 it.effect("cancels a native in-flight capture before releasing its snapshot pin", () =>
@@ -336,6 +383,7 @@ const harness = Effect.fn(function* (
   advanceDuringCapture = false,
   loseCaptureReceipt = false,
   renderGate?: { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> },
+  comments?: CadComments["Service"],
 ) {
   const engine = yield* OrchestrationEngineService;
   let sequence = 0;
@@ -404,6 +452,7 @@ const harness = Effect.fn(function* (
     });
   }
   let pins = 0;
+  const assets = new Map<string, Uint8Array>();
   const store = CadSnapshotStore.of({
     checkReserve: unused,
     findGeometry: unused,
@@ -428,12 +477,16 @@ const harness = Effect.fn(function* (
                 pins--;
               }),
           );
-          return yield* use(manifest, unused);
+          return yield* use(manifest, (sha256) => {
+            const bytes = assets.get(sha256);
+            return bytes ? Effect.succeed(bytes) : unused();
+          });
         }),
       ),
   });
   const renderRequests: CadRenderRequest[] = [];
   const renderedBytes = new Uint8Array([1, 2, 3]);
+  let renderFailure: CadRenderError["reason"] | null = null;
   const artifacts = yield* makeArtifacts.pipe(
     Effect.provideService(OrchestrationEngineService, {
       ...engine,
@@ -464,6 +517,7 @@ const harness = Effect.fn(function* (
         capture: (input) =>
           Effect.gen(function* () {
             renderRequests.push(input);
+            if (renderFailure) return yield* new CadRenderError({ reason: renderFailure });
             if (renderGate) {
               yield* Deferred.succeed(renderGate.started, undefined);
               yield* Deferred.await(renderGate.release);
@@ -500,6 +554,7 @@ const harness = Effect.fn(function* (
   const service = yield* make.pipe(
     Effect.provideService(CadSnapshotStore, store),
     Effect.provideService(CadCaptureArtifacts, artifacts),
+    comments ? Effect.provideService(CadComments, comments) : (effect) => effect,
   );
   const presentation = yield* makePresentation.pipe(Effect.provideService(CadSnapshotStore, store));
   return {
@@ -510,15 +565,223 @@ const harness = Effect.fn(function* (
     ),
     recreate: make.pipe(Effect.provideService(CadSnapshotStore, store)),
     pins: () => pins,
+    failRenders: (reason: CadRenderError["reason"] | null) => {
+      renderFailure = reason;
+    },
     dispatch,
     renderRequests,
     renderedBytes,
     presentation,
     recreatePresentation: makePresentation.pipe(Effect.provideService(CadSnapshotStore, store)),
     snapshots,
+    assets,
     store,
   };
 });
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+/** JSON-only GLB with one 50 mm cube; cad_checks reads accessor bounds, never the binary chunk. */
+/** A closed 5 cm cube with real triangles, so both bounds and exact interference can read it. */
+const cubeGlb = (() => {
+  const positions = new Float32Array(
+    Array.from({ length: 8 }, (_, i) => [
+      i & 1 ? 0.05 : 0,
+      i & 2 ? 0.05 : 0,
+      i & 4 ? 0.05 : 0,
+    ]).flat(),
+  );
+  // Outward-wound faces: -Z, +Z, -Y, +Y, -X, +X.
+  const indices = new Uint16Array([
+    0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0, 6, 2, 1, 3,
+    7, 1, 7, 5,
+  ]);
+  const json = new TextEncoder().encode(
+    encodeJson({
+      asset: { version: "2.0" },
+      scenes: [{ nodes: [0] }],
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      accessors: [
+        {
+          bufferView: 0,
+          componentType: 5126,
+          count: 8,
+          type: "VEC3",
+          min: [0, 0, 0],
+          max: [0.05, 0.05, 0.05],
+        },
+        { bufferView: 1, componentType: 5123, count: 36, type: "SCALAR" },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: positions.byteLength },
+        { buffer: 0, byteOffset: positions.byteLength, byteLength: indices.byteLength },
+      ],
+      buffers: [{ byteLength: positions.byteLength + indices.byteLength }],
+    }),
+  );
+  const jsonLength = Math.ceil(json.length / 4) * 4;
+  const binLength = positions.byteLength + indices.byteLength;
+  const glb = new Uint8Array(20 + jsonLength + 8 + binLength);
+  const view = new DataView(glb.buffer);
+  view.setUint32(0, 0x46546c67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, glb.length, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, 0x4e4f534a, true);
+  glb.fill(0x20, 20, 20 + jsonLength);
+  glb.set(json, 20);
+  view.setUint32(20 + jsonLength, binLength, true);
+  view.setUint32(24 + jsonLength, 0x004e4942, true);
+  glb.set(new Uint8Array(positions.buffer), 28 + jsonLength);
+  glb.set(new Uint8Array(indices.buffer), 28 + jsonLength + positions.byteLength);
+  return glb;
+})();
+const decodeRevision = Schema.decodeUnknownEffect(Schema.Struct({ revision: Schema.Int }));
+const decodeChecks = Schema.decodeUnknownEffect(CadChecksResult);
+it.effect("runs cad_checks over the pinned snapshot and caches part bounds per activation", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const partId = (value: number) => value.toString(16).padStart(64, "0");
+    const glb = cubeGlb;
+    let reads = 0;
+    h.assets.set(partId(9), glb);
+    const decorated = decodeSnapshot({
+      ...snapshot,
+      nodes: [
+        ...snapshot.nodes,
+        ...[
+          {
+            number: 5,
+            name: "Block A",
+            transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          },
+          {
+            number: 6,
+            name: "Block B",
+            transform: [1, 0, 0, 0.04, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          },
+        ].map((node) => ({
+          id: partId(node.number),
+          parentId: snapshot.nodes[0]!.id,
+          occurrencePath: [String(node.number)],
+          instanceId: String(node.number),
+          name: node.name,
+          kind: "part",
+          suppressed: false,
+          defaultVisible: true,
+          transform: node.transform,
+          sourcePartKey: partId(8),
+        })),
+      ],
+      parts: [
+        {
+          geometryKey: partId(8),
+          source: {
+            host: source.host,
+            documentId: source.documentId,
+            documentMicroversion: source.workspaceId,
+            documentVersion: null,
+            elementId: "e".repeat(24),
+            configuration: "default",
+            fullConfiguration: "default",
+            partId: "JHD",
+            tessellationProfile: "test",
+          },
+          geometryRequired: true,
+          metadata: {
+            name: "Block",
+            bodyType: "solid",
+            isHidden: null,
+            isMesh: null,
+            partIdentity: null,
+            configurationId: null,
+            appearance: null,
+            material: null,
+          },
+        },
+      ],
+      assets: [
+        {
+          geometryKey: partId(8),
+          sha256: partId(9),
+          byteLength: glb.length,
+          format: "glb",
+          relativePath: `${partId(9)}.glb`,
+        },
+      ],
+    });
+    h.snapshots.set(snapshot.snapshotId, yield* decorated);
+    const store = h.store;
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(
+        CadViewing,
+        yield* make.pipe(
+          Effect.provideService(CadSnapshotStore, {
+            ...store,
+            withPinned: (id, use) =>
+              store.withPinned(id, (manifest, readAsset) =>
+                use(manifest, (sha256) =>
+                  Effect.sync(() => {
+                    reads++;
+                  }).pipe(Effect.andThen(readAsset(sha256))),
+                ),
+              ),
+          }),
+        ),
+      ),
+    );
+    const turnId = TurnId.make("checks");
+    const context = yield* decodeRevision(
+      (yield* tools.invoke(null, turnId, "cad_context", {})).result,
+    );
+    const first = yield* decodeChecks(
+      (yield* tools.invoke(null, turnId, "cad_checks", { expectedRevision: context.revision }))
+        .result,
+    );
+    assert.deepEqual(
+      first.findings.map((finding) => [
+        finding.check,
+        finding.occurrences.map((occurrence) => occurrence.name),
+      ]),
+      [["mesh-interference", ["Block A", "Block B"]]],
+    );
+    const interference = first.findings[0]!;
+    if (interference.check === "mesh-interference")
+      assert.closeTo(interference.intersectionVolume, 0.01 * 0.05 * 0.05, 1e-10);
+    assert.equal(first.summary.partOccurrences, 2);
+    assert.equal(first.summary.meshUnknown, 0);
+    // One bounds read, cached for the activation, and one triangle read for this call.
+    assert.equal(reads, 2);
+    const leads = yield* decodeChecks(
+      (yield* tools.invoke(null, turnId, "cad_checks", {
+        expectedRevision: context.revision,
+        checks: ["overlapping-bounds"],
+      })).result,
+    );
+    const overlap = leads.findings[0]!;
+    if (overlap.check === "overlapping-bounds")
+      assert.deepEqual(
+        overlap.overlapSize.map((value) => Number(value.toFixed(9))),
+        [0.01, 0.05, 0.05],
+      );
+    assert.equal(reads, 2);
+    const second = yield* decodeChecks(
+      (yield* tools.invoke(null, turnId, "cad_checks", {
+        expectedRevision: context.revision,
+        checks: ["degenerate-geometry"],
+      })).result,
+    );
+    assert.deepEqual(second.findings, []);
+    assert.equal(reads, 2);
+    assert.equal(
+      (yield* tools
+        .invoke(null, turnId, "cad_checks", { expectedRevision: context.revision + 1 })
+        .pipe(Effect.flip)).reason,
+      "revision-conflict",
+    );
+    yield* tools.close;
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 
 const storageHarness = Effect.fn(function* () {
   const h = yield* harness();
@@ -597,6 +860,46 @@ it.effect("keeps native descendant rendering alive until the thread becomes quie
     yield* releaseCompletedCadRuns(threadId).pipe(Effect.provideService(CadRenderBroker, broker));
     assert.equal((yield* Fiber.join(capture)).reason, "interrupted");
     assert.deepEqual(yield* broker.runsForThread(threadId), []);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("tells the agent why a capture or view update failed", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turnId = TurnId.make("tool-errors");
+    const failure = (name: string, input: unknown) =>
+      tools.invoke(null, turnId, name, input).pipe(Effect.flip);
+    yield* tools.invoke(null, turnId, "cad_context", {});
+
+    // Render failures are retryable and must not read as CAD being off.
+    h.failRenders("busy");
+    const busy = yield* failure("cad_capture", { expectedRevision: 0 });
+    assert.equal(busy.reason, "render-busy");
+    assert.include(busy.details, "Retry");
+    h.failRenders("unavailable");
+    assert.equal(
+      (yield* failure("cad_capture", { expectedRevision: 0 })).reason,
+      "render-unavailable",
+    );
+    h.failRenders(null);
+    yield* tools.invoke(null, turnId, "cad_capture", { expectedRevision: 0 });
+
+    const malformed = yield* failure("cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "camera-pose" }],
+    });
+    assert.equal(malformed.reason, "invalid-operation");
+    assert.include(malformed.details, "pose");
+    const unknown = yield* failure("cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "hide", occurrenceIds: ["f".repeat(64)] }],
+    });
+    assert.equal(unknown.reason, "invalid-operation");
+    assert.include(unknown.details, "operations[0]");
+    yield* tools.end(null, turnId);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 

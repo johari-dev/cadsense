@@ -215,11 +215,14 @@ function glb(object: Object3mf, palettes: Map<string, number[][]>) {
   return bytes;
 }
 
-/** Match all exported occurrences uniquely before publishing any source geometry. No UUID or array-order identity inference. */
+/** Extract only uniquely identified source geometry. Bulk callers can fetch unresolved
+ * parts separately with allowMissing; strict callers reject them. No UUID or array-order identity inference.
+ */
 export function readOnshapeThreeMf(
   draft: CadSnapshotDraft,
   bytes: Uint8Array,
   references?: ReadonlySet<string>,
+  allowMissing = false,
 ) {
   const files = readOnshapeZip(bytes),
     relationships = files.get("_rels/.rels");
@@ -375,7 +378,7 @@ export function readOnshapeThreeMf(
           ? atPose
           : [];
       if (matches.length !== 1) {
-        if (!references) throw identityUnavailable();
+        if (!references && !allowMissing) throw identityUnavailable();
         for (const n of named.length ? named : atPose) rejected.add(n.sourcePartKey!);
       } else {
         const match = matches[0]!,
@@ -404,7 +407,7 @@ export function readOnshapeThreeMf(
   for (const p of draft.parts)
     if (p.geometryRequired && (!keys.get(p.geometryKey)?.length || rejected.has(p.geometryKey))) {
       keys.delete(p.geometryKey);
-      if (!references?.has(p.geometryKey)) throw identityUnavailable();
+      if (!references?.has(p.geometryKey) && !allowMissing) throw identityUnavailable();
     }
   return {
     has: (key: string) => keys.has(key) || (references?.has(key) ?? false),

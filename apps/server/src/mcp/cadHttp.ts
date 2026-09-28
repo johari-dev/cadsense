@@ -7,7 +7,11 @@ import {
   ClaudeCadCapabilities,
   CLAUDE_CAD_CAPABILITY_FIELD,
 } from "../provider/ClaudeCadCapabilities.ts";
-import { cadToolDefinitions } from "../provider/CadProviderTools.ts";
+import {
+  mcpCadToolDefinitions,
+  mcpCadToolError,
+  mcpCadToolResult,
+} from "../provider/CadProviderTools.ts";
 import { McpSessionRegistry } from "./McpSessionRegistry.ts";
 
 const Request = Schema.Struct({
@@ -25,8 +29,6 @@ const decodeCall = Schema.decodeUnknownEffect(
     }),
   }),
 );
-const encodeResult = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
-const encodeError = Schema.encodeSync(Schema.fromJsonString(CadViewError));
 const headers = { "cache-control": "no-store" };
 const handle = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -51,16 +53,7 @@ const handle = Effect.gen(function* () {
     case "ping":
       return yield* reply({});
     case "tools/list":
-      return yield* reply({
-        tools: cadToolDefinitions.map(({ type: _type, ...tool }) => ({
-          ...tool,
-          annotations: {
-            readOnlyHint: tool.name === "cad_context" || tool.name === "cad_hierarchy",
-            destructiveHint: false,
-            openWorldHint: false,
-          },
-        })),
-      });
+      return yield* reply({ tools: mcpCadToolDefinitions });
     case "tools/call": {
       const result = yield* Effect.gen(function* () {
         const call = yield* decodeCall(body.params).pipe(
@@ -71,30 +64,8 @@ const handle = Effect.gen(function* () {
           call.arguments[CLAUDE_CAD_CAPABILITY_FIELD],
           call.name,
         );
-        const text = yield* encodeResult(delivery.result).pipe(
-          Effect.mapError(() => new CadViewError({ reason: "capability-unavailable" })),
-        );
-        return {
-          isError: false,
-          structuredContent: delivery.result,
-          content: [
-            { type: "text", text },
-            ...(delivery.png
-              ? [
-                  {
-                    type: "image",
-                    mimeType: "image/png",
-                    data: Buffer.from(delivery.png).toString("base64"),
-                  },
-                ]
-              : []),
-          ],
-        };
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.succeed({ isError: true, content: [{ type: "text", text: encodeError(error) }] }),
-        ),
-      );
+        return yield* mcpCadToolResult(delivery);
+      }).pipe(Effect.catch((error) => Effect.succeed(mcpCadToolError(error))));
       return yield* reply(result);
     }
     default:

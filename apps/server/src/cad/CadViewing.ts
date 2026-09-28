@@ -7,6 +7,7 @@ import {
   CadRenderError,
   CommandId,
   type CadViewerSession,
+  type CadChecksResult,
   type CadContextResult,
   type CadHierarchyResult,
   type CadSnapshotManifest,
@@ -29,8 +30,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
-import { initialCadView, rebaseCadView, updateCadView, indexCadSnapshot } from "./CadViewState.ts";
+import {
+  decodeCadToolInput,
+  defaultCadRoot,
+  initialCadView,
+  rebaseCadView,
+  updateCadView,
+  indexCadSnapshot,
+} from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
@@ -38,8 +47,6 @@ import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivit
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
 const conflict = () => new CadViewError({ reason: "revision-conflict" });
 const decodeView = Schema.decodeUnknownEffect(CadViewState);
-const decodeUpdate = Schema.decodeUnknownEffect(CadUpdateViewInput);
-const decodeCapture = Schema.decodeUnknownEffect(CadCaptureInput);
 export interface CadAgentTools {
   readonly comments?: (
     name: string,
@@ -47,6 +54,7 @@ export interface CadAgentTools {
   ) => Effect.Effect<CadCommentDelivery, CadViewError>;
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
+  readonly checks: (input: unknown) => Effect.Effect<CadChecksResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -252,15 +260,7 @@ export const make = Effect.gen(function* () {
           const saved = currentSession.view ?? (yield* getUserView(session.threadId));
           const selected = saved
             ? roots.find((root) => root.rootId === saved.rootId)
-            : project.onshapeSource?.elementId
-              ? roots.find(
-                  (root) =>
-                    root.elementId === project.onshapeSource?.elementId &&
-                    root.configuration === (project.onshapeSource.configuration ?? "default"),
-                )
-              : roots.length === 1
-                ? roots[0]
-                : undefined;
+            : defaultCadRoot(project.onshapeSource, roots);
           if (!selected?.current) return null;
           const next = yield* bind(selected.current.snapshotId).pipe(
             Effect.orElseSucceed(() => null),
@@ -308,15 +308,35 @@ export const make = Effect.gen(function* () {
               return yield* readCadHierarchy(indexCadSnapshot(binding.snapshot), state, input);
             }),
           );
+        // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
+        const boundsCache = new Map<string, CadBounds | null>();
+        const checks: CadAgentTools["checks"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* readCadChecks(
+                binding.snapshot,
+                state,
+                {
+                  bounds: (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
+                  // Triangles are only needed while intersecting, so they are read per call, not cached.
+                  meshes: (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                },
+                input,
+              );
+            }),
+          );
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
               let initialized = yield* initialize();
               const { roots } = yield* availableRoots();
               // Load only roots explicitly requested by the validated batch, never every cached root.
-              const update = yield* decodeUpdate(input).pipe(
-                Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
-              );
+              const update = yield* decodeCadToolInput(CadUpdateViewInput, input);
               if (
                 update.expectedRevision !==
                 (initialized?.state.revision ?? currentSession.revision ?? 0)
@@ -368,9 +388,7 @@ export const make = Effect.gen(function* () {
         const capture: CadAgentTools["capture"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
-              const requested = yield* decodeCapture(input).pipe(
-                Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
-              );
+              const requested = yield* decodeCadToolInput(CadCaptureInput, input);
               const initialized = yield* initialize();
               if (!initialized || turnId === undefined || Option.isNone(artifacts))
                 return yield* unavailable();
@@ -397,20 +415,25 @@ export const make = Effect.gen(function* () {
           ...(commentActivation
             ? {
                 comments: (name: string, input: unknown) =>
-                  commentActivation.invoke(name, input).pipe(
-                    Effect.catch((cause) =>
-                      Effect.succeed({
-                        result: {
-                          error: cause.reason,
-                          ...(cause.details === undefined ? {} : { details: cause.details }),
-                        },
-                      }),
+                  activity.track(
+                    session.threadId,
+                    turnId,
+                    commentActivation.invoke(name, input).pipe(
+                      Effect.catch((cause) =>
+                        Effect.succeed({
+                          result: {
+                            error: cause.reason,
+                            ...(cause.details === undefined ? {} : { details: cause.details }),
+                          },
+                        }),
+                      ),
                     ),
                   ),
               }
             : {}),
           context: () => activity.track(session.threadId, turnId, context()),
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
+          checks: (input) => activity.track(session.threadId, turnId, checks(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });

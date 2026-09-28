@@ -1,6 +1,7 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
-import { CommandId, IsoDateTime, ThreadId, TurnId } from "./baseSchemas.ts";
+import { CommandId, IsoDateTime, ProjectId, ThreadId, TurnId } from "./baseSchemas.ts";
 
 const text = (max: number) =>
   Schema.String.check(
@@ -8,12 +9,32 @@ const text = (max: number) =>
     Schema.makeFilter((s) => [...s].length <= max),
   );
 const Id = text(160);
+/** Why a user dismissed a finding. Also the text of the review learning it creates. */
+export const CadReviewReason = text(500);
 export const CadCommentPoint = Schema.Tuple([
   Schema.Number.check(Schema.isFinite()),
   Schema.Number.check(Schema.isFinite()),
   Schema.Number.check(Schema.isFinite()),
 ]);
 export const CadCommentState = Schema.Literals(["open", "resolved", "dismissed"]);
+/** Ordered from most to least consequential for the mechanism; the card sorts open findings by it. */
+export const CAD_COMMENT_SEVERITIES = ["blocker", "concern", "question", "nit"] as const;
+export const CadCommentSeverity = Schema.Literals(CAD_COMMENT_SEVERITIES);
+export type CadCommentSeverity = typeof CadCommentSeverity.Type;
+/** The lifecycle stage a finding belongs to, for filtering and counting across reviews. */
+export const CadCommentCategory = Schema.Literals([
+  "interference",
+  "access",
+  "assembly",
+  "wiring",
+  "structure",
+  "manufacturing",
+  "other",
+]);
+export type CadCommentCategory = typeof CadCommentCategory.Type;
+/** Comments and chat cards written before these labels existed decode as null and show no label. */
+const legacyNull = <S extends Schema.Top>(schema: S) =>
+  Schema.NullOr(schema).pipe(Schema.withDecodingDefault(Effect.succeed(null)));
 export const CadCommentTarget = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("point"),
@@ -47,15 +68,46 @@ export const CadComment = Schema.Struct({
   modelDescriptor: Schema.String,
   title: text(160),
   body: text(4000),
+  severity: legacyNull(CadCommentSeverity),
+  category: legacyNull(CadCommentCategory),
   targets: Schema.Array(CadCommentTarget).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   link: Schema.NullOr(CadCommentLink),
   state: CadCommentState,
   version: Schema.Int,
+  /** Present only while the latest review carried a reason; reopening clears it. */
+  reviewReason: Schema.optionalKey(CadReviewReason),
   number: Schema.Int,
   createdAt: IsoDateTime,
   turnId: TurnId,
 });
 export type CadComment = typeof CadComment.Type;
+/**
+ * Chat record of one `cad_comments_publish` call: the findings that became comments and the
+ * items the server rejected. Replayed publications are omitted because they were already shown.
+ */
+export const CadCommentsPublishedCard = Schema.Struct({
+  published: Schema.Array(
+    Schema.Struct({
+      publicationKey: Schema.String,
+      commentId: CadComment.fields.id,
+      number: CadComment.fields.number,
+      title: CadComment.fields.title,
+      severity: CadComment.fields.severity,
+      category: CadComment.fields.category,
+      location: Schema.String,
+    }),
+  ),
+  rejected: Schema.Array(
+    Schema.Struct({
+      publicationKey: Schema.String,
+      title: Schema.NullOr(Schema.String),
+      reason: Schema.String,
+    }),
+  ),
+});
+export type CadCommentsPublishedCard = typeof CadCommentsPublishedCard.Type;
+export const CAD_COMMENTS_PUBLISHED_ACTIVITY = "cad.comments.published";
+
 const { modelDescriptor: _modelDescriptor, ...summaryFields } = CadComment.fields;
 export const CadCommentsCatalog = Schema.Struct({
   comments: Schema.Array(Schema.Struct(summaryFields)),
@@ -75,6 +127,8 @@ export const CadCommentPublication = Schema.Union([
     inspectedSnapshotId: CadSnapshotId,
     title: text(160),
     body: text(4000),
+    severity: CadCommentSeverity,
+    category: CadCommentCategory,
     targets: Schema.Array(
       Schema.Union([
         Schema.Struct({
@@ -140,7 +194,40 @@ export const CadCommentReviewInput = Schema.Struct({
   commentId: Id,
   expectedVersion: Schema.Int,
   state: CadCommentState,
+  reason: Schema.optionalKey(CadReviewReason),
   commandId: CommandId,
+});
+/**
+ * User feedback the project keeps from dismissals with a reason. Agents receive every learning
+ * with the review guidance so later reviews do not repeat findings the user rejected.
+ */
+export const CadReviewLearning = Schema.Struct({
+  id: Id,
+  projectId: ProjectId,
+  text: CadReviewReason,
+  sourceCommentId: Id,
+  sourceThreadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+export type CadReviewLearning = typeof CadReviewLearning.Type;
+/** Oldest learnings beyond this count are dropped per project. */
+export const CAD_REVIEW_LEARNINGS_LIMIT = 50;
+export const CadReviewLearningRemoveInput = Schema.Struct({
+  projectId: ProjectId,
+  learningId: Id,
+  commandId: CommandId,
+});
+export const CadReviewLearningRemoveCommand = Schema.Struct({
+  ...CadReviewLearningRemoveInput.fields,
+  type: Schema.Literal("project.cad.review-learning.remove"),
+});
+export const CadReviewLearningAdded = Schema.Struct({
+  projectId: ProjectId,
+  learning: CadReviewLearning,
+});
+export const CadReviewLearningRemoved = Schema.Struct({
+  projectId: ProjectId,
+  learningId: Id,
 });
 export const CadCommentReceipt = Schema.Struct({
   key: Id,
@@ -172,6 +259,7 @@ export const CadCommentReviewed = Schema.Struct({
   commentId: Id,
   state: CadCommentState,
   version: Schema.Int,
+  reason: Schema.optionalKey(CadReviewReason),
   commandId: CommandId,
   payloadHash: CadHash,
 });

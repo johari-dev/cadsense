@@ -47,10 +47,11 @@ import {
   isVideoAttachment,
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { CadCaptureCard } from "../../cad/CadCaptureCard";
+import { CadFilmstrip, CadPublishedComments } from "../../cad/CadChatRows";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
   BotIcon,
+  BoxIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -924,6 +925,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                     row.message.role === "assistant" &&
                     !row.showAssistantMeta) ||
                   row.kind === "work" ||
+                  row.kind === "cad-filmstrip" ||
+                  row.kind === "cad-comments" ||
                   row.kind === "work-live" ||
                   row.kind === "work-toggle" ||
                   row.kind === "turn-plan"
@@ -942,6 +945,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
           isExpandedToolGroupEntry={row.isExpandedToolGroupEntry}
         />
       ) : null}
+      {row.kind === "cad-filmstrip" ? <CadFilmstripTimelineRow row={row} /> : null}
+      {row.kind === "cad-comments" ? <CadCommentsTimelineRow row={row} /> : null}
       {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
@@ -955,6 +960,24 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     </div>
   );
 });
+
+function CadFilmstripTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "cad-filmstrip" }>;
+}) {
+  const { threadRef, onImageExpand } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return (
+    <CadFilmstrip captures={row.captures} threadRef={threadRef} onImageExpand={onImageExpand} />
+  );
+}
+
+function CadCommentsTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "cad-comments" }> }) {
+  const { threadRef } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return <CadPublishedComments card={row.card} threadRef={threadRef} />;
+}
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -1526,6 +1549,8 @@ function toolGroupSummaryIconName(
   kind: Extract<TimelineRow, { kind: "work-toggle" }>["summaryKind"],
 ): WorkEntryIconName {
   switch (kind) {
+    case "cad":
+      return "box";
     case "read":
       return "eye";
     case "edit":
@@ -1852,6 +1877,7 @@ function formatWorkingTimerNow(startIso: string): string {
 
 type WorkEntryIconName =
   | "bot"
+  | "box"
   | "check"
   | "circle-alert"
   | "eye"
@@ -1869,6 +1895,8 @@ function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; classN
   switch (name) {
     case "bot":
       return <BotIcon className={className} aria-hidden />;
+    case "box":
+      return <BoxIcon className={className} aria-hidden />;
     case "check":
       return <CheckIcon className={className} aria-hidden />;
     case "circle-alert":
@@ -2131,15 +2159,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   isExpandedToolGroupEntry: boolean;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
-  const { threadRef, onImageExpand } = use(TimelineRowCtx);
-  if (workEntry.cadCapture && threadRef)
-    return (
-      <CadCaptureCard
-        capture={workEntry.cadCapture}
-        threadRef={threadRef}
-        onImageExpand={onImageExpand}
-      />
-    );
   // Before any hooks: spawn CTA rows render their own component.
   if (workEntry.agentSpawn) {
     return <AgentSpawnCtaRow workEntry={workEntry} />;

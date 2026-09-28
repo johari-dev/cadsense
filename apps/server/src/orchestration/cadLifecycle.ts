@@ -9,7 +9,10 @@ import * as Effect from "effect/Effect";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { requireProjectCadIdle } from "./commandInvariants.ts";
 
-type CadCommand = Extract<OrchestrationCommand, { type: `project.cad.${string}` }>;
+type CadCommand = Exclude<
+  Extract<OrchestrationCommand, { type: `project.cad.${string}` }>,
+  { type: "project.cad.review-learning.remove" }
+>;
 
 export const decideCadState = Effect.fn("decideCadState")(function* (
   project: OrchestrationProject,

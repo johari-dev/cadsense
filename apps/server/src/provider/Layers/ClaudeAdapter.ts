@@ -6,6 +6,7 @@
  *
  * @module ClaudeAdapterLive
  */
+import { cadReviewInstructions } from "../CadReviewInstructions.ts";
 import {
   type CanUseTool,
   query,
@@ -69,7 +70,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Scope from "effect/Scope";
-import { compactClaudeCadMessage } from "../CadProviderContent.ts";
+import { CLAUDE_CAD_TOOL_PREFIX, compactClaudeCadMessage } from "../CadProviderContent.ts";
 import * as Option from "effect/Option";
 import { CadViewing } from "../../cad/CadViewing.ts";
 import { makeCadProviderTools, type CadProviderTools } from "../CadProviderTools.ts";
@@ -1213,14 +1214,21 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   return `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
-function titleForTool(itemType: CanonicalItemType): string {
+/**
+ * MCP titles name the server and tool (`cadsense_cad · cad_capture`), matching Codex, so clients
+ * can recognize specific tools instead of seeing a generic "MCP tool call".
+ */
+function titleForTool(itemType: CanonicalItemType, toolName: string): string {
   switch (itemType) {
     case "command_execution":
       return "Command run";
     case "file_change":
       return "File change";
-    case "mcp_tool_call":
-      return "MCP tool call";
+    case "mcp_tool_call": {
+      const [prefix, server, ...rest] = toolName.split("__");
+      const tool = rest.join("__");
+      return prefix === "mcp" && server && tool ? `${server} · ${tool}` : "MCP tool call";
+    }
     case "collab_agent_tool_call":
       return "Subagent task";
     case "web_search":
@@ -2689,7 +2697,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         itemId,
         itemType,
         toolName,
-        title: titleForTool(itemType),
+        title: titleForTool(itemType, toolName),
         detail,
         input: toolInput,
         partialInputJson: "",
@@ -2762,7 +2770,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       message,
       new Set(
         Array.from(context.inFlightTools.values())
-          .filter((tool) => tool.toolName === "mcp__cadsense_cad__cad_capture")
+          .filter((tool) => tool.toolName.startsWith(CLAUDE_CAD_TOOL_PREFIX))
           .map((tool) => tool.itemId),
       ),
     );
@@ -4130,7 +4138,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
-        if (toolName.startsWith("mcp__cadsense_cad__")) {
+        if (toolName.startsWith(CLAUDE_CAD_TOOL_PREFIX)) {
           if (!context.cad || Option.isNone(cadCapabilities))
             return {
               behavior: "deny",
@@ -4157,7 +4165,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               context.cad.providerSessionId,
               childKey,
               turnId,
-              toolName.slice("mcp__cadsense_cad__".length),
+              toolName.slice(CLAUDE_CAD_TOOL_PREFIX.length),
               toolInput,
             )
             .pipe(
@@ -4413,9 +4421,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
+        // The system prompt is fixed for the session, so learnings added later reach Claude
+        // when its next session starts. A failed read only costs this session its learnings.
+        const learnings = yield* cadQuery.value
+          .getCadReviewLearnings(project.value.id)
+          .pipe(Effect.orElseSucceed(() => []));
         return {
           scope,
           tools,
+          reviewInstructions: cadReviewInstructions(learnings),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,
           ended: new Set<string>(),
@@ -4452,7 +4466,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          ...(cad ? { append: cad.reviewInstructions } : {}),
+        },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.

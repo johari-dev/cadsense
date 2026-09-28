@@ -51,6 +51,7 @@ const snapshot = Schema.decodeUnknownSync(CadSnapshotManifest)({
 const snapshots = new Map([[rootId, snapshot]]);
 const encodeViewJson = Schema.encodeEffect(Schema.fromJsonString(CadViewState));
 const decodeViewJson = Schema.decodeUnknownEffect(Schema.fromJsonString(CadViewState));
+const decodeManifest = Schema.decodeUnknownEffect(CadSnapshotManifest);
 
 describe("private CAD semantic state", () => {
   it.effect("rejects invalid camera geometry and zoom without applying earlier operations", () =>
@@ -85,6 +86,74 @@ describe("private CAD semantic state", () => {
         ).pipe(Effect.flip);
         assert.equal(error.reason, "invalid-operation");
         assert.deepEqual(before, initialCadView(snapshot));
+      }
+    }),
+  );
+
+  it.effect("reports part material and mass only where Onshape supplied them", () =>
+    Effect.gen(function* () {
+      const source = {
+        host: snapshot.root.host,
+        documentId: snapshot.root.documentId,
+        documentMicroversion: snapshot.root.microversionId,
+        documentVersion: null,
+        elementId: snapshot.root.elementId,
+        configuration: "default",
+        fullConfiguration: "default",
+        tessellationProfile: "test",
+      };
+      const metadata = {
+        bodyType: "solid",
+        isHidden: null,
+        isMesh: null,
+        partIdentity: null,
+        configurationId: null,
+        appearance: null,
+        material: null,
+      };
+      const partKeys = new Map([
+        [id(3), id(30)],
+        [id(5), id(31)],
+      ]);
+      const withParts = yield* decodeManifest({
+        ...snapshot,
+        nodes: snapshot.nodes.map((node) => {
+          const sourcePartKey = partKeys.get(node.id);
+          return sourcePartKey ? { ...node, kind: "part", sourcePartKey } : node;
+        }),
+        parts: [
+          {
+            geometryKey: id(30),
+            source: { ...source, partId: "A" },
+            geometryRequired: false,
+            metadata: {
+              ...metadata,
+              name: "Bolt",
+              material: { displayName: "6061-T6 Aluminum" },
+              massKg: 0.25,
+            },
+          },
+          {
+            geometryKey: id(31),
+            source: { ...source, partId: "B" },
+            geometryRequired: false,
+            metadata: { ...metadata, name: "Bolt" },
+          },
+        ],
+      });
+      const index = indexCadSnapshot(withParts);
+      const state = initialCadView(withParts);
+      const read = (parentOccurrenceId: string) =>
+        readCadHierarchy(index, state, { parentOccurrenceId }).pipe(
+          Effect.map((result) => result.entries),
+        );
+      assert.deepInclude((yield* read(id(2)))[0], {
+        material: "6061-T6 Aluminum",
+        massKg: 0.25,
+      });
+      for (const entry of [...(yield* read(id(4))), ...(yield* read(id(1)))]) {
+        assert.notProperty(entry, "material");
+        assert.notProperty(entry, "massKg");
       }
     }),
   );

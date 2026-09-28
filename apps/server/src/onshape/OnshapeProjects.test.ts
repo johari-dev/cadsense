@@ -135,6 +135,7 @@ const makeHarness = Effect.fn(function* (options?: {
     Layer.succeed(
       ProjectionSnapshotQuery,
       ProjectionSnapshotQuery.of({
+        getCadReviewLearnings: () => unsupported(),
         getCommandReadModel: () => unsupported(),
         getSnapshot: () => unsupported(),
         getShellSnapshot: () => unsupported(),
