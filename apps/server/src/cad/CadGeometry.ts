@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { validateBytes } from "gltf-validator";
 
-const MAX_BYTES = 128 * 1024 * 1024;
+export const MAX_PART_EXPORT_BYTES = 128 * 1024 * 1024;
 export const MAX_ASSEMBLY_EXPORT_BYTES = 512 * 1024 * 1024;
 const ObjectValue = Schema.Record(Schema.String, Schema.Unknown);
 const isObject = Schema.is(ObjectValue);
@@ -60,7 +60,7 @@ export const normalizeCadGeometry = Effect.fn("normalizeCadGeometry")(function* 
   input: Uint8Array,
   scope: "part" | "assembly" = "part",
 ) {
-  const maxBytes = scope === "assembly" ? MAX_ASSEMBLY_EXPORT_BYTES : MAX_BYTES;
+  const maxBytes = scope === "assembly" ? MAX_ASSEMBLY_EXPORT_BYTES : MAX_PART_EXPORT_BYTES;
   if (input.byteLength > maxBytes) return yield* new CadGeometryError({ reason: "too-large" });
   const container = yield* Effect.try({
     try: () => {

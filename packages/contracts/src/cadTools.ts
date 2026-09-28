@@ -34,6 +34,76 @@ export const CadHierarchyResult = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
+export const CAD_CHECK_NAMES = [
+  "mesh-interference",
+  "overlapping-bounds",
+  "coincident-instances",
+  "degenerate-geometry",
+] as const;
+export const CadCheckName = Schema.Literals(CAD_CHECK_NAMES);
+export type CadCheckName = typeof CadCheckName.Type;
+export const CadChecksInput = Schema.Struct({
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  checks: Schema.optionalKey(Schema.Array(CadCheckName).check(Schema.isMinLength(1))),
+  cursor: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+});
+export type CadChecksInput = typeof CadChecksInput.Type;
+const CadCheckOccurrence = Schema.Struct({ occurrenceId: CadHash, name: Schema.String });
+const Meters3 = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
+/** Deterministic leads for the agent to verify visually. Every number is in meters. */
+export const CadCheckFinding = Schema.Union([
+  Schema.Struct({
+    check: Schema.Literal("mesh-interference"),
+    occurrences: Schema.Array(CadCheckOccurrence),
+    // Cubic meters of solid shared by both parts, from exact mesh booleans.
+    intersectionVolume: Schema.Number,
+    // Intersection volume divided by the smaller solid's volume.
+    intersectionFraction: Schema.Number,
+    // Both parts sit in one subassembly below the root, such as a vendor kit's own screw and nut.
+    withinSubassembly: Schema.Boolean,
+  }),
+  Schema.Struct({
+    check: Schema.Literal("overlapping-bounds"),
+    occurrences: Schema.Array(CadCheckOccurrence),
+    overlapSize: Meters3,
+    overlapVolume: Schema.Number,
+    // Overlap volume divided by the smaller box volume; 1 means one box lies inside the other.
+    overlapFraction: Schema.Number,
+    contained: Schema.Boolean,
+  }),
+  Schema.Struct({
+    check: Schema.Literal("coincident-instances"),
+    occurrences: Schema.Array(CadCheckOccurrence),
+    maxDeviation: Schema.Number,
+  }),
+  Schema.Struct({
+    check: Schema.Literal("degenerate-geometry"),
+    occurrences: Schema.Array(CadCheckOccurrence),
+    size: Schema.NullOr(Meters3),
+  }),
+]);
+export type CadCheckFinding = typeof CadCheckFinding.Type;
+export const CadChecksResult = Schema.Struct({
+  revision: Schema.Int,
+  snapshotId: CadSnapshotId,
+  checks: Schema.Array(CadCheckName),
+  // What each selected check does and does not prove, stated once per page rather than per finding.
+  explanations: Schema.Record(Schema.String, Schema.String),
+  findings: Schema.Array(CadCheckFinding),
+  nextCursor: Schema.NullOr(Schema.String),
+  summary: Schema.Struct({
+    totalFindings: Schema.Int,
+    partOccurrences: Schema.Int,
+    boundsUnknown: Schema.Int,
+    // Parts whose mesh is not a closed solid, so mesh-interference cannot clear or report them.
+    meshUnknown: Schema.Int,
+    pairsEvaluated: Schema.Int,
+    pairBudget: Schema.Int,
+    budgetExhausted: Schema.Boolean,
+  }),
+});
+export type CadChecksResult = typeof CadChecksResult.Type;
 export const CadContextResult = Schema.Struct({
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   state: Schema.NullOr(CadViewState),
@@ -78,6 +148,7 @@ export const CAD_TOOL_INPUTS = {
   cad_comments_publish: CadCommentsPublishToolInput,
   cad_context: Schema.Struct({}),
   cad_hierarchy: CadHierarchyInput,
+  cad_checks: CadChecksInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;

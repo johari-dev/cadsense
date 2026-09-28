@@ -31,6 +31,11 @@ const descriptions = {
     "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
+  cad_checks: [
+    'Run deterministic geometry checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: mesh-interference, coincident-instances, degenerate-geometry.',
+    "mesh-interference lists part pairs whose solids actually intersect, with the shared volume in cubic meters, ordered by volume with pairs inside one subassembly last. Intended fits touch at zero volume, so a listed pair is usually a duplicate part, a misplaced gear or shaft, or a real collision; parts modeled undeformed on purpose (a squeezed game piece, press fits, threads) also appear. coincident-instances lists duplicate placements of one part; degenerate-geometry lists parts with unknown or near-zero bounds.",
+    "Treat each mesh-interference finding as a problem to explain, not a hint: capture the pair isolated and say what is wrong or ask why it is intended. summary.meshUnknown counts parts that are not closed solids; request overlapping-bounds for bounding-box leads on those. Read summary.budgetExhausted to know whether every pair was evaluated. Each page states every selected check's explanation once in explanations; a page may hold fewer findings than limit to stay small, so follow nextCursor.",
+  ].join(" "),
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -48,6 +53,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_comments_list",
   "cad_context",
   "cad_hierarchy",
+  "cad_checks",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -80,6 +86,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.context() };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
+    case "cad_checks":
+      return { result: yield* tools.checks(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":

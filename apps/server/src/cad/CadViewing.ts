@@ -7,6 +7,7 @@ import {
   CadRenderError,
   CommandId,
   type CadViewerSession,
+  type CadChecksResult,
   type CadContextResult,
   type CadHierarchyResult,
   type CadSnapshotManifest,
@@ -38,6 +39,7 @@ import {
   indexCadSnapshot,
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
@@ -52,6 +54,7 @@ export interface CadAgentTools {
   ) => Effect.Effect<CadCommentDelivery, CadViewError>;
   readonly context: () => Effect.Effect<typeof CadContextResult.Type, CadViewError>;
   readonly hierarchy: (input: unknown) => Effect.Effect<CadHierarchyResult, CadViewError>;
+  readonly checks: (input: unknown) => Effect.Effect<CadChecksResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -303,6 +306,28 @@ export const make = Effect.gen(function* () {
               return yield* readCadHierarchy(indexCadSnapshot(binding.snapshot), state, input);
             }),
           );
+        // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
+        const boundsCache = new Map<string, CadBounds | null>();
+        const checks: CadAgentTools["checks"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* readCadChecks(
+                binding.snapshot,
+                state,
+                {
+                  bounds: (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
+                  // Triangles are only needed while intersecting, so they are read per call, not cached.
+                  meshes: (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                },
+                input,
+              );
+            }),
+          );
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -406,6 +431,7 @@ export const make = Effect.gen(function* () {
             : {}),
           context: () => activity.track(session.threadId, turnId, context()),
           hierarchy: (input) => activity.track(session.threadId, turnId, hierarchy(input)),
+          checks: (input) => activity.track(session.threadId, turnId, checks(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });
