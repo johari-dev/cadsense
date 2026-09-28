@@ -55,8 +55,8 @@ export const CadPartInfoResult = Schema.Struct({
     Schema.Struct({
       name: CadPartMetadata.fields.name,
       bodyType: CadPartMetadata.fields.bodyType,
-      isMesh: Schema.Boolean,
-      isHidden: Schema.Boolean,
+      isMesh: CadPartMetadata.fields.isMesh,
+      isHidden: CadPartMetadata.fields.isHidden,
       partIdentity: CadPartMetadata.fields.partIdentity,
       configurationId: CadPartMetadata.fields.configurationId,
       appearance: CadPartMetadata.fields.appearance,
