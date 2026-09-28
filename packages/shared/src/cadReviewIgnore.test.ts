@@ -1,15 +1,15 @@
-import { CadReviewScope, CadSnapshotManifest, ProjectId } from "@cadsense/contracts";
+import { CadReviewIgnoreMatch, CadSnapshotManifest, ProjectId } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   compileCadReviewGlob,
-  describeCadReviewScopeMatch,
+  describeCadReviewIgnoreMatch,
   ignoredCadOccurrences,
-  matchesCadReviewScope,
-} from "./cadReviewScopes.ts";
+  matchesCadReviewIgnore,
+} from "./cadReviewIgnore.ts";
 
-const decodeScopes = Schema.decodeUnknownSync(Schema.Array(CadReviewScope));
+const decodeIgnore = Schema.decodeUnknownSync(Schema.Array(CadReviewIgnoreMatch));
 const decodeSnapshot = Schema.decodeUnknownSync(CadSnapshotManifest);
 
 describe("compileCadReviewGlob", () => {
@@ -33,29 +33,29 @@ describe("compileCadReviewGlob", () => {
   });
 });
 
-describe("matchesCadReviewScope", () => {
+describe("matchesCadReviewIgnore", () => {
   const gear = { path: "Drivetrain <1>/Gearbox <1>/Gear <2>", name: "Gear <2>", material: "Steel" };
 
   it("matches each field on its own", () => {
-    expect(matchesCadReviewScope({ path: "drivetrain*/**" }, gear)).toBe(true);
-    expect(matchesCadReviewScope({ name: "gear*" }, gear)).toBe(true);
-    expect(matchesCadReviewScope({ material: "*steel*" }, gear)).toBe(true);
+    expect(matchesCadReviewIgnore({ path: "drivetrain*/**" }, gear)).toBe(true);
+    expect(matchesCadReviewIgnore({ name: "gear*" }, gear)).toBe(true);
+    expect(matchesCadReviewIgnore({ material: "*steel*" }, gear)).toBe(true);
   });
 
   it("requires every listed field to match", () => {
-    expect(matchesCadReviewScope({ path: "Drivetrain*/**", material: "Steel" }, gear)).toBe(true);
-    expect(matchesCadReviewScope({ path: "Drivetrain*/**", material: "Aluminum" }, gear)).toBe(
+    expect(matchesCadReviewIgnore({ path: "Drivetrain*/**", material: "Steel" }, gear)).toBe(true);
+    expect(matchesCadReviewIgnore({ path: "Drivetrain*/**", material: "Aluminum" }, gear)).toBe(
       false,
     );
-    expect(matchesCadReviewScope({ name: "Gear*", path: "Chassis/**" }, gear)).toBe(false);
+    expect(matchesCadReviewIgnore({ name: "Gear*", path: "Chassis/**" }, gear)).toBe(false);
   });
 
   it("never matches a material glob against a component without a material", () => {
-    expect(matchesCadReviewScope({ material: "*" }, { ...gear, material: null })).toBe(false);
+    expect(matchesCadReviewIgnore({ material: "*" }, { ...gear, material: null })).toBe(false);
   });
 
   it("describes the listed fields in a fixed order", () => {
-    expect(describeCadReviewScopeMatch({ material: "*steel*", path: "Drivetrain/**" })).toBe(
+    expect(describeCadReviewIgnoreMatch({ material: "*steel*", path: "Drivetrain/**" })).toBe(
       "path Drivetrain/**, material *steel*",
     );
   });
@@ -132,29 +132,17 @@ describe("ignoredCadOccurrences", () => {
   });
 
   it("flags matching occurrences and everything inside a matching assembly", () => {
-    const ignored = ignoredCadOccurrences(
-      decodeScopes([{ match: { path: "Drivetrain*" }, ignore: true }]),
-      snapshot,
-    );
+    const ignored = ignoredCadOccurrences(decodeIgnore([{ path: "Drivetrain*" }]), snapshot);
     expect([...ignored].sort()).toEqual([id(2), id(3), id(5)].sort());
   });
 
-  it("matches materials through the source part and ignores instruction scopes", () => {
-    const ignored = ignoredCadOccurrences(
-      decodeScopes([
-        { match: { material: "alu*" }, ignore: true },
-        { match: { name: "Bolt*" }, instructions: "Bolts are purchased." },
-      ]),
-      snapshot,
-    );
+  it("matches materials through the source part", () => {
+    const ignored = ignoredCadOccurrences(decodeIgnore([{ material: "alu*" }]), snapshot);
     expect([...ignored]).toEqual([id(4)]);
   });
 
-  it("flags nothing without ignore scopes and never flags the root", () => {
+  it("flags nothing without entries and never flags the root", () => {
     expect(ignoredCadOccurrences([], snapshot).size).toBe(0);
-    expect(
-      ignoredCadOccurrences(decodeScopes([{ match: { name: "Assembly" }, ignore: true }]), snapshot)
-        .size,
-    ).toBe(0);
+    expect(ignoredCadOccurrences(decodeIgnore([{ name: "Assembly" }]), snapshot).size).toBe(0);
   });
 });

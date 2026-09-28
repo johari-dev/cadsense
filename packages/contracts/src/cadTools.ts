@@ -24,7 +24,7 @@ export const CadHierarchyEntry = Schema.Struct({
   hasChildren: Schema.Boolean,
   visible: Schema.Boolean,
   suppressed: Schema.Boolean,
-  /** Present when a cadsense.json review scope excludes this occurrence (or an ancestor) from review. */
+  /** Present when cadsense.json `reviewIgnore` excludes this occurrence (or an ancestor) from review. */
   ignored: Schema.optionalKey(Schema.Literal(true)),
   // Parts only, when Onshape supplied them. Mass is per occurrence, not rolled up.
   material: Schema.optionalKey(Schema.String),

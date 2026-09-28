@@ -20,33 +20,25 @@ describe("CadsenseProjectFile", () => {
     expect(decode({ futureField: true })).toEqual({});
   });
 
-  it("decodes review scopes", () => {
+  it("decodes and trims review ignore entries", () => {
     const decoded = decode({
-      reviewScopes: [
-        { match: { path: "Drivetrain <1>/**" }, instructions: " Gearbox ratio is fixed. " },
-        { match: { name: "*bolt*", material: "*steel*" }, ignore: true },
-      ],
+      reviewIgnore: [{ path: " Drivetrain <1>/** " }, { name: "*bolt*", material: "*steel*" }],
     });
 
-    expect(decoded.reviewScopes).toEqual([
-      { match: { path: "Drivetrain <1>/**" }, instructions: "Gearbox ratio is fixed." },
-      { match: { name: "*bolt*", material: "*steel*" }, ignore: true },
+    expect(decoded.reviewIgnore).toEqual([
+      { path: "Drivetrain <1>/**" },
+      { name: "*bolt*", material: "*steel*" },
     ]);
   });
 
   it.each([
-    [
-      "ignore and instructions together",
-      { match: { name: "Bolt" }, ignore: true, instructions: "x" },
-    ],
-    ["neither ignore nor instructions", { match: { name: "Bolt" } }],
-    ["ignore: false", { match: { name: "Bolt" }, ignore: false }],
-    ["an empty match", { match: {}, ignore: true }],
-    ["an unknown match field", { match: { pth: "Drivetrain/**" }, ignore: true }],
-    ["an unknown scope field", { match: { name: "Bolt" }, ignore: true, note: "x" }],
-    ["an empty instruction", { match: { name: "Bolt" }, instructions: " " }],
-  ])("rejects a review scope with %s", (_label, scope) => {
-    expect(() => decode({ reviewScopes: [scope] })).toThrow();
+    ["an empty entry", {}],
+    ["an unknown field", { pth: "Drivetrain/**" }],
+    ["an unknown field beside a valid one", { name: "Bolt", ignore: true }],
+    ["an empty glob", { name: " " }],
+    ["a non-object entry", "Drivetrain/**"],
+  ])("rejects a review ignore entry with %s", (_label, entry) => {
+    expect(() => decode({ reviewIgnore: [entry] })).toThrow();
   });
 
   it("trims icon paths", () => {

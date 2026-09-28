@@ -187,7 +187,7 @@ it.effect(
       const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-claude-cad-" });
       yield* fs.writeFileString(
         `${workspaceRoot}/cadsense.json`,
-        '{ "reviewScopes": [{ "match": { "name": "*bolt*" }, "instructions": "Bolts are purchased." }] }',
+        '{ "reviewIgnore": [{ "name": "*bolt*" }] }',
       );
       const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
       const capabilities = yield* ClaudeCadCapabilities.ClaudeCadCapabilities;
@@ -273,7 +273,7 @@ it.effect(
         preset: "claude_code",
         append: cadReviewInstructions({
           learnings: [],
-          scopes: [{ match: { name: "*bolt*" }, instructions: "Bolts are purchased." }],
+          ignored: [{ name: "*bolt*" }],
         }),
       });
     }).pipe(

@@ -11,7 +11,7 @@ const invalid = () => new CadViewError({ reason: "invalid-operation" });
 
 /**
  * Cursors are bound to an immutable snapshot and parent, not browser focus or mutable list offsets.
- * `ignored` holds occurrences that cadsense.json review scopes exclude from review.
+ * `ignored` holds occurrences that cadsense.json `reviewIgnore` excludes from review.
  */
 export const readCadHierarchy = Effect.fn("readCadHierarchy")(function* (
   index: ReturnType<typeof indexCadSnapshot>,

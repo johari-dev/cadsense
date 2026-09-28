@@ -589,30 +589,22 @@ describe("cadsense browser developer instructions", () => {
       NodeAssert.doesNotMatch(buildCodexDeveloperInstructions(mode, runtime, false), /cad_capture/);
     }
   });
-  it("adds the project's review scopes to the CAD guidance for each turn", () => {
+  it("adds the project's ignored components to the CAD guidance for each turn", () => {
     const runtime = { model: "test", reasoningEffort: "low" };
-    const scopes = [
-      { match: { name: "*bolt*" }, ignore: true as const },
-      { match: { path: "Drivetrain*/**" }, instructions: "Gearbox ratio is fixed." },
-    ];
+    const ignored = [{ name: "*bolt*" }, { path: "Drivetrain*/**" }];
     for (const mode of ["default", "plan"] as const) {
-      const scoped = buildCodexDeveloperInstructions(mode, runtime, false, true, {
-        learnings: [],
-        scopes,
-      });
-      NodeAssert.match(scoped, /Ignored components .*: name \*bolt\*\./);
       NodeAssert.match(
-        scoped,
-        /Components matching path Drivetrain\*\/\*\*: Gearbox ratio is fixed\./,
+        buildCodexDeveloperInstructions(mode, runtime, false, true, { learnings: [], ignored }),
+        /Ignored components .*: name \*bolt\*; path Drivetrain\*\/\*\*\./,
       );
       NodeAssert.doesNotMatch(
         buildCodexDeveloperInstructions(mode, runtime, false, true),
-        /Review scopes/,
+        /Ignored components/,
       );
-      // Scopes only matter alongside the CAD tools that act on them.
+      // The ignore list only matters alongside the CAD tools that act on it.
       NodeAssert.doesNotMatch(
-        buildCodexDeveloperInstructions(mode, runtime, false, false, { learnings: [], scopes }),
-        /Review scopes/,
+        buildCodexDeveloperInstructions(mode, runtime, false, false, { learnings: [], ignored }),
+        /Ignored components/,
       );
     }
   });

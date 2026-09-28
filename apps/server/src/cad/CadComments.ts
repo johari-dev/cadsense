@@ -50,8 +50,8 @@ import { forkParked } from "../serverActivation.ts";
 import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
-import { readCadReviewScopes } from "./CadReviewScopes.ts";
-import { cadReviewScopeSubjects, ignoredCadOccurrences } from "@cadsense/shared/cadReviewScopes";
+import { readCadReviewIgnore } from "./CadReviewIgnore.ts";
+import { cadReviewSubjects, ignoredCadOccurrences } from "@cadsense/shared/cadReviewIgnore";
 
 const fail = (reason: string) => new CadCommentError({ reason });
 const isCommentError = Schema.is(CadCommentError);
@@ -558,7 +558,7 @@ export const make = Effect.gen(function* () {
     const publish = Effect.fn("CadComments.publish")(function* (input: unknown) {
       const request = yield* decode(CadCommentsPublishInput, input);
       const project = yield* owner(threadId);
-      const reviewScopes = yield* readCadReviewScopes(project.workspaceRoot).pipe(
+      const reviewIgnore = yield* readCadReviewIgnore(project.workspaceRoot).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
       );
@@ -633,13 +633,13 @@ export const make = Effect.gen(function* () {
             )
               return yield* fail("invalid-comment-link");
             const targets: CadCommentTarget[] = [];
-            // Scoped-out occurrences reject the whole item; the agent was told not to review them.
-            const ignored = ignoredCadOccurrences(reviewScopes, binding.manifest);
+            // Ignored occurrences reject the whole item; the agent was told not to review them.
+            const ignored = ignoredCadOccurrences(reviewIgnore, binding.manifest);
             const rejectIgnored = (occurrenceId: string) => {
-              const subject = cadReviewScopeSubjects(binding.manifest).get(occurrenceId);
+              const subject = cadReviewSubjects(binding.manifest).get(occurrenceId);
               return new CadCommentError({
                 reason: "occurrence-ignored",
-                details: `cadsense.json excludes ${subject?.path ?? occurrenceId} from review through an ignore scope. Do not comment on it; choose a target outside the ignored scopes.`,
+                details: `cadsense.json reviewIgnore excludes ${subject?.path ?? occurrenceId} from review. Do not comment on it; choose a target outside the ignored components.`,
               });
             };
             for (const target of item.targets) {

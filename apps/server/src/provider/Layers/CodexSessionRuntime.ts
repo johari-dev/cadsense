@@ -2557,7 +2557,7 @@ export const makeCodexSessionRuntime = (
               ? {
                   learnings: options.cadReviewLearnings ? yield* options.cadReviewLearnings : [],
                   designBrief: options.designBrief ? yield* options.designBrief : null,
-                  scopes: yield* options.cad.reviewScopes,
+                  ignored: yield* options.cad.reviewIgnore,
                 }
               : undefined;
           const params = yield* buildTurnStartParams({

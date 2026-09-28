@@ -1,9 +1,9 @@
-import type { CadReviewScope, CadReviewScopeMatch, CadSnapshotManifest } from "@cadsense/contracts";
+import type { CadReviewIgnoreMatch, CadSnapshotManifest } from "@cadsense/contracts";
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * Compile a review scope glob into a case-insensitive RegExp. `*` and `?` stay within one
+ * Compile a `reviewIgnore` glob into a case-insensitive RegExp. `*` and `?` stay within one
  * `/` segment, `**` spans segments, and a leading `** /` or trailing `/ **` also matches the
  * bare path so `Drivetrain <1>/**` covers the assembly itself and everything inside it.
  */
@@ -26,8 +26,8 @@ export function compileCadReviewGlob(pattern: string): RegExp {
   return new RegExp(`^${source}$`, "i");
 }
 
-/** The occurrence facts a scope match is evaluated against. */
-export interface CadReviewScopeSubject {
+/** The occurrence facts a `reviewIgnore` entry is evaluated against. */
+export interface CadReviewSubject {
   /** Instance names from the top level down to the occurrence, joined with "/". */
   readonly path: string;
   readonly name: string;
@@ -36,9 +36,9 @@ export interface CadReviewScopeSubject {
 }
 
 /** True when every field listed in `match` matches the subject. */
-export function matchesCadReviewScope(
-  match: CadReviewScopeMatch,
-  subject: CadReviewScopeSubject,
+export function matchesCadReviewIgnore(
+  match: CadReviewIgnoreMatch,
+  subject: CadReviewSubject,
 ): boolean {
   if (match.path !== undefined && !compileCadReviewGlob(match.path).test(subject.path))
     return false;
@@ -49,17 +49,17 @@ export function matchesCadReviewScope(
   return true;
 }
 
-/** Human-readable match summary for review guidance, e.g. `path Drivetrain/**, material *steel*`. */
-export function describeCadReviewScopeMatch(match: CadReviewScopeMatch): string {
+/** Human-readable entry summary for review guidance, e.g. `path Drivetrain/**, material *steel*`. */
+export function describeCadReviewIgnoreMatch(match: CadReviewIgnoreMatch): string {
   return (["path", "name", "material"] as const)
     .flatMap((field) => (match[field] === undefined ? [] : [`${field} ${match[field]}`]))
     .join(", ");
 }
 
 /** Every occurrence subject in a snapshot, keyed by occurrence ID. The root node is not a subject. */
-export function cadReviewScopeSubjects(
+export function cadReviewSubjects(
   snapshot: CadSnapshotManifest,
-): ReadonlyMap<string, CadReviewScopeSubject> {
+): ReadonlyMap<string, CadReviewSubject> {
   const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
   const materials = new Map(
     snapshot.parts.map((part) => [part.geometryKey, part.metadata?.material?.displayName ?? null]),
@@ -76,7 +76,7 @@ export function cadReviewScopeSubjects(
     paths.set(id, path);
     return path;
   };
-  const subjects = new Map<string, CadReviewScopeSubject>();
+  const subjects = new Map<string, CadReviewSubject>();
   for (const node of snapshot.nodes) {
     if (node.parentId === null) continue;
     subjects.set(node.id, {
@@ -89,16 +89,15 @@ export function cadReviewScopeSubjects(
 }
 
 /**
- * Occurrence IDs excluded from review by `ignore` scopes. A matching assembly excludes its
- * whole subtree, so children inherit the flag.
+ * Occurrence IDs excluded from review by `reviewIgnore` entries. A matching assembly excludes
+ * its whole subtree, so children inherit the flag. The root node never matches.
  */
 export function ignoredCadOccurrences(
-  scopes: ReadonlyArray<CadReviewScope>,
+  reviewIgnore: ReadonlyArray<CadReviewIgnoreMatch>,
   snapshot: CadSnapshotManifest,
 ): ReadonlySet<string> {
-  const ignoreScopes = scopes.filter((scope) => scope.ignore === true);
-  if (ignoreScopes.length === 0) return new Set();
-  const subjects = cadReviewScopeSubjects(snapshot);
+  if (reviewIgnore.length === 0) return new Set();
+  const subjects = cadReviewSubjects(snapshot);
   const parents = new Map(snapshot.nodes.map((node) => [node.id, node.parentId]));
   const decided = new Map<string, boolean>();
   const isIgnored = (id: string): boolean => {
@@ -109,7 +108,7 @@ export function ignoredCadOccurrences(
     const result =
       subject !== undefined &&
       ((parentId !== null && isIgnored(parentId)) ||
-        ignoreScopes.some((scope) => matchesCadReviewScope(scope.match, subject)));
+        reviewIgnore.some((match) => matchesCadReviewIgnore(match, subject)));
     decided.set(id, result);
     return result;
   };

@@ -4440,7 +4440,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           reviewInstructions: cadReviewInstructions({
             learnings,
             designBrief,
-            scopes: yield* tools.reviewScopes,
+            ignored: yield* tools.reviewIgnore,
           }),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,

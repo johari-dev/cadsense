@@ -19,9 +19,9 @@
       "types": "./src/cadScene.ts",
       "import": "./src/cadScene.ts"
     },
-    "./cadReviewScopes": {
-      "types": "./src/cadReviewScopes.ts",
-      "import": "./src/cadReviewScopes.ts"
+    "./cadReviewIgnore": {
+      "types": "./src/cadReviewIgnore.ts",
+      "import": "./src/cadReviewIgnore.ts"
     },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",

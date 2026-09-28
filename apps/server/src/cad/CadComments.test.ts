@@ -334,16 +334,13 @@ for (const unavailable of ["suppressed", "geometryless"] as const) {
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
   );
 }
-it.effect("rejects targets on occurrences that cadsense.json review scopes ignore", () =>
+it.effect("rejects targets on occurrences that cadsense.json reviewIgnore excludes", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-scopes-" });
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-ignore-" });
     const projectFile = path.join(workspaceRoot, "cadsense.json");
-    yield* fs.writeFileString(
-      projectFile,
-      '{ "reviewScopes": [{ "match": { "name": "intake" }, "ignore": true }] }',
-    );
+    yield* fs.writeFileString(projectFile, '{ "reviewIgnore": [{ "name": "intake" }] }');
     const h = yield* harness({ workspaceRoot });
     const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
     const rejected = yield* decodePublicationFailure(
@@ -353,9 +350,9 @@ it.effect("rejects targets on occurrences that cadsense.json review scopes ignor
       })).result,
     );
     assert.equal(rejected.results[0]?.reason, "occurrence-ignored");
-    assert.include(rejected.results[0]?.details, "cadsense.json excludes Intake from review");
+    assert.include(rejected.results[0]?.details, "cadsense.json reviewIgnore excludes Intake");
     assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 0);
-    // Removing the scope applies to the next publication without restarting anything.
+    // Removing the entry applies to the next publication without restarting anything.
     yield* fs.writeFileString(projectFile, "{}");
     const published = yield* decodeReasons(
       (yield* a.invoke("cad_comments_publish", {

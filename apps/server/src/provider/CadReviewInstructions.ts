@@ -1,5 +1,5 @@
-import type { CadReviewScope } from "@cadsense/contracts";
-import { describeCadReviewScopeMatch } from "@cadsense/shared/cadReviewScopes";
+import type { CadReviewIgnoreMatch } from "@cadsense/contracts";
+import { describeCadReviewIgnoreMatch } from "@cadsense/shared/cadReviewIgnore";
 import type { CadDesignBrief } from "../cad/CadDesignBrief.ts";
 
 /** Review guidance shared by every project. Projects add context through {@link cadReviewInstructions}. */
@@ -17,37 +17,17 @@ export const CAD_REVIEW_INSTRUCTIONS = [
   "Before publishing, check that each finding follows from the design's intended use, distinguishes observation from assumption, matches its location, and helps the designer make a decision. Rewrite findings that fail; drop only the ones you cannot support. There is no target comment count. Finish with a brief explanation of the main concern and next decisions, without repeating every comment or adding unsupported reassurance. Expand only when the user needs more detail.",
 ].join("\n\n");
 
-// Values come from trusted config and user dismissals, but keep each entry on one line regardless.
-const singleLine = (value: string) => value.replaceAll(/\s+/g, " ").trim();
-
 export const CAD_REVIEW_LEARNINGS_HEADING =
   "Review learnings from this project's past dismissals (apply them; do not repeat dismissed findings):";
 
 /**
- * Review scopes section: ignore scopes become one line so the agent skips those components
- * before capturing; instruction scopes are quoted verbatim. Null when there are no scopes.
+ * One line listing the cadsense.json `reviewIgnore` entries so the agent skips those components
+ * before capturing. Null when nothing is ignored.
  */
-const reviewScopesSection = (scopes: ReadonlyArray<CadReviewScope>): string | null => {
-  if (scopes.length === 0) return null;
-  const ignored = scopes
-    .filter((scope) => scope.ignore === true)
-    .map((scope) => describeCadReviewScopeMatch(scope.match));
-  return [
-    "Review scopes from this project's cadsense.json:",
-    ...(ignored.length > 0
-      ? [
-          `Ignored components (do not capture, inspect, or comment on them; cad_hierarchy marks them ignored and publication rejects targets there): ${ignored.join("; ")}.`,
-        ]
-      : []),
-    ...scopes.flatMap((scope) =>
-      scope.instructions === undefined
-        ? []
-        : [
-            `Components matching ${describeCadReviewScopeMatch(scope.match)}: ${singleLine(scope.instructions)}`,
-          ],
-    ),
-  ].join("\n");
-};
+const reviewIgnoreSection = (ignored: ReadonlyArray<CadReviewIgnoreMatch>): string | null =>
+  ignored.length === 0
+    ? null
+    : `Ignored components from this project's cadsense.json (do not capture, inspect, or comment on them; cad_hierarchy marks them ignored and publication rejects targets there): ${ignored.map(describeCadReviewIgnoreMatch).join("; ")}.`;
 
 /** Project context appended to the shared review guidance for one session or turn. */
 export interface CadReviewContext {
@@ -55,31 +35,31 @@ export interface CadReviewContext {
   readonly learnings: ReadonlyArray<{ readonly text: string }>;
   /** The workspace design brief, when the project has one. */
   readonly designBrief?: CadDesignBrief | null;
-  /** The project's cadsense.json review scopes. */
-  readonly scopes?: ReadonlyArray<CadReviewScope>;
+  /** The project's cadsense.json `reviewIgnore` entries. */
+  readonly ignored?: ReadonlyArray<CadReviewIgnoreMatch>;
 }
 
 /**
  * Review guidance for one project session or turn: the shared instructions, then the project
- * design brief, then the cadsense.json review scopes, then one line per learning. Empty sections
- * are omitted, so a project with none of them gets the shared text alone.
+ * design brief, then the components cadsense.json ignores, then one line per learning. Empty
+ * sections are omitted, so a project with none of them gets the shared text alone.
  */
 export const cadReviewInstructions = ({
   learnings,
   designBrief,
-  scopes = [],
+  ignored = [],
 }: CadReviewContext): string =>
   [
     CAD_REVIEW_INSTRUCTIONS,
     designBrief
       ? `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`
       : null,
-    reviewScopesSection(scopes),
+    reviewIgnoreSection(ignored),
     learnings.length === 0
       ? null
       : [
           CAD_REVIEW_LEARNINGS_HEADING,
-          ...learnings.map((learning) => `- ${singleLine(learning.text)}`),
+          ...learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`),
         ].join("\n"),
   ]
     .filter((section) => section !== null)

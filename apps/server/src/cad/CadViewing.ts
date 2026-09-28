@@ -14,7 +14,7 @@ import {
   type CadChecksResult,
   type CadContextResult,
   type CadHierarchyResult,
-  type CadReviewScope,
+  type CadReviewIgnoreMatch,
   type CadSnapshotManifest,
   type OrchestrationCommand,
   type ThreadId,
@@ -46,8 +46,8 @@ import {
   indexCadSnapshot,
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
-import { readCadReviewScopes } from "./CadReviewScopes.ts";
-import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewScopes";
+import { readCadReviewIgnore } from "./CadReviewIgnore.ts";
+import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewIgnore";
 import { readCadDesignBrief } from "./CadDesignBrief.ts";
 import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
 import {
@@ -97,10 +97,10 @@ export interface CadViewingShape {
     view: unknown,
   ) => Effect.Effect<CadViewState, CadViewError>;
   readonly getUserView: (threadId: ThreadId) => Effect.Effect<CadViewState | null, CadViewError>;
-  /** The thread's project cadsense.json review scopes, read fresh on each call. */
-  readonly reviewScopes: (
+  /** The thread's project cadsense.json `reviewIgnore` entries, read fresh on each call. */
+  readonly reviewIgnore: (
     threadId: ThreadId,
-  ) => Effect.Effect<ReadonlyArray<CadReviewScope>, CadViewError>;
+  ) => Effect.Effect<ReadonlyArray<CadReviewIgnoreMatch>, CadViewError>;
 }
 export class CadViewing extends Context.Service<CadViewing, CadViewingShape>()(
   "@cadsense/server/cad/CadViewing",
@@ -150,14 +150,14 @@ export const make = Effect.gen(function* () {
       return yield* unavailable();
     return project.value;
   });
-  const projectReviewScopes = (workspaceRoot: string) =>
-    readCadReviewScopes(workspaceRoot).pipe(
+  const projectReviewIgnore = (workspaceRoot: string) =>
+    readCadReviewIgnore(workspaceRoot).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
     );
-  const reviewScopes = Effect.fn("CadViewing.reviewScopes")(function* (threadId: ThreadId) {
+  const reviewIgnore = Effect.fn("CadViewing.reviewIgnore")(function* (threadId: ThreadId) {
     const project = yield* projectFor(threadId);
-    return yield* projectReviewScopes(project.workspaceRoot);
+    return yield* projectReviewIgnore(project.workspaceRoot);
   });
   const resolveContext = Effect.fn("CadViewing.resolveContext")(function* (
     threadId: ThreadId,
@@ -346,12 +346,12 @@ export const make = Effect.gen(function* () {
               if (!initialized) return yield* unavailable();
               const { binding, state } = initialized;
               const { project } = yield* availableRoots();
-              const scopes = yield* projectReviewScopes(project.workspaceRoot);
+              const reviewIgnore = yield* projectReviewIgnore(project.workspaceRoot);
               return yield* readCadHierarchy(
                 indexCadSnapshot(binding.snapshot),
                 state,
                 input,
-                ignoredCadOccurrences(scopes, binding.snapshot),
+                ignoredCadOccurrences(reviewIgnore, binding.snapshot),
               );
             }),
           );
@@ -599,7 +599,7 @@ export const make = Effect.gen(function* () {
     withActivation,
     saveUserView,
     getUserView,
-    reviewScopes,
+    reviewIgnore,
     watchActivity: activity.watch,
   });
 });
