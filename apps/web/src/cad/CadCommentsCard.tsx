@@ -61,6 +61,8 @@ export function CadCommentsCard({
   );
   const [notice, setNotice] = useState("");
   const [pendingReviews, setPendingReviews] = useState<ReadonlySet<string>>(new Set());
+  // The comment whose Dismiss control is showing its reason input, and the draft reason.
+  const [dismissing, setDismissing] = useState<{ id: string; reason: string } | null>(null);
   const inFlightReviews = useRef(new Set<string>());
   const [layoutVersion, setLayoutVersion] = useState(0);
   const card = useRef<HTMLDivElement>(null),
@@ -197,12 +199,13 @@ export function CadCommentsCard({
       cancelAnimationFrame(frame);
     };
   }, [comments, manifest, renderer, open, filter, selection?.id]);
-  const change = async (c: CadComment, state: CadComment["state"]) => {
+  const change = async (c: CadComment, state: CadComment["state"], reason = "") => {
     // Guard synchronously as two clicks can arrive before React disables the controls.
     if (inFlightReviews.current.has(c.id)) return;
     inFlightReviews.current.add(c.id);
     setPendingReviews(new Set(inFlightReviews.current));
     setNotice("");
+    const trimmed = reason.trim();
     try {
       const result = await review({
         environmentId: threadRef.environmentId,
@@ -211,9 +214,11 @@ export function CadCommentsCard({
           commentId: c.id,
           expectedVersion: c.version,
           state,
+          ...(trimmed ? { reason: trimmed } : {}),
           commandId: newCommandId(),
         },
       });
+      if (result._tag !== "Failure") setDismissing((d) => (d?.id === c.id ? null : d));
       if (result._tag !== "Failure" && state !== "open") clearSelection(c.id);
       setNotice(
         result._tag === "Failure"
@@ -422,8 +427,45 @@ export function CadCommentsCard({
                               See {x.link?.kind}: {x.title}
                             </button>
                           ))}
+                        {c.state === "dismissed" && c.reviewReason && (
+                          <p className="text-muted-foreground">Dismissed: {c.reviewReason}</p>
+                        )}
                         <div className="flex gap-1">
-                          {c.state === "open" ? (
+                          {c.state === "open" && dismissing?.id === c.id ? (
+                            <form
+                              className="flex min-w-0 flex-1 gap-1"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                void change(c, "dismissed", dismissing.reason);
+                              }}
+                            >
+                              <input
+                                autoFocus
+                                aria-label="Dismiss reason"
+                                className="h-7 min-w-0 flex-1 border-b bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground"
+                                placeholder="Why? (optional, becomes a review learning)"
+                                maxLength={500}
+                                value={dismissing.reason}
+                                disabled={pendingReviews.has(c.id)}
+                                onChange={(event) =>
+                                  setDismissing({ id: c.id, reason: event.target.value })
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key !== "Escape") return;
+                                  event.preventDefault();
+                                  setDismissing(null);
+                                }}
+                              />
+                              <Button
+                                size="compact"
+                                variant="ghost"
+                                type="submit"
+                                disabled={pendingReviews.has(c.id)}
+                              >
+                                Confirm
+                              </Button>
+                            </form>
+                          ) : c.state === "open" ? (
                             <>
                               <Button
                                 size="compact"
@@ -438,7 +480,7 @@ export function CadCommentsCard({
                                 size="compact"
                                 variant="ghost"
                                 disabled={pendingReviews.has(c.id)}
-                                onClick={() => void change(c, "dismissed")}
+                                onClick={() => setDismissing({ id: c.id, reason: "" })}
                               >
                                 Dismiss
                               </Button>
@@ -471,7 +513,7 @@ export function CadCommentsCard({
               )}
             </div>
             <p className="border-t p-2 text-[11px] text-muted-foreground">
-              Resolve = addressed. Dismiss = no action needed.
+              Resolve = addressed. Dismiss = no action needed; a reason teaches later reviews.
             </p>
           </div>
         )}

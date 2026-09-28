@@ -10,3 +10,23 @@ export const CAD_REVIEW_INSTRUCTIONS = [
   "Run cad_checks early. Its mesh-interference findings are exact solid overlaps: explain each one in your review or say why it is intended. Never publish an interference comment from a bounding-box overlap alone. A verified marker proves location, not the finding. Support claims about clearance, rubbing, strength, or safe material removal with inspection, measurements, or analysis. Without analysis or a stated load case, never label an area low-stress, approve a support as strong enough, or prescribe a safe cutout region or size. Visible ribs alone do not establish strength. Ask about the load, material, and remaining thickness when those determine the recommendation.",
   "Before publishing, check that each finding follows from the design's intended use, distinguishes observation from assumption, matches its location, and helps the designer make a decision. Rewrite findings that fail; drop only the ones you cannot support. There is no target comment count. Finish with a brief explanation of the main concern and next decisions, without repeating every comment or adding unsupported reassurance. Expand only when the user needs more detail.",
 ].join("\n\n");
+
+export const CAD_REVIEW_LEARNINGS_HEADING =
+  "Review learnings from this project's past dismissals (apply them; do not repeat dismissed findings):";
+
+/**
+ * Review guidance for one project: the shared instructions plus one line per learning the
+ * user left when dismissing earlier findings. Without learnings it is the shared text alone.
+ */
+export const cadReviewInstructions = (
+  learnings: ReadonlyArray<{ readonly text: string }>,
+): string =>
+  learnings.length === 0
+    ? CAD_REVIEW_INSTRUCTIONS
+    : [
+        CAD_REVIEW_INSTRUCTIONS,
+        [
+          CAD_REVIEW_LEARNINGS_HEADING,
+          ...learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`),
+        ].join("\n"),
+      ].join("\n\n");

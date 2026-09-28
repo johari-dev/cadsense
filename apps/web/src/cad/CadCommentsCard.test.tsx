@@ -115,7 +115,7 @@ it.each(["Success", "Failure"] as const)(
     const buttons = actions(render());
     expect(buttons).toHaveLength(2);
     (buttons[0]!.props.onClick as () => void)();
-    (buttons[1]!.props.onClick as () => void)();
+    (buttons[0]!.props.onClick as () => void)();
     expect(commands.review).toHaveBeenCalledTimes(1);
     expect(actions(render()).every((button) => button.props.disabled === true)).toBe(true);
     complete({ _tag: outcome });
@@ -124,6 +124,88 @@ it.each(["Success", "Failure"] as const)(
     expect(actions(render()).every((button) => !button.props.disabled)).toBe(true);
   },
 );
+
+const REASON_PLACEHOLDER = "Why? (optional, becomes a review learning)";
+it("asks for a dismiss reason, sends it trimmed once, and cancels on Escape", async () => {
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  commands.review.mockResolvedValue({ _tag: "Success" });
+  const comment = {
+    id: "dismiss-comment",
+    number: 2,
+    state: "open",
+    version: 0,
+    snapshotId: "snapshot",
+    modelDescriptor: "model",
+    title: "Vent hole",
+    body: "Open hole",
+    targets: [{ kind: "part", occurrenceId: "plate", label: "Plate" }],
+  } as unknown as CadComment;
+  const props = {
+    threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
+    comments: [comment],
+    manifest: null,
+    displayedSnapshotId: "snapshot",
+    renderer: { current: null },
+    open: true,
+    setOpen() {},
+    selection: { id: comment.id, target: 0, request: 1 },
+    clearSelection: vi.fn(),
+    choose() {},
+    historical: true,
+    back() {},
+  };
+  const render = (current = props) => {
+    hooks.beginRender();
+    return CadCommentsCard(current);
+  };
+  const byText = (tree: ReactNode, text: string) =>
+    elements(tree).find((element) => element.props.children === text);
+  const reasonInput = (tree: ReactNode) =>
+    elements(tree).find((element) => element.props.placeholder === REASON_PLACEHOLDER);
+  expect(reasonInput(render())).toBeUndefined();
+  (byText(render(), "Dismiss")!.props.onClick as () => void)();
+  expect(commands.review).not.toHaveBeenCalled();
+  const input = reasonInput(render())!;
+  (input.props.onChange as (event: { target: { value: string } }) => void)({
+    target: { value: "  Vent holes are intentional  " },
+  });
+  const form = elements(render()).find((element) => typeof element.props.onSubmit === "function")!;
+  const submit = form.props.onSubmit as (event: { preventDefault: () => void }) => void;
+  submit({ preventDefault: vi.fn() });
+  submit({ preventDefault: vi.fn() });
+  expect(commands.review).toHaveBeenCalledTimes(1);
+  expect(commands.review.mock.calls[0]![0]).toMatchObject({
+    environmentId: "test",
+    input: { commentId: comment.id, state: "dismissed", reason: "Vent holes are intentional" },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(props.clearSelection).toHaveBeenCalledWith(comment.id);
+  expect(reasonInput(render())).toBeUndefined();
+  // Escape closes the input without reviewing; an empty reason is simply omitted.
+  (byText(render(), "Dismiss")!.props.onClick as () => void)();
+  (reasonInput(render())!.props.onKeyDown as (event: unknown) => void)({
+    key: "Escape",
+    preventDefault: vi.fn(),
+  });
+  expect(reasonInput(render())).toBeUndefined();
+  expect(commands.review).toHaveBeenCalledTimes(1);
+  // A dismissed finding shows the reason that was kept with it.
+  const dismissed: CadComment = {
+    ...comment,
+    state: "dismissed",
+    reviewReason: "Intentional vent",
+  };
+  expect(
+    elements(render({ ...props, comments: [dismissed] })).some(
+      (element) =>
+        Array.isArray(element.props.children) &&
+        element.props.children.join("") === "Dismissed: Intentional vent",
+    ),
+  ).toBe(true);
+});
 
 it("updates comment markers after scene changes without repeating idle projections", () => {
   const manifest = {

@@ -121,6 +121,8 @@ it.effect("shows agent CAD control while a comment tool renders", () =>
         }),
       watch: () => Stream.empty,
       review: () => Effect.die("unused"),
+      learnings: () => Stream.empty,
+      removeLearning: () => Effect.die("unused"),
     });
     const tools = yield* makeCadProviderTools(threadId).pipe(
       Effect.provideService(CadViewing, h.service),

@@ -944,3 +944,98 @@ it.effect(
       );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
+it.effect("turns a dismissal reason into a project review learning the user can remove", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+        yield* a.invoke("cad_comments_publish", {
+          expectedCatalogVersion: 0,
+          items: [
+            makeFinding(h.snapshot),
+            { ...makeFinding(h.snapshot), publicationKey: "second", title: "Second finding" },
+          ],
+        });
+      }),
+    );
+    const [first, second] = (yield* h.query.getCommandReadModel()).cadComments!;
+    const review = (
+      comment: { id: string },
+      input: Omit<Parameters<typeof h.service.review>[0], "threadId" | "commentId">,
+    ) => h.service.review({ threadId, commentId: comment.id, ...input });
+    // A whitespace-only reason is no reason: nothing on the comment and no learning.
+    const blank = yield* review(first!, {
+      expectedVersion: 0,
+      state: "dismissed",
+      reason: "   ",
+      commandId: CommandId.make("blank"),
+    });
+    assert.equal(blank.state, "dismissed");
+    assert.isUndefined(blank.reviewReason);
+    assert.deepEqual(yield* h.query.getCadReviewLearnings(projectId), []);
+    yield* review(first!, {
+      expectedVersion: 1,
+      state: "open",
+      commandId: CommandId.make("reopen-first"),
+    });
+    const dismiss = {
+      expectedVersion: 2,
+      state: "dismissed" as const,
+      reason: "  Vent holes are intentional.  ",
+      commandId: CommandId.make("dismiss-first"),
+    };
+    const dismissed = yield* review(first!, dismiss);
+    assert.equal(dismissed.reviewReason, "Vent holes are intentional.");
+    // Replaying the same command returns the same state without a second learning.
+    assert.equal((yield* review(first!, dismiss)).version, 3);
+    const learnings = yield* h.query.getCadReviewLearnings(projectId);
+    assert.deepEqual(learnings, [
+      {
+        id: "dismiss-first",
+        projectId,
+        text: "Vent holes are intentional.",
+        sourceCommentId: first!.id,
+        sourceThreadId: threadId,
+        createdAt: learnings[0]!.createdAt,
+      },
+    ]);
+    assert.deepEqual((yield* h.query.getCommandReadModel()).cadReviewLearnings, learnings);
+    // Resolve keeps the reason on the comment but only dismissals teach the project.
+    const resolved = yield* review(second!, {
+      expectedVersion: 0,
+      state: "resolved",
+      reason: "Fixed in v2",
+      commandId: CommandId.make("resolve-second"),
+    });
+    assert.equal(resolved.reviewReason, "Fixed in v2");
+    assert.equal((yield* h.query.getCadReviewLearnings(projectId)).length, 1);
+    // Reopening clears the reason.
+    const reopened = yield* review(second!, {
+      expectedVersion: 1,
+      state: "open",
+      commandId: CommandId.make("reopen-second"),
+    });
+    assert.isUndefined(reopened.reviewReason);
+    // The settings list reads the same projection and removal goes through the decider.
+    assert.equal(
+      (yield* Stream.runCollect(h.service.learnings(projectId).pipe(Stream.take(1))))[0]?.length,
+      1,
+    );
+    const missing = yield* h.service
+      .removeLearning({ projectId, learningId: "nope", commandId: CommandId.make("remove-nope") })
+      .pipe(Effect.flip);
+    assert.equal(missing.reason, "learning-unavailable");
+    yield* h.service.removeLearning({
+      projectId,
+      learningId: "dismiss-first",
+      commandId: CommandId.make("remove-first"),
+    });
+    assert.deepEqual(yield* h.query.getCadReviewLearnings(projectId), []);
+    assert.deepEqual((yield* h.query.getCommandReadModel()).cadReviewLearnings, []);
+    const unknownProject = yield* h.service
+      .learnings(ProjectId.make("missing-project"))
+      .pipe(Stream.runCollect, Effect.flip);
+    assert.equal(unknownProject.reason, "project-unavailable");
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
