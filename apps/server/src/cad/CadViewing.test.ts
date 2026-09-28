@@ -3,6 +3,7 @@ import {
   CadChecksResult,
   CadDiffResult,
   CadSnapshotManifest,
+  CadFindPartsResult,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
@@ -754,98 +755,104 @@ const cubeGlb = (() => {
 })();
 const decodeRevision = Schema.decodeUnknownEffect(Schema.Struct({ revision: Schema.Int }));
 const decodeChecks = Schema.decodeUnknownEffect(CadChecksResult);
+interface CubeBlock {
+  readonly number: number;
+  readonly name: string;
+  readonly transform: readonly number[];
+  readonly suppressed?: boolean;
+}
+/** Blocks placed from one stored cube GLB, served by a real activation that counts asset reads. */
+const cubeBlockTools = Effect.fn(function* (blocks: readonly CubeBlock[]) {
+  const h = yield* harness();
+  const partId = (value: number) => value.toString(16).padStart(64, "0");
+  let reads = 0;
+  h.assets.set(partId(9), cubeGlb);
+  const decorated = decodeSnapshot({
+    ...snapshot,
+    nodes: [
+      ...snapshot.nodes,
+      ...blocks.map((node) => ({
+        id: partId(node.number),
+        parentId: snapshot.nodes[0]!.id,
+        occurrencePath: [String(node.number)],
+        instanceId: String(node.number),
+        name: node.name,
+        kind: "part",
+        suppressed: node.suppressed ?? false,
+        defaultVisible: true,
+        transform: node.transform,
+        sourcePartKey: partId(8),
+      })),
+    ],
+    parts: [
+      {
+        geometryKey: partId(8),
+        source: {
+          host: source.host,
+          documentId: source.documentId,
+          documentMicroversion: source.workspaceId,
+          documentVersion: null,
+          elementId: "e".repeat(24),
+          configuration: "default",
+          fullConfiguration: "default",
+          partId: "JHD",
+          tessellationProfile: "test",
+        },
+        geometryRequired: true,
+        metadata: {
+          name: "Block",
+          bodyType: "solid",
+          isHidden: null,
+          isMesh: null,
+          partIdentity: null,
+          configurationId: null,
+          appearance: null,
+          material: null,
+        },
+      },
+    ],
+    assets: [
+      {
+        geometryKey: partId(8),
+        sha256: partId(9),
+        byteLength: cubeGlb.length,
+        format: "glb",
+        relativePath: `${partId(9)}.glb`,
+      },
+    ],
+  });
+  h.snapshots.set(snapshot.snapshotId, yield* decorated);
+  const store = h.store;
+  const tools = yield* makeCadProviderTools(threadId).pipe(
+    Effect.provideService(
+      CadViewing,
+      yield* make.pipe(
+        Effect.provideService(CadSnapshotStore, {
+          ...store,
+          withPinned: (id, use) =>
+            store.withPinned(id, (manifest, readAsset) =>
+              use(manifest, (sha256) =>
+                Effect.sync(() => {
+                  reads++;
+                }).pipe(Effect.andThen(readAsset(sha256))),
+              ),
+            ),
+        }),
+      ),
+    ),
+  );
+  return { tools, reads: () => reads };
+});
 it.effect("runs cad_checks over the pinned snapshot and caches part bounds per activation", () =>
   Effect.gen(function* () {
-    const h = yield* harness();
-    const partId = (value: number) => value.toString(16).padStart(64, "0");
-    const glb = cubeGlb;
-    let reads = 0;
-    h.assets.set(partId(9), glb);
-    const decorated = decodeSnapshot({
-      ...snapshot,
-      nodes: [
-        ...snapshot.nodes,
-        ...[
-          {
-            number: 5,
-            name: "Block A",
-            transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          },
-          {
-            number: 6,
-            name: "Block B",
-            transform: [1, 0, 0, 0.04, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          },
-        ].map((node) => ({
-          id: partId(node.number),
-          parentId: snapshot.nodes[0]!.id,
-          occurrencePath: [String(node.number)],
-          instanceId: String(node.number),
-          name: node.name,
-          kind: "part",
-          suppressed: false,
-          defaultVisible: true,
-          transform: node.transform,
-          sourcePartKey: partId(8),
-        })),
-      ],
-      parts: [
-        {
-          geometryKey: partId(8),
-          source: {
-            host: source.host,
-            documentId: source.documentId,
-            documentMicroversion: source.workspaceId,
-            documentVersion: null,
-            elementId: "e".repeat(24),
-            configuration: "default",
-            fullConfiguration: "default",
-            partId: "JHD",
-            tessellationProfile: "test",
-          },
-          geometryRequired: true,
-          metadata: {
-            name: "Block",
-            bodyType: "solid",
-            isHidden: null,
-            isMesh: null,
-            partIdentity: null,
-            configurationId: null,
-            appearance: null,
-            material: null,
-          },
-        },
-      ],
-      assets: [
-        {
-          geometryKey: partId(8),
-          sha256: partId(9),
-          byteLength: glb.length,
-          format: "glb",
-          relativePath: `${partId(9)}.glb`,
-        },
-      ],
-    });
-    h.snapshots.set(snapshot.snapshotId, yield* decorated);
-    const store = h.store;
-    const tools = yield* makeCadProviderTools(threadId).pipe(
-      Effect.provideService(
-        CadViewing,
-        yield* make.pipe(
-          Effect.provideService(CadSnapshotStore, {
-            ...store,
-            withPinned: (id, use) =>
-              store.withPinned(id, (manifest, readAsset) =>
-                use(manifest, (sha256) =>
-                  Effect.sync(() => {
-                    reads++;
-                  }).pipe(Effect.andThen(readAsset(sha256))),
-                ),
-              ),
-          }),
-        ),
-      ),
-    );
+    const { tools, reads } = yield* cubeBlockTools([
+      { number: 5, name: "Block A", transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+      {
+        number: 6,
+        name: "Block B",
+        transform: [1, 0, 0, 0.04, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      },
+    ]);
     const turnId = TurnId.make("checks");
     const context = yield* decodeRevision(
       (yield* tools.invoke(null, turnId, "cad_context", {})).result,
@@ -867,7 +874,7 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
     assert.equal(first.summary.partOccurrences, 2);
     assert.equal(first.summary.meshUnknown, 0);
     // One bounds read, cached for the activation, and one triangle read for this call.
-    assert.equal(reads, 2);
+    assert.equal(reads(), 2);
     const leads = yield* decodeChecks(
       (yield* tools.invoke(null, turnId, "cad_checks", {
         expectedRevision: context.revision,
@@ -880,7 +887,7 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
         overlap.overlapSize.map((value) => Number(value.toFixed(9))),
         [0.01, 0.05, 0.05],
       );
-    assert.equal(reads, 2);
+    assert.equal(reads(), 2);
     const second = yield* decodeChecks(
       (yield* tools.invoke(null, turnId, "cad_checks", {
         expectedRevision: context.revision,
@@ -888,7 +895,7 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
       })).result,
     );
     assert.deepEqual(second.findings, []);
-    assert.equal(reads, 2);
+    assert.equal(reads(), 2);
     assert.equal(
       (yield* tools
         .invoke(null, turnId, "cad_checks", { expectedRevision: context.revision + 1 })
@@ -1901,4 +1908,93 @@ it.effect(
       yield* h.service.saveUserView(threadId, null, initialCadView(snapshot));
       assert.isNull(yield* h.service.getUserView(otherThreadId));
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+const decodeFindParts = Schema.decodeUnknownEffect(CadFindPartsResult);
+it.effect("searches pinned metadata through native tools without view changes", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const provider = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, h.service),
+    );
+    const turn = TurnId.make("find-parts");
+    const context = yield* provider.invoke(null, turn, "cad_context", {});
+    const delivery = yield* provider.invoke(null, turn, "cad_find_parts", {
+      snapshotId: snapshot.snapshotId,
+      expectedRevision: 0,
+      kind: "all",
+      nameQuery: "INTAKE",
+    });
+    const result = yield* decodeFindParts(delivery.result);
+    assert.deepEqual(
+      result.entries.map((entry) => entry.occurrenceId),
+      [snapshot.nodes[0]!.id],
+    );
+    assert.deepEqual(yield* provider.invoke(null, turn, "cad_context", {}), context);
+    yield* provider.invoke(null, turn, "cad_update_view", {
+      expectedRevision: 0,
+      operations: [{ type: "explode", amount: 1 }],
+    });
+    assert.equal(
+      (yield* provider
+        .invoke(null, turn, "cad_find_parts", {
+          snapshotId: snapshot.snapshotId,
+          expectedRevision: 0,
+        })
+        .pipe(Effect.flip)).reason,
+      "revision-conflict",
+    );
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect("reports world bounds in cad_find_parts from the cache cad_checks uses", () =>
+  Effect.gen(function* () {
+    const { tools, reads } = yield* cubeBlockTools([
+      // Rotated 90 degrees about Z, then moved to (1, 2, 3).
+      { number: 5, name: "Block A", transform: [0, -1, 0, 1, 1, 0, 0, 2, 0, 0, 1, 3, 0, 0, 0, 1] },
+      {
+        number: 6,
+        name: "Block B",
+        transform: [1, 0, 0, 0.04, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      },
+      {
+        number: 7,
+        name: "Block C",
+        transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        suppressed: true,
+      },
+    ]);
+    const turnId = TurnId.make("find-parts-bounds");
+    const context = yield* decodeRevision(
+      (yield* tools.invoke(null, turnId, "cad_context", {})).result,
+    );
+    const found = yield* decodeFindParts(
+      (yield* tools.invoke(null, turnId, "cad_find_parts", {
+        snapshotId: snapshot.snapshotId,
+        expectedRevision: context.revision,
+        kind: "all",
+      })).result,
+    );
+    // One asset, three instances: each placed box differs, the suppressed one and the assembly are null.
+    assert.deepEqual(
+      found.entries.map((entry) => [entry.name, entry.bounds]),
+      [
+        ["Intake", null],
+        ["Block A", { min: [0.95, 2, 3], max: [1, 2.05, 3.05], size: [0.05, 0.05, 0.05] }],
+        ["Block B", { min: [0.04, 0, 0], max: [0.09, 0.05, 0.05], size: [0.05, 0.05, 0.05] }],
+        ["Block C", null],
+      ],
+    );
+    assert.equal(reads(), 1);
+    const checks = yield* decodeChecks(
+      (yield* tools.invoke(null, turnId, "cad_checks", {
+        expectedRevision: context.revision,
+        checks: ["overlapping-bounds", "degenerate-geometry"],
+      })).result,
+    );
+    assert.equal(checks.summary.partOccurrences, 2);
+    assert.equal(checks.summary.boundsUnknown, 0);
+    // cad_checks found every box in the cache cad_find_parts filled.
+    assert.equal(reads(), 1);
+    yield* tools.close;
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );

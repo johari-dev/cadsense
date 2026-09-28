@@ -29,6 +29,8 @@ it("keeps CAD activity tied to the live chat row, including completed tool gaps"
     "cad_capture",
     "cad_comments_publish",
     "mcp__cad__cad_update_view",
+    "cad_find_parts",
+    "mcp__cad__cad_find_parts",
     "cadsense_cad · cad_capture",
   ]) {
     for (const toolLifecycleStatus of ["inProgress", "completed"] as const) {
