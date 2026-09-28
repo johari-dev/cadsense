@@ -7,6 +7,7 @@
  * @module ClaudeAdapterLive
  */
 import { cadReviewInstructions } from "../CadReviewInstructions.ts";
+import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import {
   type CanUseTool,
   query,
@@ -4421,15 +4422,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
-        // The system prompt is fixed for the session, so learnings added later reach Claude
-        // when its next session starts. A failed read only costs this session its learnings.
+        // The system prompt is fixed for the session, so learnings and design brief edits made
+        // later reach Claude when its next session starts. Codex re-reads both on every turn.
+        // A failed learnings read only costs this session its learnings.
         const learnings = yield* cadQuery.value
           .getCadReviewLearnings(project.value.id)
           .pipe(Effect.orElseSucceed(() => []));
+        const designBrief = input.cwd
+          ? yield* readCadDesignBrief(input.cwd).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            )
+          : null;
         return {
           scope,
           tools,
-          reviewInstructions: cadReviewInstructions(learnings),
+          reviewInstructions: cadReviewInstructions({ learnings, designBrief }),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,
           ended: new Set<string>(),

@@ -41,6 +41,7 @@ import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
+import type { CadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import { handleCodexCadCall, codexCadFailure } from "./CodexCadTools.ts";
 import { compactCodexCadItem } from "../CadProviderContent.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
@@ -170,6 +171,8 @@ export interface CodexSessionRuntimeOptions {
   readonly cad?: CadProviderTools;
   /** Read at every turn start so a learning added mid-session reaches the next turn. */
   readonly cadReviewLearnings?: Effect.Effect<ReadonlyArray<{ readonly text: string }>>;
+  /** Reads the workspace design brief; run before each CAD turn so edits apply without a restart. */
+  readonly designBrief?: Effect.Effect<CadDesignBrief | null>;
   readonly onProcessSpawned?: (receipt: CodexProcessReceipt) => void;
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
@@ -639,6 +642,7 @@ function buildCodexCollaborationMode(input: {
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
   readonly cadReviewLearnings?: ReadonlyArray<{ readonly text: string }>;
+  readonly designBrief?: CadDesignBrief | null;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -656,6 +660,7 @@ function buildCodexCollaborationMode(input: {
         input.browserToolsAvailable ?? true,
         input.cadToolsAvailable ?? false,
         input.cadReviewLearnings ?? [],
+        input.designBrief ?? null,
       ),
     },
   };
@@ -678,6 +683,7 @@ export function buildTurnStartParams(input: {
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
   readonly cadReviewLearnings?: ReadonlyArray<{ readonly text: string }>;
+  readonly designBrief?: CadDesignBrief | null;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -704,6 +710,7 @@ export function buildTurnStartParams(input: {
     browserToolsAvailable: input.browserToolsAvailable ?? true,
     cadToolsAvailable: input.cadToolsAvailable ?? false,
     ...(input.cadReviewLearnings ? { cadReviewLearnings: input.cadReviewLearnings } : {}),
+    designBrief: input.designBrief ?? null,
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2548,6 +2555,8 @@ export const makeCodexSessionRuntime = (
             cadToolsAvailable && options.cadReviewLearnings
               ? yield* options.cadReviewLearnings
               : [];
+          const designBrief =
+            cadToolsAvailable && options.designBrief ? yield* options.designBrief : null;
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -2564,6 +2573,7 @@ export const makeCodexSessionRuntime = (
             browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
             cadToolsAvailable,
             cadReviewLearnings,
+            designBrief,
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
