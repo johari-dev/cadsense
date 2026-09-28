@@ -720,7 +720,11 @@ const invalid = (details: string) => new CadViewError({ reason: "invalid-operati
 const encodeFindingJson = Schema.encodeSync(Schema.fromJsonString(CadCheckFinding));
 const encodeResultJson = Schema.encodeSync(Schema.fromJsonString(CadChecksResult));
 const significant = (value: number) => Number(value.toPrecision(4));
-const significant3 = ([x, y, z]: Vector3): Vector3 => [significant(x), significant(y), significant(z)];
+const significant3 = ([x, y, z]: Vector3): Vector3 => [
+  significant(x),
+  significant(y),
+  significant(z),
+];
 /** A finding as sent to the agent: four significant digits, since float noise only costs tokens. */
 const presentFinding = (finding: CadCheckFinding): CadCheckFinding => {
   switch (finding.check) {
@@ -801,9 +805,8 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
   );
   const limit = input.limit ?? CAD_CHECK_LIMITS.pageSize;
   const bytes = (value: CadCheckFinding | CadChecksResult) =>
-    new TextEncoder().encode(
-      "check" in value ? encodeFindingJson(value) : encodeResultJson(value),
-    ).byteLength;
+    new TextEncoder().encode("check" in value ? encodeFindingJson(value) : encodeResultJson(value))
+      .byteLength;
   // Reserve room for the longest cursor this page could carry, then add findings until the budget runs out.
   let used = bytes({
     revision: state.revision,

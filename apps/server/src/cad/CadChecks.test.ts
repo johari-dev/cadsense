@@ -806,24 +806,27 @@ describe("cad_checks tool", () => {
       assert.equal(loads.length, before);
     }),
   );
-  it.effect("states each explanation once per page and rounds numbers to four significant digits", () =>
-    Effect.gen(function* () {
-      const page = yield* readCadChecks(snapshot, state, geometry, { expectedRevision: 3 });
-      assert.deepEqual(Object.keys(page.explanations), [...page.checks]);
-      for (const check of page.checks)
-        assert.equal(page.explanations[check], CAD_CHECK_EXPLANATIONS[check]);
-      const numbers: number[] = [];
-      const collect = (value: unknown): void => {
-        if (typeof value === "number") numbers.push(value);
-        else if (value !== null && typeof value === "object") Object.values(value).forEach(collect);
-      };
-      for (const finding of page.findings) {
-        assert.notProperty(finding, "explanation");
-        collect(finding);
-      }
-      assert.isNotEmpty(numbers);
-      for (const value of numbers) assert.equal(value, Number(value.toPrecision(4)));
-    }),
+  it.effect(
+    "states each explanation once per page and rounds numbers to four significant digits",
+    () =>
+      Effect.gen(function* () {
+        const page = yield* readCadChecks(snapshot, state, geometry, { expectedRevision: 3 });
+        assert.deepEqual(Object.keys(page.explanations), [...page.checks]);
+        for (const check of page.checks)
+          assert.equal(page.explanations[check], CAD_CHECK_EXPLANATIONS[check]);
+        const numbers: number[] = [];
+        const collect = (value: unknown): void => {
+          if (typeof value === "number") numbers.push(value);
+          else if (value !== null && typeof value === "object")
+            Object.values(value).forEach(collect);
+        };
+        for (const finding of page.findings) {
+          assert.notProperty(finding, "explanation");
+          collect(finding);
+        }
+        assert.isNotEmpty(numbers);
+        for (const value of numbers) assert.equal(value, Number(value.toPrecision(4)));
+      }),
   );
   it.effect("keeps every page under the byte cap and still returns each finding once", () =>
     Effect.gen(function* () {
@@ -847,7 +850,10 @@ describe("cad_checks tool", () => {
           ...(cursor === undefined ? {} : { cursor }),
         });
         pageCount++;
-        assert.isAtMost(new TextEncoder().encode(encodeJson(page)).length, CAD_CHECK_LIMITS.pageBytes);
+        assert.isAtMost(
+          new TextEncoder().encode(encodeJson(page)).length,
+          CAD_CHECK_LIMITS.pageBytes,
+        );
         assert.isNotEmpty(page.findings);
         for (const finding of page.findings) {
           assert.isFalse(seen.has(pairKey(finding)));
