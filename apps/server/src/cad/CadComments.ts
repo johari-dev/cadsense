@@ -52,7 +52,7 @@ import { forkParked } from "../serverActivation.ts";
 import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
-import { cadCommentOutdatedReason } from "./CadCommentOutdated.ts";
+import { cadCommentOutdatedCheck } from "./CadCommentOutdated.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
 const isCommentError = Schema.is(CadCommentError);
@@ -204,6 +204,8 @@ export const make = Effect.gen(function* () {
           ThreadId,
           { commentId: string; reason: CadCommentOutdatedReason | null }[]
         >();
+        // One cad_diff per (comment snapshot, current snapshot) pair, shared by its comments.
+        const checks = new Map<string, ReturnType<typeof cadCommentOutdatedCheck>>();
         for (const comment of model.cadComments ?? []) {
           if (
             comment.state !== "open" ||
@@ -214,9 +216,14 @@ export const make = Effect.gen(function* () {
             continue;
           let reason: CadCommentOutdatedReason | null = null;
           if (comment.snapshotId !== current) {
-            const from = yield* load(comment.snapshotId);
-            if (!from) continue;
-            reason = cadCommentOutdatedReason(comment, from, to);
+            let check = checks.get(comment.snapshotId);
+            if (!check) {
+              const from = yield* load(comment.snapshotId);
+              if (!from) continue;
+              check = cadCommentOutdatedCheck(from, to);
+              checks.set(comment.snapshotId, check);
+            }
+            reason = check(comment);
           }
           if (reason === (comment.outdated?.reason ?? null)) continue;
           entries.set(comment.threadId, [

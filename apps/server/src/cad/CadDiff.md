@@ -18,6 +18,8 @@ Occurrences match by `occurrencePath`, which survives reimport; node IDs are roo
 
 `counts` totals each category plus `unchanged`. Entries are ordered added, removed, modified, and parents before children. Pages default to 100 entries with a cursor bound to the snapshot pair; a cursor from another pair is rejected. The diff is linear in the node count and is cached per activation, so paging never reloads a snapshot. Part metadata such as color and material is not compared.
 
+Outdated comment annotations (`CadComments.md`) use this diff: a comment is outdated when its target is removed, suppressed, or `geometry-changed`, or when it or an ancestor is `moved`. Renames and visibility changes do not outdate a comment.
+
 ## Verification
 
 `CadDiff.test.ts` covers every category, repeated instances of one part, sub-epsilon noise and reimported identical models, cursor binding, and default base choice. `CadViewing.test.ts` runs the tool through the real activation path with a committed comment and a second sync, checking the rollback and comment-referenced base, retained snapshot listing, cached paging, and the first-review error. Transport tests enumerate `cad_diff` among the nine CAD tools with the read-only hint.

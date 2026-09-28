@@ -1,39 +1,5 @@
-import type {
-  CadComment,
-  CadCommentOutdatedReason,
-  CadSnapshotManifest,
-  CadSnapshotNode,
-} from "@cadsense/contracts";
-
-// Manifest transforms are exact copies of Onshape occurrence matrices, so equal placements compare equal.
-const TRANSFORM_TOLERANCE = 1e-9;
-const samePath = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((segment, index) => segment === b[index]);
-const sameTransform = (a: readonly number[], b: readonly number[]) =>
-  a.every((value, index) => Math.abs(value - (b[index] ?? Number.NaN)) <= TRANSFORM_TOLERANCE);
-type Geometry = Pick<CadSnapshotManifest, "nodes" | "assets">;
-const geometryHash = (manifest: Geometry, node: CadSnapshotNode) =>
-  manifest.assets.find((asset) => asset.geometryKey === node.sourcePartKey)?.sha256 ?? null;
-
-/** Compares one target's occurrence between the comment's snapshot and a later one of the same root. */
-const targetOutdatedReason = (
-  occurrenceId: string,
-  from: Geometry,
-  to: Geometry,
-): CadCommentOutdatedReason | null => {
-  const before = from.nodes.find((node) => node.id === occurrenceId);
-  if (!before) return "removed";
-  // Occurrence paths identify the same instance across snapshots, including repeated instances.
-  const after = to.nodes.find(
-    (node) => node.kind === "part" && samePath(node.occurrencePath, before.occurrencePath),
-  );
-  if (!after || after.suppressed || after.sourcePartKey === null) return "removed";
-  // Asset hashes identify geometry; geometry keys also change with untouched document microversions.
-  const geometry = geometryHash(to, after);
-  if (geometry === null) return "removed";
-  if (geometry !== geometryHash(from, before)) return "geometry-changed";
-  return sameTransform(before.transform, after.transform) ? null : "moved";
-};
+import type { CadComment, CadCommentOutdatedReason } from "@cadsense/contracts";
+import { cadOccurrenceKey, diffCadManifests, type CadDiffManifest } from "./CadDiff.ts";
 
 const SEVERITY: Record<CadCommentOutdatedReason, number> = {
   removed: 3,
@@ -42,15 +8,43 @@ const SEVERITY: Record<CadCommentOutdatedReason, number> = {
 };
 
 /**
- * Whether a newer snapshot invalidated a comment: the most severe change across its targets, or
- * null when every targeted instance still exists with the same geometry and placement.
+ * Decides which comments a newer snapshot of the same root invalidated, using cad_diff's rules so
+ * the two agree. Build one check per (comment snapshot, current snapshot) pair and call it for
+ * every comment on that pair; it returns the most severe change across a comment's targets, or
+ * null when every targeted instance is unchanged.
  */
-export const cadCommentOutdatedReason = (
-  comment: Pick<CadComment, "targets">,
-  from: Geometry,
-  to: Geometry,
-): CadCommentOutdatedReason | null =>
-  comment.targets.reduce<CadCommentOutdatedReason | null>((worst, target) => {
-    const reason = targetOutdatedReason(target.occurrenceId, from, to);
-    return reason && (!worst || SEVERITY[reason] > SEVERITY[worst]) ? reason : worst;
-  }, null);
+export const cadCommentOutdatedCheck = (from: CadDiffManifest, to: CadDiffManifest) => {
+  const changes = new Map(
+    diffCadManifests(from, to).entries.map((entry) => [
+      cadOccurrenceKey(entry.occurrencePath),
+      entry,
+    ]),
+  );
+  const before = new Map(from.nodes.map((node) => [node.id, node]));
+  const after = new Map(to.nodes.map((node) => [cadOccurrenceKey(node.occurrencePath), node]));
+  const withGeometry = new Set(to.assets.map((asset) => asset.geometryKey));
+  const targetReason = (occurrenceId: string): CadCommentOutdatedReason | null => {
+    const path = before.get(occurrenceId)?.occurrencePath;
+    if (!path) return "removed";
+    const current = after.get(cadOccurrenceKey(path));
+    if (
+      !current ||
+      current.suppressed ||
+      current.sourcePartKey === null ||
+      !withGeometry.has(current.sourcePartKey)
+    )
+      return "removed";
+    const changed = (prefix: readonly string[]) =>
+      changes.get(cadOccurrenceKey(prefix))?.changes ?? [];
+    if (changed(path).includes("geometry-changed")) return "geometry-changed";
+    // cad_diff reports a moved subassembly once, relative to its parent, so a target is moved
+    // when it or any ancestor (an occurrence path prefix) moved.
+    const lineage = Array.from({ length: path.length + 1 }, (_, length) => path.slice(0, length));
+    return lineage.some((prefix) => changed(prefix).includes("moved")) ? "moved" : null;
+  };
+  return (comment: Pick<CadComment, "targets">) =>
+    comment.targets.reduce<CadCommentOutdatedReason | null>((worst, target) => {
+      const reason = targetReason(target.occurrenceId);
+      return reason && (!worst || SEVERITY[reason] > SEVERITY[worst]) ? reason : worst;
+    }, null);
+};
