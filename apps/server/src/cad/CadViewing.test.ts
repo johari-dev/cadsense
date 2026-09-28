@@ -934,6 +934,8 @@ it.effect(
             modelDescriptor: "descriptor",
             title: "Check the intake",
             body: "The intake mount looks unsupported.",
+            severity: "concern",
+            category: "structure",
             targets: [
               {
                 kind: "part",

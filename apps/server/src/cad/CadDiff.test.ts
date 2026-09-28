@@ -451,6 +451,8 @@ describe("retainedCadCandidates", () => {
     modelDescriptor: "descriptor",
     title: "Finding",
     body: "Body",
+    severity: "concern",
+    category: "structure",
     targets: [
       { kind: "part", label: "Part", occurrenceId: hash("4"), preciseLocationLimitation: "whole" },
     ],
