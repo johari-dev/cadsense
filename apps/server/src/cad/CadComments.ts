@@ -301,6 +301,7 @@ export const make = Effect.gen(function* () {
                 (e.aggregateId === threadId &&
                   (e.type === "thread.cad-comments-committed" ||
                     e.type === "thread.cad-comment-reviewed" ||
+                    e.type === "thread.cad-comments-outdated" ||
                     e.type === "thread.deleted")),
             ),
             Stream.mapEffect(() => read(threadId)),

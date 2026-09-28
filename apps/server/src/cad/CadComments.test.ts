@@ -1094,6 +1094,33 @@ it.effect(
       assert.equal(restoredRows[0]?.n, 3);
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
+it.live("refreshes a watched comments card when a comment goes outdated", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+    yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [makeFinding(h.snapshot)],
+    });
+    // The first read is emitted after the watch subscribed, so later events cannot be missed.
+    const subscribed = yield* Deferred.make<void>();
+    const reads = yield* h.service.watch(threadId).pipe(
+      Stream.tap(() => Deferred.succeed(subscribed, undefined)),
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.timeoutOption("5 seconds"),
+      Effect.forkScoped,
+    );
+    yield* Deferred.await(subscribed);
+    const moved = yield* laterSnapshot(h.snapshot, 5, { moved: true });
+    yield* nextOutdated(makeCurrent(h, moved));
+    const collected = yield* Fiber.join(reads);
+    assert.isTrue(collected._tag === "Some", "the watch emitted no read after the outdate");
+    const [initial, refreshed] = collected._tag === "Some" ? collected.value : [];
+    assert.equal(initial?.[0]?.outdated, null);
+    assert.deepEqual(refreshed?.[0]?.outdated, { snapshotId: moved.snapshotId, reason: "moved" });
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
 it.effect(
   "records resolution proposals only with newer evidence on open comments of this chat",
   () =>
