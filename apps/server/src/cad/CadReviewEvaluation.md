@@ -12,6 +12,10 @@ system prompt. `CadProviderTools.ts` adds a shared reminder before publication. 
 3. Wait for each review to finish. Open every comment and inspect its marked location.
 4. Record the model, source revision, prompts, run IDs, comment text, and failures.
    Keep results with the PR so a successful tool call cannot substitute for reading the comments.
+5. Run each prompt twice: once with no `DESIGN.md` in the workspace, and once with a
+   [design brief](CadDesignBrief.md) that states the intended motion, load cases, and
+   known unfinished work. Confirm `cad_context` reports the brief in the second run, and
+   record whether the brief removed intent mistakes the first run made.
 
 Use these two prompts on a telescoping arm with a pivot and printed motor supports:
 
