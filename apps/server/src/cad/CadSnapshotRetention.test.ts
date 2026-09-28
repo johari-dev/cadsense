@@ -56,6 +56,7 @@ const run = (input: { operating?: boolean; pinned?: boolean; targetOnly?: boolea
   const removed: string[] = [];
   const protectedIds: string[] = [];
   const query = ProjectionSnapshotQuery.of({
+    getCadReviewLearnings: () => Effect.succeed([]),
     getCommandReadModel: () =>
       Effect.succeed(
         input.operating

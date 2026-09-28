@@ -6,6 +6,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
+  CadCommentsListResult,
   CadCommentsPublishedCard,
   CadSnapshotManifest,
   CommandId,
@@ -29,6 +30,7 @@ import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
+import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
@@ -52,6 +54,7 @@ const decodeReasons = Schema.decodeUnknownEffect(
   }),
 );
 const decodePublishedCard = Schema.decodeUnknownEffect(CadCommentsPublishedCard);
+const decodeListing = Schema.decodeUnknownEffect(CadCommentsListResult);
 const decodePublicationFailure = Schema.decodeUnknownEffect(
   Schema.Struct({
     results: Schema.Array(Schema.Struct({ reason: Schema.String, details: Schema.String })),
@@ -302,6 +305,8 @@ const makeFinding = (snapshot: CadSnapshotManifest) => ({
   inspectedSnapshotId: snapshot.snapshotId,
   title: "Check this fastener",
   body: "The inspected attachment appears empty.",
+  severity: "concern",
+  category: "assembly",
   targets: [
     {
       kind: "part",
@@ -403,12 +408,56 @@ it.effect("records each publication in chat, including rejected findings, but no
           commentId: comment.id,
           number: 1,
           title: "Check this fastener",
+          severity: "concern",
+          category: "assembly",
           location: "Intake",
         },
       ],
       rejected: [{ publicationKey: "malformed", title: "Loose cable", reason: "invalid-input" }],
       proposed: [],
     });
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect("requires severity and category on new findings and lists them back", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+    const { severity: _severity, ...unrated } = makeFinding(h.snapshot);
+    const rejected = yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [unrated, { ...makeFinding(h.snapshot), publicationKey: "typo", severity: "warning" }],
+    });
+    const failures = yield* decodePublicationFailure(rejected.result);
+    for (const failure of failures.results) {
+      assert.equal(failure.reason, "invalid-input");
+      assert.include(failure.details, '["severity"]');
+      assert.include(failure.details, "blocker|concern|question|nit");
+    }
+    assert.equal((yield* h.query.getCommandReadModel()).cadComments?.length, 0);
+    yield* a.invoke("cad_comments_publish", {
+      expectedCatalogVersion: 0,
+      items: [
+        makeFinding(h.snapshot),
+        { ...makeFinding(h.snapshot), publicationKey: "nit", severity: "nit", category: "other" },
+      ],
+    });
+    const listed = yield* decodeListing((yield* a.invoke("cad_comments_list", {})).result);
+    assert.deepEqual(
+      listed.comments.map((c) => [c.severity, c.category]),
+      [
+        ["concern", "assembly"],
+        ["nit", "other"],
+      ],
+    );
+    // The persisted record round-trips the labels for the viewer subscription too.
+    const stored = yield* readThreadCadComments(threadId);
+    assert.deepEqual(
+      stored.toSorted((a, b) => a.number - b.number).map((c) => [c.severity, c.category]),
+      [
+        ["concern", "assembly"],
+        ["nit", "other"],
+      ],
+    );
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 it.effect(
@@ -517,6 +566,8 @@ it.effect(
       model = yield* h.query.getCommandReadModel();
       assert.equal(model.cadComments?.length, 1);
       assert.equal(model.cadComments?.[0]?.state, "resolved");
+      assert.equal(model.cadComments?.[0]?.severity, "concern");
+      assert.equal(model.cadComments?.[0]?.category, "assembly");
       assert.equal(model.cadCommentReceipts?.length, 2);
       // Reusing a finding from an earlier turn does not add a "wrote" row to this turn.
       const sql = yield* SqlClient.SqlClient;
@@ -1143,4 +1194,99 @@ it.effect(
       assert.equal(rows[0]?.proposal, "null");
       assert.equal((yield* propose(a, { publicationKey: "again" })).reason, "comment-not-open");
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+it.effect("turns a dismissal reason into a project review learning the user can remove", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const a = yield* h.service.activate(threadId, "test", TurnId.make("turn"));
+        yield* a.invoke("cad_comments_publish", {
+          expectedCatalogVersion: 0,
+          items: [
+            makeFinding(h.snapshot),
+            { ...makeFinding(h.snapshot), publicationKey: "second", title: "Second finding" },
+          ],
+        });
+      }),
+    );
+    const [first, second] = (yield* h.query.getCommandReadModel()).cadComments!;
+    const review = (
+      comment: { id: string },
+      input: Omit<Parameters<typeof h.service.review>[0], "threadId" | "commentId">,
+    ) => h.service.review({ threadId, commentId: comment.id, ...input });
+    // A whitespace-only reason is no reason: nothing on the comment and no learning.
+    const blank = yield* review(first!, {
+      expectedVersion: 0,
+      state: "dismissed",
+      reason: "   ",
+      commandId: CommandId.make("blank"),
+    });
+    assert.equal(blank.state, "dismissed");
+    assert.isUndefined(blank.reviewReason);
+    assert.deepEqual(yield* h.query.getCadReviewLearnings(projectId), []);
+    yield* review(first!, {
+      expectedVersion: 1,
+      state: "open",
+      commandId: CommandId.make("reopen-first"),
+    });
+    const dismiss = {
+      expectedVersion: 2,
+      state: "dismissed" as const,
+      reason: "  Vent holes are intentional.  ",
+      commandId: CommandId.make("dismiss-first"),
+    };
+    const dismissed = yield* review(first!, dismiss);
+    assert.equal(dismissed.reviewReason, "Vent holes are intentional.");
+    // Replaying the same command returns the same state without a second learning.
+    assert.equal((yield* review(first!, dismiss)).version, 3);
+    const learnings = yield* h.query.getCadReviewLearnings(projectId);
+    assert.deepEqual(learnings, [
+      {
+        id: "dismiss-first",
+        projectId,
+        text: "Vent holes are intentional.",
+        sourceCommentId: first!.id,
+        sourceThreadId: threadId,
+        createdAt: learnings[0]!.createdAt,
+      },
+    ]);
+    assert.deepEqual((yield* h.query.getCommandReadModel()).cadReviewLearnings, learnings);
+    // Resolve keeps the reason on the comment but only dismissals teach the project.
+    const resolved = yield* review(second!, {
+      expectedVersion: 0,
+      state: "resolved",
+      reason: "Fixed in v2",
+      commandId: CommandId.make("resolve-second"),
+    });
+    assert.equal(resolved.reviewReason, "Fixed in v2");
+    assert.equal((yield* h.query.getCadReviewLearnings(projectId)).length, 1);
+    // Reopening clears the reason.
+    const reopened = yield* review(second!, {
+      expectedVersion: 1,
+      state: "open",
+      commandId: CommandId.make("reopen-second"),
+    });
+    assert.isUndefined(reopened.reviewReason);
+    // The settings list reads the same projection and removal goes through the decider.
+    assert.equal(
+      (yield* Stream.runCollect(h.service.learnings(projectId).pipe(Stream.take(1))))[0]?.length,
+      1,
+    );
+    const missing = yield* h.service
+      .removeLearning({ projectId, learningId: "nope", commandId: CommandId.make("remove-nope") })
+      .pipe(Effect.flip);
+    assert.equal(missing.reason, "learning-unavailable");
+    yield* h.service.removeLearning({
+      projectId,
+      learningId: "dismiss-first",
+      commandId: CommandId.make("remove-first"),
+    });
+    assert.deepEqual(yield* h.query.getCadReviewLearnings(projectId), []);
+    assert.deepEqual((yield* h.query.getCommandReadModel()).cadReviewLearnings, []);
+    const unknownProject = yield* h.service
+      .learnings(ProjectId.make("missing-project"))
+      .pipe(Stream.runCollect, Effect.flip);
+    assert.equal(unknownProject.reason, "project-unavailable");
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );

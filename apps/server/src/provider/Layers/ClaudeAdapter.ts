@@ -6,7 +6,7 @@
  *
  * @module ClaudeAdapterLive
  */
-import { CAD_REVIEW_INSTRUCTIONS } from "../CadReviewInstructions.ts";
+import { cadReviewInstructions } from "../CadReviewInstructions.ts";
 import {
   type CanUseTool,
   query,
@@ -4421,9 +4421,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
+        // The system prompt is fixed for the session, so learnings added later reach Claude
+        // when its next session starts. A failed read only costs this session its learnings.
+        const learnings = yield* cadQuery.value
+          .getCadReviewLearnings(project.value.id)
+          .pipe(Effect.orElseSucceed(() => []));
         return {
           scope,
           tools,
+          reviewInstructions: cadReviewInstructions(learnings),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,
           ended: new Set<string>(),
@@ -4463,7 +4469,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(cad ? { append: CAD_REVIEW_INSTRUCTIONS } : {}),
+          ...(cad ? { append: cad.reviewInstructions } : {}),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is

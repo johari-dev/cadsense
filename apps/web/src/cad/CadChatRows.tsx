@@ -10,7 +10,7 @@ import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
-import { CommentBadge } from "./CadCommentsCard";
+import { CadSeverityLabel, CommentBadge } from "./CadCommentsCard";
 
 const MAX_THUMBNAILS = 6;
 const MAX_LISTED_COMMENTS = 8;
@@ -173,7 +173,10 @@ export function CadPublishedComments({
           onClick={() => openCadComments(threadRef, comment.commentId)}
         >
           <CommentBadge number={comment.number} />
-          <span className="min-w-0 flex-1 truncate text-foreground">{comment.title}</span>
+          <span className="min-w-0 flex-1 truncate text-foreground">
+            <CadSeverityLabel severity={comment.severity} />
+            {comment.title}
+          </span>
           {comment.location ? (
             <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
               {comment.location}

@@ -287,6 +287,8 @@ describe("CAD review rows", () => {
     commentId: `comment-${number}`,
     number,
     title: `Finding ${number}`,
+    severity: null,
+    category: null,
     location: "Motor mount",
   });
 

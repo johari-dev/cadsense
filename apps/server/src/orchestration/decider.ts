@@ -240,14 +240,72 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "thread.cad.comments.commit":
     case "thread.cad.comment.review":
     case "thread.cad.comments.outdate": {
-      return {
+      const occurredAt = yield* nowIso;
+      const event = {
         ...(yield* withEventBase({
           commandId: command.commandId,
           aggregateKind: "thread",
           aggregateId: command.threadId,
-          occurredAt: yield* nowIso,
+          occurredAt,
         })),
         ...(yield* decideCadComments(command, readModel)),
+      };
+      if (
+        event.type !== "thread.cad-comment-reviewed" ||
+        event.payload.state !== "dismissed" ||
+        event.payload.reason === undefined
+      )
+        return event;
+      // A dismissal with a reason also teaches the project. The review command ID doubles as
+      // the learning ID so a replayed command cannot create a second learning.
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      return [
+        event,
+        {
+          ...(yield* withEventBase({
+            commandId: command.commandId,
+            aggregateKind: "project",
+            aggregateId: thread.projectId,
+            occurredAt,
+          })),
+          type: "project.cad-review-learning-added",
+          payload: {
+            projectId: thread.projectId,
+            learning: {
+              id: command.commandId,
+              projectId: thread.projectId,
+              text: event.payload.reason,
+              sourceCommentId: event.payload.commentId,
+              sourceThreadId: thread.id,
+              createdAt: occurredAt,
+            },
+          },
+        },
+      ];
+    }
+    case "project.cad.review-learning.remove": {
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const known = (readModel.cadReviewLearnings ?? []).some(
+        (l) => l.id === command.learningId && l.projectId === project.id,
+      );
+      if (!known)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "learning-unavailable",
+        });
+      return {
+        ...(yield* withEventBase({
+          commandId: command.commandId,
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt: yield* nowIso,
+        })),
+        type: "project.cad-review-learning-removed",
+        payload: { projectId: project.id, learningId: command.learningId },
       };
     }
     case "thread.cad.context.ensure":

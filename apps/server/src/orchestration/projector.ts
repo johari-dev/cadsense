@@ -1,5 +1,6 @@
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@cadsense/contracts";
 import {
+  CAD_REVIEW_LEARNINGS_LIMIT,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
@@ -151,11 +152,17 @@ export function projectEvent(
       // The user's judgment supersedes any agent proposal.
       return Effect.succeed({
         ...nextBase,
-        cadComments: (model.cadComments ?? []).map((c) =>
-          c.id === event.payload.commentId
-            ? { ...c, state: event.payload.state, version: event.payload.version, proposal: null }
-            : c,
-        ),
+        cadComments: (model.cadComments ?? []).map((c) => {
+          if (c.id !== event.payload.commentId) return c;
+          const { reviewReason: _previousReason, ...rest } = c;
+          return {
+            ...rest,
+            state: event.payload.state,
+            version: event.payload.version,
+            proposal: null,
+            ...(event.payload.reason === undefined ? {} : { reviewReason: event.payload.reason }),
+          };
+        }),
         cadCommentReviews: [...(model.cadCommentReviews ?? []), event.payload],
       });
     case "thread.cad-comments-outdated": {
@@ -168,6 +175,26 @@ export function projectEvent(
         }),
       });
     }
+    case "project.cad-review-learning-added": {
+      // Newest last; the per-project cap drops the oldest learnings first.
+      const others = (model.cadReviewLearnings ?? []).filter(
+        (l) => l.projectId !== event.payload.projectId,
+      );
+      const own = [
+        ...(model.cadReviewLearnings ?? []).filter(
+          (l) => l.projectId === event.payload.projectId && l.id !== event.payload.learning.id,
+        ),
+        event.payload.learning,
+      ].slice(-CAD_REVIEW_LEARNINGS_LIMIT);
+      return Effect.succeed({ ...nextBase, cadReviewLearnings: [...others, ...own] });
+    }
+    case "project.cad-review-learning-removed":
+      return Effect.succeed({
+        ...nextBase,
+        cadReviewLearnings: (model.cadReviewLearnings ?? []).filter(
+          (l) => l.id !== event.payload.learningId,
+        ),
+      });
     case "thread.cad-context-ensured":
       return Effect.succeed({
         ...nextBase,

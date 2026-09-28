@@ -19,10 +19,11 @@ const descriptions = {
     "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them. A comment with outdated set describes a part that was removed, moved, or reshaped in the current model: re-verify it before proposing resolution or a follow-up.",
   cad_comment_locate: `Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height}), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.`,
   cad_comment_inspect:
-    "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use whole-part fallback only after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
+    "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use a whole-part target when the issue concerns the whole part, such as a duplicate or misplaced part, or after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
   cad_comments_publish: [
-    "Before publishing, check each comment against the CAD review instructions: one useful issue at its marked location, consistent with the intended motion, supported by observations rather than assumptions, and written so the user understands the next decision without the chat. Rewrite or omit comments that fail this check.",
-    'Publish complete verified findings incrementally. Input: {expectedCatalogVersion,items:[{kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}]}. Each new item requires all six fields shown. Use expectedCatalogVersion from cad_comments_list and inspectedSnapshotId from the inspected cad_capture.snapshotId (or cad_context.state.snapshotId for a whole-part finding).',
+    "Before publishing, check each comment against the CAD review instructions: one useful issue at its marked location, consistent with the intended motion, supported by observations rather than assumptions, and written so the user understands the next decision without the chat. Rewrite comments that fail this check; drop only findings you cannot support.",
+    'Publish complete verified findings incrementally. Input: {expectedCatalogVersion,items:[{kind:"new",publicationKey,inspectedSnapshotId,title,body,severity,category,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}]}. Each new item requires all eight fields shown. Use expectedCatalogVersion from cad_comments_list and inspectedSnapshotId from the inspected cad_capture.snapshotId (or cad_context.state.snapshotId for a whole-part finding).',
+    "severity rates the consequence to the mechanism: blocker breaks function or safety, concern likely causes a problem, question needs the designer's answer, nit is cosmetic. category names the lifecycle stage the finding affects: interference (parts collide or rub), access (tools, service, or removal), assembly (fastening and build order), wiring (cable routing and strain), structure (stiffness, load, or mounting), manufacturing (making the part), or other.",
     'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
     'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
     'When a newer model shows an open comment was addressed, propose resolution: {kind:"propose-resolve",publicationKey,inspectedSnapshotId,commentId,explanation}. The inspected snapshot must be newer than the comment\'s and the explanation must cite what you verified in the new geometry. The user confirms; the comment stays open until then. Comments listed with outdated set need this re-verification first.',
@@ -31,12 +32,20 @@ const descriptions = {
   cad_context:
     "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
-    "Read a bounded page of the selected CAD component tree with occurrence visibility.",
+    "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
+  cad_checks: [
+    'Run deterministic geometry checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: mesh-interference, coincident-instances, degenerate-geometry.',
+    "mesh-interference lists part pairs whose solids actually intersect, with the shared volume in cubic meters, ordered by volume with pairs inside one subassembly last. Intended fits touch at zero volume, so a listed pair is usually a duplicate part, a misplaced gear or shaft, or a real collision; parts modeled undeformed on purpose (a squeezed game piece, press fits, threads) also appear. coincident-instances lists duplicate placements of one part; degenerate-geometry lists parts with unknown or near-zero bounds.",
+    "Treat each mesh-interference finding as a problem to explain, not a hint: capture the pair isolated and say what is wrong or ask why it is intended. summary.meshUnknown counts parts that are not closed solids; request overlapping-bounds for bounding-box leads on those. Read summary.budgetExhausted to know whether every pair was evaluated. Each page states every selected check's explanation once in explanations; a page may hold fewer findings than limit to stay small, so follow nextCursor.",
+  ].join(" "),
+  cad_diff:
+    "Compare two retained snapshots of the selected root and list what changed: added, removed, moved (placement relative to the parent), geometry-changed, renamed, suppression-changed, and visibility-changed occurrences with IDs on both sides. targetSnapshotId defaults to the current snapshot; baseSnapshotId defaults to the newest earlier retained snapshot, such as the one earlier comments inspected, and baseSelection explains the choice. retainedSnapshots lists the bases available with createdAt and microversion. Page with nextCursor. Use it when earlier comments exist to focus on changed components and reuse unchanged findings; it changes no view state.",
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
     "For relative adjustments, use state.camera.pose only when camera.kind is pose and camera.fit is null; otherwise capture first and use the returned cameraPose. To center on a point while preserving angle and distance, translate position by newTarget-oldTarget and set target to newTarget. To look at a point from a fixed eye, change only target. To zoom in/out, multiply/divide zoom (positive, at most 100000).",
     'For example: {expectedRevision:0,operations:[{type:"camera-pose",pose:{position:[0.2,-0.3,0.15],target:[0.02,0,0.01],up:[0,0,1],projection:"perspective",zoom:2}}]}. A camera-pose disables automatic fitting. A later fit recenters on the requested visible components (or all visible geometry for []) and resets zoom to 1, preserving the viewing direction and projection.',
+    'Inspection operations replace their previous selection: {type:"highlight",occurrenceIds:[id]} applies amber highlighting; {type:"ghost",occurrenceIds:[id],opacity:0.05..0.95} makes those subtrees translucent. Empty occurrenceIds clears that effect. {type:"section",planes:[{normal:[1,0,0],constant:0}]} replaces up to 6 clipping planes; [] clears sections. Normals must have unit length; constants are meters, bounded to ±1e9. A point remains visible when dot(normal,point)+constant>=0 for every plane. Planes use displayed world coordinates after explosion. Sections are uncapped mesh clipping, not CAD cuts or measurable geometry. Transparent front surfaces make point picking ambiguous; hide them or reset ghosting before locating a precise comment. {type:"reset-inspection"} clears highlight, ghosting, and sections without changing camera, explosion, or visibility.',
     "Use the returned revision for the next update or capture. Changes remain private until captured.",
     "An invalid-operation error includes details naming the field or operation to correct; fix it and retry.",
   ].join(" "),
@@ -49,6 +58,8 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_comments_list",
   "cad_context",
   "cad_hierarchy",
+  "cad_checks",
+  "cad_diff",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -61,10 +72,47 @@ export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, sc
     inputSchema: { ...document.schema, type: "object" as const, $defs: document.definitions },
   };
 });
+/** `tools/list` entries for MCP clients, with read-only hints. */
+export const mcpCadToolDefinitions = cadToolDefinitions.map(({ type: _type, ...tool }) => ({
+  ...tool,
+  annotations: {
+    readOnlyHint: CAD_READ_ONLY_TOOLS.has(tool.name),
+    destructiveHint: false,
+    openWorldHint: false,
+  },
+}));
 export interface CadToolDelivery {
   readonly result: unknown;
   readonly png?: Uint8Array;
 }
+const encodeDeliveryResult = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const encodeCadViewError = Schema.encodeSync(Schema.fromJsonString(CadViewError));
+/** MCP `tools/call` result for a CAD tool: the result as JSON text and structured content, plus any render. */
+export const mcpCadToolResult = (delivery: CadToolDelivery) =>
+  encodeDeliveryResult(delivery.result).pipe(
+    Effect.mapError(() => new CadViewError({ reason: "capability-unavailable" })),
+    Effect.map((text) => ({
+      isError: false,
+      structuredContent: delivery.result,
+      content: [
+        { type: "text" as const, text },
+        ...(delivery.png
+          ? [
+              {
+                type: "image" as const,
+                mimeType: "image/png",
+                data: Buffer.from(delivery.png).toString("base64"),
+              },
+            ]
+          : []),
+      ],
+    })),
+  );
+/** MCP `tools/call` result for a failed CAD tool. Agents read `reason` and `details` to recover. */
+export const mcpCadToolError = (error: CadViewError) => ({
+  isError: true,
+  content: [{ type: "text" as const, text: encodeCadViewError(error) }],
+});
 export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
   tools: CadAgentTools,
   name: string,
@@ -81,6 +129,10 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.context() };
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
+    case "cad_checks":
+      return { result: yield* tools.checks(input) };
+    case "cad_diff":
+      return { result: yield* tools.diff(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":
