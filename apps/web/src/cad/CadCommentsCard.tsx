@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import type { CadComment, CadSnapshotManifest, ScopedThreadRef } from "@cadsense/contracts";
+import {
+  CAD_COMMENT_SEVERITIES,
+  type CadComment,
+  type CadCommentSeverity,
+  type CadSnapshotManifest,
+  type ScopedThreadRef,
+} from "@cadsense/contracts";
 import { newCommandId } from "../lib/utils";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { MessageSquare, X, LocateFixed, Check, RotateCcw, Box } from "lucide-react";
@@ -9,6 +15,11 @@ import { useAtomCommand } from "../state/use-atom-command";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { useDiscussCadComment } from "./useDiscussCadComment";
 
+/** Open findings sort from most to least consequential; comments without a severity sort last. */
+const severityRank = (comment: CadComment) =>
+  comment.severity === null
+    ? CAD_COMMENT_SEVERITIES.length
+    : CAD_COMMENT_SEVERITIES.indexOf(comment.severity);
 export interface CadCommentSelection {
   id: string;
   target: number;
@@ -67,11 +78,15 @@ export function CadCommentsCard({
     descriptor ? c.modelDescriptor === descriptor : c.snapshotId === displayedSnapshotId,
   );
   const selected = comments.find((c) => c.id === selection?.id);
-  const openCount = displayed.filter((c) => c.state === "open").length;
+  const openComments = displayed.filter((c) => c.state === "open");
+  const openCount = openComments.length;
+  const blockerCount = openComments.filter((c) => c.severity === "blocker").length;
   const visible =
     filter === "history"
       ? comments.filter((c) => c.modelDescriptor !== descriptor || historical)
-      : displayed.filter((c) => (filter === "open" ? c.state === "open" : c.state !== "open"));
+      : filter === "open"
+        ? openComments.sort((a, b) => severityRank(a) - severityRank(b) || a.number - b.number)
+        : displayed.filter((c) => c.state !== "open");
   useEffect(() => {
     if (historical) setFilter("history");
   }, [historical]);
@@ -269,7 +284,8 @@ export function CadCommentsCard({
             size="icon"
             variant="ghost"
             className="absolute right-0 top-0 size-8"
-            aria-label={`Comments (${openCount} unresolved)`}
+            aria-label={`Comments (${openCount} unresolved${blockerCount ? `, ${blockerCount} blocking` : ""})`}
+            title={blockerCount ? `${blockerCount} blocking` : undefined}
             aria-expanded={false}
             onClick={() => setOpen(true)}
           >
@@ -331,7 +347,8 @@ export function CadCommentsCard({
                       onClick={() => choose(c, 0)}
                     >
                       <CommentBadge number={c.number} reviewed={c.state !== "open"} />
-                      <span>
+                      <span className="min-w-0">
+                        <CadSeverityLabel severity={c.severity} />
                         <strong>{c.title}</strong>
                         <span className="mt-1 block text-muted-foreground">
                           {c.targets.length} locations · {c.state}
@@ -341,6 +358,12 @@ export function CadCommentsCard({
                     </button>
                     {selection?.id === c.id && (
                       <div className="mt-3 space-y-3">
+                        {(c.severity || c.category) && (
+                          <p className="text-muted-foreground">
+                            <CadSeverityLabel severity={c.severity} />
+                            {c.category}
+                          </p>
+                        )}
                         <p className="whitespace-pre-wrap leading-relaxed">{c.body}</p>
                         {c.targets.map((t, i) => (
                           <div key={i}>
@@ -496,6 +519,21 @@ export function CadCommentsCard({
         )}
       </div>
     </div>
+  );
+}
+
+const SEVERITY_CLASS: Record<CadCommentSeverity, string> = {
+  blocker: "text-foreground",
+  concern: "text-muted-foreground",
+  question: "text-muted-foreground",
+  nit: "text-muted-foreground/60",
+};
+/** The severity word ahead of a finding's title. Comments published without one show nothing. */
+export function CadSeverityLabel({ severity }: { severity: CadCommentSeverity | null }) {
+  return severity === null ? null : (
+    <span data-severity={severity} className={`mr-1.5 shrink-0 ${SEVERITY_CLASS[severity]}`}>
+      {severity}
+    </span>
   );
 }
 

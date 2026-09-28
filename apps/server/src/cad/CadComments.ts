@@ -71,7 +71,7 @@ const uuid = () => NodeCrypto.randomUUID();
 // Include recovery guidance in responses: resumed providers can retain older descriptions.
 const inputGuidance = (schema: Schema.Top) =>
   schema === CadCommentPublication
-    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
+    ? 'New item: {kind:"new",publicationKey,inspectedSnapshotId,title,body,severity,category,targets:[{kind:"point",label,candidateId,inspectionId,confirmationReason}]}. severity is blocker|concern|question|nit; category is interference|access|assembly|wiring|structure|manufacturing|other. Use snapshotId from the inspected capture. Precise targets require locate then visual verification of inspect. Whole-part fallback target: {kind:"part",label,occurrenceId,preciseLocationLimitation}, inside targets. Reuse item: {kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}.'
     : schema === CadCommentLocateInput
       ? `Input: {captureId,picks:[{pickKey,intendedOccurrenceId,x,y}]}. Use x/y in original ${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height} image pixels, not pixelX/pixelY.`
       : "";
@@ -670,6 +670,8 @@ export const make = Effect.gen(function* () {
               modelDescriptor: descriptor,
               title: item.title,
               body: item.body,
+              severity: item.severity,
+              category: item.category,
               targets,
               link: item.link ?? null,
               state: "open",
@@ -791,6 +793,8 @@ export const make = Effect.gen(function* () {
                     commentId: comment.id,
                     number: comment.number,
                     title: comment.title,
+                    severity: comment.severity,
+                    category: comment.category,
                     location: comment.targets[0]?.label ?? "",
                   },
                 ]
