@@ -8,14 +8,20 @@ import * as NetService from "@cadsense/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { isEntrypoint } from "./entrypoint.ts";
-import { runServerCommand } from "./cli/server.ts";
+import { cadMcpCommand } from "./cadMcp/CadMcpCommand.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 export const makeCli = () =>
   Command.make("cadsense", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription("Run the local Cadsense desktop backend."),
-    Command.withHandler((flags) => runServerCommand(flags)),
+    // Imported on use so `cadsense mcp` can answer before the server module graph loads.
+    Command.withHandler((flags) =>
+      Effect.promise(() => import("./cli/server.ts")).pipe(
+        Effect.flatMap(({ runServerCommand }) => runServerCommand(flags)),
+      ),
+    ),
+    Command.withSubcommands([cadMcpCommand]),
   );
 
 export const cli = makeCli();

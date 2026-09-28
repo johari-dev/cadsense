@@ -66,10 +66,47 @@ export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, sc
     inputSchema: { ...document.schema, type: "object" as const, $defs: document.definitions },
   };
 });
+/** `tools/list` entries for MCP clients, with read-only hints. */
+export const mcpCadToolDefinitions = cadToolDefinitions.map(({ type: _type, ...tool }) => ({
+  ...tool,
+  annotations: {
+    readOnlyHint: CAD_READ_ONLY_TOOLS.has(tool.name),
+    destructiveHint: false,
+    openWorldHint: false,
+  },
+}));
 export interface CadToolDelivery {
   readonly result: unknown;
   readonly png?: Uint8Array;
 }
+const encodeDeliveryResult = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const encodeCadViewError = Schema.encodeSync(Schema.fromJsonString(CadViewError));
+/** MCP `tools/call` result for a CAD tool: the result as JSON text and structured content, plus any render. */
+export const mcpCadToolResult = (delivery: CadToolDelivery) =>
+  encodeDeliveryResult(delivery.result).pipe(
+    Effect.mapError(() => new CadViewError({ reason: "capability-unavailable" })),
+    Effect.map((text) => ({
+      isError: false,
+      structuredContent: delivery.result,
+      content: [
+        { type: "text" as const, text },
+        ...(delivery.png
+          ? [
+              {
+                type: "image" as const,
+                mimeType: "image/png",
+                data: Buffer.from(delivery.png).toString("base64"),
+              },
+            ]
+          : []),
+      ],
+    })),
+  );
+/** MCP `tools/call` result for a failed CAD tool. Agents read `reason` and `details` to recover. */
+export const mcpCadToolError = (error: CadViewError) => ({
+  isError: true,
+  content: [{ type: "text" as const, text: encodeCadViewError(error) }],
+});
 export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
   tools: CadAgentTools,
   name: string,
