@@ -482,6 +482,7 @@ const makeWsRpcLayer = (
         switch (event.type) {
           case "thread.cad-comments-committed":
           case "thread.cad-comment-reviewed":
+          case "thread.cad-comments-outdated":
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":

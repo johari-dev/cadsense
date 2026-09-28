@@ -468,3 +468,47 @@ it("orders open findings by severity then number and labels each one", () => {
   expect(toggle?.props["aria-label"]).toBe("Comments (5 unresolved, 2 blocking)");
   expect(toggle?.props.title).toBe("2 blocking");
 });
+
+it("shows why a comment is outdated and the proposed resolution beside the Resolve control", () => {
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  const comment = {
+    id: "stale",
+    number: 1,
+    state: "open",
+    snapshotId: "snapshot",
+    modelDescriptor: "model",
+    title: "Battery location",
+    body: "Battery",
+    targets: [{ kind: "part", occurrenceId: "battery", label: "Battery" }],
+    outdated: { snapshotId: "newer", reason: "geometry-changed" },
+    proposal: { snapshotId: "newer", explanation: "The new revision adds the bracket." },
+  } as unknown as CadComment;
+  hooks.beginRender();
+  const tree = CadCommentsCard({
+    threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
+    comments: [comment],
+    manifest: null,
+    displayedSnapshotId: "snapshot",
+    renderer: { current: null },
+    open: true,
+    setOpen() {},
+    selection: { id: comment.id, target: 0, request: 1 },
+    clearSelection() {},
+    choose() {},
+    historical: true,
+    back() {},
+  });
+  const text = (node: ReactNode): string =>
+    Array.isArray(node)
+      ? node.map(text).join("")
+      : isValidElement<Record<string, unknown>>(node)
+        ? text(node.props.children as ReactNode)
+        : typeof node === "string" || typeof node === "number"
+          ? String(node)
+          : "";
+  expect(text(tree)).toContain("Outdated: geometry changed in a newer revision");
+  expect(text(tree)).toContain("Proposed resolution: The new revision adds the bracket.");
+  expect(text(tree)).toContain("Resolve · 1");
+});

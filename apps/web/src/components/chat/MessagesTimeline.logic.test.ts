@@ -358,11 +358,13 @@ describe("CAD review rows", () => {
           // Same call: a different finding that happens to share a published title.
           published: [comment("fillet", 5)],
           rejected: [{ publicationKey: "fillet-2", title: "Finding 5", reason: "invalid-input" }],
+          proposed: [],
         }),
         // A later conflict on an already-published key is a new failure, not a fix.
         published("published-6", {
           published: [],
           rejected: [{ publicationKey: "fillet", title: "Other", reason: "idempotency-conflict" }],
+          proposed: [],
         }),
       ],
       isWorking: false,
@@ -402,9 +404,14 @@ describe("CAD review rows", () => {
             { publicationKey: "retried", title: "Finding 2", reason: "invalid-input" },
             { publicationKey: "dropped", title: null, reason: "candidate-expired" },
           ],
+          proposed: [],
         }),
         tool("publish-2", "cad_comments_publish"),
-        published("published-2", { published: [comment("retried", 2)], rejected: [] }),
+        published("published-2", {
+          published: [comment("retried", 2)],
+          rejected: [],
+          proposed: [{ publicationKey: "fixed", commentId: "c0", number: 0, title: "Earlier" }],
+        }),
         reply("reply"),
       ],
       isWorking: false,
@@ -415,9 +422,9 @@ describe("CAD review rows", () => {
     const unfolded = deriveMessagesTimelineRows({
       timelineEntries: [
         tool("publish-3", "cad_comments_publish"),
-        published("published-3", { published: [comment("third", 3)], rejected: [] }),
+        published("published-3", { published: [comment("third", 3)], rejected: [], proposed: [] }),
         tool("publish-4", "cad_comments_publish"),
-        published("published-4", { published: [comment("fourth", 4)], rejected: [] }),
+        published("published-4", { published: [comment("fourth", 4)], rejected: [], proposed: [] }),
       ],
       isWorking: false,
       activeTurnStartedAt: null,
@@ -428,6 +435,7 @@ describe("CAD review rows", () => {
     expect(comments?.kind === "cad-comments" && comments.card).toEqual({
       published: [comment("first", 1), comment("retried", 2)],
       rejected: [{ publicationKey: "dropped", title: null, reason: "candidate-expired" }],
+      proposed: [{ publicationKey: "fixed", commentId: "c0", number: 0, title: "Earlier" }],
     });
   });
 });

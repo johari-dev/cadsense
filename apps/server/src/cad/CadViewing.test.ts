@@ -1072,9 +1072,12 @@ it.effect(
             number: 1,
             createdAt: now,
             turnId: firstTurn,
+            outdated: null,
+            proposal: null,
           },
         ],
         receipts: [],
+        proposals: [],
       });
       const later = "2026-09-06T00:00:00Z";
       const revised = yield* decodeSnapshot({

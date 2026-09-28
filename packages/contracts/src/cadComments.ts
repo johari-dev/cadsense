@@ -59,6 +59,22 @@ export const CadCommentLink = Schema.Struct({
   commentId: Id,
   explanation: text(1000),
 });
+/** Why a newer current snapshot invalidated a comment's targets. */
+export const CadCommentOutdatedReason = Schema.Literals(["removed", "moved", "geometry-changed"]);
+export type CadCommentOutdatedReason = typeof CadCommentOutdatedReason.Type;
+export const CadCommentOutdated = Schema.Struct({
+  snapshotId: CadSnapshotId,
+  reason: CadCommentOutdatedReason,
+});
+export type CadCommentOutdated = typeof CadCommentOutdated.Type;
+/** An agent's evidence that a newer snapshot addressed the finding. Only the user resolves it. */
+export const CadCommentProposal = Schema.Struct({
+  snapshotId: CadSnapshotId,
+  explanation: text(1000),
+  turnId: TurnId,
+  createdAt: IsoDateTime,
+});
+export type CadCommentProposal = typeof CadCommentProposal.Type;
 export const CadComment = Schema.Struct({
   id: Id,
   threadId: ThreadId,
@@ -79,6 +95,13 @@ export const CadComment = Schema.Struct({
   number: Schema.Int,
   createdAt: IsoDateTime,
   turnId: TurnId,
+  // Projection state beside review state. Records written before these fields decode as null.
+  outdated: Schema.NullOr(CadCommentOutdated).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  proposal: Schema.NullOr(CadCommentProposal).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type CadComment = typeof CadComment.Type;
 /**
@@ -104,6 +127,14 @@ export const CadCommentsPublishedCard = Schema.Struct({
       reason: Schema.String,
     }),
   ),
+  proposed: Schema.Array(
+    Schema.Struct({
+      publicationKey: Schema.String,
+      commentId: CadComment.fields.id,
+      number: CadComment.fields.number,
+      title: CadComment.fields.title,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CadCommentsPublishedCard = typeof CadCommentsPublishedCard.Type;
 export const CAD_COMMENTS_PUBLISHED_ACTIVITY = "cad.comments.published";
@@ -153,6 +184,13 @@ export const CadCommentPublication = Schema.Union([
     publicationKey: Id,
     inspectedSnapshotId: CadSnapshotId,
     reuseCommentId: Id,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("propose-resolve"),
+    publicationKey: Id,
+    inspectedSnapshotId: CadSnapshotId,
+    commentId: Id,
+    explanation: text(1000),
   }),
 ]);
 export type CadCommentPublication = typeof CadCommentPublication.Type;
@@ -236,6 +274,11 @@ export const CadCommentReceipt = Schema.Struct({
   threadId: ThreadId,
 });
 export type CadCommentReceipt = typeof CadCommentReceipt.Type;
+export const CadCommentProposed = Schema.Struct({ commentId: Id, proposal: CadCommentProposal });
+export type CadCommentProposed = typeof CadCommentProposed.Type;
+const Proposals = Schema.Array(CadCommentProposed).pipe(
+  Schema.withDecodingDefault(Effect.succeed([])),
+);
 export const CadCommentsCommitCommand = Schema.Struct({
   type: Schema.Literal("thread.cad.comments.commit"),
   commandId: CommandId,
@@ -243,6 +286,20 @@ export const CadCommentsCommitCommand = Schema.Struct({
   expectedCatalogVersion: Schema.Int,
   comments: Schema.Array(CadComment),
   receipts: Schema.Array(CadCommentReceipt),
+  proposals: Proposals,
+});
+/**
+ * Internal command from the comments service after a snapshot becomes current for a root: each
+ * open comment on that root with its recomputed reason, null when its targets are unchanged.
+ */
+export const CadCommentsOutdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.cad.comments.outdate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  snapshotId: CadSnapshotId,
+  entries: Schema.Array(
+    Schema.Struct({ commentId: Id, reason: Schema.NullOr(CadCommentOutdatedReason) }),
+  ),
 });
 export const CadCommentReviewCommand = Schema.Struct({
   ...CadCommentReviewInput.fields,
@@ -253,6 +310,15 @@ export const CadCommentsCommitted = Schema.Struct({
   threadId: ThreadId,
   comments: Schema.Array(CadComment),
   receipts: Schema.Array(CadCommentReceipt),
+  proposals: Proposals,
+});
+/** Only comments whose annotation changed are listed. */
+export const CadCommentsOutdated = Schema.Struct({
+  threadId: ThreadId,
+  snapshotId: CadSnapshotId,
+  entries: Schema.Array(
+    Schema.Struct({ commentId: Id, outdated: Schema.NullOr(CadCommentOutdated) }),
+  ),
 });
 export const CadCommentReviewed = Schema.Struct({
   threadId: ThreadId,

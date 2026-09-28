@@ -1,6 +1,8 @@
 import {
   CAD_REVIEW_LEARNINGS_LIMIT,
   CadComment,
+  CadCommentOutdated,
+  CadCommentProposal,
   CadCommentReceipt,
   CadCommentReviewed,
   CadReviewLearning,
@@ -26,6 +28,8 @@ const encodeComment = Schema.encodeEffect(Schema.fromJsonString(CadComment));
 const encodeLearning = Schema.encodeEffect(Schema.fromJsonString(CadReviewLearning));
 const encodeReceipt = Schema.encodeEffect(Schema.fromJsonString(CadCommentReceipt));
 const encodeReview = Schema.encodeEffect(Schema.fromJsonString(CadCommentReviewed));
+const encodeProposal = Schema.encodeEffect(Schema.fromJsonString(CadCommentProposal));
+const encodeOutdated = Schema.encodeEffect(Schema.fromJsonString(CadCommentOutdated));
 export const readThreadCadComments = Effect.fn("readThreadCadComments")(function* (
   threadId: ThreadId,
 ) {
@@ -73,13 +77,21 @@ export const projectCadCommentEvent = Effect.fn("projectCadCommentEvent")(functi
       yield* sql`INSERT INTO projection_cad_comments(comment_id, thread_id, snapshot_id, sequence, record_json) VALUES(${comment.id},${comment.threadId},${comment.snapshotId},${event.sequence},${yield* encodeComment(comment)}) ON CONFLICT(comment_id) DO NOTHING`;
     for (const receipt of event.payload.receipts)
       yield* sql`INSERT INTO projection_cad_comment_receipts(thread_id, publication_key, record_json) VALUES(${receipt.threadId},${receipt.key},${yield* encodeReceipt(receipt)}) ON CONFLICT(thread_id, publication_key) DO NOTHING`;
+    for (const { commentId, proposal } of event.payload.proposals)
+      yield* sql`UPDATE projection_cad_comments SET record_json=json_set(record_json,'$.proposal',json(${yield* encodeProposal(proposal)})) WHERE comment_id=${commentId} AND thread_id=${event.payload.threadId}`;
   } else if (event.type === "thread.cad-comment-reviewed") {
     const p = event.payload;
     // The latest review owns the reason: a reopen or reason-less review clears the previous one.
+    // The user's judgment also supersedes any agent proposal.
     yield* p.reason === undefined
-      ? sql`UPDATE projection_cad_comments SET record_json=json_remove(json_set(record_json,'$.state',${p.state},'$.version',${p.version}),'$.reviewReason') WHERE comment_id=${p.commentId} AND thread_id=${p.threadId}`
-      : sql`UPDATE projection_cad_comments SET record_json=json_set(record_json,'$.state',${p.state},'$.version',${p.version},'$.reviewReason',${p.reason}) WHERE comment_id=${p.commentId} AND thread_id=${p.threadId}`;
+      ? sql`UPDATE projection_cad_comments SET record_json=json_remove(json_set(record_json,'$.state',${p.state},'$.version',${p.version},'$.proposal',NULL),'$.reviewReason') WHERE comment_id=${p.commentId} AND thread_id=${p.threadId}`
+      : sql`UPDATE projection_cad_comments SET record_json=json_set(record_json,'$.state',${p.state},'$.version',${p.version},'$.reviewReason',${p.reason},'$.proposal',NULL) WHERE comment_id=${p.commentId} AND thread_id=${p.threadId}`;
     yield* sql`INSERT INTO projection_cad_comment_reviews(command_id,record_json) VALUES(${p.commandId},${yield* encodeReview(p)}) ON CONFLICT(command_id) DO NOTHING`;
+  } else if (event.type === "thread.cad-comments-outdated") {
+    for (const { commentId, outdated } of event.payload.entries)
+      yield* outdated === null
+        ? sql`UPDATE projection_cad_comments SET record_json=json_set(record_json,'$.outdated',NULL) WHERE comment_id=${commentId} AND thread_id=${event.payload.threadId}`
+        : sql`UPDATE projection_cad_comments SET record_json=json_set(record_json,'$.outdated',json(${yield* encodeOutdated(outdated)})) WHERE comment_id=${commentId} AND thread_id=${event.payload.threadId}`;
   } else if (event.type === "project.cad-review-learning-added") {
     const { projectId, learning } = event.payload;
     yield* sql`INSERT INTO projection_cad_review_learnings(learning_id, project_id, sequence, record_json) VALUES(${learning.id},${projectId},${event.sequence},${yield* encodeLearning(learning)}) ON CONFLICT(learning_id) DO NOTHING`;

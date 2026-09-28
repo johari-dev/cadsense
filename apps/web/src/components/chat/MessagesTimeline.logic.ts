@@ -542,8 +542,13 @@ function mergeCadCommentCards(
     });
     // A key rejected again in a later call keeps only its latest reason.
     const latestRejected = [...new Map(rejected.map((r) => [r.publicationKey, r])).values()];
-    if (published.length > 0 || latestRejected.length > 0)
-      merged.set(publications.at(-1)!.id, { published, rejected: latestRejected });
+    const proposed = [
+      ...new Map(
+        publications.flatMap(({ card }) => card.proposed).map((p) => [p.commentId, p]),
+      ).values(),
+    ];
+    if (published.length > 0 || latestRejected.length > 0 || proposed.length > 0)
+      merged.set(publications.at(-1)!.id, { published, rejected: latestRejected, proposed });
   }
   return merged;
 }

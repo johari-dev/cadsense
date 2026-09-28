@@ -103,6 +103,9 @@ const REJECTION_REASONS: Readonly<Record<string, string>> = {
   "model-equivalence-unverified": "the model changed since the original comment",
   "invalid-comment-link": "it links to a comment that does not exist",
   "idempotency-conflict": "it reused the key of a different finding",
+  "comment-unavailable": "the comment it refers to is not in this chat",
+  "comment-not-open": "the comment it refers to is already reviewed",
+  "snapshot-not-newer": "its evidence is not from a newer model revision",
 };
 
 /** Plain wording for why the server rejected a finding. */
@@ -120,7 +123,19 @@ export function describeCadCommentRejection(rejection: {
     : `A finding was not published: ${reason}.`;
 }
 
-/** Comments one turn published, each opening its location in the CAD panel. */
+/** "Wrote 2 comments, proposed 1 resolution", or the fallback when nothing was published. */
+export function describeCadCommentsPublished(card: CadCommentsPublishedCard): string {
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const summary = [
+    card.published.length ? `wrote ${count(card.published.length, "comment")}` : "",
+    card.proposed.length ? `proposed ${count(card.proposed.length, "resolution")}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : "No comments published";
+}
+
+/** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
   card,
   threadRef,
@@ -138,11 +153,9 @@ export function CadPublishedComments({
           <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
         </span>
         <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-          {count === 0
-            ? "No comments published"
-            : `Wrote ${count} ${count === 1 ? "comment" : "comments"}`}
+          {describeCadCommentsPublished(card)}
         </span>
-        {count > 0 ? (
+        {count > 0 || card.proposed.length > 0 ? (
           <button
             type="button"
             className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
@@ -180,6 +193,18 @@ export function CadPublishedComments({
           {unlisted} more in CAD
         </button>
       ) : null}
+      {card.proposed.map((proposal) => (
+        <button
+          key={proposal.commentId}
+          type="button"
+          className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
+          onClick={() => openCadComments(threadRef, proposal.commentId)}
+        >
+          <CommentBadge number={proposal.number} />
+          <span className="min-w-0 flex-1 truncate text-foreground">{proposal.title}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">resolution proposed</span>
+        </button>
+      ))}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}

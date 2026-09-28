@@ -15,6 +15,12 @@ import { useAtomCommand } from "../state/use-atom-command";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { useDiscussCadComment } from "./useDiscussCadComment";
 
+/** Plain wording for why a newer model revision invalidated a comment's targets. */
+const OUTDATED_REASONS: Record<NonNullable<CadComment["outdated"]>["reason"], string> = {
+  removed: "part removed",
+  moved: "part moved",
+  "geometry-changed": "geometry changed",
+};
 /** Open findings sort from most to least consequential; comments without a severity sort last. */
 const severityRank = (comment: CadComment) =>
   comment.severity === null
@@ -353,6 +359,7 @@ export function CadCommentsCard({
                         <span className="mt-1 block text-muted-foreground">
                           {c.targets.length} locations · {c.state}
                           {c.modelDescriptor !== descriptor ? " · previous revision" : ""}
+                          {c.outdated ? " · outdated" : ""}
                         </span>
                       </span>
                     </button>
@@ -365,6 +372,11 @@ export function CadCommentsCard({
                           </p>
                         )}
                         <p className="whitespace-pre-wrap leading-relaxed">{c.body}</p>
+                        {c.outdated && (
+                          <p className="text-muted-foreground">
+                            Outdated: {OUTDATED_REASONS[c.outdated.reason]} in a newer revision
+                          </p>
+                        )}
                         {c.targets.map((t, i) => (
                           <div key={i}>
                             <Button
@@ -427,6 +439,11 @@ export function CadCommentsCard({
                               See {x.link?.kind}: {x.title}
                             </button>
                           ))}
+                        {c.proposal && c.state === "open" && (
+                          <p className="whitespace-pre-wrap">
+                            Proposed resolution: {c.proposal.explanation}
+                          </p>
+                        )}
                         {c.state === "dismissed" && c.reviewReason && (
                           <p className="text-muted-foreground">Dismissed: {c.reviewReason}</p>
                         )}
