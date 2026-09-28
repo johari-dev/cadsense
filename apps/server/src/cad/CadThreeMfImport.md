@@ -2,7 +2,7 @@
 
 The importer requests coarse, meter-unit 3MF and preserves per-face colors, converting sRGB colors to linear glTF material values. ZIP64 archives are supported with the existing inflated-size and integrity limits. The browser receives bounded, independently compressed chunks of the manifest-ordered geometry bundle.
 
-3MF does not provide Onshape part/instance IDs. Unique name and placement matches retain the authoritative assembly identities. Composite member bodies can be collected at a unique placement. Ambiguous or omitted parts use geometry identified by source IDs, reused only from the same project/root/microversion. If that geometry is unavailable, a resumable coarse glTF companion export supplies it. The importer does not arbitrarily assign repeated instances.
+3MF does not provide Onshape part/instance IDs. Unique name and placement matches retain the authoritative assembly identities. Composite member bodies can be collected at a unique placement. Since September 22, ambiguous or omitted parts use pinned source-ID geometry fetched in bounded Part Studio batches, without a companion assembly export. The importer does not arbitrarily assign repeated instances. The [request experiment report](../onshape/OnshapeRequestExperiments.md) records the current behavior; the measurements below describe the September 10 implementation.
 
 ## Full robot, September 10, 2026
 

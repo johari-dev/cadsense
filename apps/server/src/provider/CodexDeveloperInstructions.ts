@@ -1,4 +1,5 @@
 import type { ProviderInteractionMode } from "@cadsense/contracts";
+import { cadReviewInstructions } from "./CadReviewInstructions.ts";
 
 const CADSENSE_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -190,6 +191,8 @@ export function buildCodexDeveloperInstructions(
    */
   browserToolsAvailable = true,
   cadToolsAvailable = false,
+  /** The project's review learnings, read at turn start. Ignored without CAD tools. */
+  cadReviewLearnings: ReadonlyArray<{ readonly text: string }> = [],
 ): string {
   const base =
     interactionMode === "plan"
@@ -200,7 +203,9 @@ export function buildCodexDeveloperInstructions(
 
 ## Local CAD tools
 
-When using CAD tools through exec, parse JSON string results as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
+${cadReviewInstructions(cadReviewLearnings)}
+
+When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, cad_part_info, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
 
 \`\`\`javascript
 const result = await tools.cad_capture({expectedRevision: revision});

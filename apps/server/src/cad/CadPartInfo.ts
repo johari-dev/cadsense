@@ -187,6 +187,8 @@ export const readCadPartInfo = Effect.fn("readCadPartInfo")(function* <E>(
           partIdentity: metadata.partIdentity,
           configurationId: metadata.configurationId,
           appearance: metadata.appearance,
+          // Absent means Onshape reported no mass, not zero.
+          ...(metadata.massKg === undefined ? {} : { massKg: metadata.massKg }),
         }
       : null,
     material: materialSummary,

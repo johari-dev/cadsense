@@ -9,6 +9,7 @@ import { it } from "@effect/vitest";
 import * as Capabilities from "../provider/ClaudeCadCapabilities.ts";
 import { McpSessionRegistry } from "./McpSessionRegistry.ts";
 import { routeLayer } from "./cadHttp.ts";
+import { cadToolDefinitions } from "../provider/CadProviderTools.ts";
 
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decode = Schema.decodeUnknownSync(
@@ -24,6 +25,7 @@ const decode = Schema.decodeUnknownSync(
         Schema.Array(
           Schema.Struct({
             name: Schema.String,
+            description: Schema.String,
             inputSchema: Schema.Struct({ type: Schema.Literal("object") }),
             annotations: Schema.Struct({ readOnlyHint: Schema.Boolean }),
           }),
@@ -102,23 +104,34 @@ it.effect("serves native images only for the authenticated session's one-use CAD
     expect((yield* request("tools/list", undefined, "")).status).toBe(401);
     const listed = yield* request("tools/list");
     expect(listed.headers.get("cache-control")).toBe("no-store");
-    expect(
-      decode(yield* Effect.promise(() => listed.json())).result.tools?.map((tool) => tool.name),
-    ).toEqual([
+    const listedTools = decode(yield* Effect.promise(() => listed.json())).result.tools!;
+    expect(listedTools.map((tool) => tool.name)).toEqual([
       "cad_comments_list",
       "cad_comment_locate",
       "cad_comment_inspect",
       "cad_comments_publish",
       "cad_context",
       "cad_hierarchy",
+      "cad_checks",
+      "cad_diff",
       "cad_part_info",
       "cad_update_view",
       "cad_capture",
     ]);
-    const partTool = (yield* response("tools/list")).result.tools?.find(
-      (tool) => tool.name === "cad_part_info",
+    expect(
+      listedTools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name),
+    ).toEqual([
+      "cad_comments_list",
+      "cad_context",
+      "cad_hierarchy",
+      "cad_checks",
+      "cad_diff",
+      "cad_part_info",
+    ]);
+    // Claude must receive the same review guidance as native Codex tool registration.
+    expect(listedTools.map(({ name, description }) => ({ name, description }))).toEqual(
+      cadToolDefinitions.map(({ name, description }) => ({ name, description })),
     );
-    expect(partTool?.annotations.readOnlyHint).toBe(true);
     const partInput = {
       snapshotId: "00000000-0000-4000-8000-000000000001",
       expectedRevision: 3,

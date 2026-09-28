@@ -60,6 +60,7 @@ export const CadPartInfoResult = Schema.Struct({
       partIdentity: CadPartMetadata.fields.partIdentity,
       configurationId: CadPartMetadata.fields.configurationId,
       appearance: CadPartMetadata.fields.appearance,
+      massKg: CadPartMetadata.fields.massKg,
     }),
   ),
   material: Schema.Union([
