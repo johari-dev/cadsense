@@ -177,6 +177,8 @@ export const make = Effect.gen(function* () {
             [
               ...Object.keys(view.visibility),
               ...view.isolatedOccurrenceIds,
+              ...(view.highlightedOccurrenceIds ?? []),
+              ...(view.ghost?.occurrenceIds ?? []),
               ...(view.camera.fit ?? []),
             ].some((id) => !ids.has(id))
           )
