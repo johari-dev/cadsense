@@ -88,6 +88,7 @@ it.each(["Success", "Failure"] as const)(
     const props = {
       threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
       comments: [comment],
+      captureViews: {},
       manifest: null,
       displayedSnapshotId: "snapshot",
       renderer: { current: null },
@@ -145,6 +146,7 @@ it("asks for a dismiss reason, sends it trimmed once, and cancels on Escape", as
   const props = {
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
     comments: [comment],
+    captureViews: {},
     manifest: null,
     displayedSnapshotId: "snapshot",
     renderer: { current: null },
@@ -252,6 +254,7 @@ it("updates comment markers after scene changes without repeating idle projectio
   const props = {
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
     comments: [comment],
+    captureViews: {},
     manifest,
     displayedSnapshotId: "snapshot",
     renderer: { current: graphics },
@@ -328,6 +331,7 @@ it("seeds the active thread's composer at its cursor for a point finding", () =>
   const tree = CadCommentsCard({
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
     comments: [comment],
+    captureViews: {},
     manifest: null,
     displayedSnapshotId: "snapshot",
     renderer: { current: null },
@@ -375,6 +379,7 @@ it("opens the finding's thread from the floating card for a whole-part finding",
   const tree = CadCommentsCard({
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
     comments: [comment],
+    captureViews: {},
     manifest: null,
     displayedSnapshotId: "snapshot",
     renderer: { current: null },
@@ -431,6 +436,7 @@ it("orders open findings by severity then number and labels each one", () => {
   const props = {
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
     comments,
+    captureViews: {},
     manifest: null,
     displayedSnapshotId: "snapshot",
     renderer: { current: null },
@@ -489,6 +495,7 @@ it("shows why a comment is outdated and the proposed resolution beside the Resol
   const tree = CadCommentsCard({
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
     comments: [comment],
+    captureViews: {},
     manifest: null,
     displayedSnapshotId: "snapshot",
     renderer: { current: null },

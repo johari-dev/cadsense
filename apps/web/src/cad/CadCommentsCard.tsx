@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   CAD_COMMENT_SEVERITIES,
   type CadComment,
+  type CadCommentsCatalog,
   type CadCommentSeverity,
   type CadSnapshotManifest,
   type ScopedThreadRef,
@@ -34,6 +35,8 @@ export interface CadCommentSelection {
 export interface CadCommentsCardProps {
   threadRef: ScopedThreadRef;
   comments: readonly CadComment[];
+  /** Agent captures behind point targets, replayed when a point is selected. */
+  captureViews: CadCommentsCatalog["captureViews"];
   manifest: CadSnapshotManifest | null;
   displayedSnapshotId: string;
   renderer: RefObject<CadSceneRenderer | null>;
@@ -50,6 +53,7 @@ export interface CadCommentsCardProps {
 export function CadCommentsCard({
   threadRef,
   comments,
+  captureViews,
   manifest,
   displayedSnapshotId,
   renderer,
@@ -165,6 +169,7 @@ export function CadCommentsCard({
           centerY: (below ? belowTop : 0) + safeHeight / 2,
         },
         window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        target.kind === "point" ? captureViews[target.captureId] : undefined,
       ) ?? "Location unavailable",
     );
     card.current?.querySelector('[aria-expanded="true"]')?.scrollIntoView({ block: "nearest" });

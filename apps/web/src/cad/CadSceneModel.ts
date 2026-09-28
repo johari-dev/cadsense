@@ -165,6 +165,7 @@ export const buildCadSceneModel = (
     group,
     bounds,
     objects,
+    index,
     apply,
     isClipped,
     clippingPlanes: () => planes,

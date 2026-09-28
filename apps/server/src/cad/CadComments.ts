@@ -20,6 +20,8 @@ import {
   type CadCommentsPublishedCard,
   ProjectId,
   type CadComment,
+  type CadCommentsCatalog,
+  cadCommentsCatalog,
   type CadCommentOutdatedReason,
   type CadCommentProposed,
   type CadCommentReceipt,
@@ -49,7 +51,10 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
 import { forkParked } from "../serverActivation.ts";
-import { readThreadCadComments } from "./CadCommentPersistence.ts";
+import {
+  readThreadCadCommentCaptureViews,
+  readThreadCadComments,
+} from "./CadCommentPersistence.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
 import { cadCommentOutdatedCheck } from "./CadCommentOutdated.ts";
@@ -106,7 +111,7 @@ export class CadComments extends Context.Service<
       contextId: string,
       turnId: TurnId,
     ) => Effect.Effect<CadCommentActivation, CadCommentError, Scope.Scope>;
-    readonly watch: (threadId: ThreadId) => Stream.Stream<readonly CadComment[], CadCommentError>;
+    readonly watch: (threadId: ThreadId) => Stream.Stream<CadCommentsCatalog, CadCommentError>;
     readonly review: (
       input: typeof CadCommentReviewInput.Type,
     ) => Effect.Effect<CadComment, CadCommentError>;
@@ -295,12 +300,20 @@ export const make = Effect.gen(function* () {
       Effect.provideService(SqlClient.SqlClient, sql),
     );
   });
+  // Captures are durable, so a catalog read replays the view behind every point target.
+  const catalog = Effect.fn("CadComments.catalog")(function* (threadId: ThreadId) {
+    const comments = yield* read(threadId);
+    const views = yield* readThreadCadCommentCaptureViews(threadId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
+    return cadCommentsCatalog(comments, views);
+  });
   const watch = (threadId: ThreadId) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const events = yield* engine.subscribeDomainEvents;
         return Stream.concat(
-          Stream.fromEffect(read(threadId)),
+          Stream.fromEffect(catalog(threadId)),
           Stream.fromSubscription(events).pipe(
             Stream.filter(
               (e) =>
@@ -311,7 +324,7 @@ export const make = Effect.gen(function* () {
                     e.type === "thread.cad-comments-outdated" ||
                     e.type === "thread.deleted")),
             ),
-            Stream.mapEffect(() => read(threadId)),
+            Stream.mapEffect(() => catalog(threadId)),
           ),
         );
       }),

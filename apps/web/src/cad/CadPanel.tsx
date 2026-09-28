@@ -52,6 +52,7 @@ import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
+const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -500,6 +501,9 @@ export function CadPanel({
         : [],
     [commentState],
   );
+  const captureViews = AsyncResult.isSuccess(commentState)
+    ? commentState.value.captureViews
+    : EMPTY_CAPTURE_VIEWS;
   const renderer = useRef<CadSceneRenderer | null>(null);
   const reviewKey = scopedThreadKey(threadRef);
   const { commentsOpen, selection, historicalView, savedCurrent, localFraming, localView } =
@@ -732,6 +736,7 @@ export function CadPanel({
             commentsCard={{
               threadRef,
               comments,
+              captureViews,
               renderer,
               open: commentsOpen,
               setOpen: setCommentsOpen,
@@ -774,6 +779,7 @@ export function CadPanel({
         <CadCommentsCard
           threadRef={threadRef}
           comments={comments}
+          captureViews={captureViews}
           renderer={renderer}
           manifest={null}
           displayedSnapshotId=""

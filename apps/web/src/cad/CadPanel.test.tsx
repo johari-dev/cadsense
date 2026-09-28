@@ -228,6 +228,7 @@ const harness = (
     commentsCard: {
       threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
       comments: [],
+      captureViews: {},
       renderer: { current: null as CadSceneRenderer | null },
       open: false,
       setOpen() {},
@@ -367,7 +368,11 @@ function reviewHarness() {
     userRevision: 1,
     agentControlling: false,
   });
-  boundary.commentState = AsyncResult.success({ comments: [], modelDescriptors: {} });
+  boundary.commentState = AsyncResult.success({
+    comments: [],
+    modelDescriptors: {},
+    captureViews: {},
+  });
   boundary.peek.mockReturnValue(null);
   const comment = {
     id: "comment",

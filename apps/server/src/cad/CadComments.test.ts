@@ -21,6 +21,7 @@ import {
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -487,7 +488,8 @@ it.effect(
       yield* publish();
       yield* h.dispatch({ type: "thread.archive", threadId });
       assert.equal(
-        (yield* Stream.runCollect(h.service.watch(threadId).pipe(Stream.take(1))))[0]?.length,
+        (yield* Stream.runCollect(h.service.watch(threadId).pipe(Stream.take(1))))[0]?.comments
+          .length,
         1,
       );
       let model = yield* h.query.getCommandReadModel();
@@ -607,7 +609,8 @@ it.effect(
       assert.equal(recreated.cadCommentReceipts?.length, 0);
       assert.equal(recreated.cadCommentReviews?.length, 0);
       assert.equal(
-        (yield* Stream.runCollect(h.service.watch(threadId).pipe(Stream.take(1))))[0]?.length,
+        (yield* Stream.runCollect(h.service.watch(threadId).pipe(Stream.take(1))))[0]?.comments
+          .length,
         0,
       );
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
@@ -776,7 +779,12 @@ it.effect(
         turnId = TurnId.make("point-turn");
       const { snapshot } = h;
       const finding = makeFinding(snapshot);
-      const view = initialCadView(snapshot, 0);
+      // The agent isolated and exploded the target before capturing it; the viewer replays this.
+      const view = {
+        ...initialCadView(snapshot, 0),
+        isolatedOccurrenceIds: [snapshot.nodes.at(-1)!.id],
+        explosion: 0.25,
+      };
       yield* h.dispatch({ type: "thread.cad.context.ensure", threadId, contextId, childKey: null });
       yield* h.dispatch({
         type: "thread.cad.view.set",
@@ -910,6 +918,23 @@ it.effect(
       const comment = (yield* h.query.getCommandReadModel()).cadComments?.[0];
       assert.equal(comment?.snapshotId, snapshot.snapshotId);
       assert.equal(comment?.targets[0]?.kind, "point");
+      const catalog = yield* h.service.watch(threadId).pipe(Stream.runHead);
+      assert.deepStrictEqual(Option.getOrThrow(catalog).captureViews, {
+        "00000000-0000-4000-8000-000000000012": {
+          ...view,
+          camera: {
+            kind: "pose",
+            pose: {
+              position: [1, 1, 1],
+              target: [0, 0, 0],
+              up: [0, 0, 1],
+              projection: "perspective",
+              zoom: 1,
+            },
+            fit: null,
+          },
+        },
+      });
       const fs = yield* FileSystem.FileSystem;
       assert.isTrue(yield* fs.exists(evidence));
       assert.isTrue(yield* fs.exists(evidence.replace(".png", ".json")));
@@ -1117,8 +1142,11 @@ it.live("refreshes a watched comments card when a comment goes outdated", () =>
     const collected = yield* Fiber.join(reads);
     assert.isTrue(collected._tag === "Some", "the watch emitted no read after the outdate");
     const [initial, refreshed] = collected._tag === "Some" ? collected.value : [];
-    assert.equal(initial?.[0]?.outdated, null);
-    assert.deepEqual(refreshed?.[0]?.outdated, { snapshotId: moved.snapshotId, reason: "moved" });
+    assert.equal(initial?.comments[0]?.outdated, null);
+    assert.deepEqual(refreshed?.comments[0]?.outdated, {
+      snapshotId: moved.snapshotId,
+      reason: "moved",
+    });
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 it.effect(
