@@ -1,3 +1,4 @@
+import { CadFindPartsInput } from "./cadFindParts.ts";
 import {
   CadCommentsListInput,
   CadCommentLocateInput,
@@ -225,6 +226,7 @@ export const CAD_TOOL_INPUTS = {
   cad_checks: CadChecksInput,
   cad_diff: CadDiffInput,
   cad_measure: CadMeasureInput,
+  cad_find_parts: CadFindPartsInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
 } as const;

@@ -115,6 +115,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_checks",
       "cad_diff",
       "cad_measure",
+      "cad_find_parts",
       "cad_update_view",
       "cad_capture",
     ]);
@@ -127,6 +128,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_checks",
       "cad_diff",
       "cad_measure",
+      "cad_find_parts",
     ]);
     // Claude must receive the same review guidance as native Codex tool registration.
     expect(listedTools.map(({ name, description }) => ({ name, description }))).toEqual(
@@ -153,6 +155,25 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       })).result.isError,
     ).toBe(false);
     expect(calls.pop()).toEqual(measurementInput);
+    const searchInput = {
+      snapshotId: "00000000-0000-4000-8000-000000000001",
+      expectedRevision: 3,
+      nameQuery: "bolt",
+    };
+    const searchToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_find_parts",
+      searchInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_find_parts",
+        arguments: { _cadsenseCapability: searchToken, nameQuery: "forged" },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(searchInput);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",
