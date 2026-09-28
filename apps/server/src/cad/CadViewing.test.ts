@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CadChecksResult,
+  CadDiffResult,
   CadSnapshotManifest,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -901,6 +902,182 @@ it.effect("tells the agent why a capture or view update failed", () =>
     assert.include(unknown.details, "operations[0]");
     yield* tools.end(null, turnId);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect(
+  "diffs the current snapshot against the retained snapshot earlier comments inspected",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const tools = yield* makeCadProviderTools(threadId).pipe(
+        Effect.provideService(CadViewing, h.service),
+      );
+      const decodeDiff = Schema.decodeUnknownEffect(CadDiffResult);
+      const firstTurn = TurnId.make("diff-first-review");
+      // Nothing retained before the current snapshot: the agent must inspect the whole model.
+      const first = yield* tools.invoke(null, firstTurn, "cad_diff", {}).pipe(Effect.flip);
+      assert.equal(first.reason, "invalid-operation");
+      assert.include(first.details, "first review");
+      yield* tools.end(null, firstTurn);
+
+      yield* h.dispatch({
+        type: "thread.cad.comments.commit",
+        threadId,
+        expectedCatalogVersion: 0,
+        comments: [
+          {
+            id: "finding-1",
+            threadId,
+            rootId: snapshot.rootId,
+            snapshotId: snapshot.snapshotId,
+            modelKey: "5".repeat(64),
+            modelDescriptor: "descriptor",
+            title: "Check the intake",
+            body: "The intake mount looks unsupported.",
+            severity: "concern",
+            category: "structure",
+            targets: [
+              {
+                kind: "part",
+                label: "Intake",
+                occurrenceId: snapshot.nodes[0]!.id,
+                preciseLocationLimitation: "Whole part.",
+              },
+            ],
+            link: null,
+            state: "open",
+            version: 0,
+            number: 1,
+            createdAt: now,
+            turnId: firstTurn,
+          },
+        ],
+        receipts: [],
+      });
+      const later = "2026-09-06T00:00:00Z";
+      const revised = yield* decodeSnapshot({
+        ...snapshot,
+        snapshotId: "00000000-0000-4000-8000-000000000007",
+        createdAt: later,
+        root: { ...snapshot.root, microversionId: "e".repeat(24) },
+        nodes: [
+          { ...snapshot.nodes[0]!, name: "Intake v2" },
+          {
+            id: "4".repeat(64),
+            parentId: snapshot.nodes[0]!.id,
+            occurrencePath: ["bracket"],
+            instanceId: "bracket",
+            name: "Bracket",
+            kind: "part",
+            suppressed: false,
+            defaultVisible: true,
+            sourcePartKey: null,
+            transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          },
+        ],
+      });
+      h.snapshots.set(revised.snapshotId, revised);
+      const operationId = "00000000-0000-4000-8000-000000000008";
+      yield* h.dispatch({
+        type: "project.cad.operation.reserve",
+        projectId,
+        operationId,
+        kind: "sync",
+        root: {
+          rootId: revised.rootId,
+          elementId: revised.root.elementId,
+          kind: revised.root.kind,
+          configuration: "default",
+        },
+      });
+      yield* h.dispatch({
+        type: "project.cad.operation.complete",
+        projectId,
+        operationId,
+        result: {
+          kind: "sync",
+          snapshot: {
+            snapshotId: revised.snapshotId,
+            microversionId: revised.root.microversionId,
+            createdAt: later,
+            manifestBytes: 1,
+            assetBytes: 0,
+          },
+        },
+      });
+
+      const turnId = TurnId.make("diff-second-review");
+      const page = yield* decodeDiff(
+        (yield* tools.invoke(null, turnId, "cad_diff", { limit: 1 })).result,
+      );
+      assert.equal(page.base.snapshotId, snapshot.snapshotId);
+      assert.equal(page.target.snapshotId, revised.snapshotId);
+      assert.equal(page.target.microversionId, revised.root.microversionId);
+      assert.include(page.baseSelection, "rollback, comments; inspected by comment #1");
+      assert.deepEqual(page.counts, {
+        added: 1,
+        removed: 0,
+        modified: 1,
+        moved: 0,
+        geometryChanged: 0,
+        renamed: 1,
+        suppressionChanged: 0,
+        visibilityChanged: 0,
+        unchanged: 0,
+      });
+      assert.deepEqual(
+        page.retainedSnapshots.map((item) => [
+          item.snapshotId,
+          item.retainedBy,
+          item.commentNumbers,
+        ]),
+        [
+          [revised.snapshotId, ["current"], []],
+          [snapshot.snapshotId, ["rollback", "comments"], [1]],
+        ],
+      );
+      assert.deepEqual(page.entries, [
+        {
+          status: "added",
+          occurrencePath: ["bracket"],
+          name: "Bracket",
+          previousName: null,
+          kind: "part",
+          baseOccurrenceId: null,
+          targetOccurrenceId: "4".repeat(64),
+          changes: [],
+        },
+      ]);
+      assert.equal(page.nextCursor, `${snapshot.snapshotId}:${revised.snapshotId}:1`);
+      // Later pages reuse the cached diff and never rebind the pinned snapshot.
+      const pinsBefore = h.pins();
+      const rest = yield* decodeDiff(
+        (yield* tools.invoke(null, turnId, "cad_diff", { cursor: page.nextCursor! })).result,
+      );
+      assert.equal(h.pins(), pinsBefore);
+      assert.deepEqual(
+        rest.entries.map((entry) => [
+          entry.status,
+          entry.previousName,
+          entry.name,
+          ...entry.changes,
+        ]),
+        [["modified", "Intake", "Intake v2", "renamed"]],
+      );
+      assert.isNull(rest.nextCursor);
+      const same = yield* tools
+        .invoke(null, turnId, "cad_diff", { baseSnapshotId: revised.snapshotId })
+        .pipe(Effect.flip);
+      assert.include(same.details, "same snapshot");
+      const unknown = yield* tools
+        .invoke(null, turnId, "cad_diff", {
+          baseSnapshotId: "00000000-0000-4000-8000-0000000000ff",
+        })
+        .pipe(Effect.flip);
+      assert.equal(unknown.reason, "invalid-operation");
+      assert.include(unknown.details, snapshot.snapshotId);
+      yield* tools.end(null, turnId);
+    }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
 it.effect("marks only the selected missing root unavailable in the panel", () =>
