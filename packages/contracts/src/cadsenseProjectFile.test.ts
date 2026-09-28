@@ -56,4 +56,9 @@ describe("CadsenseProjectFile", () => {
 
     expect(decoded.iconPath).toBe("assets/logo.svg");
   });
+
+  it("decodes and trims the design brief path", () => {
+    expect(decode({ designBrief: " docs/brief.md " }).designBrief).toBe("docs/brief.md");
+    expect(() => decode({ designBrief: "" })).toThrow();
+  });
 });

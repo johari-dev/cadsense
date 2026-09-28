@@ -1,10 +1,11 @@
 import type { CadReviewScope } from "@cadsense/contracts";
 import { describeCadReviewScopeMatch } from "@cadsense/shared/cadReviewScopes";
+import type { CadDesignBrief } from "../cad/CadDesignBrief.ts";
 
-/** Review guidance shared by every project. Projects add review scopes and learnings through {@link cadReviewInstructions}. */
+/** Review guidance shared by every project. Projects add context through {@link cadReviewInstructions}. */
 export const CAD_REVIEW_INSTRUCTIONS = [
   "CAD review defaults: A request to review a design is enough to inspect it and leave useful CAD comments. Use the user's context to choose what to investigate; the user need not specify review criteria or writing style.",
-  "Understand the intended motion and the reason for the design choices before suggesting changes. Distinguish what the user said, what you observed, and what you inferred. Inspect the model to resolve uncertainty first. If an ambiguity changes the recommendation, ask a specific question and continue independent checks. A motor moving with a stage is not evidence of a loose mount. Compact packaging may be intentional; understand the constraint before proposing a different layout.",
+  "Understand the intended motion and the reason for the design choices before suggesting changes. Distinguish what the user said, what you observed, and what you inferred. When a project design brief is provided below, prefer it over inference about intent, constraints, and purchased parts, and ask when the brief and the model disagree. Inspect the model to resolve uncertainty first. If an ambiguity changes the recommendation, ask a specific question and continue independent checks. A motor moving with a stage is not evidence of a loose mount. Compact packaging may be intentional; understand the constraint before proposing a different layout.",
   "Check that the mechanism works as modeled before judging the design choices. Trace power from each motor through every gear, belt, and shaft to the part it drives, and confirm that each stage meshes or connects and that every shaft is carried by bearings or a mount. Look for parts that overlap each other, duplicate another part, or float with nothing holding them. When the user has not said one of these is unfinished, it is a finding.",
   "Then walk through how the mechanism will be built, wired, run, and repaired, following the actual parts: tool access to fasteners, what must come apart to replace a worn part, and where cables bend through travel. Use these to investigate, not as a checklist to paste into the review. Lead with the most consequential supported concern and explain its effect on use. If the evidence does not establish a main concern, say what still needs checking instead of inventing one.",
   "Suggest changes with reasons and relevant tradeoffs. Added support can add weight; tighter packaging can obstruct repairs. Use the team's stated operating and repair goals. A fast part swap, a material choice, or a particular retainer is not a universal requirement. When alternatives depend on missing information, ask the local design question rather than prescribing a fix.",
@@ -48,23 +49,37 @@ const reviewScopesSection = (scopes: ReadonlyArray<CadReviewScope>): string | nu
   ].join("\n");
 };
 
-/**
- * Review guidance for one project: the shared instructions, then the project's cadsense.json
- * review scopes, then one line per learning the user left when dismissing earlier findings.
- * Empty sections are omitted, so a project with neither gets the shared text alone.
- */
-export const cadReviewInstructions = (context: {
+/** Project context appended to the shared review guidance for one session or turn. */
+export interface CadReviewContext {
+  /** Notes the user left when dismissing earlier findings. */
   readonly learnings: ReadonlyArray<{ readonly text: string }>;
+  /** The workspace design brief, when the project has one. */
+  readonly designBrief?: CadDesignBrief | null;
+  /** The project's cadsense.json review scopes. */
   readonly scopes?: ReadonlyArray<CadReviewScope>;
-}): string =>
+}
+
+/**
+ * Review guidance for one project session or turn: the shared instructions, then the project
+ * design brief, then the cadsense.json review scopes, then one line per learning. Empty sections
+ * are omitted, so a project with none of them gets the shared text alone.
+ */
+export const cadReviewInstructions = ({
+  learnings,
+  designBrief,
+  scopes = [],
+}: CadReviewContext): string =>
   [
     CAD_REVIEW_INSTRUCTIONS,
-    reviewScopesSection(context.scopes ?? []),
-    context.learnings.length === 0
+    designBrief
+      ? `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`
+      : null,
+    reviewScopesSection(scopes),
+    learnings.length === 0
       ? null
       : [
           CAD_REVIEW_LEARNINGS_HEADING,
-          ...context.learnings.map((learning) => `- ${singleLine(learning.text)}`),
+          ...learnings.map((learning) => `- ${singleLine(learning.text)}`),
         ].join("\n"),
   ]
     .filter((section) => section !== null)

@@ -596,7 +596,10 @@ describe("cadsense browser developer instructions", () => {
       { match: { path: "Drivetrain*/**" }, instructions: "Gearbox ratio is fixed." },
     ];
     for (const mode of ["default", "plan"] as const) {
-      const scoped = buildCodexDeveloperInstructions(mode, runtime, false, true, [], scopes);
+      const scoped = buildCodexDeveloperInstructions(mode, runtime, false, true, {
+        learnings: [],
+        scopes,
+      });
       NodeAssert.match(scoped, /Ignored components .*: name \*bolt\*\./);
       NodeAssert.match(
         scoped,
@@ -608,7 +611,7 @@ describe("cadsense browser developer instructions", () => {
       );
       // Scopes only matter alongside the CAD tools that act on them.
       NodeAssert.doesNotMatch(
-        buildCodexDeveloperInstructions(mode, runtime, false, false, [], scopes),
+        buildCodexDeveloperInstructions(mode, runtime, false, false, { learnings: [], scopes }),
         /Review scopes/,
       );
     }
@@ -973,7 +976,7 @@ describe("CAD review learnings in developer instructions", () => {
   ];
   it("lists each learning under the heading, in order, only with CAD tools attached", () => {
     for (const mode of ["default", "plan"] as const) {
-      const text = buildCodexDeveloperInstructions(mode, runtime, false, true, learnings);
+      const text = buildCodexDeveloperInstructions(mode, runtime, false, true, { learnings });
       const heading = text.indexOf(CAD_REVIEW_LEARNINGS_HEADING);
       const first = text.indexOf("- Vent holes are intentional.");
       const second = text.indexOf("- The motor is a placeholder; skip its mount.");
@@ -984,7 +987,7 @@ describe("CAD review learnings in developer instructions", () => {
         /past dismissals/,
       );
       NodeAssert.doesNotMatch(
-        buildCodexDeveloperInstructions(mode, runtime, false, false, learnings),
+        buildCodexDeveloperInstructions(mode, runtime, false, false, { learnings }),
         /Vent holes/,
       );
     }

@@ -31,7 +31,12 @@ describe("buildCadsenseProjectFileJsonSchema", () => {
       required?: ReadonlyArray<string>;
     };
 
-    expect(Object.keys(schema.properties).sort()).toEqual(["$schema", "iconPath", "reviewScopes"]);
+    expect(Object.keys(schema.properties).sort()).toEqual([
+      "$schema",
+      "designBrief",
+      "iconPath",
+      "reviewScopes",
+    ]);
     expect(schema.required).toBeUndefined();
     expect(schema.properties.iconPath?.description).toContain("Workspace-relative path");
     const scope = schema.properties.reviewScopes?.items;
@@ -42,6 +47,7 @@ describe("buildCadsenseProjectFileJsonSchema", () => {
       "match",
     ]);
     expect(JSON.stringify(scope)).toContain("Case-insensitive glob");
+    expect(schema.properties.designBrief?.description).toContain('default "DESIGN.md"');
   });
 
   it("stays JSON-serializable", () => {

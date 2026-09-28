@@ -1,6 +1,5 @@
 import {
   ApprovalRequestId,
-  type CadReviewScope,
   DEFAULT_MODEL,
   EventId,
   ProviderDriverKind,
@@ -42,6 +41,8 @@ import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
+import type { CadReviewContext } from "../CadReviewInstructions.ts";
+import type { CadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import { handleCodexCadCall, codexCadFailure } from "./CodexCadTools.ts";
 import { compactCodexCadItem } from "../CadProviderContent.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
@@ -171,6 +172,8 @@ export interface CodexSessionRuntimeOptions {
   readonly cad?: CadProviderTools;
   /** Read at every turn start so a learning added mid-session reaches the next turn. */
   readonly cadReviewLearnings?: Effect.Effect<ReadonlyArray<{ readonly text: string }>>;
+  /** Reads the workspace design brief; run before each CAD turn so edits apply without a restart. */
+  readonly designBrief?: Effect.Effect<CadDesignBrief | null>;
   readonly onProcessSpawned?: (receipt: CodexProcessReceipt) => void;
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
@@ -639,8 +642,8 @@ function buildCodexCollaborationMode(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
-  readonly cadReviewLearnings?: ReadonlyArray<{ readonly text: string }>;
-  readonly cadReviewScopes?: ReadonlyArray<CadReviewScope>;
+  /** Project review context for the CAD guidance. Ignored without CAD tools. */
+  readonly cadReview?: CadReviewContext;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -657,8 +660,7 @@ function buildCodexCollaborationMode(input: {
         { model, reasoningEffort },
         input.browserToolsAvailable ?? true,
         input.cadToolsAvailable ?? false,
-        input.cadReviewLearnings ?? [],
-        input.cadReviewScopes ?? [],
+        input.cadReview,
       ),
     },
   };
@@ -680,8 +682,8 @@ export function buildTurnStartParams(input: {
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
-  readonly cadReviewLearnings?: ReadonlyArray<{ readonly text: string }>;
-  readonly cadReviewScopes?: ReadonlyArray<CadReviewScope>;
+  /** Project review context for the CAD guidance. Ignored without CAD tools. */
+  readonly cadReview?: CadReviewContext;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -707,8 +709,7 @@ export function buildTurnStartParams(input: {
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
     cadToolsAvailable: input.cadToolsAvailable ?? false,
-    ...(input.cadReviewLearnings ? { cadReviewLearnings: input.cadReviewLearnings } : {}),
-    ...(input.cadReviewScopes ? { cadReviewScopes: input.cadReviewScopes } : {}),
+    ...(input.cadReview ? { cadReview: input.cadReview } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2549,13 +2550,16 @@ export const makeCodexSessionRuntime = (
               )
             : { prompt: input.input ?? "", skills: [] };
           const cadToolsAvailable = !!options.cad && cadToolsEnabled;
-          const cadReviewLearnings =
-            cadToolsAvailable && options.cadReviewLearnings
-              ? yield* options.cadReviewLearnings
-              : [];
-          // Read per turn so cadsense.json edits reach the next turn without a restart.
-          const cadReviewScopes =
-            cadToolsAvailable && options.cad ? yield* options.cad.reviewScopes : [];
+          // Read per turn so new learnings and edits to the brief or cadsense.json reach the next
+          // turn without a restart.
+          const cadReview: CadReviewContext | undefined =
+            cadToolsAvailable && options.cad
+              ? {
+                  learnings: options.cadReviewLearnings ? yield* options.cadReviewLearnings : [],
+                  designBrief: options.designBrief ? yield* options.designBrief : null,
+                  scopes: yield* options.cad.reviewScopes,
+                }
+              : undefined;
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -2571,8 +2575,7 @@ export const makeCodexSessionRuntime = (
             // has even if the setting changed after the session started.
             browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
             cadToolsAvailable,
-            cadReviewLearnings,
-            cadReviewScopes,
+            ...(cadReview ? { cadReview } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

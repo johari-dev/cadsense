@@ -13,6 +13,7 @@ import wire from "../testFixtures/codexMultiAgentWire.json" with { type: "json" 
 import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
 import { CAD_REVIEW_INSTRUCTIONS } from "../CadReviewInstructions.ts";
+import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeResponses = Schema.decodeUnknownSync(
@@ -55,6 +56,8 @@ it.effect.each([
     const fs = yield* FileSystem.FileSystem;
     const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-resume-" });
     const scriptPath = NodePath.join(cwd, "script.json");
+    const designBrief = "The elevator motor rides on the moving stage by design.";
+    yield* fs.writeFileString(NodePath.join(cwd, "DESIGN.md"), designBrief);
     yield* fs.writeFileString(
       scriptPath,
       encodeJson({
@@ -75,6 +78,7 @@ it.effect.each([
       resumeCursor: { threadId: wire.rootThreadId, cadTools: registered },
       ...(attached
         ? {
+            designBrief: readCadDesignBrief(cwd).pipe(Effect.provide(NodeServices.layer)),
             cad: {
               close: Effect.void,
               invoke: () => Effect.succeed({ result: {} }),
@@ -123,6 +127,10 @@ it.effect.each([
     assert.strictEqual(requests.includes("## Local CAD tools"), attached && registered);
     assert.strictEqual(
       requests.includes(encodeJson(CAD_REVIEW_INSTRUCTIONS).slice(1, -1)),
+      attached && registered,
+    );
+    assert.strictEqual(
+      requests.includes(`Project design brief (DESIGN.md)`) && requests.includes(designBrief),
       attached && registered,
     );
     assert.strictEqual(requests.includes("- Vent holes are intentional."), attached && registered);

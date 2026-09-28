@@ -48,6 +48,7 @@ import {
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import { readCadReviewScopes } from "./CadReviewScopes.ts";
 import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewScopes";
+import { readCadDesignBrief } from "./CadDesignBrief.ts";
 import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
 import {
   cadDiffSnapshot,
@@ -111,7 +112,7 @@ export const make = Effect.gen(function* () {
   const query = yield* ProjectionSnapshotQuery;
   const store = yield* CadSnapshotStore;
   const crypto = yield* Crypto.Crypto;
-  const fs = yield* FileSystem.FileSystem;
+  const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
   const commentService = yield* Effect.serviceOption(CadComments);
@@ -151,7 +152,7 @@ export const make = Effect.gen(function* () {
   });
   const projectReviewScopes = (workspaceRoot: string) =>
     readCadReviewScopes(workspaceRoot).pipe(
-      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
     );
   const reviewScopes = Effect.fn("CadViewing.reviewScopes")(function* (threadId: ThreadId) {
@@ -320,9 +321,14 @@ export const make = Effect.gen(function* () {
               const initialized = yield* initialize();
               const state = initialized?.state ?? null;
               const { project, roots } = yield* availableRoots();
+              const designBrief = yield* readCadDesignBrief(project.workspaceRoot).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+              );
               return {
                 state,
                 revision: state?.revision ?? currentSession.revision ?? 0,
+                designBrief: designBrief && { path: designBrief.path, bytes: designBrief.bytes },
                 roots: roots.map((root) => ({
                   rootId: root.rootId,
                   kind: root.kind,
