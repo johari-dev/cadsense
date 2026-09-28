@@ -122,5 +122,13 @@ export function bulkFixture(count = 400) {
       { bufferView: 1, componentType: 5126, count: 3, type: "VEC3" },
     ],
   };
-  return { definition, gltf, bytes: new TextEncoder().encode(encodeFixture(gltf)) };
+  const metadata = parts.map((part, i) => ({
+    partId: part.partId,
+    name: `Part ${i}`,
+    bodyType: part.bodyType,
+    elementId: part.elementId,
+    microversionId: part.documentMicroversion,
+    appearance: { color: { red: 64, green: 64, blue: 64 }, opacity: 255 },
+  }));
+  return { definition, metadata, gltf, bytes: new TextEncoder().encode(encodeFixture(gltf)) };
 }

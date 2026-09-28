@@ -28,6 +28,7 @@ import {
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import { readCadSessionIndexes } from "../../cad/CadSessionPersistence.ts";
+import { readProjectCadReviewLearnings } from "../../cad/CadCommentPersistence.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -2078,6 +2079,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       Effect.map(Option.map(mapProjectShellRow)),
     );
 
+  const getCadReviewLearnings: ProjectionSnapshotQueryShape["getCadReviewLearnings"] = (
+    projectId,
+  ) =>
+    readProjectCadReviewLearnings(projectId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getCadReviewLearnings:query",
+          "ProjectionSnapshotQuery.getCadReviewLearnings:decodeRows",
+        ),
+      ),
+    );
+
   const listPendingOnshapeProjects: ProjectionSnapshotQueryShape["listPendingOnshapeProjects"] =
     () =>
       listPendingOnshapeProjectRows(undefined).pipe(
@@ -2480,6 +2494,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getCounts,
     getActiveProjectByWorkspaceRoot,
     getProjectShellById,
+    getCadReviewLearnings,
     listPendingOnshapeProjects,
     getFirstActiveThreadIdByProjectId,
     getThreadShellById,

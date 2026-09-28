@@ -1,5 +1,6 @@
 import {
   CAD_CAPTURE_SIZE,
+  type CadRenderError,
   CadViewError,
   CommandId,
   type CadCaptureToolResult,
@@ -30,6 +31,14 @@ export class CadCaptureArtifacts extends Context.Service<
   }
 >()("@cadsense/server/cad/CadCaptureArtifacts") {}
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
+const RENDER_RECOVERY: Record<CadRenderError["reason"], string> = {
+  unavailable:
+    "No open Cadsense window is connected to render CAD. Ask the user to keep Cadsense open, then retry.",
+  busy: "The renderer is busy with other views. Retry the same capture.",
+  interrupted: "The render was cancelled or timed out. Retry the same capture once.",
+  "invalid-result":
+    "The open renderer could not produce this view. Retry once; if it fails again, tell the user CAD rendering failed.",
+};
 
 export const make = Effect.gen(function* () {
   const broker = yield* CadRenderBroker;
@@ -41,7 +50,17 @@ export const make = Effect.gen(function* () {
   const capture = Effect.fn("CadCaptureArtifacts.capture")(function* (
     input: CadRenderRequest & { readonly threadId: ThreadId; readonly turnId: TurnId },
   ) {
-    const rendered = yield* broker.capture(input).pipe(Effect.mapError(unavailable));
+    // Distinct render reasons, with recovery steps in the response itself because resumed
+    // providers can keep older tool descriptions.
+    const rendered = yield* broker.capture(input).pipe(
+      Effect.mapError(
+        (cause) =>
+          new CadViewError({
+            reason: `render-${cause.reason}`,
+            details: RENDER_RECOVERY[cause.reason],
+          }),
+      ),
+    );
     const captureId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable));
     const artifactPath = path.join(config.attachmentsDir, `cad-${captureId}.png`);
     const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -57,7 +76,7 @@ export const make = Effect.gen(function* () {
         byteLength: rendered.png.byteLength,
         createdAt,
       },
-      summary: "CAD view captured.",
+      summary: `Captured view revision ${input.state.revision} as a ${CAD_CAPTURE_SIZE.width}x${CAD_CAPTURE_SIZE.height} PNG. Use this captureId and image pixel coordinates with cad_comment_locate.`,
     };
     // Once file publication starts, wait for the durable record receipt before returning or cancelling.
     yield* Effect.uninterruptible(

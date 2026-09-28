@@ -8,7 +8,7 @@ import { readOnshapeExportGeometry } from "./OnshapeExportGeometry.ts";
 import {
   parseAssemblySnapshotDraft,
   snapshotRootId,
-  withAssemblyExportMetadata,
+  enrichSnapshotMetadata,
 } from "./OnshapeSnapshotManifest.ts";
 import {
   bulkFixture,
@@ -53,10 +53,13 @@ describe("Onshape export geometry", () => {
         ...fixture.definition,
         parts: fixture.definition.parts.map((part) => ({ ...part, bodyType: "composite" })),
       };
-      const draft = yield* withAssemblyExportMetadata(
-        yield* parseAssemblySnapshotDraft(context, definition),
-        definition,
-      );
+      const base = yield* parseAssemblySnapshotDraft(context, definition);
+      const draft = yield* enrichSnapshotMetadata(base, [
+        {
+          source: base.parts[0]!.source,
+          response: fixture.metadata.map((part) => ({ ...part, bodyType: "composite" })),
+        },
+      ]);
       const gltf = {
         ...fixture.gltf,
         nodes: [

@@ -1,3 +1,4 @@
+import * as NodeURL from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
@@ -106,6 +107,13 @@ export default defineConfig(({ command }) => ({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: buildSourcemap,
+    // render-host.html is the headless renderer page for `cadsense mcp`.
+    rollupOptions: {
+      input: {
+        main: NodeURL.fileURLToPath(new URL("./index.html", import.meta.url)),
+        renderHost: NodeURL.fileURLToPath(new URL("./render-host.html", import.meta.url)),
+      },
+    },
   },
   test: {
     projects: [defineProject(unitTestProject)],
