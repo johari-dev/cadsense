@@ -84,6 +84,7 @@ it.effect.each([
               invoke: () => Effect.succeed({ result: {} }),
               end: () => Effect.void,
             },
+            cadReviewLearnings: Effect.succeed([{ text: "Vent holes are intentional." }]),
           }
         : {}),
     }).pipe(
@@ -131,6 +132,7 @@ it.effect.each([
       requests.includes(`Project design brief (DESIGN.md)`) && requests.includes(designBrief),
       attached && registered,
     );
+    assert.strictEqual(requests.includes("- Vent holes are intentional."), attached && registered);
     yield* runtime.close;
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
@@ -252,6 +254,8 @@ it.effect(
           "cad_comments_publish",
           "cad_context",
           "cad_hierarchy",
+          "cad_checks",
+          "cad_diff",
           "cad_update_view",
           "cad_capture",
         ],

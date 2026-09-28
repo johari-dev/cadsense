@@ -2137,6 +2137,48 @@ function createMockStorage() {
   };
 }
 
+describe("composerDraftStore seedPrompt", () => {
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-seed"));
+  const seed = 'About CAD comment #4 "Missing screw" (Bracket): ';
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("takes the seed as the whole prompt when the draft is empty", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "   ");
+    expect(store.seedPrompt(threadRef, seed, 1)).toBe(seed.length);
+    expect(store.getComposerDraft(threadRef)?.prompt).toBe(seed);
+  });
+
+  it("appends on its own line when no cursor is known or the cursor is at the end", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "check the bracket");
+    expect(store.seedPrompt(threadRef, seed, null)).toBe(
+      "check the bracket\n".length + seed.length,
+    );
+    expect(store.getComposerDraft(threadRef)?.prompt).toBe(`check the bracket\n${seed}`);
+
+    store.setPrompt(threadRef, "already on a line\n");
+    const cursor = store.seedPrompt(threadRef, seed, "already on a line\n".length);
+    expect(store.getComposerDraft(threadRef)?.prompt).toBe(`already on a line\n${seed}`);
+    expect(cursor).toBe(store.getComposerDraft(threadRef)?.prompt.length);
+  });
+
+  it("inserts at a mid-draft cursor with a word boundary and returns the cursor after the seed", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "why does this fail?");
+    const cursor = store.seedPrompt(threadRef, seed, "why does".length);
+    expect(store.getComposerDraft(threadRef)?.prompt).toBe(`why does ${seed} this fail?`);
+    expect(cursor).toBe("why does ".length + seed.length);
+
+    store.setPrompt(threadRef, "why does this fail?");
+    store.seedPrompt(threadRef, seed, "why does ".length);
+    expect(store.getComposerDraft(threadRef)?.prompt).toBe(`why does ${seed}this fail?`);
+  });
+});
+
 describe("createDebouncedStorage", () => {
   beforeEach(() => {
     vi.useFakeTimers();

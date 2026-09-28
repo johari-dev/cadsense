@@ -28,7 +28,7 @@ Contents are free-form. These headings cover what reviews most often get wrong w
 
 ## How it reaches the agent
 
-`CadDesignBrief.ts` reads the file. `buildCadReviewInstructions` appends it after the shared review guidance under "Project design brief (path), written by the designer", and the guidance tells the agent to prefer the brief over inference and to ask when the brief and the model disagree.
+`CadDesignBrief.ts` reads the file. `cadReviewInstructions` appends it after the shared review guidance and before any review learnings, under "Project design brief (path), written by the designer", and the guidance tells the agent to prefer the brief over inference and to ask when the brief and the model disagree.
 
 Codex reads the brief on every turn, so an edit applies to the next message. Claude reads it when its session starts, because the SDK fixes the system prompt for the life of the process; edits reach a Claude chat after the session restarts. `cad_context` reports `designBrief: { path, bytes }` for the file as it is on disk, or `null`, so a user can confirm the brief was picked up.
 

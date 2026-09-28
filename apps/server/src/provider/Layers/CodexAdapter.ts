@@ -1716,16 +1716,24 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             !project.value.cad?.roots.some((root) => root.current !== null)
           )
             return undefined;
-          return yield* makeCadProviderTools(input.threadId).pipe(
-            Effect.provideService(CadViewing, cadViewing.value),
-            Effect.provideService(Scope.Scope, sessionScope),
-          );
+          const projectId = project.value.id;
+          return {
+            tools: yield* makeCadProviderTools(input.threadId).pipe(
+              Effect.provideService(CadViewing, cadViewing.value),
+              Effect.provideService(Scope.Scope, sessionScope),
+            ),
+            // A failed read only costs this turn its learnings; the review still runs.
+            reviewLearnings: cadQuery.value
+              .getCadReviewLearnings(projectId)
+              .pipe(Effect.orElseSucceed(() => [])),
+          };
         }).pipe(Effect.orElseSucceed(() => undefined));
         const runtime = yield* createRuntime({
           ...runtimeInput,
           ...(cad
             ? {
-                cad,
+                cad: cad.tools,
+                cadReviewLearnings: cad.reviewLearnings,
                 designBrief: readCadDesignBrief(runtimeInput.cwd).pipe(
                   Effect.provideService(FileSystem.FileSystem, fileSystem),
                   Effect.provideService(Path.Path, path),

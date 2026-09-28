@@ -62,6 +62,27 @@ const decodeBom = Schema.decodeUnknownOption(Bom);
 const decodeRow = Schema.decodeUnknownOption(BomRow);
 const decodePartMetadata = Schema.decodeUnknownOption(CadPartMetadata);
 
+// Standard Onshape metadata property IDs, which the BOM also uses as column IDs.
+const BOM_COLUMNS = {
+  name: "57f3fb8efa3416c06701d60d",
+  appearance: "57f3fb8efa3416c06701d60c",
+  material: "57f3fb8efa3416c06701d615",
+  mass: "57f3fb8efa3416c06701d626",
+} as const;
+const KILOGRAMS_PER_UNIT = new Map([
+  ["kg", 1],
+  ["g", 0.001],
+  ["lb", 0.45359237],
+  ["oz", 0.028349523125],
+]);
+// BOM mass arrives as text in the document's units, such as "0.903691 lb".
+// Blank, malformed, or unknown-unit values yield no mass rather than a guess.
+const bomMassKg = (value: unknown) => {
+  const match = typeof value === "string" ? /^(\d+(?:\.\d+)?) ([a-z]+)$/.exec(value) : null;
+  const perUnit = match ? KILOGRAMS_PER_UNIT.get(match[2]!) : undefined;
+  return match && perUnit !== undefined ? { massKg: Number(match[1]) * perUnit } : {};
+};
+
 // Onshape abbreviates configurations by omitting default-valued parameters.
 // Accept an abbreviation only if it identifies one source in this pinned assembly.
 const configurationEntries = (configuration: string) => {
@@ -160,14 +181,15 @@ function withBomMetadata(draft: CadSnapshotDraft, definition: unknown, response:
     const matches = exact.length > 0 ? exact : abbreviated.length === 1 ? abbreviated : [];
     for (const part of matches) {
       const metadata = decodePartMetadata({
-        name: props["57f3fb8efa3416c06701d60d"],
+        name: props[BOM_COLUMNS.name],
         bodyType: bodyTypes.get(part.geometryKey),
         isHidden: null,
         isMesh: null,
         partIdentity: ref.partIdentity ?? null,
         configurationId: null,
-        appearance: props["57f3fb8efa3416c06701d60c"],
-        material: props["57f3fb8efa3416c06701d615"] ?? null,
+        appearance: props[BOM_COLUMNS.appearance],
+        material: props[BOM_COLUMNS.material] ?? null,
+        ...bomMassKg(props[BOM_COLUMNS.mass]),
       });
       if (Option.isNone(metadata)) {
         conflicting.add(part.geometryKey);
@@ -213,7 +235,7 @@ export const onshapePartStudioRequest = Effect.fn(function* (
   };
 });
 
-/** Read expanded BOM appearance once; fetch studio metadata only for unresolved sources. */
+/** Read expanded BOM appearance, material, and mass once; fetch studio metadata only for unresolved sources. */
 export const acquireSnapshotMetadata = <E, R>(
   input: CadSnapshotDraft,
   read: (path: string, query?: string) => Effect.Effect<unknown, E, R>,
@@ -235,12 +257,7 @@ export const acquireSnapshotMetadata = <E, R>(
         includeItemMicroversions: "true",
         onlyVisibleColumns: "false",
       });
-      for (const id of [
-        "57f3fb8efa3416c06701d60d",
-        "57f3fb8efa3416c06701d60c",
-        "57f3fb8efa3416c06701d615",
-      ])
-        query.append("bomColumnIds", id);
+      for (const id of Object.values(BOM_COLUMNS)) query.append("bomColumnIds", id);
       const response = yield* read(
         `${ONSHAPE_API_BASE_PATH}/assemblies/d/${root.documentId}/m/${root.microversionId}/e/${root.elementId}/bom`,
         query.toString(),

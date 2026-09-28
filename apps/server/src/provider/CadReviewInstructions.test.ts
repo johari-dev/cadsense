@@ -1,6 +1,9 @@
-import { assert, it } from "@effect/vitest";
-
-import { CAD_REVIEW_INSTRUCTIONS, buildCadReviewInstructions } from "./CadReviewInstructions.ts";
+import { describe, expect, it } from "vite-plus/test";
+import {
+  CAD_REVIEW_INSTRUCTIONS,
+  CAD_REVIEW_LEARNINGS_HEADING,
+  cadReviewInstructions,
+} from "./CadReviewInstructions.ts";
 import { buildCodexDeveloperInstructions } from "./CodexDeveloperInstructions.ts";
 
 const brief = {
@@ -10,28 +13,62 @@ const brief = {
 };
 const runtime = { model: "gpt-5.6-terra", reasoningEffort: "medium" };
 
-it("appends the design brief after the shared review guidance", () => {
-  assert.equal(buildCadReviewInstructions(null), CAD_REVIEW_INSTRUCTIONS);
-  const withBrief = buildCadReviewInstructions(brief);
-  assert.ok(withBrief.startsWith(CAD_REVIEW_INSTRUCTIONS));
-  assert.include(
-    withBrief,
-    "Project design brief (DESIGN.md), written by the designer. Treat it as the user's stated intent and constraints:\n\n# Arm",
-  );
-  assert.include(CAD_REVIEW_INSTRUCTIONS, "prefer it over inference");
+describe("cadReviewInstructions", () => {
+  it("is the shared guidance alone without learnings or a design brief", () => {
+    expect(cadReviewInstructions({ learnings: [] })).toBe(CAD_REVIEW_INSTRUCTIONS);
+    expect(cadReviewInstructions({ learnings: [], designBrief: null })).toBe(
+      CAD_REVIEW_INSTRUCTIONS,
+    );
+  });
+  it("appends one line per learning in order after the shared guidance", () => {
+    const text = cadReviewInstructions({
+      learnings: [
+        { text: "Vent holes are intentional." },
+        { text: "The motor is a placeholder;\n  do not review its mount." },
+      ],
+    });
+    expect(text.startsWith(`${CAD_REVIEW_INSTRUCTIONS}\n\n${CAD_REVIEW_LEARNINGS_HEADING}\n`)).toBe(
+      true,
+    );
+    expect(text.split("\n").slice(-2)).toEqual([
+      "- Vent holes are intentional.",
+      "- The motor is a placeholder; do not review its mount.",
+    ]);
+  });
+  it("appends the design brief after the shared review guidance", () => {
+    const withBrief = cadReviewInstructions({ learnings: [], designBrief: brief });
+    expect(withBrief.startsWith(CAD_REVIEW_INSTRUCTIONS)).toBe(true);
+    expect(withBrief).toContain(
+      "Project design brief (DESIGN.md), written by the designer. Treat it as the user's stated intent and constraints:\n\n# Arm",
+    );
+    expect(CAD_REVIEW_INSTRUCTIONS).toContain("prefer it over inference");
+  });
+  it("puts the design brief before the learnings", () => {
+    const text = cadReviewInstructions({
+      learnings: [{ text: "Vent holes are intentional." }],
+      designBrief: brief,
+    });
+    const briefAt = text.indexOf("Project design brief (DESIGN.md)");
+    const learningsAt = text.indexOf(CAD_REVIEW_LEARNINGS_HEADING);
+    expect(briefAt).toBeGreaterThan(CAD_REVIEW_INSTRUCTIONS.length - 1);
+    expect(learningsAt).toBeGreaterThan(briefAt);
+    expect(text.endsWith("- Vent holes are intentional.")).toBe(true);
+  });
 });
 
-it("gives Codex the brief only with CAD tools", () => {
-  const withBrief = buildCodexDeveloperInstructions("default", runtime, true, true, brief);
-  assert.include(withBrief, "## Local CAD tools");
-  assert.include(withBrief, "Project design brief (DESIGN.md)");
-  assert.include(withBrief, brief.content);
+describe("design brief in Codex developer instructions", () => {
+  it("gives Codex the brief only with CAD tools", () => {
+    const withBrief = buildCodexDeveloperInstructions("default", runtime, true, true, [], brief);
+    expect(withBrief).toContain("## Local CAD tools");
+    expect(withBrief).toContain("Project design brief (DESIGN.md)");
+    expect(withBrief).toContain(brief.content);
 
-  const withoutBrief = buildCodexDeveloperInstructions("default", runtime, true, true, null);
-  assert.include(withoutBrief, CAD_REVIEW_INSTRUCTIONS);
-  assert.notInclude(withoutBrief, "Project design brief");
+    const withoutBrief = buildCodexDeveloperInstructions("default", runtime, true, true, [], null);
+    expect(withoutBrief).toContain(CAD_REVIEW_INSTRUCTIONS);
+    expect(withoutBrief).not.toContain("Project design brief");
 
-  const withoutCad = buildCodexDeveloperInstructions("default", runtime, true, false, brief);
-  assert.notInclude(withoutCad, "Project design brief");
-  assert.notInclude(withoutCad, brief.content);
+    const withoutCad = buildCodexDeveloperInstructions("default", runtime, true, false, [], brief);
+    expect(withoutCad).not.toContain("Project design brief");
+    expect(withoutCad).not.toContain(brief.content);
+  });
 });

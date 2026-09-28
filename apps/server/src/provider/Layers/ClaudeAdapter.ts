@@ -6,7 +6,7 @@
  *
  * @module ClaudeAdapterLive
  */
-import { buildCadReviewInstructions } from "../CadReviewInstructions.ts";
+import { cadReviewInstructions } from "../CadReviewInstructions.ts";
 import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import {
   type CanUseTool,
@@ -4422,23 +4422,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
-        return {
-          scope,
-          tools,
-          providerSessionId: mcpSession.providerSessionId,
-          turnIds,
-          ended: new Set<string>(),
-        };
-      }).pipe(Effect.orElseSucceed(() => undefined));
-      // The SDK fixes the system prompt for the life of the process, so the brief is read here and
-      // edits reach Claude when the session restarts. Codex re-reads it on every turn.
-      const designBrief =
-        cad && input.cwd
+        // The system prompt is fixed for the session, so learnings and design brief edits made
+        // later reach Claude when its next session starts. Codex re-reads both on every turn.
+        // A failed learnings read only costs this session its learnings.
+        const learnings = yield* cadQuery.value
+          .getCadReviewLearnings(project.value.id)
+          .pipe(Effect.orElseSucceed(() => []));
+        const designBrief = input.cwd
           ? yield* readCadDesignBrief(input.cwd).pipe(
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.provideService(Path.Path, path),
             )
           : null;
+        return {
+          scope,
+          tools,
+          reviewInstructions: cadReviewInstructions({ learnings, designBrief }),
+          providerSessionId: mcpSession.providerSessionId,
+          turnIds,
+          ended: new Set<string>(),
+        };
+      }).pipe(Effect.orElseSucceed(() => undefined));
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment
@@ -4473,7 +4477,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(cad ? { append: buildCadReviewInstructions(designBrief) } : {}),
+          ...(cad ? { append: cad.reviewInstructions } : {}),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
