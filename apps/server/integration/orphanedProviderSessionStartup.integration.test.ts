@@ -68,8 +68,7 @@ const startupDependencies = Layer.mergeAll(
   }),
   Layer.succeed(OnshapeVersionReviews, {
     start: () => Effect.void,
-    pollAll: () => Effect.void,
-    pollProject: () => Effect.void,
+    check: () => Effect.succeed({ status: "skipped", reason: "disabled" }),
   }),
   ServerLifecycleEvents.layer,
   Layer.succeed(ServerEnvironment.ServerEnvironment, {

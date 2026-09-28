@@ -99,6 +99,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
+import { OnshapeVersionReviews } from "./onshape/OnshapeVersionReviews.ts";
 import { CadStorage } from "./cad/CadStorage.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
 import { CadPanel } from "./cad/CadPanel.ts";
@@ -390,6 +391,7 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
+      const onshapeVersionReviews = yield* OnshapeVersionReviews;
       const cadUserOperations = yield* CadUserOperations;
       const cadStorage = yield* CadStorage;
       const cadRenderBroker = yield* CadRenderBroker;
@@ -883,6 +885,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.onshapeProjectsSetConnection,
             onshapeProjects.setConnection(input),
+            { "rpc.aggregate": "onshape-projects" },
+          ),
+        [WS_METHODS.onshapeProjectsCheckVersions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.onshapeProjectsCheckVersions,
+            onshapeVersionReviews.check(input),
             { "rpc.aggregate": "onshape-projects" },
           ),
         [WS_METHODS.cadUserStart]: (input) =>

@@ -6,6 +6,9 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   MessageId,
+  type OnshapeVersionCheckInput,
+  type OnshapeVersionCheckReason,
+  type OnshapeVersionCheckResult,
   OnshapeWorkspaceId,
   type OrchestrationEvent,
   type OrchestrationProjectShell,
@@ -21,11 +24,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type * as Scope from "effect/Scope";
+import * as Scope from "effect/Scope";
 
 import { CadUserOperations } from "../cad/CadUserOperations.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -34,14 +36,18 @@ import { forkParked } from "../serverActivation.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
 
-/** Every enabled project lists its document versions this often; jitter spreads the requests. */
-export const ONSHAPE_VERSION_POLL_INTERVAL = "5 minutes";
+/**
+ * An "opened" check for a project that was checked more recently than this is skipped without
+ * contacting Onshape. Manual checks ignore it. Onshape's annual API limit is a few thousand calls
+ * per user, so opening and switching projects must not cost one call each.
+ */
+export const OPENED_CHECK_INTERVAL_MS = 15 * 60 * 1_000;
 const MAX_RETRY_BACKOFF_MS = 60 * 60 * 1_000;
 /** A CAD sync that has not settled by then is reported as failed and the review starts anyway. */
 const SYNC_TIMEOUT = "30 minutes";
 const MAX_TITLE_LENGTH = 120;
 
-/** The subset of Onshape's BTVersionInfo the poller reads. Unknown fields are ignored. */
+/** The subset of Onshape's BTVersionInfo a check reads. Unknown fields are ignored. */
 export const OnshapeVersion = Schema.Struct({
   id: OnshapeWorkspaceId,
   name: Schema.String,
@@ -78,7 +84,7 @@ const compareVersions = (a: OnshapeVersion, b: OnshapeVersion) =>
           : 0;
 
 /**
- * Pure poll decision. Without a cursor the newest version becomes the baseline and nothing is
+ * Pure check decision. Without a cursor the newest version becomes the baseline and nothing is
  * reviewed. With one, every version created after it is pending, oldest first, along with its
  * ordinal in the document's version history (the initial "Start" version is v0).
  */
@@ -168,12 +174,17 @@ export function versionReviewPrompt(input: {
 }
 
 export interface OnshapeVersionReviewsShape {
-  /** Starts the periodic poll and the toggle listener inside the given scope. */
+  /**
+   * Starts the toggle listener inside the given scope: turning the setting on records the
+   * baseline, turning it off drops it. Nothing here contacts Onshape on its own schedule.
+   */
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
-  /** Polls every enabled project once. Never fails; problems are logged and retried later. */
-  readonly pollAll: () => Effect.Effect<void>;
-  /** Polls one project once, if it is enabled. */
-  readonly pollProject: (projectId: ProjectId) => Effect.Effect<void>;
+  /**
+   * Checks one project for new versions, from the client's project-opened hook or the settings
+   * page's "Check now". Returns once the version list is read; reviews for new versions start in
+   * the background. Never fails; Onshape errors come back as "failed" and start a backoff.
+   */
+  readonly check: (input: OnshapeVersionCheckInput) => Effect.Effect<OnshapeVersionCheckResult>;
 }
 
 export class OnshapeVersionReviews extends Context.Service<
@@ -219,9 +230,13 @@ export const make = Effect.gen(function* () {
   const snapshots = yield* ProjectionSnapshotQuery;
   const cadOperations = yield* CadUserOperations;
   const crypto = yield* Crypto.Crypto;
-  // Overlap guard and failure backoff live in memory; the version cursor is the durable state.
+  // Reviews started by a check run here so they outlive the request that found them.
+  const scope = yield* Scope.Scope;
+  // Overlap guard, failure backoff, and the "opened" throttle live in memory; the version cursor
+  // is the durable state.
   const inflight = new Set<ProjectId>();
   const backoff = new Map<ProjectId, { readonly retryAtMs: number; readonly failures: number }>();
+  const lastChecked = new Map<ProjectId, number>();
 
   const readCursor = (projectId: ProjectId) =>
     sql<CursorRow>`
@@ -379,22 +394,31 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  const poll = Effect.fn("OnshapeVersionReviews.poll")(function* (
+  // Reads the version list and decides. Without a cursor it only records the baseline. Reviews
+  // are not started here so the caller can answer before the slow CAD sync runs.
+  const plan = Effect.fn("OnshapeVersionReviews.plan")(function* (
     project: OrchestrationProjectShell,
   ) {
     const cursor = yield* readCursor(project.id);
     const versions = yield* listVersions(project);
-    const plan = planVersionReviews({ cursor, versions });
-    if (cursor === null) {
-      if (plan.baseline) yield* writeCursor(project.id, plan.baseline);
-      return;
-    }
-    for (const { version, ordinal } of plan.pending) {
+    const decision = planVersionReviews({ cursor, versions });
+    if (decision.baseline) yield* writeCursor(project.id, decision.baseline);
+    return decision.pending;
+  });
+
+  // Starts each pending review oldest first. The cursor advances after each start, so a failure
+  // stops at that version and the next check retries it.
+  const review = Effect.fn("OnshapeVersionReviews.review")(function* (
+    project: OrchestrationProjectShell,
+    pending: ReadonlyArray<{ readonly version: OnshapeVersion; readonly ordinal: number }>,
+  ) {
+    for (const { version, ordinal } of pending) {
       yield* startReview(project, version, ordinal);
       yield* writeCursor(project.id, { versionId: version.id, createdAt: version.createdAt });
     }
   });
 
+  // Records the failure and returns when the project may contact Onshape again.
   const noteFailure = (projectId: ProjectId, cause: Cause.Cause<unknown>) =>
     Effect.gen(function* () {
       const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
@@ -407,63 +431,100 @@ export const make = Effect.gen(function* () {
           ? retryAfterSeconds * 1_000
           : Math.min(MAX_RETRY_BACKOFF_MS, 5 * 60 * 1_000 * 2 ** (failures - 1));
       backoff.set(projectId, { retryAtMs: nowMs + delayMs, failures });
-      yield* Effect.logWarning("Onshape version poll failed", {
+      yield* Effect.logWarning("Onshape version check failed", {
         projectId,
         retryInMs: delayMs,
         cause: Cause.pretty(cause),
       });
+      return nowMs + delayMs;
     });
 
-  const pollGuarded = (project: OrchestrationProjectShell) =>
-    Effect.gen(function* () {
-      const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-      if (inflight.has(project.id) || (backoff.get(project.id)?.retryAtMs ?? 0) > nowMs) return;
-      inflight.add(project.id);
-      yield* poll(project).pipe(
-        Effect.tap(() => Effect.sync(() => backoff.delete(project.id))),
-        Effect.catchCause((cause) =>
-          Cause.hasInterrupts(cause) ? Effect.interrupt : noteFailure(project.id, cause),
-        ),
-        Effect.ensuring(Effect.sync(() => inflight.delete(project.id))),
+  const recover = <A>(projectId: ProjectId, onFailure: (retryAtMs: number) => A) =>
+    Effect.catchCause((cause: Cause.Cause<unknown>) =>
+      Cause.hasInterrupts(cause)
+        ? Effect.interrupt
+        : noteFailure(projectId, cause).pipe(Effect.map(onFailure)),
+    );
+  const isoAt = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
+
+  // One check for one enabled project. Skips without contacting Onshape while another check or
+  // review for the project is running, while backing off, and for throttled "opened" checks.
+  const checkEnabled = Effect.fn("OnshapeVersionReviews.checkEnabled")(function* (
+    project: OrchestrationProjectShell,
+    reason: OnshapeVersionCheckReason,
+  ): Effect.fn.Return<OnshapeVersionCheckResult> {
+    const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+    if (inflight.has(project.id)) return { status: "skipped", reason: "in-progress" };
+    const retryAtMs = backoff.get(project.id)?.retryAtMs ?? 0;
+    if (retryAtMs > nowMs) return { status: "backing-off", retryAt: isoAt(retryAtMs) };
+    if (
+      reason === "opened" &&
+      nowMs - (lastChecked.get(project.id) ?? -Infinity) < OPENED_CHECK_INTERVAL_MS
+    )
+      return { status: "skipped", reason: "throttled" };
+    inflight.add(project.id);
+    lastChecked.set(project.id, nowMs);
+    // Set once a background review owns the in-flight mark; until then this check releases it.
+    let handedOff = false;
+    const release = Effect.sync(() => inflight.delete(project.id));
+    const succeeded = Effect.sync(() => backoff.delete(project.id));
+    return yield* Effect.gen(function* () {
+      const planned = yield* plan(project).pipe(
+        Effect.map((pending) => ({ ok: true as const, pending })),
+        recover(project.id, (retryAtMs) => ({ ok: false as const, retryAtMs })),
       );
-    });
+      if (!planned.ok) return { status: "failed" as const, retryAt: isoAt(planned.retryAtMs) };
+      if (planned.pending.length === 0) {
+        yield* succeeded;
+        return { status: "no-new-versions" as const };
+      }
+      yield* review(project, planned.pending).pipe(
+        Effect.andThen(succeeded),
+        recover(project.id, () => undefined),
+        Effect.ensuring(release),
+        Effect.forkIn(scope),
+      );
+      handedOff = true;
+      return {
+        status: "reviewing" as const,
+        versions: planned.pending.map(({ version, ordinal }) => ({
+          ordinal,
+          name: version.name.trim() || version.id,
+        })),
+      };
+    }).pipe(Effect.ensuring(Effect.suspend(() => (handedOff ? Effect.void : release))));
+  });
 
-  const pollProject: OnshapeVersionReviewsShape["pollProject"] = (projectId) =>
+  const check: OnshapeVersionReviewsShape["check"] = ({ projectId, reason }) =>
     snapshots.getProjectShellById(projectId).pipe(
-      Effect.flatMap((project) =>
-        Option.isSome(project) && enabled(project.value) ? pollGuarded(project.value) : Effect.void,
+      Effect.flatMap(
+        (project): Effect.Effect<OnshapeVersionCheckResult> =>
+          Option.isSome(project) && enabled(project.value)
+            ? checkEnabled(project.value, reason)
+            : Effect.succeed({ status: "skipped", reason: "disabled" }),
       ),
       Effect.catchCause((cause) =>
         Cause.hasInterrupts(cause)
           ? Effect.interrupt
-          : Effect.logWarning("Onshape version poll could not read the project", {
-              projectId,
-              cause: Cause.pretty(cause),
+          : Effect.gen(function* () {
+              yield* Effect.logWarning("Onshape version check could not read the project", {
+                projectId,
+                cause: Cause.pretty(cause),
+              });
+              const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+              return { status: "failed" as const, retryAt: isoAt(nowMs) };
             }),
       ),
     );
 
-  const pollAll: OnshapeVersionReviewsShape["pollAll"] = () =>
-    snapshots.getShellSnapshot().pipe(
-      Effect.flatMap((snapshot) =>
-        Effect.forEach(snapshot.projects.filter(enabled), pollGuarded, { discard: true }),
-      ),
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.interrupt
-          : Effect.logWarning("Onshape version poll could not list projects", {
-              cause: Cause.pretty(cause),
-            }),
-      ),
-    );
-
-  // Turning the setting on polls right away so the baseline is recorded; turning it off drops
-  // the cursor so a later re-enable starts a fresh baseline instead of reviewing the gap.
+  // Turning the setting on records the baseline right away, bypassing the "opened" throttle;
+  // turning it off drops the cursor so a later re-enable starts a fresh baseline instead of
+  // reviewing the gap.
   const onToggle = Effect.fn("OnshapeVersionReviews.onToggle")(function* (
     projectId: ProjectId,
     on: boolean,
   ) {
-    if (on) return yield* pollProject(projectId);
+    if (on) return yield* check({ projectId, reason: "manual" }).pipe(Effect.asVoid);
     yield* clearCursor(projectId).pipe(
       Effect.catch(() =>
         Effect.logWarning("Onshape version review cursor could not be cleared", { projectId }),
@@ -482,14 +543,9 @@ export const make = Effect.gen(function* () {
             : Effect.void,
         ),
       );
-      yield* forkParked(
-        pollAll().pipe(
-          Effect.repeat(Schedule.spaced(ONSHAPE_VERSION_POLL_INTERVAL).pipe(Schedule.jittered)),
-        ),
-      );
     });
 
-  return OnshapeVersionReviews.of({ start, pollAll, pollProject });
+  return OnshapeVersionReviews.of({ start, check });
 });
 
 export const layer = Layer.effect(OnshapeVersionReviews, make);

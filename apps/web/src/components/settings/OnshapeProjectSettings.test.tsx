@@ -12,7 +12,12 @@ import { isValidElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { reactHookHarness as hooks } from "../../test/reactHookHarness";
 
-const state = vi.hoisted(() => ({ catalog: vi.fn(), command: vi.fn() }));
+const state = vi.hoisted(() => ({
+  catalog: vi.fn(),
+  command: vi.fn(),
+  check: vi.fn(),
+  checkVersions: Symbol("checkVersions"),
+}));
 vi.mock("react", async (original) => {
   const actual = await original<typeof import("react")>();
   const { reactHookHarness } = await import("../../test/reactHookHarness");
@@ -25,9 +30,15 @@ vi.mock("react/compiler-runtime", async () => {
 vi.mock("./useOnshapeConnectionsController", () => ({
   useOnshapeConnectionsController: state.catalog,
 }));
-vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.command }));
+vi.mock("../../state/use-atom-command", () => ({
+  useAtomCommand: (command: unknown) =>
+    command === state.checkVersions ? state.check : state.command,
+}));
 vi.mock("../../state/onshapeProjects", () => ({
-  onshapeProjectEnvironment: { setConnection: Symbol("setConnection") },
+  onshapeProjectEnvironment: {
+    setConnection: Symbol("setConnection"),
+    checkVersions: state.checkVersions,
+  },
 }));
 
 import { OnshapeProjectSettings } from "./OnshapeProjectSettings";
@@ -108,6 +119,7 @@ describe("Onshape project connection recovery", () => {
   beforeEach(() => {
     hooks.reset();
     state.command.mockReset();
+    state.check.mockReset();
     refresh.mockReset();
     state.catalog.mockReturnValue(catalog);
   });
@@ -174,5 +186,63 @@ describe("Onshape project connection recovery", () => {
     state.catalog.mockReturnValue({ ...catalog, connections: [incompatible] });
     saveButton()?.onClick?.();
     expect(state.command).not.toHaveBeenCalled();
+  });
+});
+
+describe("Onshape version check button", () => {
+  const enabled: OnshapeProjectSource = { ...source, autoReviewVersions: true };
+  const checkButton = (currentSource = enabled) =>
+    findAll(render(currentSource), (props) => props.children === "Check now")[0];
+  const statusText = () =>
+    findAll(render(enabled), (props) => props.role === "status").map((props) => props.children);
+  beforeEach(() => {
+    hooks.reset();
+    state.check.mockReset();
+    state.catalog.mockReturnValue({
+      ...catalog,
+      connections: [{ connectionId: source.connectionId, name: "Current", host: source.host }],
+    });
+  });
+
+  it("only offers Check now while version reviews are on", () => {
+    expect(checkButton(source)).toBeUndefined();
+    expect(checkButton()?.disabled).toBe(false);
+  });
+
+  it("sends a manual check, disables the button while it runs, then shows the result", async () => {
+    let settle: (value: unknown) => void = () => {};
+    state.check.mockReturnValue(new Promise((resolve) => (settle = resolve)));
+    checkButton()?.onClick?.();
+    expect(state.check).toHaveBeenCalledExactlyOnceWith({
+      environmentId: project.environmentId,
+      input: { projectId: project.id, reason: "manual" },
+    });
+    expect(checkButton()?.disabled).toBe(true);
+    checkButton()?.onClick?.();
+    expect(state.check).toHaveBeenCalledTimes(1);
+    expect(statusText()).toEqual([]);
+
+    const result = AsyncResult.success({
+      status: "reviewing",
+      versions: [{ ordinal: 12, name: "Bracket rev" }],
+    });
+    settle(result);
+    await Promise.resolve(result);
+    await Promise.resolve();
+    expect(checkButton()?.disabled).toBe(false);
+    expect(statusText()).toEqual(["Reviewing v12"]);
+  });
+
+  it.each([
+    [AsyncResult.success({ status: "no-new-versions" }), "No new versions"],
+    [AsyncResult.success({ status: "skipped", reason: "in-progress" }), "Check already running"],
+    [AsyncResult.failure(Cause.fail(new Error("socket closed"))), "Could not check. Try again."],
+  ])("shows %# as short text", async (value, text) => {
+    const result = Promise.resolve(value);
+    state.check.mockReturnValue(result);
+    checkButton()?.onClick?.();
+    await result;
+    await Promise.resolve();
+    expect(statusText()).toEqual([text]);
   });
 });

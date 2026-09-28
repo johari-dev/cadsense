@@ -160,6 +160,7 @@ import {
 } from "../providerInstances";
 import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { useOnshapeVersionCheckOnOpen } from "../hooks/useOnshapeVersionCheckOnOpen";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
@@ -994,6 +995,8 @@ function ChatViewContent(props: ChatViewProps) {
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
+  // Opening a project's thread or draft is the "project opened" signal for version reviews.
+  useOnshapeVersionCheckOnOpen(activeProject, !activeEnvironmentUnavailable);
   const activeReconnectingEnvironmentId =
     activeEnvironmentConnectionPhase === "connecting" ||
     activeEnvironmentConnectionPhase === "reconnecting"

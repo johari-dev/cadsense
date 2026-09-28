@@ -20,10 +20,13 @@ import {
   type OnshapeConnectionError,
 } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 
 import { CadUserOperations } from "../cad/CadUserOperations.ts";
 import { ServerConfig } from "../config.ts";
@@ -39,6 +42,7 @@ import { OrchestrationEventStoreLive } from "../persistence/Layers/Orchestration
 import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
 import {
+  OPENED_CHECK_INTERVAL_MS,
   OnshapeVersionReviews,
   layer as versionReviewsLayer,
   planVersionReviews,
@@ -70,7 +74,7 @@ const v2 = version("c", "Gearbox check", "2026-09-03T00:00:00.000Z");
 const unsupported = () => Effect.die("Unused test service method.");
 
 describe("planVersionReviews", () => {
-  it("records the newest version as the baseline on the first poll", () => {
+  it("records the newest version as the baseline on the first check", () => {
     const plan = planVersionReviews({ cursor: null, versions: [v1, start] });
     assert.deepStrictEqual(plan, {
       baseline: { versionId: v1.id, createdAt: v1.createdAt },
@@ -172,6 +176,8 @@ interface Onshape {
   /** Whether a fake CAD sync completes or ends failed, plus how many syncs were requested. */
   readonly syncMode: Ref.Ref<"succeed" | "fail">;
   readonly syncs: Ref.Ref<number>;
+  /** When set, a fake CAD sync waits for it, which holds the review in flight. */
+  readonly syncGate: Ref.Ref<Deferred.Deferred<void> | null>;
 }
 
 const root: CadRootIdentity = {
@@ -198,6 +204,8 @@ const fakeCadOperations = (onshape: Onshape) =>
         start: (input) =>
           Effect.gen(function* () {
             const count = yield* Ref.updateAndGet(onshape.syncs, (n) => n + 1);
+            const gate = yield* Ref.get(onshape.syncGate);
+            if (gate) yield* Deferred.await(gate);
             const operationId = `00000000-0000-4000-9000-${String(count).padStart(12, "0")}`;
             yield* engine
               .dispatch({
@@ -302,7 +310,7 @@ const createEnabledProject = Effect.fn(function* (enabled: boolean) {
   if (enabled) yield* setEnabled(true, "server:test:enable");
 });
 
-// A user already synced one root from project settings; the poller refreshes that root.
+// A user already synced one root from project settings; a check refreshes that root before reviewing.
 const seedSyncedRoot = Effect.flatMap(CadUserOperations, (cadOperations) =>
   cadOperations.start({ projectId, kind: "sync", root }),
 );
@@ -340,28 +348,66 @@ const makeOnshape = Effect.gen(function* () {
     requests: yield* Ref.make(0),
     syncMode: yield* Ref.make<"succeed" | "fail">("succeed"),
     syncs: yield* Ref.make(0),
+    syncGate: yield* Ref.make<Deferred.Deferred<void> | null>(null),
   } satisfies Onshape;
 });
 
+const manual = { projectId, reason: "manual" } as const;
+const opened = { projectId, reason: "opened" } as const;
+
+// Waits for a background review to finish. While it runs every check reports "in-progress";
+// afterwards this "opened" check is throttled and makes no request, unless the test moved the
+// clock past the throttle window.
+const awaitIdle = Effect.gen(function* () {
+  const reviews = yield* OnshapeVersionReviews;
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const result = yield* reviews.check(opened);
+    if (!(result.status === "skipped" && result.reason === "in-progress")) return;
+    yield* TestClock.withLive(Effect.sleep("5 millis"));
+  }
+  return yield* Effect.die("The version review never finished.");
+});
+
 describe("OnshapeVersionReviews", () => {
-  it.effect("ignores projects without the setting", () =>
+  it.effect("skips projects without the setting and never contacts Onshape", () =>
     withTempDir((baseDir) =>
       Effect.gen(function* () {
         const onshape = yield* makeOnshape;
         yield* Effect.gen(function* () {
           yield* createEnabledProject(false);
           const reviews = yield* OnshapeVersionReviews;
-          yield* reviews.pollAll();
-          yield* reviews.pollProject(projectId);
+          assert.deepStrictEqual(yield* reviews.check(opened), {
+            status: "skipped",
+            reason: "disabled",
+          });
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "skipped",
+            reason: "disabled",
+          });
           assert.strictEqual(yield* Ref.get(onshape.requests), 0);
           assert.deepStrictEqual(yield* reviewThreads, []);
-        }).pipe(Effect.provide(makeLayer(baseDir, onshape)));
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("makes no Onshape request until a check is asked for", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          const reviews = yield* OnshapeVersionReviews;
+          yield* reviews.start();
+          yield* TestClock.adjust("1 day");
+          assert.strictEqual(yield* Ref.get(onshape.requests), 0);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
       }),
     ),
   );
 
   it.effect(
-    "baselines on the first poll, reviews each later version once, and survives a restart",
+    "baselines on the first check, reviews each later version once, and survives a restart",
     () =>
       withTempDir((baseDir) =>
         Effect.gen(function* () {
@@ -371,12 +417,19 @@ describe("OnshapeVersionReviews", () => {
             const reviews = yield* OnshapeVersionReviews;
             const query = yield* ProjectionSnapshotQuery;
 
-            yield* reviews.pollAll();
+            assert.deepStrictEqual(yield* reviews.check(manual), { status: "no-new-versions" });
             assert.strictEqual(yield* Ref.get(onshape.requests), 1);
             assert.deepStrictEqual(yield* reviewThreads, []);
 
             yield* Ref.set(onshape.versions, [start, v1, v2]);
-            yield* reviews.pollAll();
+            assert.deepStrictEqual(yield* reviews.check(manual), {
+              status: "reviewing",
+              versions: [
+                { ordinal: 1, name: "Bracket rev" },
+                { ordinal: 2, name: "Gearbox check" },
+              ],
+            });
+            yield* awaitIdle;
             const threads = yield* reviewThreads;
             assert.deepStrictEqual(
               threads.map((thread) => thread.title),
@@ -397,7 +450,7 @@ describe("OnshapeVersionReviews", () => {
             }
             assert.strictEqual(yield* Ref.get(onshape.syncs), 0);
 
-            yield* reviews.pollAll();
+            assert.deepStrictEqual(yield* reviews.check(manual), { status: "no-new-versions" });
             assert.strictEqual((yield* reviewThreads).length, 2);
             assert.strictEqual(yield* Ref.get(onshape.requests), 3);
           }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
@@ -405,12 +458,81 @@ describe("OnshapeVersionReviews", () => {
           // A fresh server over the same state must not review v1 or v2 again.
           yield* Effect.gen(function* () {
             const reviews = yield* OnshapeVersionReviews;
-            yield* reviews.pollAll();
+            assert.deepStrictEqual(yield* reviews.check(opened), { status: "no-new-versions" });
             assert.strictEqual((yield* reviewThreads).length, 2);
             assert.strictEqual(yield* Ref.get(onshape.requests), 4);
           }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
         }),
       ),
+  );
+
+  it.effect("throttles opened checks per project and lets manual checks through", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          const reviews = yield* OnshapeVersionReviews;
+          const throttled = { status: "skipped", reason: "throttled" } as const;
+
+          assert.deepStrictEqual(yield* reviews.check(opened), { status: "no-new-versions" });
+          assert.deepStrictEqual(yield* reviews.check(opened), throttled);
+          yield* TestClock.adjust(OPENED_CHECK_INTERVAL_MS - 1);
+          assert.deepStrictEqual(yield* reviews.check(opened), throttled);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 1);
+
+          // Manual bypasses the throttle, and restarts its window for later opened checks.
+          yield* Ref.set(onshape.versions, [start, v1]);
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "reviewing",
+            versions: [{ ordinal: 1, name: "Bracket rev" }],
+          });
+          yield* awaitIdle;
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+          yield* TestClock.adjust(OPENED_CHECK_INTERVAL_MS - 1);
+          assert.deepStrictEqual(yield* reviews.check(opened), throttled);
+
+          yield* TestClock.adjust(1);
+          assert.deepStrictEqual(yield* reviews.check(opened), { status: "no-new-versions" });
+          assert.strictEqual(yield* Ref.get(onshape.requests), 3);
+          assert.strictEqual((yield* reviewThreads).length, 1);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("skips every check while a review for the project is still starting", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          yield* seedSyncedRoot;
+          const reviews = yield* OnshapeVersionReviews;
+          yield* reviews.check(manual);
+
+          const gate = yield* Deferred.make<void>();
+          yield* Ref.set(onshape.syncGate, gate);
+          yield* Ref.set(onshape.versions, [start, v1]);
+          assert.strictEqual((yield* reviews.check(manual)).status, "reviewing");
+          const inProgress = { status: "skipped", reason: "in-progress" } as const;
+          assert.deepStrictEqual(yield* reviews.check(manual), inProgress);
+          yield* TestClock.adjust(OPENED_CHECK_INTERVAL_MS);
+          assert.deepStrictEqual(yield* reviews.check(opened), inProgress);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+          assert.deepStrictEqual(yield* reviewThreads, []);
+
+          // The clock is past the throttle window, so awaitIdle's final opened check is real.
+          yield* Deferred.succeed(gate, undefined);
+          yield* awaitIdle;
+          assert.deepStrictEqual(
+            (yield* reviewThreads).map((thread) => thread.title),
+            ["Review v1: Bracket rev"],
+          );
+          assert.strictEqual(yield* Ref.get(onshape.requests), 3);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
   );
 
   it.effect("keeps the cursor and backs off when Onshape fails, then retries later", () =>
@@ -420,23 +542,37 @@ describe("OnshapeVersionReviews", () => {
         yield* Effect.gen(function* () {
           yield* createEnabledProject(true);
           const reviews = yield* OnshapeVersionReviews;
-          yield* reviews.pollAll();
+          yield* reviews.check(manual);
 
           yield* Ref.set(onshape.versions, [start, v1]);
           yield* Ref.set(onshape.failure, new OnshapeRateLimitError({ retryAfterSeconds: 30 }));
-          yield* reviews.pollAll();
+          const isoAt = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
+          const retryAt = isoAt(30_000);
+          assert.deepStrictEqual(yield* reviews.check(manual), { status: "failed", retryAt });
           assert.deepStrictEqual(yield* reviewThreads, []);
-          // Backing off: the next poll before the retry time makes no request at all.
+          // Backing off: even a manual check before Retry-After makes no request at all.
           yield* Ref.set(onshape.failure, new OnshapeNetworkError());
-          yield* reviews.pollAll();
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "backing-off",
+            retryAt,
+          });
           assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+
+          // A second failure in a row without Retry-After backs off 5 minutes doubled.
+          yield* TestClock.adjust("30 seconds");
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "failed",
+            retryAt: isoAt(30_000 + 10 * 60_000),
+          });
+          assert.strictEqual(yield* Ref.get(onshape.requests), 3);
         }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
 
         // Restart clears the in-memory backoff; the durable cursor still points at the baseline.
         yield* Effect.gen(function* () {
           yield* Ref.set(onshape.failure, null);
           const reviews = yield* OnshapeVersionReviews;
-          yield* reviews.pollAll();
+          assert.strictEqual((yield* reviews.check(opened)).status, "reviewing");
+          yield* awaitIdle;
           assert.deepStrictEqual(
             (yield* reviewThreads).map((thread) => thread.title),
             ["Review v1: Bracket rev"],
@@ -455,7 +591,7 @@ describe("OnshapeVersionReviews", () => {
           yield* seedSyncedRoot;
           const reviews = yield* OnshapeVersionReviews;
           const query = yield* ProjectionSnapshotQuery;
-          yield* reviews.pollAll();
+          yield* reviews.check(manual);
 
           const promptFor = (id: string) =>
             Effect.map(
@@ -464,10 +600,11 @@ describe("OnshapeVersionReviews", () => {
             );
 
           // v1 syncs first, so its prompt names the fresh snapshot. v2 is handled in the same
-          // poll while v1's run is pending, so the CAD lifecycle refuses its sync as busy and
+          // check while v1's run is pending, so the CAD lifecycle refuses its sync as busy and
           // the review still starts with the failure spelled out.
           yield* Ref.set(onshape.versions, [start, v1, v2]);
-          yield* reviews.pollAll();
+          yield* reviews.check(manual);
+          yield* awaitIdle;
           assert.strictEqual(yield* Ref.get(onshape.syncs), 3);
           const project = Option.getOrThrow(yield* query.getProjectShellById(projectId));
           const current = project.cad?.roots[0]?.current;
@@ -495,11 +632,12 @@ describe("OnshapeVersionReviews", () => {
           yield* seedSyncedRoot;
           const reviews = yield* OnshapeVersionReviews;
           const query = yield* ProjectionSnapshotQuery;
-          yield* reviews.pollAll();
+          yield* reviews.check(manual);
 
           yield* Ref.set(onshape.syncMode, "fail");
           yield* Ref.set(onshape.versions, [start, v1]);
-          yield* reviews.pollAll();
+          yield* reviews.check(manual);
+          yield* awaitIdle;
           assert.strictEqual(yield* Ref.get(onshape.syncs), 2);
           const detail = Option.getOrThrow(
             yield* query.getThreadDetailById(
@@ -518,7 +656,7 @@ describe("OnshapeVersionReviews", () => {
     ),
   );
 
-  it.effect("polls when the setting turns on and re-baselines after it was off", () =>
+  it.effect("baselines when the setting turns on and re-baselines after it was off", () =>
     withTempDir((baseDir) =>
       Effect.gen(function* () {
         const onshape = yield* makeOnshape;
@@ -538,15 +676,18 @@ describe("OnshapeVersionReviews", () => {
           yield* awaitRequests(1);
           assert.strictEqual(yield* Ref.get(onshape.requests), 1);
 
-          // Versions created while the setting is off are not reviewed on re-enable.
+          // Versions created while the setting is off are not reviewed on re-enable, even when
+          // it is turned back on inside the opened-check throttle window.
           yield* setEnabled(false, "server:test:toggle-off");
           yield* Ref.set(onshape.versions, [start, v1]);
           yield* setEnabled(true, "server:test:toggle-on-again");
           yield* awaitRequests(2);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
           assert.deepStrictEqual(yield* reviewThreads, []);
 
           yield* Ref.set(onshape.versions, [start, v1, v2]);
-          yield* reviews.pollProject(projectId);
+          assert.strictEqual((yield* reviews.check(manual)).status, "reviewing");
+          yield* awaitIdle;
           assert.deepStrictEqual(
             (yield* reviewThreads).map((thread) => thread.title),
             ["Review v2: Gearbox check"],

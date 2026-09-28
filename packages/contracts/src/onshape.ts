@@ -66,11 +66,43 @@ export const OnshapeProjectSource = Schema.Struct({
   configuration: Schema.String.check(Schema.isMaxLength(MAX_ONSHAPE_CONFIGURATION_LENGTH)),
   // Optional for events written before managed workspace provisioning became reactor-owned.
   managedWorkspaceReady: Schema.optionalKey(Schema.Boolean),
-  // When true, the server polls this document for new named versions and starts a review
-  // thread for each one. Absent means off.
+  // When true, the server checks this document for new named versions when the project is
+  // opened or on request, and starts a review thread for each one. Absent means off.
   autoReviewVersions: Schema.optionalKey(Schema.Boolean),
 });
 export type OnshapeProjectSource = typeof OnshapeProjectSource.Type;
+
+/**
+ * Why the client asks for a version check. "opened" is throttled per project on the server;
+ * "manual" is the settings page's "Check now" and skips the throttle.
+ */
+export const OnshapeVersionCheckReason = Schema.Literals(["opened", "manual"]);
+export type OnshapeVersionCheckReason = typeof OnshapeVersionCheckReason.Type;
+
+export const OnshapeVersionCheckInput = Schema.Struct({
+  projectId: ProjectId,
+  reason: OnshapeVersionCheckReason,
+});
+export type OnshapeVersionCheckInput = typeof OnshapeVersionCheckInput.Type;
+
+/**
+ * Outcome of one version check. "reviewing" lists the versions whose reviews are starting in the
+ * background; "failed" and "backing-off" carry when the server will next contact Onshape.
+ */
+export const OnshapeVersionCheckResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("no-new-versions") }),
+  Schema.Struct({
+    status: Schema.Literal("reviewing"),
+    versions: Schema.Array(Schema.Struct({ ordinal: NonNegativeInt, name: Schema.String })),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("skipped"),
+    reason: Schema.Literals(["disabled", "throttled", "in-progress"]),
+  }),
+  Schema.Struct({ status: Schema.Literal("backing-off"), retryAt: IsoDateTime }),
+  Schema.Struct({ status: Schema.Literal("failed"), retryAt: IsoDateTime }),
+]);
+export type OnshapeVersionCheckResult = typeof OnshapeVersionCheckResult.Type;
 
 /** Stable identity for duplicate detection; the saved connection is intentionally excluded. */
 export function onshapeProjectSourceIdentity(source: {

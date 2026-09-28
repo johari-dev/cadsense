@@ -119,7 +119,7 @@ const failureReason = (error: unknown): string => {
 };
 
 /**
- * User RPC handlers and the opt-in Onshape version review poller receive this service. Accepted
+ * User RPC handlers and Onshape version review checks receive this service. Accepted
  * jobs outlive route and socket changes.
  */
 export const make = Effect.gen(function* () {
