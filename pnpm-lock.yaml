@@ -186,6 +186,9 @@ importers:
       msgpackr-extract:
         specifier: 3.0.4
         version: 3.0.4
+      playwright-core:
+        specifier: 1.60.0
+        version: 1.60.0
       saxes:
         specifier: ^6.0.0
         version: 6.0.0
