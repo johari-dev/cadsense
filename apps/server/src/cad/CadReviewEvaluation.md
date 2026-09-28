@@ -24,6 +24,7 @@ Use these two prompts on a telescoping arm with a pivot and printed motor suppor
 Judge decision quality before brevity:
 
 - Does the review understand the mechanism's intended motion and stated design constraints? A motor moving with its stage must not become a loose-mount finding without evidence.
+- Does it check that the mechanism works as modeled: power reaches every driven part, each stage meshes or connects, shafts are supported, and no parts overlap or duplicate each other?
 - Does it identify the most consequential supported concern and explain its effect on operation? Accept an explicit evidence gap when no main concern is established.
 - Does it investigate relevant manufacturing, assembly, wiring, operation, and repair steps on the actual model? A generic lifecycle checklist is not evidence of inspection.
 - Do recommendations explain their purpose and relevant tradeoffs, such as support weight or access lost through tighter packaging?
@@ -40,7 +41,8 @@ Require all of the following for each published comment:
 
 - The marker identifies the feature discussed. A whole-part target has a reason that fits the issue.
 - The comment addresses one issue and explains a practical change, check, or specific question at that spot.
-- The title and body make sense without reading the chat. Usually one or two plain sentences suffice.
+- The title and body make sense without reading the chat. Usually one or two plain sentences at about an 8th-grade reading level suffice.
+- Short comments do not drop verified findings. A small cleanup issue, such as a duplicate part, gets its own short comment rather than disappearing.
 - Claims follow from the inspection. A verified marker alone does not prove rubbing, interference, weakness, or a safe cutout size.
 - Known unfinished work appears when it blocks a specific decision, with the dependency explained. An empty hole alone does not establish a missing screw.
 - The comment adds information instead of repeating another finding or giving advice that could go anywhere on the assembly.
@@ -83,6 +85,44 @@ An earlier tool-description-only version produced a long report and dense plate
 advice. Moving the guidance into session instructions and explicitly limiting
 unsupported strength claims improved brevity, but did not eliminate these misses.
 Claude delivery is covered by code checks; this behavioral check ran only Terra.
+
+## Recorded check: September 27, 2026, Ultimate Ascent transfer
+
+A WIP 2013 frisbee transfer: Onshape document `0e6a45fa6581191bfeed4d0a`, Assembly 1
+(`ed9df6627855dacf7d96be26`), microversion `437281c10d1a49799e4ed01d`, 146 components.
+The student prompt, sent without follow-up coaching:
+
+> Can you review my transfer for Ultimate Ascent (2013)? It's still WIP. I based it on the small robots from that year that had a ground intake and a single wheel shooter. The disc comes in from the intake already at an angle, and the transfer's job is to feed it into the shooter. I'm using 2 inch rollers and a Vortex. I've been having trouble finding a good place to mount the motor, but the middle of the transfer seems like it could have enough space. Right now it's 3 separate plates but I'm planning to consolidate them into one. I haven't run gear ratio calcs yet, but since the frisbee is somewhat compliant I don't think it'll take much torque to move it. Any feedback?
+
+Eight problems, each confirmed with exact OpenCascade booleans on a STEP export of
+the same microversion, form the answer key:
+
+1. The drive is not connected: the 40T gear's 1.75" shaft and the 2.39" shaft carrying the 84T belt are 2.30" apart with nothing between them.
+2. The 7T/40T centers are 1.152" apart instead of 1.175", and the 40T gear runs into the 1x1 tube.
+3. Neither jackshaft has bearings, and both run into the SPARK Flex.
+4. Part 17 and Part 20 overlap by 10.99 in³; Part 20 is a stale copy.
+5. Each roller carries both a 13" hex shaft and the roller kit's 11.5" rounded hex.
+6. The belt ends have no pulleys.
+7. The existing stage is 7T:40T, 5.71:1 (a review that assumes 1:1 fails this).
+8. The SPARK Flex is mated between the Vortex and its plate, so the motor is not held.
+
+Runs used the CAD tool branches under review at the time (#83, #84, #85, #87, #89,
+#102), Opus 5.5 at high effort and GPT-5.6-Terra at medium, two concurrent runs per
+machine. Problems found out of eight, per run:
+
+| Guidance                                           | Opus 5.5 | GPT-5.6-Terra |
+| -------------------------------------------------- | -------- | ------------- |
+| Previous defaults                                  | 3, 5     | 1, 0          |
+| These defaults                                     | 7        | 1, 1          |
+| Previous defaults, exact `cad_checks` interference | 6.5      | 1, 1.5        |
+| These defaults, exact `cad_checks` interference    | 8, 8     | 1.5, 2.25     |
+
+Every Opus run under the previous defaults pinned a comment asking whether the motor
+could come out without removing a shaft, echoing the old wording example; no run under
+these defaults did. Opus comments measured Flesch-Kincaid grade 3.8 to 6.5 under
+both. Terra found the duplicate plate only with exact interference, and under both
+defaults it traced the power path but twice called it connected. One or two runs per
+cell is a spot check, not a benchmark.
 
 ## Matched evaluation before the review-process update
 

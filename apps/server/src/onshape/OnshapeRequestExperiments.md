@@ -17,7 +17,7 @@ Every comparison uses microversion `00bc99fc702d682d31e0d064`.
 | ---------------------------------------------- | -------: |
 | Pin and verify the workspace revision          |        2 |
 | Read assembly identities and placements        |        1 |
-| Read expanded BOM appearance and materials     |        1 |
+| Read expanded BOM appearance, material, mass   |        1 |
 | Submit, poll, and download one 3MF export      |        3 |
 | Fetch ambiguous geometry in two studio batches |        2 |
 | Total                                          |    **9** |
@@ -47,7 +47,7 @@ existing per-face color parser and obtains source identities separately. Names o
 array order never resolve ambiguous source parts.
 
 - `OnshapeSnapshotMetadata.ts` reads one expanded BOM, requesting name, appearance,
-  and material columns. The live response supplies all 153 required parts exactly.
+  material, and mass columns. The live response supplies all 153 required parts exactly.
   Rows must match document, pinned revision, element, part ID, and configuration.
   `distinctConfigurations` handles BOM rows that collapse metadata-equivalent
   configurations. Ambiguous, malformed, conflicting, or missing rows retain the
@@ -67,6 +67,27 @@ The BOM does not supply Part Studio `isHidden`, `isMesh`, or `configurationId`.
 These optional metadata values remain null. Occurrences still determine assembly
 visibility. The BOM does supply `partIdentity`. Suppressed-part metadata can remain
 null. No rendering or review identity depends on the omitted fields in this checkout.
+
+## Part mass
+
+September 27, 2026. Adding the BOM Mass column (`57f3fb8efa3416c06701d626`) kept the
+live cold import at 9 requests and the unchanged sync at 1. The BOM response grew from
+284 KB to 291 KB. Onshape returns mass as text in document units, such as `0.903691 lb`,
+from material density or a manual override. The importer stores kilograms and omits
+blank, malformed, or unknown-unit values.
+
+94 of 153 required parts have a mass, including vendor parts with overrides and no
+material. The other 59 have neither a material nor an override, so no API route can
+supply their mass. `cad_hierarchy` reports mass for 353 of 419 unsuppressed part
+occurrences, totaling 14.04 kg (30.95 lb) of known mass. Subassembly BOM rollups are
+null when any child lacks mass, so the importer does not store them. Center of mass
+and inertia columns were null for every row and are not requested.
+
+Snapshots acquired earlier have no mass. An unchanged sync reuses them, so mass appears
+after the document next changes. This run's artifacts are in
+`.cadsense/request-experiments/part-mass-live/`, with `hierarchy.json` from walking
+`cad_hierarchy` over the stored manifest. The earlier `bom-targeted-live` recording no
+longer replays, because the BOM query now includes the Mass column.
 
 ## Geometry and appearance
 
