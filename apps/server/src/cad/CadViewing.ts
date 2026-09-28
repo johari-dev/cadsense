@@ -32,6 +32,7 @@ import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifa
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
 import {
   decodeCadToolInput,
+  defaultCadRoot,
   initialCadView,
   rebaseCadView,
   updateCadView,
@@ -257,15 +258,7 @@ export const make = Effect.gen(function* () {
           const saved = currentSession.view ?? (yield* getUserView(session.threadId));
           const selected = saved
             ? roots.find((root) => root.rootId === saved.rootId)
-            : project.onshapeSource?.elementId
-              ? roots.find(
-                  (root) =>
-                    root.elementId === project.onshapeSource?.elementId &&
-                    root.configuration === (project.onshapeSource.configuration ?? "default"),
-                )
-              : roots.length === 1
-                ? roots[0]
-                : undefined;
+            : defaultCadRoot(project.onshapeSource, roots);
           if (!selected?.current) return null;
           const next = yield* bind(selected.current.snapshotId).pipe(
             Effect.orElseSucceed(() => null),

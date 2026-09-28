@@ -532,6 +532,46 @@ describe("bulk snapshot acquisition", () => {
       2,
     ),
   );
+  it.effect("reads part mass from the same assembly metadata request", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          const masses = ["0.903691 lb", "2 kg", "250 g", "8 oz", "heavy", "-1 kg", 3, undefined];
+          h.bulkMetadata.change = (response) =>
+            response.rows.forEach((row, i) => {
+              if (masses[i] !== undefined)
+                row.headerIdToValue["57f3fb8efa3416c06701d626"] = masses[i];
+            });
+          const manifest = yield* h.acquire();
+          const bom = h.requests.filter((r) => r.path.endsWith("/bom"));
+          assert.lengthOf(bom, 1);
+          assert.include(
+            new URLSearchParams(bom[0]!.query).getAll("bomColumnIds"),
+            "57f3fb8efa3416c06701d626",
+          );
+          assert.lengthOf(
+            h.requests.filter((r) => r.path.includes("/parts/")),
+            0,
+          );
+          const metadata = h.definition.parts.map(
+            (definition) =>
+              manifest.parts.find((part) => part.source.partId === definition.partId)!.metadata!,
+          );
+          assert.closeTo(metadata[0]!.massKg!, 0.903691 * 0.45359237, 1e-9);
+          assert.equal(metadata[1]!.massKg, 2);
+          assert.closeTo(metadata[2]!.massKg!, 0.25, 1e-9);
+          assert.closeTo(metadata[3]!.massKg!, 8 * 0.028349523125, 1e-9);
+          // Unusable or blank mass leaves the rest of the row's metadata intact.
+          for (const [i, part] of metadata.entries())
+            if (i >= 4) {
+              assert.notProperty(part, "massKg");
+              assert.equal(part.name, h.metadata[i]!.name);
+            }
+        }),
+      8,
+      true,
+    ),
+  );
   it.effect("downloads only an omitted source body and resumes without resubmission", () =>
     harness(
       (h) =>
