@@ -980,8 +980,19 @@ it.each(["missing", "clipped"])(
       renderer.apply(current);
       renderer.focusComment(target(id), safe, true);
       const displayed = calls.render.mock.calls.at(-1)![0];
+      const ghosted = (name: string) => {
+        let transparent = false;
+        displayed.getObjectByName(name).traverse((object: unknown) => {
+          if (object instanceof Mesh && !Array.isArray(object.material))
+            transparent ||= object.material.transparent;
+        });
+        return transparent;
+      };
       expect(displayed.getObjectByName(id).visible).toBe(true);
-      expect(displayed.getObjectByName(blockerId).visible).toBe(false);
+      // The enclosing blocker stays visible for context but is ghosted, not hidden.
+      expect(displayed.getObjectByName(blockerId).visible).toBe(true);
+      expect(ghosted(blockerId)).toBe(true);
+      expect(ghosted(id)).toBe(false);
       const before = calls.render.mock.calls.length;
       expect(
         renderer.focusComment(
@@ -993,6 +1004,7 @@ it.each(["missing", "clipped"])(
       expect(calls.render.mock.calls.length).toBeGreaterThan(before);
       expect(displayed.getObjectByName(id).visible).toBe(false);
       expect(displayed.getObjectByName(blockerId).visible).toBe(true);
+      expect(ghosted(blockerId)).toBe(false);
       renderer.apply(current);
       expect(displayed.getObjectByName(id).visible).toBe(false);
       expect(displayed.getObjectByName(blockerId).visible).toBe(true);

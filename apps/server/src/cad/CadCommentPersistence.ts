@@ -6,6 +6,7 @@ import {
   CadCommentReceipt,
   CadCommentReviewed,
   CadReviewLearning,
+  CadViewState,
   type OrchestrationEvent,
   type ProjectId,
   type ThreadId,
@@ -15,6 +16,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 const decodeComments = Schema.decodeUnknownEffect(Schema.Array(Schema.fromJsonString(CadComment)));
+const decodeViews = Schema.decodeUnknownEffect(Schema.Array(Schema.fromJsonString(CadViewState)));
 const decodeReceipts = Schema.decodeUnknownEffect(
   Schema.Array(Schema.fromJsonString(CadCommentReceipt)),
 );
@@ -38,6 +40,20 @@ export const readThreadCadComments = Effect.fn("readThreadCadComments")(function
     yield* sql`SELECT record_json AS record FROM projection_cad_comments WHERE thread_id=${threadId} ORDER BY sequence, comment_id`;
   return yield* decodeComments(rows.map((r) => r.record));
 });
+/** Captured views cited by this chat's point targets, keyed by capture ID. */
+export const readThreadCadCommentCaptureViews = Effect.fn("readThreadCadCommentCaptureViews")(
+  function* (threadId: ThreadId) {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ captureId: string; view: string }>`SELECT DISTINCT
+      capture.capture_id AS "captureId", capture.view_json AS view
+      FROM projection_cad_comments c, json_each(c.record_json,'$.targets') target
+      JOIN projection_cad_captures capture
+        ON capture.capture_id=json_extract(target.value,'$.captureId') AND capture.thread_id=c.thread_id
+      WHERE c.thread_id=${threadId} AND json_extract(target.value,'$.kind')='point'`;
+    const views = yield* decodeViews(rows.map((r) => r.view));
+    return Object.fromEntries(rows.map((r, i) => [r.captureId, views[i]!]));
+  },
+);
 /** Oldest first, matching the order agents see them in the review guidance. */
 export const readProjectCadReviewLearnings = Effect.fn("readProjectCadReviewLearnings")(function* (
   projectId: ProjectId,

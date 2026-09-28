@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadHash, CadSnapshotId } from "./cad.ts";
 import { CommandId, IsoDateTime, ProjectId, ThreadId, TurnId } from "./baseSchemas.ts";
+import { CadViewState } from "./cadView.ts";
 
 const text = (max: number) =>
   Schema.String.check(
@@ -143,13 +144,21 @@ const { modelDescriptor: _modelDescriptor, ...summaryFields } = CadComment.field
 export const CadCommentsCatalog = Schema.Struct({
   comments: Schema.Array(Schema.Struct(summaryFields)),
   modelDescriptors: Schema.Record(Schema.String, Schema.String),
+  /**
+   * The agent's captured view for each point target's `captureId`, with its resolved camera.
+   * Locating the point proved it visible from that view, so the viewer replays it on selection.
+   */
+  captureViews: Schema.Record(Schema.String, CadViewState),
 });
+export type CadCommentsCatalog = typeof CadCommentsCatalog.Type;
 /** A manifest descriptor is shared by every finding on that model, rather than repeated per item. */
 export const cadCommentsCatalog = (
   comments: readonly CadComment[],
-): typeof CadCommentsCatalog.Type => ({
+  captureViews: CadCommentsCatalog["captureViews"],
+): CadCommentsCatalog => ({
   comments: comments.map(({ modelDescriptor: _descriptor, ...comment }) => comment),
   modelDescriptors: Object.fromEntries(comments.map((c) => [c.modelKey, c.modelDescriptor])),
+  captureViews,
 });
 export const CadCommentPublication = Schema.Union([
   Schema.Struct({
