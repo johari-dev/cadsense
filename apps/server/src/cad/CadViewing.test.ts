@@ -316,6 +316,76 @@ it.effect(
       ),
     ),
 );
+it.effect("reads the project design brief for Claude instructions and cad_context", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-brief-" });
+    const brief = "The elevator motor rides on the moving stage by design.";
+    yield* fs.writeFileString(`${workspaceRoot}/DESIGN.md`, `\n${brief}\n`);
+    const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+    const contextId = yield* h.service.resolveContext(threadId);
+    yield* h.service.withActivation(
+      contextId,
+      (tools) =>
+        Effect.gen(function* () {
+          assert.deepEqual((yield* tools.context()).designBrief, {
+            path: "DESIGN.md",
+            bytes: brief.length + 2,
+          });
+        }),
+      TurnId.make("design-brief"),
+    );
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("cad-test"),
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          providerSessionId: "claude-brief-session",
+          endpoint: "http://localhost/mcp",
+          authorizationHeader: "Bearer test-only",
+        }),
+      ),
+      () => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+    );
+    let sdkOptions: ClaudeOptions | undefined;
+    const stopped = Promise.withResolvers<void>();
+    const adapter = yield* makeClaudeAdapter(claudeSettings, {
+      modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+      createQuery: ({ options }) => {
+        sdkOptions = options;
+        return {
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          setMaxThinkingTokens: async () => {},
+          close: () => stopped.resolve(),
+          [Symbol.asyncIterator]: () => ({
+            next: async (): Promise<IteratorResult<SDKMessage>> => {
+              await stopped.promise;
+              return { done: true, value: undefined };
+            },
+          }),
+        };
+      },
+    }).pipe(Effect.provideService(CadViewing, h.service));
+    yield* adapter.startSession({ threadId, runtimeMode: "full-access", cwd: workspaceRoot });
+    const systemPrompt = sdkOptions?.systemPrompt;
+    if (typeof systemPrompt !== "object" || Array.isArray(systemPrompt))
+      return yield* Effect.die("Claude session started without a preset system prompt");
+    assert.include(systemPrompt.append, "Project design brief (DESIGN.md)");
+    assert.include(systemPrompt.append, brief);
+    yield* adapter.stopSession(threadId);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(
+        dependencies,
+        ServerSettingsService.layerTest(),
+        ClaudeCadCapabilities.layer.pipe(Layer.provide(NodeServices.layer)),
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+  ),
+);
 it.effect(
   "binds concurrent provider children to private viewers and revokes native session tools",
   () =>
@@ -429,6 +499,7 @@ const harness = Effect.fn(function* (
   loseCaptureReceipt = false,
   renderGate?: { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> },
   comments?: CadComments["Service"],
+  workspaceRoot = "C:/cad-view-test",
 ) {
   const engine = yield* OrchestrationEngineService;
   let sequence = 0;
@@ -438,7 +509,7 @@ const harness = Effect.fn(function* (
     type: "project.onshape.create",
     projectId,
     title: "CAD",
-    workspaceRoot: "C:/cad-view-test",
+    workspaceRoot,
     defaultModelSelection: null,
     onshapeSource: source,
     createdAt: now,
