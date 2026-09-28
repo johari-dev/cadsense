@@ -108,6 +108,13 @@ export type CadChecksResult = typeof CadChecksResult.Type;
 export const CadContextResult = Schema.Struct({
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   state: Schema.NullOr(CadViewState),
+  /** The workspace design brief as it is on disk now, or null when the project has none. */
+  designBrief: Schema.NullOr(
+    Schema.Struct({
+      path: Schema.String,
+      bytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
   roots: Schema.Array(
     Schema.Struct({
       rootId: CadHash,
