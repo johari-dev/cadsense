@@ -256,6 +256,7 @@ it.effect(
           "cad_hierarchy",
           "cad_checks",
           "cad_diff",
+          "cad_measure",
           "cad_update_view",
           "cad_capture",
         ],

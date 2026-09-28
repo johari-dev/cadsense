@@ -297,6 +297,7 @@ const toolActionLabels: Readonly<Record<string, string>> = {
   cad_hierarchy: "Exploring CAD structure",
   cad_checks: "Running CAD checks",
   cad_diff: "Comparing CAD versions",
+  cad_measure: "Measuring CAD",
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",
   cad_comments_list: "Reading CAD comments",

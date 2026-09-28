@@ -22,4 +22,4 @@ Outdated comment annotations (`CadComments.md`) use this diff: a comment is outd
 
 ## Verification
 
-`CadDiff.test.ts` covers every category, repeated instances of one part, sub-epsilon noise and reimported identical models, cursor binding, and default base choice. `CadViewing.test.ts` runs the tool through the real activation path with a committed comment and a second sync, checking the rollback and comment-referenced base, retained snapshot listing, cached paging, and the first-review error. Transport tests enumerate `cad_diff` among the nine CAD tools with the read-only hint.
+`CadDiff.test.ts` covers every category, repeated instances of one part, sub-epsilon noise and reimported identical models, cursor binding, and default base choice. `CadViewing.test.ts` runs the tool through the real activation path with a committed comment and a second sync, checking the rollback and comment-referenced base, retained snapshot listing, cached paging, and the first-review error. Transport tests enumerate `cad_diff` among the eleven CAD tools with the read-only hint.

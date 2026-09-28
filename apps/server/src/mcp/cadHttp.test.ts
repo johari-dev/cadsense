@@ -114,16 +114,45 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_hierarchy",
       "cad_checks",
       "cad_diff",
+      "cad_measure",
       "cad_update_view",
       "cad_capture",
     ]);
     expect(
       listedTools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name),
-    ).toEqual(["cad_comments_list", "cad_context", "cad_hierarchy", "cad_checks", "cad_diff"]);
+    ).toEqual([
+      "cad_comments_list",
+      "cad_context",
+      "cad_hierarchy",
+      "cad_checks",
+      "cad_diff",
+      "cad_measure",
+    ]);
     // Claude must receive the same review guidance as native Codex tool registration.
     expect(listedTools.map(({ name, description }) => ({ name, description }))).toEqual(
       cadToolDefinitions.map(({ name, description }) => ({ name, description })),
     );
+    const measurementInput = {
+      expectedRevision: 3,
+      snapshotId: "00000000-0000-4000-8000-000000000002",
+      mode: "point-distance",
+      from: { space: "world", point: [0, 0, 0] },
+      to: { space: "world", point: [3, 4, 0] },
+    };
+    const measurementToken = yield* capabilities!.issue(
+      "native-session",
+      "child",
+      TurnId.make("turn"),
+      "cad_measure",
+      measurementInput,
+    );
+    expect(
+      (yield* response("tools/call", {
+        name: "cad_measure",
+        arguments: { _cadsenseCapability: measurementToken },
+      })).result.isError,
+    ).toBe(false);
+    expect(calls.pop()).toEqual(measurementInput);
     const token = yield* capabilities!.issue(
       "native-session",
       "child",

@@ -208,7 +208,7 @@ export function buildCodexDeveloperInstructions(
 
 ${cadReviewInstructions({ learnings: cadReviewLearnings, designBrief })}
 
-When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
+When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
 
 \`\`\`javascript
 const result = await tools.cad_capture({expectedRevision: revision});
