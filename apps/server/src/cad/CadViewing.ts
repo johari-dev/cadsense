@@ -336,6 +336,7 @@ export const make = Effect.gen(function* () {
             }),
           );
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
+        // cad_checks and cad_find_parts share this cache.
         const boundsCache = new Map<string, CadBounds | null>();
         const checks: CadAgentTools["checks"] = (input) =>
           fifo.withPermits(1)(
@@ -469,7 +470,15 @@ export const make = Effect.gen(function* () {
             Effect.gen(function* () {
               const initialized = yield* initialize();
               if (!initialized) return yield* unavailable();
-              return yield* findCadParts(initialized.binding.snapshot, initialized.state, input);
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* findCadParts(
+                binding.snapshot,
+                state,
+                (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
+                input,
+              );
             }),
           );
         const updateView: CadAgentTools["updateView"] = (input) =>

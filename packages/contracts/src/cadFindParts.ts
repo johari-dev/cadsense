@@ -3,6 +3,7 @@ import { CadHash, CadPartSource, CadSnapshotId, CadSnapshotNode } from "./cad.ts
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Text = Schema.String.check(Schema.isMaxLength(256));
+const Meters3 = Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]);
 export const CadFindPartsInput = Schema.Struct({
   snapshotId: CadSnapshotId,
   expectedRevision: Count,
@@ -44,6 +45,10 @@ export const CadFindPartsEntry = Schema.Struct({
   }),
   // Onshape's per-occurrence mass. Null means unknown, not zero.
   massKg: Schema.NullOr(Schema.Finite),
+  // Axis-aligned world box in meters at the original assembled placement (explosion and
+  // visibility ignored, Z up), four significant digits. Null for suppressed occurrences and
+  // anything under a suppressed assembly, non-parts, and parts whose bounds are unknown.
+  bounds: Schema.NullOr(Schema.Struct({ min: Meters3, max: Meters3, size: Meters3 })),
   assemblyPath: Schema.Array(Schema.Struct({ occurrenceId: CadHash, name: Text })).check(
     Schema.isMaxLength(16),
   ),

@@ -9,6 +9,7 @@ import {
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { presentCadBounds, worldCadBounds, type CadCheckGeometry } from "./CadChecks.ts";
 import { indexCadSnapshot } from "./CadViewState.ts";
 
 const decodeInput = Schema.decodeUnknownEffect(CadFindPartsInput);
@@ -22,12 +23,14 @@ const encodeFingerprint = Schema.encodeSync(
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
 const normalize = (value: string | undefined) => value?.trim().toLowerCase() ?? "";
 
-/** Search immutable manifest order without geometry reads. Cursors identify a page of the same
+/** Search immutable manifest order. Only the page window (at most `limit` matches) reads part
+ * bounds, through the same per-activation loader as cad_checks. Cursors identify a page of the same
  * normalized query and revision; they grant no additional authority over the pinned snapshot.
  */
 export const findCadParts = Effect.fn("findCadParts")(function* (
   snapshot: CadSnapshotManifest,
   state: CadViewState,
+  bounds: CadCheckGeometry["bounds"],
   rawInput: unknown,
 ): Effect.fn.Return<CadFindPartsResult, CadViewError> {
   const input = yield* decodeInput(rawInput).pipe(Effect.mapError(invalid));
@@ -71,7 +74,12 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
   const index = indexCadSnapshot(snapshot),
     visible = index.visible(state),
     parts = new Map(snapshot.parts.map((part) => [part.geometryKey, part]));
-  const entries: CadFindPartsEntry[] = [];
+  // Page candidates in manifest order. Placed parts carry the geometry key their bounds come from.
+  const candidates: {
+    entry: CadFindPartsEntry;
+    node: CadSnapshotManifest["nodes"][number];
+    geometryKey: string | null;
+  }[] = [];
   // Reserve the envelope using upper bounds for both the match count and cursor offset.
   let resultBytes = Buffer.byteLength(
     encodeResult({
@@ -83,7 +91,6 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
       nextCursor: `${prefix}${snapshot.nodes.length}`,
     }),
   );
-  let pageFull = false;
   let totalMatches = 0;
   for (const node of snapshot.nodes) {
     const part = node.sourcePartKey === null ? undefined : parts.get(node.sourcePartKey),
@@ -99,7 +106,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     )
       continue;
     const ordinal = totalMatches++;
-    if (ordinal < offset || entries.length === limit || pageFull) continue;
+    if (ordinal < offset || candidates.length === limit) continue;
     let textTruncated = false;
     const text = (value: string) => {
       if (value.length > 256) textTruncated = true;
@@ -107,13 +114,16 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     };
     const assemblyPath: { occurrenceId: string; name: string }[] = [];
     let parentId = node.parentId,
-      ancestorCount = 0;
+      ancestorCount = 0,
+      // Like cad_checks, anything under a suppressed assembly counts as suppressed.
+      suppressed = node.suppressed;
     // Stored manifests have validated parent links. Bound the walk even for malformed callers.
     while (parentId !== null) {
       const parent = index.nodes.get(parentId);
       if (!parent || ancestorCount++ >= snapshot.nodes.length) return yield* invalid();
       if (assemblyPath.length < 16)
         assemblyPath.push({ occurrenceId: parent.id, name: text(parent.name) });
+      suppressed ||= parent.suppressed;
       parentId = parent.parentId;
     }
     assemblyPath.reverse();
@@ -145,21 +155,35 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
             : text(metadata.material.displayName),
       },
       massKg: metadata?.massKg ?? null,
+      bounds: null,
       assemblyPath,
       omittedAncestorCount: Math.max(0, ancestorCount - 16),
       textTruncated,
     };
+    candidates.push({
+      entry,
+      node,
+      geometryKey: node.kind === "part" && !suppressed ? node.sourcePartKey : null,
+    });
+  }
+  if (offset > 0 && offset >= totalMatches) return yield* invalid();
+  const local = yield* bounds(
+    new Set(candidates.flatMap(({ geometryKey }) => (geometryKey === null ? [] : [geometryKey]))),
+  );
+  const entries: CadFindPartsEntry[] = [];
+  for (const { entry: candidate, node, geometryKey } of candidates) {
+    const world =
+      geometryKey === null ? null : worldCadBounds(node.transform, local.get(geometryKey));
+    const entry = { ...candidate, bounds: world && presentCadBounds(world) };
     const entryBytes = Buffer.byteLength(encodeEntry(entry)) + (entries.length > 0 ? 1 : 0);
     if (resultBytes + entryBytes > MAX_RESULT_BYTES) {
       if (entries.length === 0) return yield* invalid();
-      // Keep counting matches, but leave this entry and every later match for the next page.
-      pageFull = true;
-      continue;
+      // Leave this entry and every later match for the next page.
+      break;
     }
     entries.push(entry);
     resultBytes += entryBytes;
   }
-  if (offset > 0 && offset >= totalMatches) return yield* invalid();
   return {
     rootId: snapshot.rootId,
     snapshotId: snapshot.snapshotId,

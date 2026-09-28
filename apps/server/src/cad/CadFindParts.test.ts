@@ -7,6 +7,7 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import type { CadBounds } from "./CadChecks.ts";
 import { findCadParts } from "./CadFindParts.ts";
 import { initialCadView } from "./CadViewState.ts";
 
@@ -91,13 +92,18 @@ const validResult = Schema.is(CadFindPartsResult);
 const validInput = Schema.is(CadFindPartsInput);
 const ids = (result: CadFindPartsResult) => result.entries.map((entry) => entry.occurrenceId);
 const encode = Schema.encodeSync(Schema.fromJsonString(CadFindPartsResult));
+// No stored geometry: every part's bounds are unknown.
+const noBounds = () => Effect.succeed(new Map<string, CadBounds | null>());
 
 describe("cad_find_parts", () => {
   it.effect(
     "disambiguates duplicate names by assembly paths and exact configured source keys",
     () =>
       Effect.gen(function* () {
-        const result = yield* findCadParts(snapshot, state, { ...request, nameQuery: " bOlT " });
+        const result = yield* findCadParts(snapshot, state, noBounds, {
+          ...request,
+          nameQuery: " bOlT ",
+        });
         assert.deepEqual(ids(result), [3, 5, 6, 8].map(id));
         assert.isTrue(validResult(result));
         assert.deepEqual(result.entries[0]!.assemblyPath, [
@@ -111,18 +117,22 @@ describe("cad_find_parts", () => {
         assert.equal(result.entries[1]!.source?.configuration, "size=5");
         assert.equal(result.entries[2]!.source?.configuration, "size=6");
         assert.deepEqual(
-          ids(yield* findCadParts(snapshot, state, { ...request, sourcePartKey: id(100) })),
+          ids(
+            yield* findCadParts(snapshot, state, noBounds, { ...request, sourcePartKey: id(100) }),
+          ),
           [3, 5, 8].map(id),
         );
         assert.deepEqual(
-          ids(yield* findCadParts(snapshot, state, { ...request, sourcePartKey: id(999) })),
+          ids(
+            yield* findCadParts(snapshot, state, noBounds, { ...request, sourcePartKey: id(999) }),
+          ),
           [],
         );
       }),
   );
   it.effect("combines material and body filters while reporting absent metadata explicitly", () =>
     Effect.gen(function* () {
-      const steel = yield* findCadParts(snapshot, state, {
+      const steel = yield* findCadParts(snapshot, state, noBounds, {
         ...request,
         nameQuery: "BOLT",
         materialName: " STEEL ",
@@ -130,23 +140,32 @@ describe("cad_find_parts", () => {
       });
       assert.deepEqual(ids(steel), [3, 5, 8].map(id));
       assert.equal(steel.entries[0]!.massKg, 0.012);
-      const surface = yield* findCadParts(snapshot, state, { ...request, bodyType: "surface" });
+      const surface = yield* findCadParts(snapshot, state, noBounds, {
+        ...request,
+        bodyType: "surface",
+      });
       assert.deepEqual(ids(surface), [id(6)]);
-      const noMaterial = yield* findCadParts(snapshot, state, { ...request, nameQuery: "bracket" });
+      const noMaterial = yield* findCadParts(snapshot, state, noBounds, {
+        ...request,
+        nameQuery: "bracket",
+      });
       assert.deepEqual(noMaterial.entries[0]!.material, { status: "unavailable", name: null });
       assert.isTrue(noMaterial.entries[0]!.metadataAvailable);
       assert.isNull(noMaterial.entries[0]!.massKg);
-      const noMetadata = yield* findCadParts(snapshot, state, { ...request, nameQuery: "unknown" });
+      const noMetadata = yield* findCadParts(snapshot, state, noBounds, {
+        ...request,
+        nameQuery: "unknown",
+      });
       assert.isFalse(noMetadata.entries[0]!.metadataAvailable);
       assert.isNull(noMetadata.entries[0]!.bodyType);
       assert.isNull(noMetadata.entries[0]!.massKg);
       assert.deepEqual(noMetadata.entries[0]!.material, { status: "unavailable", name: null });
       assert.equal(
-        (yield* findCadParts(snapshot, state, { ...request, kind: "all" })).totalMatches,
+        (yield* findCadParts(snapshot, state, noBounds, { ...request, kind: "all" })).totalMatches,
         9,
       );
       assert.deepEqual(
-        ids(yield* findCadParts(snapshot, state, { ...request, kind: "assembly" })),
+        ids(yield* findCadParts(snapshot, state, noBounds, { ...request, kind: "assembly" })),
         [1, 2, 4].map(id),
       );
     }),
@@ -157,26 +176,24 @@ describe("cad_find_parts", () => {
       Effect.gen(function* () {
         const before = structuredClone(state);
         assert.deepEqual(
-          ids(yield* findCadParts(snapshot, state, { ...request, visibility: "hidden" })),
+          ids(yield* findCadParts(snapshot, state, noBounds, { ...request, visibility: "hidden" })),
           [3, 7, 8].map(id),
         );
         assert.deepEqual(
           ids(
-            yield* findCadParts(
-              snapshot,
-              { ...state, visibility: { [id(2)]: true } },
-              { ...request, visibility: "visible" },
-            ),
+            yield* findCadParts(snapshot, { ...state, visibility: { [id(2)]: true } }, noBounds, {
+              ...request,
+              visibility: "visible",
+            }),
           ),
           [3, 5, 6, 9].map(id),
         );
         assert.deepEqual(
           ids(
-            yield* findCadParts(
-              snapshot,
-              { ...state, isolatedOccurrenceIds: [id(5)] },
-              { ...request, visibility: "visible" },
-            ),
+            yield* findCadParts(snapshot, { ...state, isolatedOccurrenceIds: [id(5)] }, noBounds, {
+              ...request,
+              visibility: "visible",
+            }),
           ),
           [id(5)],
         );
@@ -188,7 +205,7 @@ describe("cad_find_parts", () => {
       const all: string[] = [];
       let cursor: string | undefined;
       do {
-        const page = yield* findCadParts(snapshot, state, {
+        const page = yield* findCadParts(snapshot, state, noBounds, {
           ...request,
           limit: 2,
           ...(cursor ? { cursor } : {}),
@@ -200,12 +217,12 @@ describe("cad_find_parts", () => {
       } while (cursor);
       assert.deepEqual(all, [3, 5, 6, 7, 8, 9].map(id));
       assert.equal(new Set(all).size, 6);
-      const first = yield* findCadParts(snapshot, state, {
+      const first = yield* findCadParts(snapshot, state, noBounds, {
         ...request,
         nameQuery: " bolt ",
         limit: 2,
       });
-      const same = yield* findCadParts(snapshot, state, {
+      const same = yield* findCadParts(snapshot, state, noBounds, {
         ...request,
         nameQuery: "BOLT",
         limit: 2,
@@ -213,7 +230,7 @@ describe("cad_find_parts", () => {
       assert.equal(first.nextCursor, same.nextCursor);
       assert.deepEqual(
         ids(
-          yield* findCadParts(snapshot, state, {
+          yield* findCadParts(snapshot, state, noBounds, {
             ...request,
             nameQuery: "  bOlT",
             limit: 2,
@@ -228,7 +245,7 @@ describe("cad_find_parts", () => {
     "rejects cursor mismatches, stale revisions, and malformed or out-of-page offsets",
     () =>
       Effect.gen(function* () {
-        const first = yield* findCadParts(snapshot, state, { ...request, limit: 2 });
+        const first = yield* findCadParts(snapshot, state, noBounds, { ...request, limit: 2 });
         const cursor = first.nextCursor!;
         for (const change of [
           { nameQuery: "bolt" },
@@ -240,14 +257,17 @@ describe("cad_find_parts", () => {
           { limit: 3 },
         ])
           assert.equal(
-            (yield* findCadParts(snapshot, state, { ...request, limit: 2, cursor, ...change }).pipe(
-              Effect.flip,
-            )).reason,
+            (yield* findCadParts(snapshot, state, noBounds, {
+              ...request,
+              limit: 2,
+              cursor,
+              ...change,
+            }).pipe(Effect.flip)).reason,
             "invalid-operation",
           );
         for (const suffix of ["0", "-2", "6", "8", "02", "1.5", "NaN", "9007199254740992"])
           assert.equal(
-            (yield* findCadParts(snapshot, state, {
+            (yield* findCadParts(snapshot, state, noBounds, {
               ...request,
               limit: 2,
               cursor: cursor.replace(/:[0-9]+$/, `:${suffix}`),
@@ -255,17 +275,18 @@ describe("cad_find_parts", () => {
             "invalid-operation",
           );
         assert.equal(
-          (yield* findCadParts(snapshot, state, { ...request, expectedRevision: 2 }).pipe(
+          (yield* findCadParts(snapshot, state, noBounds, { ...request, expectedRevision: 2 }).pipe(
             Effect.flip,
           )).reason,
           "revision-conflict",
         );
         assert.equal(
-          (yield* findCadParts(
-            snapshot,
-            { ...state, revision: 4 },
-            { ...request, expectedRevision: 4, limit: 2, cursor },
-          ).pipe(Effect.flip)).reason,
+          (yield* findCadParts(snapshot, { ...state, revision: 4 }, noBounds, {
+            ...request,
+            expectedRevision: 4,
+            limit: 2,
+            cursor,
+          }).pipe(Effect.flip)).reason,
           "invalid-operation",
         );
         const nextId = "00000000-0000-4000-8000-000000000002";
@@ -273,12 +294,13 @@ describe("cad_find_parts", () => {
           (yield* findCadParts(
             { ...snapshot, snapshotId: nextId },
             { ...state, snapshotId: nextId },
+            noBounds,
             { ...request, snapshotId: nextId, limit: 2, cursor },
           ).pipe(Effect.flip)).reason,
           "invalid-operation",
         );
         assert.equal(
-          (yield* findCadParts(snapshot, state, { ...request, snapshotId: nextId }).pipe(
+          (yield* findCadParts(snapshot, state, noBounds, { ...request, snapshotId: nextId }).pipe(
             Effect.flip,
           )).reason,
           "revision-conflict",
@@ -295,7 +317,7 @@ describe("cad_find_parts", () => {
         kind: i === 20 ? ("part" as const) : ("assembly" as const),
         sourcePartKey: i === 20 ? id(100) : null,
       }));
-      const result = yield* findCadParts({ ...snapshot, nodes }, state, request);
+      const result = yield* findCadParts({ ...snapshot, nodes }, state, noBounds, request);
       assert.isTrue(validResult(result));
       const entry = result.entries[0]!;
       assert.equal(entry.occurrenceId, id(21));
@@ -313,13 +335,28 @@ describe("cad_find_parts", () => {
         ...snapshot.nodes[2]!,
         id: id(i + 1000),
         parentId: null,
+        sourcePartKey: id(i + 200_000),
       }));
-      const result = yield* findCadParts({ ...snapshot, nodes }, state, request);
+      const requested: string[] = [];
+      const result = yield* findCadParts(
+        { ...snapshot, nodes },
+        state,
+        (keys) => {
+          requested.push(...keys);
+          return noBounds();
+        },
+        request,
+      );
       assert.equal(result.totalMatches, 100_000);
       assert.lengthOf(result.entries, 25);
+      // Only the returned page reads bounds, never every match.
+      assert.deepEqual(
+        requested,
+        result.entries.map((entry) => entry.sourcePartKey),
+      );
       assert.isNotNull(result.nextCursor);
       assert.isTrue(validResult(result));
-      const empty = yield* findCadParts({ ...snapshot, nodes: [] }, state, request);
+      const empty = yield* findCadParts({ ...snapshot, nodes: [] }, state, noBounds, request);
       assert.deepEqual(empty.entries, []);
       assert.equal(empty.totalMatches, 0);
       assert.isNull(empty.nextCursor);
@@ -359,13 +396,24 @@ describe("cad_find_parts", () => {
             },
           ],
         });
+        // Coordinates whose four-digit JSON form is as long as a finite number gets (21+ chars).
+        const widest: CadBounds = {
+          min: [-9.999e20, -9.999e20, -9.999e20],
+          max: [-1.111e20, -1.111e20, -1.111e20],
+        };
+        const wideBounds = (keys: ReadonlySet<string>) =>
+          Effect.succeed(new Map([...keys].map((key) => [key, widest])));
         const all: string[] = [];
         let cursor: string | undefined;
         let pageCount = 0;
         do {
           const input = { ...request, limit: 50, ...(cursor ? { cursor } : {}) };
-          const page = yield* findCadParts(large, state, input);
-          assert.deepEqual(yield* findCadParts(large, state, input), page);
+          const page = yield* findCadParts(large, state, wideBounds, input);
+          assert.deepEqual(yield* findCadParts(large, state, wideBounds, input), page);
+          assert.deepEqual(
+            page.entries.map((entry) => entry.bounds?.min[0] ?? null),
+            page.entries.map((entry) => (entry.sourcePartKey === null ? null : -9.999e20)),
+          );
           assert.isTrue(validResult(page));
           assert.isAtMost(new TextEncoder().encode(encode(page)).byteLength, 64 * 1024);
           assert.isAbove(page.entries.length, 0);
@@ -385,6 +433,36 @@ describe("cad_find_parts", () => {
           matches.map((node) => node.id),
         );
       }
+    }),
+  );
+  it.effect("places part bounds by occurrence and nulls anything under a suppressed assembly", () =>
+    Effect.gen(function* () {
+      const unit: CadBounds = { min: [0, 0, 0], max: [1, 1, 1] };
+      const withRightSuppressed = decodeSnapshot({
+        ...snapshot,
+        nodes: snapshot.nodes.map((node) =>
+          node.id === id(4)
+            ? { ...node, suppressed: true }
+            : node.id === id(3)
+              ? { ...node, transform: [2, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
+              : node,
+        ),
+      });
+      const result = yield* findCadParts(
+        withRightSuppressed,
+        initialCadView(withRightSuppressed, 3),
+        (keys) => Effect.succeed(new Map([...keys].map((key) => [key, unit]))),
+        { ...request, kind: "all", nameQuery: "bolt" },
+      );
+      assert.deepEqual(
+        result.entries.map((entry) => [entry.occurrenceId, entry.suppressed, entry.bounds]),
+        [
+          [id(3), false, { min: [5, 0, 0], max: [7, 1, 1], size: [2, 1, 1] }],
+          [id(5), false, null],
+          [id(6), false, null],
+          [id(8), true, null],
+        ],
+      );
     }),
   );
   it("rejects unbounded input pages and invalid filters", () => {
