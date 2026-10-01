@@ -49,7 +49,9 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { OnshapeConnectionId, OnshapeProjectSource } from "./onshape.ts";
+import { LocalCadProjectSource } from "./localCad.ts";
 import {
+  CadCatalog,
   CadProjectState,
   CadOperationId,
   CadOperationKind,
@@ -284,6 +286,8 @@ export const OrchestrationProject = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   // Optional for wire compatibility. Absence means a regular filesystem project.
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  // A folder project that reviews a CAD file in its workspace. Never set with onshapeSource.
+  localCadSource: Schema.optionalKey(LocalCadProjectSource),
   cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -461,6 +465,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  localCadSource: Schema.optionalKey(LocalCadProjectSource),
   cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -969,6 +974,14 @@ export const OnshapeProjectSetConnectionCommand = Schema.Struct({
   connectionId: OnshapeConnectionId,
 });
 
+/** Server-only command produced after resolving a CAD file inside a folder project's workspace. */
+export const LocalCadProjectSetCommand = Schema.Struct({
+  type: Schema.Literal("project.local-cad.set"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  localCadSource: LocalCadProjectSource,
+});
+
 /** Server-only command emitted after the managed workspace reactor succeeds. */
 export const OnshapeProjectWorkspaceReadyCommand = Schema.Struct({
   type: Schema.Literal("project.onshape.workspace.ready"),
@@ -1005,6 +1018,8 @@ const CadOperationEndCommand = Schema.Struct({
   status: Schema.Literals(["failed", "cancelled", "interrupted"]),
   reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
   retryAt: Schema.optionalKey(IsoDateTime),
+  // A failed local CAD sync still rescans the folder, so the user can choose another file.
+  catalog: Schema.optionalKey(CadCatalog),
 });
 const ThreadTurnStartSettleCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start.settle"),
@@ -1067,6 +1082,7 @@ const InternalOrchestrationCommand = Schema.Union([
   OnshapeProjectCreateCommand,
   OnshapeProjectSetConnectionCommand,
   OnshapeProjectWorkspaceReadyCommand,
+  LocalCadProjectSetCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1164,6 +1180,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   onshapeConnectionId: Schema.optional(OnshapeConnectionId),
   onshapeManagedWorkspaceReady: Schema.optional(Schema.Boolean),
+  localCadSource: Schema.optional(LocalCadProjectSource),
   updatedAt: IsoDateTime,
 });
 

@@ -63,11 +63,14 @@ export function cadPanelLockStatus({
   blocker,
   panel,
   operation,
+  localCad = false,
 }: {
   threadId: ThreadId;
   blocker: CadProjectRunBlocker | null;
   panel: Pick<CadPanelState, "agentControlling" | "agentActivityTurnId" | "captureId"> | null;
   operation: NonNullable<CadProjectState["operation"]>["kind"] | null;
+  /** The project imports a local CAD file instead of syncing from Onshape. */
+  localCad?: boolean;
 }): CadPanelLockStatus | null {
   const ownRun = blocker?.threadId === threadId ? blocker : null;
   if (ownRun || panel?.agentControlling) {
@@ -104,7 +107,14 @@ export function cadPanelLockStatus({
     };
   if (operation)
     return {
-      message: operation === "cleanup" ? "Cleaning up CAD files." : "Updating CAD from Onshape.",
+      message:
+        operation === "cleanup"
+          ? "Cleaning up CAD files."
+          : !localCad
+            ? "Updating CAD from Onshape."
+            : operation === "discover"
+              ? "Scanning the project folder."
+              : "Importing the CAD file.",
       agent: false,
     };
   return null;

@@ -528,6 +528,41 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.local-cad.set": {
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.onshapeSource !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is an Onshape project.`,
+        });
+      }
+      yield* requireProjectCadIdle({
+        readModel,
+        command,
+        projectId: command.projectId,
+        includeRuns: true,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          localCadSource: command.localCadSource,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "project.onshape.workspace.ready": {
       const project = yield* requireActiveProject({
         readModel,

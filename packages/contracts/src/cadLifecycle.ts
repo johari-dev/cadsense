@@ -6,7 +6,7 @@ import {
   ThreadId,
   TurnId,
 } from "./baseSchemas.ts";
-import type { OrchestrationThread } from "./orchestration.ts";
+import type { OrchestrationProjectShell, OrchestrationThread } from "./orchestration.ts";
 import { CadHash, CadRootKind, CadSnapshotId } from "./cad.ts";
 import { OnshapeElementId, OnshapeWorkspaceId } from "./onshape.ts";
 
@@ -102,6 +102,10 @@ export const isCadThreadRunActive = (
   thread.session?.activeTurnId != null ||
   thread.latestTurn?.state === "running" ||
   thread.backgroundLiveness === "working";
+/** True when a project has a CAD source to sync and review, from Onshape or a local file. */
+export const hasCadSource = (
+  project: Pick<OrchestrationProjectShell, "onshapeSource" | "localCadSource">,
+): boolean => project.onshapeSource !== undefined || project.localCadSource !== undefined;
 export const initialCadProjectState = (): CadProjectState => ({
   enabled: true,
   catalog: null,
@@ -111,6 +115,11 @@ export const initialCadProjectState = (): CadProjectState => ({
 });
 export const CadOperationResult = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("discover"), catalog: CadCatalog }),
-  Schema.Struct({ kind: Schema.Literal("sync"), snapshot: CadSnapshotMetadata }),
+  Schema.Struct({
+    kind: Schema.Literal("sync"),
+    snapshot: CadSnapshotMetadata,
+    // Local CAD syncs rescan the folder too, since that costs no API requests.
+    catalog: Schema.optionalKey(CadCatalog),
+  }),
   Schema.Struct({ kind: Schema.Literal("cleanup") }),
 ]);

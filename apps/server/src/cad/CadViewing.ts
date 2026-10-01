@@ -2,6 +2,7 @@ import { measureCad } from "./CadMeasure.ts";
 import { findCadParts } from "./CadFindParts.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
+  hasCadSource,
   CadViewError,
   CadViewState,
   CadUpdateViewInput,
@@ -142,7 +143,7 @@ export const make = Effect.gen(function* () {
       .pipe(Effect.mapError(unavailable));
     if (
       Option.isNone(project) ||
-      !project.value.onshapeSource ||
+      !hasCadSource(project.value) ||
       project.value.cad?.enabled === false ||
       project.value.cad?.operation
     )
@@ -285,7 +286,7 @@ export const make = Effect.gen(function* () {
           const saved = currentSession.view ?? (yield* getUserView(session.threadId));
           const selected = saved
             ? roots.find((root) => root.rootId === saved.rootId)
-            : defaultCadRoot(project.onshapeSource, roots);
+            : defaultCadRoot(project, roots);
           if (!selected?.current) return null;
           const next = yield* bind(selected.current.snapshotId).pipe(
             Effect.orElseSucceed(() => null),

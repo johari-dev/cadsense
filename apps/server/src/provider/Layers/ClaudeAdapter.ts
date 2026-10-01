@@ -24,6 +24,7 @@ import {
 import { parseCliArgs } from "@cadsense/shared/cliArgs";
 import { makeClaudeProcessExit } from "./ClaudeProcessExit.ts";
 import {
+  hasCadSource,
   ApprovalRequestId,
   MONITOR_TASK_TYPES,
   INERT_TASK_TYPES,
@@ -4400,7 +4401,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const project = yield* cadQuery.value.getProjectShellById(thread.value.projectId);
         if (
           Option.isNone(project) ||
-          !project.value.onshapeSource ||
+          !hasCadSource(project.value) ||
           project.value.cad?.enabled === false ||
           !project.value.cad?.roots.some((root) => root.current !== null)
         )

@@ -1,5 +1,6 @@
 import {
   onshapeProjectSourceIdentity,
+  hasCadSource,
   isCadThreadRunActive,
   type OnshapeProjectSource,
   type OrchestrationCommand,
@@ -28,7 +29,7 @@ export function requireProjectCadIdle(input: {
   readonly includeRuns?: boolean;
 }): Effect.Effect<void, OrchestrationCommandInvariantError> {
   const project = findProjectById(input.readModel, input.projectId);
-  if (!project?.onshapeSource) return Effect.void;
+  if (!project || !hasCadSource(project)) return Effect.void;
   if (project.cad?.operation)
     return Effect.fail(
       invariantError(input.command.type, "A CAD operation is active for this project."),

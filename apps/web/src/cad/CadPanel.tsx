@@ -38,6 +38,7 @@ import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
+import { CadLocalSyncButton } from "./CadLocalSyncButton";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
@@ -53,6 +54,20 @@ import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
+
+/** What a local CAD project shows before its first import lands: progress, then any failure. */
+function LocalCadEmptyState({ project }: { project: Project }) {
+  const filePath = project.localCadSource?.filePath;
+  if (project.cad?.operation?.kind === "sync") return <>Importing {filePath}…</>;
+  if (project.cad?.lastOutcome?.status === "failed" && project.cad.lastOutcome.reason)
+    return (
+      <span className="max-w-md">
+        {project.cad.lastOutcome.reason} Fix the file and sync again, or choose another file in
+        project settings.
+      </span>
+    );
+  return <>{filePath} has not been imported. Sync to import it.</>;
+}
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -561,6 +576,7 @@ export function CadPanel({
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
+    localCad: project.localCadSource !== undefined,
   });
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;
@@ -715,6 +731,11 @@ export function CadPanel({
                 });
             }}
           />
+          <CadLocalSyncButton
+            project={project}
+            rootId={view?.rootId ?? data?.unavailableRootId ?? null}
+            disabled={!!runBlocker || !!data?.agentControlling || !!historicalView}
+          />
         </div>
       )}
       {error && (
@@ -769,6 +790,8 @@ export function CadPanel({
             "This downloaded CAD is unavailable. You can select another cached scene."
           ) : roots.length ? (
             "Select a CAD scene above."
+          ) : project.localCadSource ? (
+            <LocalCadEmptyState project={project} />
           ) : (
             "No CAD has been downloaded. Select and sync CAD in project settings."
           )}

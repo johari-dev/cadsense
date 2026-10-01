@@ -1,4 +1,5 @@
 import {
+  hasCadSource,
   type ApprovalRequestId,
   type ChatFileAttachment,
   DEFAULT_MODEL,
@@ -1739,7 +1740,8 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
-  const cadAvailable = !!activeProject?.onshapeSource && activeProject.cad?.enabled !== false;
+  const cadAvailable =
+    !!activeProject && hasCadSource(activeProject) && activeProject.cad?.enabled !== false;
   const cadOpeningRef = useRef(false);
   const [cadOpening, setCadOpening] = useState(false);
   const addCadSurface = useCallback(() => {

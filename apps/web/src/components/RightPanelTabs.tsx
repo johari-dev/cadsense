@@ -234,7 +234,7 @@ function RightPanelEmptyState(props: {
       ? [
           {
             label: "CAD",
-            description: "Inspect the Onshape project.",
+            description: "Inspect the project's CAD.",
             icon: Box,
             shortcut: "C",
             available: true,

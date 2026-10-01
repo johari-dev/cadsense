@@ -23,6 +23,7 @@ import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { CadProjectQuiescence, make } from "./CadUserOperations.ts";
+import { LocalCadImport } from "../localCad/LocalCadImport.ts";
 
 const unused = () => Effect.die("Unexpected test operation");
 const projectId = ProjectId.make("cad-user-operations");
@@ -127,6 +128,7 @@ const harness = Effect.fn(function* (options?: {
         ),
     }),
     Layer.succeed(OnshapeSnapshotAcquisition, { acquire: unused }),
+    Layer.succeed(LocalCadImport, { catalog: unused, acquire: unused }),
     Layer.succeed(CadProjectQuiescence, {
       confirm: () =>
         Ref.update(calls, (values) => [...values, "quiesce"]).pipe(

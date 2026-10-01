@@ -1,4 +1,5 @@
 import {
+  hasCadSource,
   isCadThreadRunActive,
   type OrchestrationCommand,
   type OrchestrationReadModel,
@@ -65,7 +66,7 @@ export const decideCadSession = Effect.fn("decideCadSession")(function* (
     new OrchestrationCommandInvariantError({ commandType: command.type, detail });
   const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
   const project = yield* requireActiveProject({ readModel, command, projectId: thread.projectId });
-  if (thread.deletedAt !== null || !project.onshapeSource || project.cad?.enabled === false)
+  if (thread.deletedAt !== null || !hasCadSource(project) || project.cad?.enabled === false)
     return yield* fail("CAD capability unavailable.");
   yield* requireProjectCadIdle({
     readModel,
