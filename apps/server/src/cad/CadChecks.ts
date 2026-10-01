@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import Module from "manifold-3d";
 import { MAX_PART_EXPORT_BYTES } from "./CadGeometry.ts";
-import { decodeCadToolInput } from "./CadViewState.ts";
+import { CAD_TOOL_PAGE_BYTES, decodeCadToolInput } from "./CadViewState.ts";
 
 /** Thresholds in meters (volume in cubic meters). Findings below them are treated as numerical noise. */
 export const CAD_CHECK_LIMITS = {
@@ -27,8 +27,8 @@ export const CAD_CHECK_LIMITS = {
   // Triangles per part mesh; larger meshes are reported as unknown instead of intersected.
   meshTriangles: 500_000,
   pageSize: 50,
-  // Serialized page budget, well under Claude's MCP output limit so a page is never spilled to a file.
-  pageBytes: 32 * 1024,
+  // Serialized page budget shared with cad_hierarchy, so a page is never spilled to a file.
+  pageBytes: CAD_TOOL_PAGE_BYTES,
 } as const;
 
 type Vector3 = readonly [number, number, number];

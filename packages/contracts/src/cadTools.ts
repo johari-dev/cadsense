@@ -20,7 +20,6 @@ export const CadHierarchyInput = Schema.Struct({
 export type CadHierarchyInput = typeof CadHierarchyInput.Type;
 export const CadHierarchyEntry = Schema.Struct({
   occurrenceId: CadHash,
-  parentOccurrenceId: Schema.NullOr(CadHash),
   name: Schema.String,
   kind: Schema.Literals(["assembly", "part-studio", "part", "unsupported"]),
   hasChildren: Schema.Boolean,
@@ -30,9 +29,12 @@ export const CadHierarchyEntry = Schema.Struct({
   material: Schema.optionalKey(Schema.String),
   massKg: Schema.optionalKey(Schema.Number),
 });
+export type CadHierarchyEntry = typeof CadHierarchyEntry.Type;
+/** One page of one parent's children. Every entry shares `parentOccurrenceId`; null is the top level. */
 export const CadHierarchyResult = Schema.Struct({
   revision: Schema.Int,
   snapshotId: CadSnapshotId,
+  parentOccurrenceId: Schema.NullOr(CadHash),
   entries: Schema.Array(CadHierarchyEntry),
   nextCursor: Schema.NullOr(Schema.String),
 });
