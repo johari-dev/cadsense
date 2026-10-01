@@ -545,7 +545,6 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         y: ((1 - projected.y) * height) / 2,
         // A reviewed view hides unrelated parts; their markers would point at empty space.
         visible: projected.z >= -1 && projected.z <= 1 && (review === null || entry.object.visible),
-        occluded: !entry.object.visible || !cadCommentVisible(model, camera, point),
       };
     },
     endCommentReview,

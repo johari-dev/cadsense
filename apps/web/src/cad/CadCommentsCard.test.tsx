@@ -231,7 +231,7 @@ it("updates comment markers after scene changes without repeating idle projectio
     pending.forEach((callback) => callback(0));
   };
   const listeners = new Set<() => void>();
-  const project = vi.fn(() => ({ x: 10, y: 20, visible: true, occluded: false }));
+  const project = vi.fn(() => ({ x: 10, y: 20, visible: true }));
   const graphics = {
     commentProjection: project,
     endCommentReview() {},

@@ -193,13 +193,12 @@ export function CadCommentsCard({
         if (point) {
           button.style.left = `${point.x}px`;
           button.style.top = `${point.y}px`;
-          button.dataset.occluded = String(point.occluded);
           button.style.borderStyle = "solid";
         }
       });
     };
-    // Project after layout, then only when graphics change. Occlusion checks raycast
-    // the assembly, so polling every animation tick makes an idle model expensive.
+    // Project after layout, then at most once per animation frame while graphics change.
+    // Projection runs on every pan/orbit frame, so it must stay cheap: no scene raycasts here.
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(draw);
     };
