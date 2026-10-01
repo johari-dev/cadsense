@@ -454,6 +454,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           exceptProjectId: command.projectId,
         });
       }
+      if (command.onshapeAutoReviewVersions !== undefined && project.onshapeSource === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is not an Onshape project.`,
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -469,6 +475,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
           ...(command.defaultModelSelection !== undefined
             ? { defaultModelSelection: command.defaultModelSelection }
+            : {}),
+          ...(command.onshapeAutoReviewVersions !== undefined
+            ? { onshapeAutoReviewVersions: command.onshapeAutoReviewVersions }
             : {}),
           updatedAt: occurredAt,
         },

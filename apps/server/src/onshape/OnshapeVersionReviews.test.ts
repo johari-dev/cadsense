@@ -1,0 +1,699 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import {
+  CadUserOperationError,
+  type CadRootIdentity,
+  CommandId,
+  OnshapeConnectionId,
+  OnshapeElementId,
+  OnshapeDocumentId,
+  OnshapeNetworkError,
+  OnshapeProjectSource,
+  OnshapeRateLimitError,
+  OnshapeWorkspaceId,
+  ProjectId,
+  ThreadId,
+  type OnshapeConnectionError,
+} from "@cadsense/contracts";
+import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
+
+import { CadUserOperations } from "../cad/CadUserOperations.ts";
+import { ServerConfig } from "../config.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
+import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
+import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLiveness.ts";
+import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
+import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
+import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
+import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
+import { OnshapeConnections } from "./OnshapeConnections.ts";
+import {
+  OPENED_CHECK_INTERVAL_MS,
+  OnshapeVersionReviews,
+  layer as versionReviewsLayer,
+  planVersionReviews,
+  versionReviewPrompt,
+  versionReviewTitle,
+  type OnshapeVersion,
+} from "./OnshapeVersionReviews.ts";
+
+const now = "2026-09-04T00:00:00.000Z";
+const projectId = ProjectId.make("onshape-version-review-project");
+const source = OnshapeProjectSource.make({
+  connectionId: OnshapeConnectionId.make("00000000-0000-4000-8000-000000000001"),
+  host: "https://cad.onshape.com",
+  documentId: OnshapeDocumentId.make("05760c4d8b40fba37db8fa48"),
+  workspaceType: "w",
+  workspaceId: OnshapeWorkspaceId.make("f31b499c519e8471cced93dc"),
+  configuration: "",
+});
+const version = (id: string, name: string, createdAt: string): OnshapeVersion => ({
+  id: OnshapeWorkspaceId.make(id.padEnd(24, "0")),
+  name,
+  createdAt,
+  description: null,
+  creator: { name: "Ada" },
+});
+const start = version("a", "Start", "2026-09-01T00:00:00.000Z");
+const v1 = version("b", "Bracket rev", "2026-09-02T00:00:00.000Z");
+const v2 = version("c", "Gearbox check", "2026-09-03T00:00:00.000Z");
+const unsupported = () => Effect.die("Unused test service method.");
+
+describe("planVersionReviews", () => {
+  it("records the newest version as the baseline on the first check", () => {
+    const plan = planVersionReviews({ cursor: null, versions: [v1, start] });
+    assert.deepStrictEqual(plan, {
+      baseline: { versionId: v1.id, createdAt: v1.createdAt },
+      pending: [],
+    });
+    assert.deepStrictEqual(planVersionReviews({ cursor: null, versions: [] }), {
+      baseline: null,
+      pending: [],
+    });
+  });
+
+  it("returns versions created after the cursor, oldest first, with their ordinals", () => {
+    const plan = planVersionReviews({
+      cursor: { versionId: start.id, createdAt: start.createdAt },
+      versions: [v2, start, v1],
+    });
+    assert.deepStrictEqual(plan.pending, [
+      { version: v1, ordinal: 1 },
+      { version: v2, ordinal: 2 },
+    ]);
+  });
+
+  it("still finds newer versions when the cursor version was deleted in Onshape", () => {
+    const plan = planVersionReviews({
+      cursor: { versionId: v1.id, createdAt: v1.createdAt },
+      versions: [start, v2],
+    });
+    assert.deepStrictEqual(
+      plan.pending.map((entry) => entry.version.id),
+      [v2.id],
+    );
+  });
+
+  it("breaks createdAt ties by id so a cursor never hides a sibling version", () => {
+    const sibling = { ...v1, id: OnshapeWorkspaceId.make("d".padEnd(24, "0")) };
+    const plan = planVersionReviews({
+      cursor: { versionId: v1.id, createdAt: v1.createdAt },
+      versions: [start, v1, sibling],
+    });
+    assert.deepStrictEqual(
+      plan.pending.map((entry) => entry.version.id),
+      [sibling.id],
+    );
+  });
+
+  it("titles and prompts the review from the version metadata", () => {
+    assert.strictEqual(versionReviewTitle(v2, 2), "Review v2: Gearbox check");
+    const prompt = versionReviewPrompt({
+      sync: { status: "synced", microversionId: "e".repeat(24) },
+      project: {
+        id: projectId,
+        title: "FRC intake",
+        workspaceRoot: "/managed",
+        defaultModelSelection: null,
+        onshapeSource: source,
+        createdAt: now,
+        updatedAt: now,
+      },
+      version: { ...v2, description: "Swapped the 40T gear", microversion: "f".repeat(24) },
+    });
+    assert.include(
+      prompt,
+      'Onshape version "Gearbox check" was created on 2026-09-03T00:00:00.000Z by Ada.',
+    );
+    assert.include(prompt, "Version note: Swapped the 40T gear.");
+    assert.include(prompt, "Review this version of FRC intake and leave CAD comments.");
+    assert.include(
+      prompt,
+      `synced just now from the bound workspace at microversion ${"e".repeat(24)}`,
+    );
+    assert.include(
+      prompt,
+      `The workspace has moved on since this version (version microversion ${"f".repeat(24)})`,
+    );
+    assert.include(
+      versionReviewPrompt({
+        sync: { status: "failed", reason: "CAD is busy" },
+        project: {
+          id: projectId,
+          title: "FRC intake",
+          workspaceRoot: "/managed",
+          defaultModelSelection: null,
+          onshapeSource: source,
+          createdAt: now,
+          updatedAt: now,
+        },
+        version: v2,
+      }),
+      "The CAD download failed (CAD is busy), so the CAD panel may show an older revision.",
+    );
+    assert.include(prompt, `https://cad.onshape.com/documents/${source.documentId}/v/${v2.id}`);
+  });
+});
+
+interface Onshape {
+  readonly versions: Ref.Ref<ReadonlyArray<OnshapeVersion>>;
+  readonly failure: Ref.Ref<OnshapeConnectionError | null>;
+  readonly requests: Ref.Ref<number>;
+  /** Whether a fake CAD sync completes or ends failed, plus how many syncs were requested. */
+  readonly syncMode: Ref.Ref<"succeed" | "fail">;
+  readonly syncs: Ref.Ref<number>;
+  /** When set, a fake CAD sync waits for it, which holds the review in flight. */
+  readonly syncGate: Ref.Ref<Deferred.Deferred<void> | null>;
+}
+
+const root: CadRootIdentity = {
+  rootId: "a".repeat(64),
+  elementId: OnshapeElementId.make("b53dde24ab8b46d679af9944"),
+  kind: "assembly",
+  configuration: "default",
+};
+const snapshot = (index: number) => ({
+  snapshotId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+  microversionId: OnshapeWorkspaceId.make(String(index).padStart(24, "0")),
+  createdAt: now,
+  manifestBytes: 1,
+  assetBytes: 1,
+});
+
+// Reserves, then settles the operation through the real CAD lifecycle commands, like the real
+// service does at the end of its forked job. Runs inline so ordering is deterministic.
+const fakeCadOperations = (onshape: Onshape) =>
+  Layer.effect(
+    CadUserOperations,
+    Effect.map(OrchestrationEngineService, (engine) =>
+      CadUserOperations.of({
+        start: (input) =>
+          Effect.gen(function* () {
+            const count = yield* Ref.updateAndGet(onshape.syncs, (n) => n + 1);
+            const gate = yield* Ref.get(onshape.syncGate);
+            if (gate) yield* Deferred.await(gate);
+            const operationId = `00000000-0000-4000-9000-${String(count).padStart(12, "0")}`;
+            yield* engine
+              .dispatch({
+                type: "project.cad.operation.reserve",
+                commandId: CommandId.make(`server:test:reserve:${count}`),
+                projectId: input.projectId,
+                operationId,
+                kind: input.kind,
+                root: input.kind === "sync" ? { ...input.root, rootId: root.rootId } : null,
+              })
+              .pipe(Effect.mapError(() => new CadUserOperationError({ reason: "busy" })));
+            const mode = yield* Ref.get(onshape.syncMode);
+            yield* engine
+              .dispatch(
+                mode === "succeed"
+                  ? {
+                      type: "project.cad.operation.complete",
+                      commandId: CommandId.make(`server:test:complete:${count}`),
+                      projectId: input.projectId,
+                      operationId,
+                      result: { kind: "sync", snapshot: snapshot(count) },
+                    }
+                  : {
+                      type: "project.cad.operation.end",
+                      commandId: CommandId.make(`server:test:end:${count}`),
+                      projectId: input.projectId,
+                      operationId,
+                      status: "failed",
+                      reason: "Could not reach Onshape. Existing downloaded CAD is unchanged.",
+                    },
+              )
+              .pipe(Effect.orDie);
+            return { operationId };
+          }),
+        cancel: unsupported,
+        setEnabled: unsupported,
+        recoverInterrupted: unsupported(),
+      }),
+    ),
+  );
+
+// Real engine and projections over a SQLite file, with Onshape replaced by a version list.
+function makeLayer(baseDir: string, onshape: Onshape) {
+  const persistence = makeSqlitePersistenceLive(NodePath.join(baseDir, "state.sqlite"));
+  const orchestration = Layer.mergeAll(
+    OrchestrationEngineLive.pipe(
+      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+      Layer.provide(OrchestrationProjectionPipelineLive),
+    ),
+    OrchestrationProjectionSnapshotQueryLive,
+  ).pipe(
+    Layer.provide(ThreadBackgroundLiveness.layer),
+    Layer.provide(ThreadPlanProgress.layer),
+    Layer.provide(OrchestrationEventStoreLive),
+    Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provideMerge(persistence),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  const connections = Layer.succeed(
+    OnshapeConnections,
+    OnshapeConnections.of({
+      readJson: () =>
+        Effect.gen(function* () {
+          yield* Ref.update(onshape.requests, (count) => count + 1);
+          const failure = yield* Ref.get(onshape.failure);
+          if (failure) return yield* Effect.fail(failure);
+          return yield* Ref.get(onshape.versions);
+        }),
+      readBinary: unsupported,
+      list: unsupported,
+      create: unsupported,
+      rename: unsupported,
+      replaceCredentials: unsupported,
+      remove: unsupported,
+    }),
+  );
+  return versionReviewsLayer.pipe(
+    Layer.provideMerge(connections),
+    Layer.provideMerge(fakeCadOperations(onshape)),
+    Layer.provideMerge(orchestration),
+  );
+}
+
+const createEnabledProject = Effect.fn(function* (enabled: boolean) {
+  const engine = yield* OrchestrationEngineService;
+  yield* engine.dispatch({
+    type: "project.onshape.create",
+    commandId: CommandId.make("server:test:create"),
+    projectId,
+    title: "FRC intake",
+    workspaceRoot: "/managed/frc-intake",
+    defaultModelSelection: null,
+    onshapeSource: source,
+    createdAt: now,
+  });
+  yield* engine.dispatch({
+    type: "project.onshape.workspace.ready",
+    commandId: CommandId.make("server:test:ready"),
+    projectId,
+  });
+  if (enabled) yield* setEnabled(true, "server:test:enable");
+});
+
+// A user already synced one root from project settings; a check refreshes that root before reviewing.
+const seedSyncedRoot = Effect.flatMap(CadUserOperations, (cadOperations) =>
+  cadOperations.start({ projectId, kind: "sync", root }),
+);
+
+const setEnabled = (enabled: boolean, commandId: string) =>
+  Effect.flatMap(OrchestrationEngineService, (engine) =>
+    engine.dispatch({
+      type: "project.meta.update",
+      commandId: CommandId.make(commandId),
+      projectId,
+      onshapeAutoReviewVersions: enabled,
+    }),
+  );
+
+const reviewThreads = Effect.gen(function* () {
+  const query = yield* ProjectionSnapshotQuery;
+  return (yield* query.getShellSnapshot()).threads.filter(
+    (thread) => thread.projectId === projectId,
+  );
+});
+
+const withTempDir = <A, E, R>(use: (baseDir: string) => Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cadsense-version-reviews-")),
+    ),
+    use,
+    (baseDir) => Effect.sync(() => NodeFS.rmSync(baseDir, { recursive: true, force: true })),
+  );
+
+const makeOnshape = Effect.gen(function* () {
+  return {
+    versions: yield* Ref.make<ReadonlyArray<OnshapeVersion>>([start]),
+    failure: yield* Ref.make<OnshapeConnectionError | null>(null),
+    requests: yield* Ref.make(0),
+    syncMode: yield* Ref.make<"succeed" | "fail">("succeed"),
+    syncs: yield* Ref.make(0),
+    syncGate: yield* Ref.make<Deferred.Deferred<void> | null>(null),
+  } satisfies Onshape;
+});
+
+const manual = { projectId, reason: "manual" } as const;
+const opened = { projectId, reason: "opened" } as const;
+
+// Waits for a background review to finish. While it runs every check reports "in-progress";
+// afterwards this "opened" check is throttled and makes no request, unless the test moved the
+// clock past the throttle window.
+const awaitIdle = Effect.gen(function* () {
+  const reviews = yield* OnshapeVersionReviews;
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const result = yield* reviews.check(opened);
+    if (!(result.status === "skipped" && result.reason === "in-progress")) return;
+    yield* TestClock.withLive(Effect.sleep("5 millis"));
+  }
+  return yield* Effect.die("The version review never finished.");
+});
+
+describe("OnshapeVersionReviews", () => {
+  it.effect("skips projects without the setting and never contacts Onshape", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(false);
+          const reviews = yield* OnshapeVersionReviews;
+          assert.deepStrictEqual(yield* reviews.check(opened), {
+            status: "skipped",
+            reason: "disabled",
+          });
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "skipped",
+            reason: "disabled",
+          });
+          assert.strictEqual(yield* Ref.get(onshape.requests), 0);
+          assert.deepStrictEqual(yield* reviewThreads, []);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("makes no Onshape request until a check is asked for", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          const reviews = yield* OnshapeVersionReviews;
+          yield* reviews.start();
+          yield* TestClock.adjust("1 day");
+          assert.strictEqual(yield* Ref.get(onshape.requests), 0);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect(
+    "baselines on the first check, reviews each later version once, and survives a restart",
+    () =>
+      withTempDir((baseDir) =>
+        Effect.gen(function* () {
+          const onshape = yield* makeOnshape;
+          yield* Effect.gen(function* () {
+            yield* createEnabledProject(true);
+            const reviews = yield* OnshapeVersionReviews;
+            const query = yield* ProjectionSnapshotQuery;
+
+            assert.deepStrictEqual(yield* reviews.check(manual), { status: "no-new-versions" });
+            assert.strictEqual(yield* Ref.get(onshape.requests), 1);
+            assert.deepStrictEqual(yield* reviewThreads, []);
+
+            yield* Ref.set(onshape.versions, [start, v1, v2]);
+            assert.deepStrictEqual(yield* reviews.check(manual), {
+              status: "reviewing",
+              versions: [
+                { ordinal: 1, name: "Bracket rev" },
+                { ordinal: 2, name: "Gearbox check" },
+              ],
+            });
+            yield* awaitIdle;
+            const threads = yield* reviewThreads;
+            assert.deepStrictEqual(
+              threads.map((thread) => thread.title),
+              ["Review v1: Bracket rev", "Review v2: Gearbox check"],
+            );
+            const detail = yield* query.getThreadDetailById(
+              ThreadId.make(`onshape-version-review:${projectId}:${v2.id}`),
+            );
+            assert.isTrue(Option.isSome(detail));
+            if (Option.isSome(detail)) {
+              assert.strictEqual(detail.value.messages.length, 1);
+              assert.include(
+                detail.value.messages[0]?.text ?? "",
+                'Onshape version "Gearbox check"',
+              );
+              assert.include(detail.value.messages[0]?.text ?? "", "No CAD root has been synced");
+              assert.strictEqual(detail.value.turnAdmission?.pending.length, 1);
+            }
+            assert.strictEqual(yield* Ref.get(onshape.syncs), 0);
+
+            assert.deepStrictEqual(yield* reviews.check(manual), { status: "no-new-versions" });
+            assert.strictEqual((yield* reviewThreads).length, 2);
+            assert.strictEqual(yield* Ref.get(onshape.requests), 3);
+          }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+
+          // A fresh server over the same state must not review v1 or v2 again.
+          yield* Effect.gen(function* () {
+            const reviews = yield* OnshapeVersionReviews;
+            assert.deepStrictEqual(yield* reviews.check(opened), { status: "no-new-versions" });
+            assert.strictEqual((yield* reviewThreads).length, 2);
+            assert.strictEqual(yield* Ref.get(onshape.requests), 4);
+          }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+        }),
+      ),
+  );
+
+  it.effect("throttles opened checks per project and lets manual checks through", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          const reviews = yield* OnshapeVersionReviews;
+          const throttled = { status: "skipped", reason: "throttled" } as const;
+
+          assert.deepStrictEqual(yield* reviews.check(opened), { status: "no-new-versions" });
+          assert.deepStrictEqual(yield* reviews.check(opened), throttled);
+          yield* TestClock.adjust(OPENED_CHECK_INTERVAL_MS - 1);
+          assert.deepStrictEqual(yield* reviews.check(opened), throttled);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 1);
+
+          // Manual bypasses the throttle, and restarts its window for later opened checks.
+          yield* Ref.set(onshape.versions, [start, v1]);
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "reviewing",
+            versions: [{ ordinal: 1, name: "Bracket rev" }],
+          });
+          yield* awaitIdle;
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+          yield* TestClock.adjust(OPENED_CHECK_INTERVAL_MS - 1);
+          assert.deepStrictEqual(yield* reviews.check(opened), throttled);
+
+          yield* TestClock.adjust(1);
+          assert.deepStrictEqual(yield* reviews.check(opened), { status: "no-new-versions" });
+          assert.strictEqual(yield* Ref.get(onshape.requests), 3);
+          assert.strictEqual((yield* reviewThreads).length, 1);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("skips every check while a review for the project is still starting", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          yield* seedSyncedRoot;
+          const reviews = yield* OnshapeVersionReviews;
+          yield* reviews.check(manual);
+
+          const gate = yield* Deferred.make<void>();
+          yield* Ref.set(onshape.syncGate, gate);
+          yield* Ref.set(onshape.versions, [start, v1]);
+          assert.strictEqual((yield* reviews.check(manual)).status, "reviewing");
+          const inProgress = { status: "skipped", reason: "in-progress" } as const;
+          assert.deepStrictEqual(yield* reviews.check(manual), inProgress);
+          yield* TestClock.adjust(OPENED_CHECK_INTERVAL_MS);
+          assert.deepStrictEqual(yield* reviews.check(opened), inProgress);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+          assert.deepStrictEqual(yield* reviewThreads, []);
+
+          // The clock is past the throttle window, so awaitIdle's final opened check is real.
+          yield* Deferred.succeed(gate, undefined);
+          yield* awaitIdle;
+          assert.deepStrictEqual(
+            (yield* reviewThreads).map((thread) => thread.title),
+            ["Review v1: Bracket rev"],
+          );
+          assert.strictEqual(yield* Ref.get(onshape.requests), 3);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("keeps the cursor and backs off when Onshape fails, then retries later", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          const reviews = yield* OnshapeVersionReviews;
+          yield* reviews.check(manual);
+
+          yield* Ref.set(onshape.versions, [start, v1]);
+          yield* Ref.set(onshape.failure, new OnshapeRateLimitError({ retryAfterSeconds: 30 }));
+          const isoAt = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
+          const retryAt = isoAt(30_000);
+          assert.deepStrictEqual(yield* reviews.check(manual), { status: "failed", retryAt });
+          assert.deepStrictEqual(yield* reviewThreads, []);
+          // Backing off: even a manual check before Retry-After makes no request at all.
+          yield* Ref.set(onshape.failure, new OnshapeNetworkError());
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "backing-off",
+            retryAt,
+          });
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+
+          // A second failure in a row without Retry-After backs off 5 minutes doubled.
+          yield* TestClock.adjust("30 seconds");
+          assert.deepStrictEqual(yield* reviews.check(manual), {
+            status: "failed",
+            retryAt: isoAt(30_000 + 10 * 60_000),
+          });
+          assert.strictEqual(yield* Ref.get(onshape.requests), 3);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+
+        // Restart clears the in-memory backoff; the durable cursor still points at the baseline.
+        yield* Effect.gen(function* () {
+          yield* Ref.set(onshape.failure, null);
+          const reviews = yield* OnshapeVersionReviews;
+          assert.strictEqual((yield* reviews.check(opened)).status, "reviewing");
+          yield* awaitIdle;
+          assert.deepStrictEqual(
+            (yield* reviewThreads).map((thread) => thread.title),
+            ["Review v1: Bracket rev"],
+          );
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("syncs the project's CAD root before each review and reports the outcome", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          yield* seedSyncedRoot;
+          const reviews = yield* OnshapeVersionReviews;
+          const query = yield* ProjectionSnapshotQuery;
+          yield* reviews.check(manual);
+
+          const promptFor = (id: string) =>
+            Effect.map(
+              query.getThreadDetailById(ThreadId.make(`onshape-version-review:${projectId}:${id}`)),
+              (detail) => Option.getOrThrow(detail).messages[0]?.text ?? "",
+            );
+
+          // v1 syncs first, so its prompt names the fresh snapshot. v2 is handled in the same
+          // check while v1's run is pending, so the CAD lifecycle refuses its sync as busy and
+          // the review still starts with the failure spelled out.
+          yield* Ref.set(onshape.versions, [start, v1, v2]);
+          yield* reviews.check(manual);
+          yield* awaitIdle;
+          assert.strictEqual(yield* Ref.get(onshape.syncs), 3);
+          const project = Option.getOrThrow(yield* query.getProjectShellById(projectId));
+          const current = project.cad?.roots[0]?.current;
+          assert.strictEqual(current?.snapshotId, snapshot(2).snapshotId);
+          assert.include(
+            yield* promptFor(v1.id),
+            `synced just now from the bound workspace at microversion ${current?.microversionId}`,
+          );
+          assert.include(
+            yield* promptFor(v2.id),
+            "The CAD download failed (CAD is busy with an agent run or another CAD operation)",
+          );
+          assert.strictEqual(project.cad?.operation, null);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("starts the review with a warning when the CAD sync ends failed", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(true);
+          yield* seedSyncedRoot;
+          const reviews = yield* OnshapeVersionReviews;
+          const query = yield* ProjectionSnapshotQuery;
+          yield* reviews.check(manual);
+
+          yield* Ref.set(onshape.syncMode, "fail");
+          yield* Ref.set(onshape.versions, [start, v1]);
+          yield* reviews.check(manual);
+          yield* awaitIdle;
+          assert.strictEqual(yield* Ref.get(onshape.syncs), 2);
+          const detail = Option.getOrThrow(
+            yield* query.getThreadDetailById(
+              ThreadId.make(`onshape-version-review:${projectId}:${v1.id}`),
+            ),
+          );
+          assert.include(
+            detail.messages[0]?.text ?? "",
+            "The CAD download failed (Could not reach Onshape. Existing downloaded CAD is unchanged.), so the CAD panel may show an older revision.",
+          );
+          assert.strictEqual(detail.turnAdmission?.pending.length, 1);
+          const project = Option.getOrThrow(yield* query.getProjectShellById(projectId));
+          assert.strictEqual(project.cad?.roots[0]?.current?.snapshotId, snapshot(1).snapshotId);
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+
+  it.effect("baselines when the setting turns on and re-baselines after it was off", () =>
+    withTempDir((baseDir) =>
+      Effect.gen(function* () {
+        const onshape = yield* makeOnshape;
+        yield* Effect.gen(function* () {
+          yield* createEnabledProject(false);
+          const reviews = yield* OnshapeVersionReviews;
+          yield* reviews.start();
+          const awaitRequests = (count: number) =>
+            Effect.gen(function* () {
+              for (let attempt = 0; attempt < 200; attempt++) {
+                if ((yield* Ref.get(onshape.requests)) >= count) return;
+                yield* Effect.yieldNow;
+              }
+            });
+
+          yield* setEnabled(true, "server:test:toggle-on");
+          yield* awaitRequests(1);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 1);
+
+          // Versions created while the setting is off are not reviewed on re-enable, even when
+          // it is turned back on inside the opened-check throttle window.
+          yield* setEnabled(false, "server:test:toggle-off");
+          yield* Ref.set(onshape.versions, [start, v1]);
+          yield* setEnabled(true, "server:test:toggle-on-again");
+          yield* awaitRequests(2);
+          assert.strictEqual(yield* Ref.get(onshape.requests), 2);
+          assert.deepStrictEqual(yield* reviewThreads, []);
+
+          yield* Ref.set(onshape.versions, [start, v1, v2]);
+          assert.strictEqual((yield* reviews.check(manual)).status, "reviewing");
+          yield* awaitIdle;
+          assert.deepStrictEqual(
+            (yield* reviewThreads).map((thread) => thread.title),
+            ["Review v2: Gearbox check"],
+          );
+        }).pipe(Effect.provide(makeLayer(baseDir, onshape)), Effect.scoped);
+      }),
+    ),
+  );
+});

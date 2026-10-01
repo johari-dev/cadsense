@@ -2,18 +2,47 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import { type OnshapeProjectSource, isOnshapeProjectError } from "@cadsense/contracts";
+import {
+  type OnshapeProjectSource,
+  type OnshapeVersionCheckResult,
+  isOnshapeProjectError,
+} from "@cadsense/contracts";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
 import { onshapeProjectUrl } from "../../lib/onshapeProjects";
 import { onshapeProjectEnvironment } from "../../state/onshapeProjects";
+import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project } from "../../types";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { useOnshapeConnectionsController } from "./useOnshapeConnectionsController";
+
+const retryTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+/** Short text shown next to "Check now" for a manual version check. */
+export function versionCheckText(result: OnshapeVersionCheckResult): string {
+  switch (result.status) {
+    case "no-new-versions":
+      return "No new versions";
+    case "reviewing":
+      return `Reviewing ${result.versions.map((version) => `v${version.ordinal}`).join(", ")}`;
+    case "skipped":
+      return result.reason === "in-progress"
+        ? "Check already running"
+        : result.reason === "disabled"
+          ? "Version reviews are off"
+          : "Checked recently";
+    case "backing-off":
+      return `Onshape paused, retry after ${retryTime(result.retryAt)}`;
+    case "failed":
+      return `Check failed, retry after ${retryTime(result.retryAt)}`;
+  }
+}
 
 export function OnshapeProjectSettings({
   project,
@@ -28,10 +57,49 @@ export function OnshapeProjectSettings({
   const setConnection = useAtomCommand(onshapeProjectEnvironment.setConnection, {
     reportFailure: false,
   });
+  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const checkVersions = useAtomCommand(onshapeProjectEnvironment.checkVersions, {
+    reportFailure: false,
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewPending, setReviewPending] = useState(false);
+  const autoReviewVersions = source.autoReviewVersions === true;
+  const [checkPending, setCheckPending] = useState(false);
+  const [checkText, setCheckText] = useState<string | null>(null);
+  const checkNow = async () => {
+    if (checkPending) return;
+    setCheckPending(true);
+    setCheckText(null);
+    try {
+      const result = await checkVersions({
+        environmentId: project.environmentId,
+        input: { projectId: project.id, reason: "manual" },
+      });
+      if (result._tag === "Success") setCheckText(versionCheckText(result.value));
+      else if (!isAtomCommandInterrupted(result)) setCheckText("Could not check. Try again.");
+    } finally {
+      setCheckPending(false);
+    }
+  };
+  const setAutoReviewVersions = async (enabled: boolean) => {
+    if (reviewPending) return;
+    setReviewPending(true);
+    setError(null);
+    try {
+      const result = await updateProject({
+        environmentId: project.environmentId,
+        input: { projectId: project.id, onshapeAutoReviewVersions: enabled },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        setError("Could not change version reviews. Try again.");
+      }
+    } finally {
+      setReviewPending(false);
+    }
+  };
   const compatible = catalog.connections.filter((connection) => connection.host === source.host);
   const current = compatible.find((connection) => connection.connectionId === source.connectionId);
   const selected = compatible.find(
@@ -130,6 +198,37 @@ export function OnshapeProjectSettings({
             >
               {pending ? "Saving…" : "Save connection"}
             </Button>
+          </div>
+        }
+      />
+      <SettingsRow
+        title="Review new Onshape versions"
+        description="Opening this project checks the document for new named versions, at most once every 15 minutes. Each check is one Onshape API request. Each new version syncs the CAD snapshot and starts a review thread. Versions that exist when this is turned on are not reviewed."
+        control={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {autoReviewVersions ? (
+              <>
+                {checkText ? (
+                  <span role="status" className="text-xs text-muted-foreground">
+                    {checkText}
+                  </span>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={checkPending || reviewPending}
+                  onClick={() => void checkNow()}
+                >
+                  Check now
+                </Button>
+              </>
+            ) : null}
+            <Switch
+              aria-label="Review new Onshape versions"
+              checked={autoReviewVersions}
+              disabled={reviewPending}
+              onCheckedChange={(checked) => void setAutoReviewVersions(checked)}
+            />
           </div>
         }
       />

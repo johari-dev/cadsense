@@ -168,6 +168,85 @@ it.layer(NodeServices.layer)("Onshape project decider", (it) => {
     }),
   );
 
+  it.effect("stores the version review setting only on Onshape projects", () =>
+    Effect.gen(function* () {
+      const seeded = yield* projectEvent(createEmptyReadModel(now), {
+        sequence: 1,
+        eventId: EventId.make("event-onshape-project-created"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("server:onshape-project-create:1"),
+        causationEventId: null,
+        correlationId: CommandId.make("server:onshape-project-create:1"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "FRC intake",
+          workspaceRoot: "/managed/project-hash",
+          defaultModelSelection: null,
+          onshapeSource: source,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const event = eventOfType(
+        yield* decideOrchestrationCommand({
+          command: {
+            type: "project.meta.update",
+            commandId: CommandId.make("client:review-versions:1"),
+            projectId,
+            onshapeAutoReviewVersions: true,
+          },
+          readModel: seeded,
+        }),
+        "project.meta-updated",
+      );
+      assert.strictEqual(event.payload.onshapeAutoReviewVersions, true);
+      const projected = yield* projectEvent(seeded, { ...event, sequence: 2 });
+      assert.deepStrictEqual(projected.projects[0]?.onshapeSource, {
+        ...source,
+        autoReviewVersions: true,
+      });
+
+      const regularProjectId = ProjectId.make("regular-project");
+      const withRegular = yield* projectEvent(projected, {
+        sequence: 3,
+        eventId: EventId.make("event-regular-project-created"),
+        aggregateKind: "project",
+        aggregateId: regularProjectId,
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("client:project-create:1"),
+        causationEventId: null,
+        correlationId: CommandId.make("client:project-create:1"),
+        metadata: {},
+        payload: {
+          projectId: regularProjectId,
+          title: "Local project",
+          workspaceRoot: "/home/user/project",
+          defaultModelSelection: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const error = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "project.meta.update",
+            commandId: CommandId.make("client:review-versions:2"),
+            projectId: regularProjectId,
+            onshapeAutoReviewVersions: true,
+          },
+          readModel: withRegular,
+        }),
+      );
+      assert.include(error.message, "is not an Onshape project");
+    }),
+  );
+
   it.effect("rejects readiness and rebinding after the project is deleted", () =>
     Effect.gen(function* () {
       const active = yield* projectEvent(createEmptyReadModel(now), {

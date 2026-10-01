@@ -74,6 +74,8 @@ import {
   OnshapeProjectError,
   OnshapeProjectMutationResult,
   OnshapeProjectSetConnectionInput,
+  OnshapeVersionCheckInput,
+  OnshapeVersionCheckResult,
 } from "./onshape.ts";
 import {
   ProviderUploadFeedbackError,
@@ -177,6 +179,7 @@ export const WS_METHODS = {
   onshapeConnectionsRemove: "onshape.connections.remove",
   onshapeProjectsCreate: "onshape.projects.create",
   onshapeProjectsSetConnection: "onshape.projects.setConnection",
+  onshapeProjectsCheckVersions: "onshape.projects.checkVersions",
   cadUserStart: "cad.user.start",
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
@@ -457,6 +460,13 @@ export const WsOnshapeProjectsSetConnectionRpc = Rpc.make(WS_METHODS.onshapeProj
   error: Schema.Union([OnshapeProjectError, EnvironmentAuthorizationError]),
 });
 
+// Never fails for Onshape errors; those come back as a "failed" result with the retry time.
+export const WsOnshapeProjectsCheckVersionsRpc = Rpc.make(WS_METHODS.onshapeProjectsCheckVersions, {
+  payload: OnshapeVersionCheckInput,
+  success: OnshapeVersionCheckResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
   payload: CadUserStartInput,
   success: CadUserStartResult,
@@ -718,6 +728,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeConnectionsRemoveRpc,
   WsOnshapeProjectsCreateRpc,
   WsOnshapeProjectsSetConnectionRpc,
+  WsOnshapeProjectsCheckVersionsRpc,
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
   WsCadPanelWatchRpc,

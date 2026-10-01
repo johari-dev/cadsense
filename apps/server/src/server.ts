@@ -74,6 +74,7 @@ import * as NetService from "@cadsense/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import * as OnshapeVersionReviews from "./onshape/OnshapeVersionReviews.ts";
 import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
@@ -272,11 +273,12 @@ const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
 );
 const AgentRuntimeLayerLive = Layer.mergeAll(
-  CadUserOperations.layer,
+  OnshapeVersionReviews.layer,
   CadStorage.layer,
   CadPresentation.reactorLayer,
   CadRenderLifecycle.layer,
 ).pipe(
+  Layer.provideMerge(CadUserOperations.layer),
   Layer.provideMerge(CadPresentation.layer),
   Layer.provideMerge(CadViewingLayerLive),
   Layer.provideMerge(CadProjectQuiescence.layer),

@@ -333,7 +333,8 @@ export function projectEvent(
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
                   ...((payload.onshapeConnectionId !== undefined ||
-                    payload.onshapeManagedWorkspaceReady !== undefined) &&
+                    payload.onshapeManagedWorkspaceReady !== undefined ||
+                    payload.onshapeAutoReviewVersions !== undefined) &&
                   project.onshapeSource !== undefined
                     ? {
                         onshapeSource: {
@@ -345,6 +346,9 @@ export function projectEvent(
                             ? {
                                 managedWorkspaceReady: payload.onshapeManagedWorkspaceReady,
                               }
+                            : {}),
+                          ...(payload.onshapeAutoReviewVersions !== undefined
+                            ? { autoReviewVersions: payload.onshapeAutoReviewVersions }
                             : {}),
                         },
                       }

@@ -44,5 +44,10 @@ export function createOnshapeProjectAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    // Parallel so a check never queues behind a CAD operation; the server dedupes overlap.
+    checkVersions: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:onshape-projects:check-versions",
+      tag: WS_METHODS.onshapeProjectsCheckVersions,
+    }),
   };
 }
