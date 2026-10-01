@@ -9,14 +9,14 @@ import {
 } from "react";
 import {
   ArchiveIcon,
-  BlocksIcon,
-  BotIcon,
+  ShapesIcon as BlocksIcon,
+  RobotIcon as BotIcon,
   KeyboardIcon,
   PaletteIcon,
-  SearchIcon,
-  Settings2Icon,
+  MagnifyingGlassIcon as SearchIcon,
+  SlidersHorizontalIcon as Settings2Icon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../ui/button";

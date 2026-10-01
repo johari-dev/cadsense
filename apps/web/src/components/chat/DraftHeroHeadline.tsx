@@ -1,6 +1,6 @@
 import { scopedProjectKey, scopeProjectRef } from "@cadsense/client-runtime/environment";
 import type { ScopedProjectRef } from "@cadsense/contracts";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderPlusIcon } from "@phosphor-icons/react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";

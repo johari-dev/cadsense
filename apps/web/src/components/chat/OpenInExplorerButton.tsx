@@ -1,5 +1,5 @@
 import { PRIMARY_LOCAL_ENVIRONMENT_ID, type EnvironmentId } from "@cadsense/contracts";
-import { FolderOpenIcon } from "lucide-react";
+import { FolderOpenIcon } from "@phosphor-icons/react";
 import { memo, useCallback } from "react";
 
 import { shellEnvironment } from "../../state/shell";

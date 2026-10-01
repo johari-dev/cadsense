@@ -1,5 +1,9 @@
 import type { EnvironmentId, ScopedThreadRef } from "@cadsense/contracts";
-import { Globe, History, RadioTower } from "lucide-react";
+import {
+  GlobeIcon as Globe,
+  ClockCounterClockwiseIcon as History,
+  BroadcastIcon as RadioTower,
+} from "@phosphor-icons/react";
 
 import type { BrowserHistoryEntry } from "~/browserHistoryStore";
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "~/components/ui/empty";

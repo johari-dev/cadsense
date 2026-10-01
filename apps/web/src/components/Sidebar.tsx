@@ -1,15 +1,15 @@
 import { useRemoveCadProject } from "../cad/useRemoveCadProject";
 import {
   ArchiveIcon,
-  ArrowUpDownIcon,
-  ChevronRightIcon,
+  ArrowsDownUpIcon as ArrowUpDownIcon,
+  CaretRightIcon as ChevronRightIcon,
   FolderPlusIcon,
-  Globe2Icon,
-  LoaderIcon,
-  SettingsIcon,
-  SquarePenIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+  GlobeIcon as Globe2Icon,
+  SpinnerIcon as LoaderIcon,
+  GearSixIcon as SettingsIcon,
+  NotePencilIcon as SquarePenIcon,
+  WarningIcon as TriangleAlertIcon,
+} from "@phosphor-icons/react";
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";

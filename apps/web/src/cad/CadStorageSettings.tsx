@@ -6,7 +6,7 @@ import {
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useState } from "react";
-import { DatabaseIcon } from "lucide-react";
+import { DatabaseIcon } from "@phosphor-icons/react";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { cadStorageEnvironment } from "../state/cadStorage";
 import { useAtomCommand } from "../state/use-atom-command";

@@ -1,5 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { CheckIcon, ChevronRightIcon, CopyIcon, GlobeIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CaretRightIcon as ChevronRightIcon,
+  CopyIcon,
+  GlobeIcon,
+  WarningIcon as TriangleAlertIcon,
+} from "@phosphor-icons/react";
 import type { EnvironmentId, ScopedThreadRef, ServerProviderSkill } from "@cadsense/contracts";
 import {
   isAtomCommandInterrupted,

@@ -3,7 +3,7 @@ import {
   getProjectFaviconCacheKey,
   isProjectFaviconFallbackUrl,
 } from "@cadsense/shared/projectFavicon";
-import { FolderIcon } from "lucide-react";
+import { FolderIcon } from "@phosphor-icons/react";
 import type { ComponentType } from "react";
 import { useState } from "react";
 import { useAssetUrlState } from "../assets/assetUrls";

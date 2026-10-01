@@ -1,5 +1,5 @@
 import { type ResolvedKeybindingsConfig } from "@cadsense/contracts";
-import { ChevronRightIcon } from "lucide-react";
+import { CaretRightIcon as ChevronRightIcon } from "@phosphor-icons/react";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
   type CommandPaletteActionItem,

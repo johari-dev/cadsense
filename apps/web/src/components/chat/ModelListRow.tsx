@@ -1,6 +1,6 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@cadsense/contracts";
 import { memo } from "react";
-import { StarIcon } from "lucide-react";
+import { StarIcon } from "@phosphor-icons/react";
 import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
@@ -118,10 +118,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
               >
                 <StarIcon
-                  className={cn(
-                    "size-3.5 sm:size-3",
-                    props.isFavorite && "fill-current text-yellow-500",
-                  )}
+                  className={cn("size-3.5 sm:size-3", props.isFavorite && "text-yellow-500")}
+                  weight={props.isFavorite ? "fill" : "regular"}
                 />
               </Button>
             }

@@ -12,17 +12,17 @@ import {
   type OnshapeConnectionSummary,
 } from "@cadsense/contracts";
 import {
-  CheckCircle2Icon,
-  KeyRoundIcon,
+  CheckCircleIcon as CheckCircle2Icon,
+  KeyIcon as KeyRoundIcon,
   LaptopIcon,
   LinkIcon,
   MonitorIcon,
-  PencilIcon,
+  PencilSimpleIcon as PencilIcon,
   PlusIcon,
-  RefreshCwIcon,
-  Trash2Icon,
-  TriangleAlertIcon,
-} from "lucide-react";
+  ArrowsClockwiseIcon as RefreshCwIcon,
+  TrashIcon as Trash2Icon,
+  WarningIcon as TriangleAlertIcon,
+} from "@phosphor-icons/react";
 import {
   type FormEvent,
   type ReactNode,

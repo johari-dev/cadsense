@@ -1,5 +1,8 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDownIcon,
+  CaretLeftIcon as ChevronLeftIcon,
+} from "@phosphor-icons/react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";

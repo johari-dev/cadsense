@@ -1,7 +1,7 @@
 "use client";
 
 import type { DesktopPreviewPointerEvent } from "@cadsense/contracts";
-import { MousePointer2 } from "lucide-react";
+import { CursorIcon as MousePointer2 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
@@ -70,8 +70,8 @@ function AgentBrowserCursorEvent(props: {
         />
       ) : null}
       <MousePointer2
-        className="relative size-5 -translate-x-0.5 -translate-y-0.5 fill-background text-primary drop-shadow-sm"
-        strokeWidth={2}
+        className="relative size-5 -translate-x-0.5 -translate-y-0.5 text-primary drop-shadow-sm"
+        weight="fill"
       />
     </div>
   );

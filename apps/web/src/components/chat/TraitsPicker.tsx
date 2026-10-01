@@ -17,7 +17,7 @@ import {
 } from "@cadsense/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ZapIcon } from "lucide-react";
+import { LightningIcon as ZapIcon } from "@phosphor-icons/react";
 import { buttonVariants } from "../ui/button";
 import {
   Menu,
@@ -565,8 +565,9 @@ export const TraitsPicker = memo(function TraitsPicker({
     <>
       <ComposerControlIcon
         icon={ZapIcon}
+        weight="fill"
         className={cn(
-          "fill-current opacity-80",
+          "opacity-80",
           provider === "claudeAgent" ? "text-[#d97757]" : "text-foreground",
         )}
       />

@@ -7,7 +7,7 @@ import {
   type PreviewViewportSetting,
 } from "@cadsense/contracts";
 import { PREVIEW_VIEWPORT_PRESETS, resolvePreviewViewport } from "@cadsense/shared/previewViewport";
-import { Link2, Unlink2, X } from "lucide-react";
+import { LinkIcon as Link2, LinkBreakIcon as Unlink2, XIcon as X } from "@phosphor-icons/react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";

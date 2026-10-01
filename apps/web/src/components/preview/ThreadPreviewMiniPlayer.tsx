@@ -1,7 +1,11 @@
 "use client";
 
 import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@cadsense/contracts";
-import { PanelRightIcon, PictureInPicture2, XIcon } from "lucide-react";
+import {
+  SidebarIcon as PanelRightIcon,
+  PictureInPictureIcon as PictureInPicture2,
+  XIcon,
+} from "@phosphor-icons/react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";

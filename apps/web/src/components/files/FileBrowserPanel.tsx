@@ -5,7 +5,7 @@ import type {
 import type { EnvironmentId, ProjectEntry } from "@cadsense/contracts";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@cadsense/shared/composerTrigger";
-import { RotateCw } from "lucide-react";
+import { ArrowClockwiseIcon as RotateCw } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
