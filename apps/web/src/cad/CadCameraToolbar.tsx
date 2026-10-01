@@ -26,7 +26,7 @@ function ViewCube({ view }: { view: Preset }) {
           strokeWidth="1.15"
           className={
             view === "isometric" || view === face
-              ? "fill-red-500/85 stroke-red-300"
+              ? "fill-primary/85 stroke-primary"
               : "fill-background stroke-current opacity-60"
           }
         />
