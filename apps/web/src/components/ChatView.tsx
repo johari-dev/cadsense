@@ -71,7 +71,6 @@ import {
   type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
-import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
@@ -146,7 +145,7 @@ import {
   foldSubagentActivities,
 } from "@cadsense/client-runtime/state/subagentRuntime";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { ChevronDownIcon, Minimize2Icon, PaperclipIcon, WifiOffIcon } from "lucide-react";
+import { ChevronDownIcon, PaperclipIcon, WifiOffIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -159,7 +158,6 @@ import {
   NO_PROVIDER_MODEL_SELECTION,
 } from "../providerInstances";
 import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
-import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
@@ -219,12 +217,8 @@ import {
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
-import {
-  hasAvailableClaudeCompactionProvider,
-  hasDismissedResumeCompaction,
-  shouldOfferResumeCompaction,
-} from "./chat/ContextWindowMeter.logic";
-import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "../lib/contextWindow";
+import { hasAvailableClaudeCompactionProvider } from "./chat/ContextWindowMeter.logic";
+import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -263,7 +257,6 @@ import {
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
-import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { usePanelPresence } from "~/hooks/usePanelPresence";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
@@ -283,7 +276,6 @@ import { readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button } from "./ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { resolveAssetUrl, useAssetUrls } from "../assets/assetUrls";
 
 const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
@@ -1653,25 +1645,6 @@ function ChatViewContent(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
-  const [resumeCompactionPermanentlyDismissed, setResumeCompactionPermanentlyDismissed] =
-    useLocalStorage(
-      `cadsense:resume-compaction-dismissed:${environmentId}:${activeProviderInstanceId ?? "claudeAgent"}`,
-      false,
-      Schema.Boolean,
-    );
-  const nativeResumeCompactionDismissed = useMemo(
-    () => hasDismissedResumeCompaction(threadActivities),
-    [threadActivities],
-  );
-  useEffect(() => {
-    if (nativeResumeCompactionDismissed && !resumeCompactionPermanentlyDismissed) {
-      setResumeCompactionPermanentlyDismissed(true);
-    }
-  }, [
-    nativeResumeCompactionDismissed,
-    resumeCompactionPermanentlyDismissed,
-    setResumeCompactionPermanentlyDismissed,
-  ]);
   const providerStatusBannerKey = getProviderStatusBannerKey(activeProviderStatus);
   const [dismissedProviderStatusBannerKey, setDismissedProviderStatusBannerKey] = useState<
     string | null
@@ -2604,17 +2577,6 @@ function ChatViewContent(props: ChatViewProps) {
     handleStopBackgroundWork,
     isStoppingBackgroundWork,
   ]);
-  const nowMinute = useNowMinute();
-  // Session-scoped dismissals, one key per (thread, snapshot). A set rather
-  // than a single slot so dismissing the banner on one thread does not
-  // resurface it on another thread dismissed earlier.
-  const [dismissedResumeCompactionKeys, setDismissedResumeCompactionKeys] = useState<
-    ReadonlySet<string>
-  >(new Set());
-  const resumeCompactionKey =
-    activeThread && activeContextWindow
-      ? `${activeThread.id}:${activeContextWindow.updatedAt}`
-      : null;
   const compactDisabled =
     !activeThread ||
     !activeProject ||
@@ -2638,73 +2600,6 @@ function ChatViewContent(props: ChatViewProps) {
           ? "Enable a Claude provider before compacting"
           : "Compacting is unavailable right now"
     : null;
-  const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (
-      !activeThread ||
-      !activeContextWindow ||
-      resumeCompactionKey === null ||
-      dismissedResumeCompactionKeys.has(resumeCompactionKey) ||
-      resumeCompactionPermanentlyDismissed ||
-      nativeResumeCompactionDismissed ||
-      pendingUserInputs.length > 0 ||
-      phase === "running" ||
-      !shouldOfferResumeCompaction({
-        provider: selectedProvider,
-        usedTokens: activeContextWindow.usedTokens,
-        updatedAt: activeContextWindow.updatedAt,
-        now: `${nowMinute}:00.000Z`,
-      })
-    ) {
-      return null;
-    }
-
-    const dismiss = () =>
-      setDismissedResumeCompactionKeys((keys) => new Set(keys).add(resumeCompactionKey));
-    const compactAction = (
-      <Button
-        size="xs"
-        variant="outline"
-        disabled={compactDisabled}
-        onClick={() => {
-          if (compactDisabled) return;
-          composerRef.current?.compactContext();
-        }}
-      >
-        Compact
-      </Button>
-    );
-    return {
-      id: `resume-compaction:${resumeCompactionKey}`,
-      variant: "info",
-      icon: <Minimize2Icon />,
-      title: "Resume with less context",
-      description: `${formatContextWindowTokens(activeContextWindow.usedTokens)} tokens from an older session`,
-      actions: compactDisabledReason ? (
-        <Tooltip>
-          <TooltipTrigger render={<span className="inline-flex">{compactAction}</span>} />
-          <TooltipPopup side="top">{compactDisabledReason}</TooltipPopup>
-        </Tooltip>
-      ) : (
-        compactAction
-      ),
-      dismissLabel: "Keep full history",
-      onDismiss: dismiss,
-    };
-  }, [
-    activeContextWindow,
-    activeThread,
-    compactDisabled,
-    compactDisabledReason,
-    composerRef,
-    dismissedResumeCompactionKeys,
-    nativeResumeCompactionDismissed,
-    nowMinute,
-    pendingUserInputs.length,
-    phase,
-    resumeCompactionKey,
-    resumeCompactionPermanentlyDismissed,
-    selectedProvider,
-  ]);
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const isUrgentSystemItem = (item: ComposerBannerStackItem) =>
       item.urgent === true || item.variant === "error" || item.variant === "warning";
@@ -2714,9 +2609,8 @@ function ChatViewContent(props: ChatViewProps) {
       ...urgentSystemItems,
       ...(backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem]),
       ...calmSystemItems,
-      ...(resumeCompactionBannerItem === null ? [] : [resumeCompactionBannerItem]),
     ];
-  }, [backgroundLivenessBannerItem, resumeCompactionBannerItem, systemComposerBannerItems]);
+  }, [backgroundLivenessBannerItem, systemComposerBannerItems]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
