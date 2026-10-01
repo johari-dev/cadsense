@@ -4,7 +4,7 @@ Agent findings belong to the originating chat and the exact downloaded CAD they 
 
 ## Agent workflow
 
-`CadReviewInstructions.ts` supplies shared review guidance to Codex and Claude sessions with CAD tools. `cadReviewInstructions({ learnings, designBrief })` appends the [project design brief](CadDesignBrief.md) when the workspace has one, then the project's review learnings under one heading, one line per learning; empty sections are omitted, so with neither the shared text is delivered alone. Codex reads the brief and learnings at every turn start; Claude reads them when its session starts because the SDK system prompt is fixed per session. `CadProviderTools.ts` reinforces the guidance with a publication check in `cad_comments_publish`. When changing that guidance, use [the review evaluation](CadReviewEvaluation.md) to assess comment wording, evidence, and placement with ordinary user prompts.
+`CadReviewInstructions.ts` supplies shared review guidance to Codex and Claude sessions with CAD tools. `cadReviewInstructions({ learnings, designBrief, ignored })` appends the [project design brief](CadDesignBrief.md) when the workspace has one, then the project's [ignored components](#ignored-components), then its review learnings under one heading, one line per learning; empty sections are omitted, so with none of them the shared text is delivered alone. Codex reads the brief and learnings at every turn start; Claude reads them when its session starts because the SDK system prompt is fixed per session. `CadProviderTools.ts` reinforces the guidance with a publication check in `cad_comments_publish`. When changing that guidance, use [the review evaluation](CadReviewEvaluation.md) to assess comment wording, evidence, and placement with ordinary user prompts.
 
 1. `cad_comments_list` reads existing findings, including reviewed findings, and returns the creation catalog version. Walk `nextCursor` before deciding an issue is new. A changed creation catalog invalidates a cursor; review changes do not advance that catalog.
 2. Capture the private view with the existing `cad_capture` tool. `cad_comment_locate` takes that capture ID and explicit intended occurrence IDs with original 1280 ? 960 image coordinates (top-left origin, continuous pixels). The nearest visible surface wins. An intervening part returns `occurrence-mismatch`; the ray never searches through it for the intended part.
@@ -18,6 +18,18 @@ Each publish call that creates comments, proposes resolutions, or rejects items 
 Retry identical publications with the same keys. Receipts are checked before transient candidate handles, so a lost response can be retried after activation ends. Changing a successful key's payload conflicts. Responses include the current review state, placement, original event sequence, and current creation catalog version.
 
 Malformed input returns `invalid-input` with `details` identifying invalid or missing fields. Publication items and location picks also include a compact expected shape so resumed provider sessions can recover without guessing field names. A successful tool transport response can contain rejected items: agents must check each result, correct rejected inputs, and retry. Rejected items create no comments or receipts.
+
+## Ignored components
+
+A project's `cadsense.json` (workspace root, schema at https://cadsense.app/schema/cadsense.json) can carry a top-level `reviewIgnore` array. Each entry lists at least one of `path`, `name`, and `material`; every listed field must match. Globs are case-insensitive: `*` and `?` stay within one `/` segment, `**` spans segments, and `Drivetrain <1>/**` covers that assembly and everything inside it. `path` is the chain of instance names from the top level down to the component joined with `/`, `name` is the instance name, and `material` is the source part's Onshape material display name (parts without one never match a material glob). An invalid entry fails the whole file decode, so the project behaves as if it had no `cadsense.json`.
+
+```json
+{
+  "reviewIgnore": [{ "material": "*purchased*" }, { "path": "Drivetrain <1>/**" }]
+}
+```
+
+`CadReviewIgnore.ts` reads the file on every use, so edits apply to the next tool call or turn without a restart. An entry excludes each matching occurrence and, for assemblies, its whole subtree: `cad_hierarchy` entries gain `ignored: true`, `cad_comments_publish` rejects any target there with `occurrence-ignored`, and the assembled guidance lists the entries on one line so agents skip them before capturing (`cadReviewInstructions` in `CadReviewInstructions.ts`). Ignored geometry stays in the viewer and captures as context. Codex receives the assembled text with every turn's developer instructions; the Claude SDK fixes the system prompt for the life of a query, so Claude sessions pick up edits when the session next starts.
 
 ## Persistence and ownership
 

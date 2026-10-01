@@ -1,6 +1,5 @@
 import type { ProviderInteractionMode } from "@cadsense/contracts";
-import type { CadDesignBrief } from "../cad/CadDesignBrief.ts";
-import { cadReviewInstructions } from "./CadReviewInstructions.ts";
+import { cadReviewInstructions, type CadReviewContext } from "./CadReviewInstructions.ts";
 
 const CADSENSE_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -192,10 +191,8 @@ export function buildCodexDeveloperInstructions(
    */
   browserToolsAvailable = true,
   cadToolsAvailable = false,
-  /** The project's review learnings, read at turn start. Ignored without CAD tools. */
-  cadReviewLearnings: ReadonlyArray<{ readonly text: string }> = [],
-  /** The project's design brief as read for this turn. Ignored without CAD tools. */
-  designBrief: CadDesignBrief | null = null,
+  /** The project's review context, read at turn start. Ignored without CAD tools. */
+  cadReview: CadReviewContext = { learnings: [] },
 ): string {
   const base =
     interactionMode === "plan"
@@ -206,7 +203,7 @@ export function buildCodexDeveloperInstructions(
 
 ## Local CAD tools
 
-${cadReviewInstructions({ learnings: cadReviewLearnings, designBrief })}
+${cadReviewInstructions(cadReview)}
 
 When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, cad_find_parts, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
 

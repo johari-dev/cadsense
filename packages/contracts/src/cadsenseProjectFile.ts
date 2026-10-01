@@ -23,6 +23,55 @@ const trimmedNonEmpty = (annotations: { readonly description: string }, maxLengt
   return encoded.pipe(Schema.decodeTo(encoded, SchemaTransformation.trim()));
 };
 
+const CAD_REVIEW_IGNORE_GLOB_MAX_LENGTH = 256;
+const CAD_REVIEW_IGNORE_MAX_COUNT = 100;
+
+const reviewIgnoreGlob = (description: string) =>
+  trimmedNonEmpty(
+    {
+      description: `${description} Case-insensitive glob: "*" matches within one path segment, "**" spans segments, "?" matches one character.`,
+    },
+    CAD_REVIEW_IGNORE_GLOB_MAX_LENGTH,
+  );
+
+/**
+ * One `reviewIgnore` entry: which CAD occurrences to exclude from review. Every listed field
+ * must match, and a matching assembly excludes everything inside it.
+ */
+export const CadReviewIgnoreMatch = Schema.Struct({
+  path: Schema.optionalKey(
+    reviewIgnoreGlob(
+      'Matches the occurrence path: ancestor instance names from the top level down to the component, joined with "/" (e.g. "Drivetrain <1>/Gearbox <1>/**").',
+    ),
+  ),
+  name: Schema.optionalKey(
+    reviewIgnoreGlob('Matches the instance name of an assembly or part (e.g. "*bearing*").'),
+  ),
+  material: Schema.optionalKey(
+    reviewIgnoreGlob(
+      'Matches the display name of the part\'s material in Onshape (e.g. "*steel*"). Parts without a material never match.',
+    ),
+  ),
+})
+  .annotate({
+    description:
+      "List at least one of path, name, or material. Every listed field must match; a matching assembly excludes everything inside it.",
+  })
+  .check(
+    Schema.makeFilter(
+      (match) =>
+        match.path !== undefined || match.name !== undefined || match.material !== undefined,
+      {
+        title: "reviewIgnoreMatchNonEmpty",
+        message: "A reviewIgnore entry needs at least one of path, name, or material.",
+        // The parser reads parse options from the last check, so unknown keys fail here
+        // instead of being silently stripped into a match-everything entry.
+        parseOptions: { onExcessProperty: "error" },
+      },
+    ),
+  );
+export type CadReviewIgnoreMatch = typeof CadReviewIgnoreMatch.Type;
+
 export const CadsenseProjectFile = Schema.Struct({
   $schema: Schema.optionalKey(
     Schema.String.annotate({
@@ -45,6 +94,14 @@ export const CadsenseProjectFile = Schema.Struct({
       },
       CADSENSE_PROJECT_FILE_PATH_MAX_LENGTH,
     ),
+  ),
+  reviewIgnore: Schema.optionalKey(
+    Schema.Array(CadReviewIgnoreMatch)
+      .check(Schema.isMaxLength(CAD_REVIEW_IGNORE_MAX_COUNT))
+      .annotate({
+        description:
+          "Components to exclude from CAD review. Agents are told to skip them, cad_hierarchy marks them ignored, and comments cannot target them. Ignored geometry stays visible as context.",
+      }),
   ),
 }).annotate({
   title: "Cadsense project file",

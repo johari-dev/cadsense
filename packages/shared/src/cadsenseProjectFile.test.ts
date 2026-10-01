@@ -25,15 +25,24 @@ describe("buildCadsenseProjectFileJsonSchema", () => {
         string,
         {
           description?: string;
-          items?: { properties: Record<string, unknown>; required: ReadonlyArray<string> };
+          items?: { properties: Record<string, unknown>; required?: ReadonlyArray<string> };
         }
       >;
       required?: ReadonlyArray<string>;
     };
 
-    expect(Object.keys(schema.properties).sort()).toEqual(["$schema", "designBrief", "iconPath"]);
+    expect(Object.keys(schema.properties).sort()).toEqual([
+      "$schema",
+      "designBrief",
+      "iconPath",
+      "reviewIgnore",
+    ]);
     expect(schema.required).toBeUndefined();
     expect(schema.properties.iconPath?.description).toContain("Workspace-relative path");
+    const entry = schema.properties.reviewIgnore?.items;
+    expect(entry?.required).toBeUndefined();
+    expect(Object.keys(entry?.properties ?? {}).sort()).toEqual(["material", "name", "path"]);
+    expect(JSON.stringify(entry)).toContain("Case-insensitive glob");
     expect(schema.properties.designBrief?.description).toContain('default "DESIGN.md"');
   });
 
@@ -68,5 +77,6 @@ describe("parseCadsenseProjectFile", () => {
   it("returns null for malformed or invalid contents", () => {
     expect(parseCadsenseProjectFile("{ not json")).toBeNull();
     expect(parseCadsenseProjectFile('{ "iconPath": "" }')).toBeNull();
+    expect(parseCadsenseProjectFile('{ "reviewIgnore": [{}] }')).toBeNull();
   });
 });

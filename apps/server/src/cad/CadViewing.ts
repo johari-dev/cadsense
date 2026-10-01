@@ -16,6 +16,7 @@ import {
   type CadChecksResult,
   type CadContextResult,
   type CadHierarchyResult,
+  type CadReviewIgnoreMatch,
   type CadMeasureResult,
   type CadFindPartsResult,
   type CadSnapshotManifest,
@@ -49,6 +50,8 @@ import {
   indexCadSnapshot,
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import { readCadReviewIgnore } from "./CadReviewIgnore.ts";
+import { ignoredCadOccurrences } from "@cadsense/shared/cadReviewIgnore";
 import { readCadDesignBrief } from "./CadDesignBrief.ts";
 import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
 import {
@@ -100,6 +103,10 @@ export interface CadViewingShape {
     view: unknown,
   ) => Effect.Effect<CadViewState, CadViewError>;
   readonly getUserView: (threadId: ThreadId) => Effect.Effect<CadViewState | null, CadViewError>;
+  /** The thread's project cadsense.json `reviewIgnore` entries, read fresh on each call. */
+  readonly reviewIgnore: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<CadReviewIgnoreMatch>, CadViewError>;
 }
 export class CadViewing extends Context.Service<CadViewing, CadViewingShape>()(
   "@cadsense/server/cad/CadViewing",
@@ -148,6 +155,15 @@ export const make = Effect.gen(function* () {
     )
       return yield* unavailable();
     return project.value;
+  });
+  const projectReviewIgnore = (workspaceRoot: string) =>
+    readCadReviewIgnore(workspaceRoot).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+  const reviewIgnore = Effect.fn("CadViewing.reviewIgnore")(function* (threadId: ThreadId) {
+    const project = yield* projectFor(threadId);
+    return yield* projectReviewIgnore(project.workspaceRoot);
   });
   const resolveContext = Effect.fn("CadViewing.resolveContext")(function* (
     threadId: ThreadId,
@@ -335,7 +351,14 @@ export const make = Effect.gen(function* () {
               const initialized = yield* initialize();
               if (!initialized) return yield* unavailable();
               const { binding, state } = initialized;
-              return yield* readCadHierarchy(indexCadSnapshot(binding.snapshot), state, input);
+              const { project } = yield* availableRoots();
+              const reviewIgnore = yield* projectReviewIgnore(project.workspaceRoot);
+              return yield* readCadHierarchy(
+                indexCadSnapshot(binding.snapshot),
+                state,
+                input,
+                ignoredCadOccurrences(reviewIgnore, binding.snapshot),
+              );
             }),
           );
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
@@ -614,6 +637,7 @@ export const make = Effect.gen(function* () {
     withActivation,
     saveUserView,
     getUserView,
+    reviewIgnore,
     watchActivity: activity.watch,
   });
 });

@@ -57,6 +57,8 @@ import {
 } from "./CadCommentPersistence.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
+import { readCadReviewIgnore } from "./CadReviewIgnore.ts";
+import { cadReviewSubjects, ignoredCadOccurrences } from "@cadsense/shared/cadReviewIgnore";
 import { cadCommentOutdatedCheck } from "./CadCommentOutdated.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
@@ -693,6 +695,10 @@ export const make = Effect.gen(function* () {
     const publish = Effect.fn("CadComments.publish")(function* (input: unknown) {
       const request = yield* decode(CadCommentsPublishInput, input);
       const project = yield* owner(threadId);
+      const reviewIgnore = yield* readCadReviewIgnore(project.workspaceRoot).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+      );
       const model = yield* query.getCommandReadModel();
       const existing = (model.cadComments ?? []).filter((c) => c.threadId === threadId);
       const comments: CadComment[] = [],
@@ -791,8 +797,19 @@ export const make = Effect.gen(function* () {
             )
               return yield* fail("invalid-comment-link");
             const targets: CadCommentTarget[] = [];
+            // Ignored occurrences reject the whole item; the agent was told not to review them.
+            const ignored = ignoredCadOccurrences(reviewIgnore, binding.manifest);
+            const rejectIgnored = (occurrenceId: string) => {
+              const subject = cadReviewSubjects(binding.manifest).get(occurrenceId);
+              return new CadCommentError({
+                reason: "occurrence-ignored",
+                details: `cadsense.json reviewIgnore excludes ${subject?.path ?? occurrenceId} from review. Do not comment on it; choose a target outside the ignored components.`,
+              });
+            };
             for (const target of item.targets) {
               if (target.kind === "part") {
+                if (ignored.has(target.occurrenceId))
+                  return yield* rejectIgnored(target.occurrenceId);
                 if (
                   !binding.manifest.nodes.some(
                     (n) =>
@@ -812,6 +829,7 @@ export const make = Effect.gen(function* () {
                   return yield* fail("mixed-revision");
                 if (!c.inspectionIds.has(target.inspectionId))
                   return yield* fail("inspection-required");
+                if (ignored.has(c.occurrenceId)) return yield* rejectIgnored(c.occurrenceId);
                 targets.push({
                   kind: "point",
                   label: target.label,

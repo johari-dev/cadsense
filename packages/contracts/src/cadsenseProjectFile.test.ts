@@ -20,6 +20,27 @@ describe("CadsenseProjectFile", () => {
     expect(decode({ futureField: true })).toEqual({});
   });
 
+  it("decodes and trims review ignore entries", () => {
+    const decoded = decode({
+      reviewIgnore: [{ path: " Drivetrain <1>/** " }, { name: "*bolt*", material: "*steel*" }],
+    });
+
+    expect(decoded.reviewIgnore).toEqual([
+      { path: "Drivetrain <1>/**" },
+      { name: "*bolt*", material: "*steel*" },
+    ]);
+  });
+
+  it.each([
+    ["an empty entry", {}],
+    ["an unknown field", { pth: "Drivetrain/**" }],
+    ["an unknown field beside a valid one", { name: "Bolt", ignore: true }],
+    ["an empty glob", { name: " " }],
+    ["a non-object entry", "Drivetrain/**"],
+  ])("rejects a review ignore entry with %s", (_label, entry) => {
+    expect(() => decode({ reviewIgnore: [entry] })).toThrow();
+  });
+
   it("trims icon paths", () => {
     const decoded = decode({
       iconPath: " assets/logo.svg ",

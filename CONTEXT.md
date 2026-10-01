@@ -37,3 +37,7 @@ A new CAD comment that corrects an earlier finding while preserving the original
 
 **Linked follow-up**:
 A new CAD comment with materially new evidence about an existing finding. Rediscovering the same issue without new evidence reuses the existing comment instead.
+
+**Ignored component**:
+An occurrence that a `cadsense.json` `reviewIgnore` entry matches by path, name, or material, excluding it from review. Ignoring an assembly ignores everything inside it; ignored geometry remains visible as context.
+_Avoid_: Path filter, exclusion list, review scope

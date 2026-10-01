@@ -4422,9 +4422,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
-        // The system prompt is fixed for the session, so learnings and design brief edits made
-        // later reach Claude when its next session starts. Codex re-reads both on every turn.
-        // A failed learnings read only costs this session its learnings.
+        // The system prompt is fixed for the session, so learnings and edits to the design brief
+        // or cadsense.json made later reach Claude when its next session starts. Codex re-reads
+        // them on every turn. A failed learnings read only costs this session its learnings.
         const learnings = yield* cadQuery.value
           .getCadReviewLearnings(project.value.id)
           .pipe(Effect.orElseSucceed(() => []));
@@ -4437,7 +4437,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         return {
           scope,
           tools,
-          reviewInstructions: cadReviewInstructions({ learnings, designBrief }),
+          reviewInstructions: cadReviewInstructions({
+            learnings,
+            designBrief,
+            ignored: yield* tools.reviewIgnore,
+          }),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,
           ended: new Set<string>(),

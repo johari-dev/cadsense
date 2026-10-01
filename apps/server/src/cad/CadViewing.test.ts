@@ -42,6 +42,7 @@ import * as Exit from "effect/Exit";
 import type { Options as ClaudeOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeSettings, EnvironmentId } from "@cadsense/contracts";
 import { makeClaudeAdapter } from "../provider/Layers/ClaudeAdapter.ts";
+import { cadReviewInstructions } from "../provider/CadReviewInstructions.ts";
 import { SYNTHETIC_CLAUDE_MODEL_CATALOG } from "../provider/ClaudeModelCatalog.testFixtures.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as ClaudeCadCapabilities from "../provider/ClaudeCadCapabilities.ts";
@@ -227,7 +228,13 @@ it.effect(
   "binds two Claude SDK agent identities through one-use capabilities without approval prompts",
   () =>
     Effect.gen(function* () {
-      const h = yield* harness();
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-claude-cad-" });
+      yield* fs.writeFileString(
+        `${workspaceRoot}/cadsense.json`,
+        '{ "reviewIgnore": [{ "name": "*bolt*" }] }',
+      );
+      const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
       const capabilities = yield* ClaudeCadCapabilities.ClaudeCadCapabilities;
       const providerSessionId = "claude-cad-session";
       yield* Effect.acquireRelease(
@@ -306,6 +313,14 @@ it.effect(
       assert.equal(h.pins(), 0);
       assert.isFalse(yield* capabilities.available(providerSessionId));
       assert.deepEqual(sdkOptions!.settings, { permissions: { ask: ["mcp__cadsense_cad__*"] } });
+      assert.deepEqual(sdkOptions!.systemPrompt, {
+        type: "preset",
+        preset: "claude_code",
+        append: cadReviewInstructions({
+          learnings: [],
+          ignored: [{ name: "*bolt*" }],
+        }),
+      });
     }).pipe(
       Effect.scoped,
       Effect.provide(
@@ -500,6 +515,7 @@ const harness = Effect.fn(function* (
   loseCaptureReceipt = false,
   renderGate?: { started: Deferred.Deferred<void>; release: Deferred.Deferred<void> },
   comments?: CadComments["Service"],
+  /** Defaults to a path that does not exist, so the project has no cadsense.json. */
   workspaceRoot = "C:/cad-view-test",
 ) {
   const engine = yield* OrchestrationEngineService;

@@ -237,6 +237,9 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
       ended.clear();
     }),
   );
-  return { invoke, end, close };
+  // Providers assemble review guidance from this before each session or turn. A project
+  // whose CAD is unavailable simply ignores nothing.
+  const reviewIgnore = viewing.reviewIgnore(threadId).pipe(Effect.orElseSucceed(() => []));
+  return { invoke, end, close, reviewIgnore };
 });
 export type CadProviderTools = Effect.Success<ReturnType<typeof makeCadProviderTools>>;

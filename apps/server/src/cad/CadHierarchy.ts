@@ -9,11 +9,15 @@ import { decodeCadToolInput, indexCadSnapshot } from "./CadViewState.ts";
 
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
 
-/** Cursors are bound to an immutable snapshot and parent, not browser focus or mutable list offsets. */
+/**
+ * Cursors are bound to an immutable snapshot and parent, not browser focus or mutable list offsets.
+ * `ignored` holds occurrences that cadsense.json `reviewIgnore` excludes from review.
+ */
 export const readCadHierarchy = Effect.fn("readCadHierarchy")(function* (
   index: ReturnType<typeof indexCadSnapshot>,
   state: CadViewState,
   rawInput: unknown,
+  ignored: ReadonlySet<string> = new Set(),
 ): Effect.fn.Return<CadHierarchyResult, CadViewError> {
   const input = yield* decodeCadToolInput(CadHierarchyInput, rawInput);
   const parent = input.parentOccurrenceId ?? null;
@@ -49,6 +53,7 @@ export const readCadHierarchy = Effect.fn("readCadHierarchy")(function* (
         hasChildren: (index.children.get(occurrenceId)?.length ?? 0) > 0,
         visible: visibility.get(occurrenceId) ?? false,
         suppressed: node.suppressed,
+        ...(ignored.has(occurrenceId) ? { ignored: true as const } : {}),
         ...(material === undefined ? {} : { material }),
         ...(metadata?.massKg === undefined ? {} : { massKg: metadata.massKg }),
       };

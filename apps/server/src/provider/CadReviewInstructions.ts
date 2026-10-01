@@ -1,5 +1,8 @@
+import type { CadReviewIgnoreMatch } from "@cadsense/contracts";
+import { describeCadReviewIgnoreMatch } from "@cadsense/shared/cadReviewIgnore";
 import type { CadDesignBrief } from "../cad/CadDesignBrief.ts";
 
+/** Review guidance shared by every project. Projects add context through {@link cadReviewInstructions}. */
 export const CAD_REVIEW_INSTRUCTIONS = [
   "CAD review defaults: A request to review a design is enough to inspect it and leave useful CAD comments. Use the user's context to choose what to investigate; the user need not specify review criteria or writing style.",
   "Understand the intended motion and the reason for the design choices before suggesting changes. Distinguish what the user said, what you observed, and what you inferred. When a project design brief is provided below, prefer it over inference about intent, constraints, and purchased parts, and ask when the brief and the model disagree. Inspect the model to resolve uncertainty first. If an ambiguity changes the recommendation, ask a specific question and continue independent checks. A motor moving with a stage is not evidence of a loose mount. Compact packaging may be intentional; understand the constraint before proposing a different layout.",
@@ -19,28 +22,46 @@ export const CAD_REVIEW_LEARNINGS_HEADING =
   "Review learnings from this project's past dismissals (apply them; do not repeat dismissed findings):";
 
 /**
- * Review guidance for one project session or turn: the shared instructions, then the project
- * design brief when the workspace has one, then one line per learning the user left when
- * dismissing earlier findings. Empty sections are omitted, so with neither it is the shared
- * text alone.
+ * One line listing the cadsense.json `reviewIgnore` entries so the agent skips those components
+ * before capturing. Null when nothing is ignored.
  */
-export const cadReviewInstructions = (context: {
+const reviewIgnoreSection = (ignored: ReadonlyArray<CadReviewIgnoreMatch>): string | null =>
+  ignored.length === 0
+    ? null
+    : `Ignored components from this project's cadsense.json (do not capture, inspect, or comment on them; cad_hierarchy marks them ignored and publication rejects targets there): ${ignored.map(describeCadReviewIgnoreMatch).join("; ")}.`;
+
+/** Project context appended to the shared review guidance for one session or turn. */
+export interface CadReviewContext {
+  /** Notes the user left when dismissing earlier findings. */
   readonly learnings: ReadonlyArray<{ readonly text: string }>;
+  /** The workspace design brief, when the project has one. */
   readonly designBrief?: CadDesignBrief | null;
-}): string => {
-  const { learnings, designBrief } = context;
-  return [
+  /** The project's cadsense.json `reviewIgnore` entries. */
+  readonly ignored?: ReadonlyArray<CadReviewIgnoreMatch>;
+}
+
+/**
+ * Review guidance for one project session or turn: the shared instructions, then the project
+ * design brief, then the components cadsense.json ignores, then one line per learning. Empty
+ * sections are omitted, so a project with none of them gets the shared text alone.
+ */
+export const cadReviewInstructions = ({
+  learnings,
+  designBrief,
+  ignored = [],
+}: CadReviewContext): string =>
+  [
     CAD_REVIEW_INSTRUCTIONS,
     designBrief
       ? `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`
       : null,
-    learnings.length > 0
-      ? [
+    reviewIgnoreSection(ignored),
+    learnings.length === 0
+      ? null
+      : [
           CAD_REVIEW_LEARNINGS_HEADING,
           ...learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`),
-        ].join("\n")
-      : null,
+        ].join("\n"),
   ]
     .filter((section) => section !== null)
     .join("\n\n");
-};
