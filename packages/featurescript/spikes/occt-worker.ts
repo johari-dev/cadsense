@@ -206,14 +206,12 @@ if (NodeWorkerThreads.isMainThread) {
         if (message.ready && killAfterMs !== undefined)
           timer = setTimeout(() => {
             const t = NodePerfHooks.performance.now();
-            void worker
-              .terminate()
-              .then(() =>
-                resolve({
-                  terminatedAfterProgress: progress,
-                  terminateMs: Math.round(NodePerfHooks.performance.now() - t),
-                }),
-              );
+            void worker.terminate().then(() =>
+              resolve({
+                terminatedAfterProgress: progress,
+                terminateMs: Math.round(NodePerfHooks.performance.now() - t),
+              }),
+            );
           }, killAfterMs);
         if (message.result) {
           clearTimeout(timer);
