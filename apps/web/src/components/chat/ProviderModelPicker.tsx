@@ -1,23 +1,37 @@
+// Provider submenu structure adapted from Synara. See THIRD_PARTY_NOTICES/Synara.txt.
 import {
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@cadsense/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { Badge } from "../ui/badge";
 import { buttonVariants } from "../ui/button";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import {
+  Menu,
+  MenuTrigger,
+  MenuPopup,
+  MenuSub,
+  MenuSubTrigger,
+  MenuSubPopup,
+  MenuItem,
+  MenuSeparator,
+} from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { ModelPickerContent } from "./ModelPickerContent";
+import { PlusIcon } from "@phosphor-icons/react";
+import { Link } from "@tanstack/react-router";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { isProviderInstancePickerReady } from "../../providerInstances";
+import { ProviderModelSubmenu } from "./ProviderModelSubmenu";
+
 import {
   ModelEsque,
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
 } from "./providerIconUtils";
-import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
+import { type ProviderInstanceEntry } from "../../providerInstances";
 import { ComposerControl, ComposerControlChevron } from "./ComposerControl";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -29,7 +43,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   model: string;
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
-  /** Instance entries rendered in the sidebar + used to resolve display name. */
+  /** Configured instances, displayed as provider submenu triggers. */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
@@ -47,15 +61,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
 
-  // Resolve the active instance entry by exact routing key. The composer
-  // resolves fallbacks before rendering this component; if the selected
-  // instance disappears, do not infer a replacement from its driver kind.
-  const activeEntry = useMemo(() => {
-    return (
-      props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null
-    );
-  }, [props.activeInstanceId, props.instanceEntries]);
-
+  const activeEntry = props.instanceEntries.find(
+    (entry) => entry.instanceId === props.activeInstanceId,
+  );
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
   const selectedModel =
@@ -65,8 +73,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const triggerLabel = selectedModel
     ? `${getTriggerDisplayModelLabel(selectedModel)}${selectedModel.isUnavailable ? " (Unavailable)" : ""}`
     : props.model;
-  const showInstanceBadge =
-    activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 
   const setIsMenuOpen = (open: boolean) => {
     props.onOpenChange?.(open);
@@ -75,54 +81,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     }
   };
 
-  useEffect(() => {
-    if (!isMenuOpen) {
-      return;
-    }
-
-    const { documentElement, body } = document;
-    const previousDocumentOverscrollBehavior = documentElement.style.overscrollBehavior;
-    const previousBodyOverflow = body.style.overflow;
-    const previousBodyPaddingRight = body.style.paddingRight;
-    const scrollbarWidth = window.innerWidth - documentElement.clientWidth;
-
-    documentElement.style.overscrollBehavior = "contain";
-    body.style.overflow = "hidden";
-    if (scrollbarWidth > 0) {
-      body.style.paddingRight = `${scrollbarWidth}px`;
-    }
-
-    const shouldAllowOverlayScroll = (target: EventTarget | null) => {
-      return target instanceof Element && target.closest("[data-model-picker-content]");
-    };
-    const preventBackgroundWheel = (event: WheelEvent) => {
-      if (shouldAllowOverlayScroll(event.target)) {
-        return;
-      }
-      event.preventDefault();
-    };
-    const preventBackgroundTouchMove = (event: TouchEvent) => {
-      if (shouldAllowOverlayScroll(event.target)) {
-        return;
-      }
-      event.preventDefault();
-    };
-
-    document.addEventListener("wheel", preventBackgroundWheel, { capture: true, passive: false });
-    document.addEventListener("touchmove", preventBackgroundTouchMove, {
-      capture: true,
-      passive: false,
-    });
-
-    return () => {
-      document.removeEventListener("wheel", preventBackgroundWheel, { capture: true });
-      document.removeEventListener("touchmove", preventBackgroundTouchMove, { capture: true });
-      documentElement.style.overscrollBehavior = previousDocumentOverscrollBehavior;
-      body.style.overflow = previousBodyOverflow;
-      body.style.paddingRight = previousBodyPaddingRight;
-    };
-  }, [isMenuOpen]);
-
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
@@ -130,7 +88,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   };
 
   return (
-    <Popover
+    <Menu
       open={isMenuOpen}
       onOpenChange={(open) => {
         if (props.disabled) {
@@ -140,10 +98,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         setIsMenuOpen(open);
       }}
     >
-      <PopoverTrigger
+      <MenuTrigger
         render={
           <ComposerControl
-            aria-label={props.triggerAriaLabel}
+            aria-label={props.triggerAriaLabel ?? "Choose model"}
             variant={props.triggerVariant ?? "ghost"}
             data-chat-provider-model-picker="true"
             className={cn(
@@ -160,15 +118,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             <ProviderInstanceIcon
               driverKind={activeEntry.driverKind}
               displayName={activeEntry.displayName}
-              accentColor={activeEntry.accentColor}
-              showBadge={showInstanceBadge}
               className="size-4"
               iconClassName={cn("size-4", props.activeProviderIconClassName)}
-              indicatorBackground="var(--contrast-input)"
-              badgeClassName={cn(
-                "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3",
-                "px-0.5 text-[7px]",
-              )}
             />
           ) : null}
           <Tooltip>
@@ -186,27 +137,59 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <span aria-hidden="true" className="flex items-center">
           <ComposerControlChevron />
         </span>
-      </PopoverTrigger>
-      <PopoverPopup
-        align="start"
-        className="before:hidden [--viewport-inline-padding:0]"
-        viewportClassName="!overflow-hidden rounded-[calc(var(--radius-lg)-1px)] p-0 [clip-path:inset(0_round_calc(var(--radius-lg)-1px))]"
-      >
-        <ModelPickerContent
-          activeInstanceId={activeInstanceId}
-          model={props.model}
-          lockedProvider={props.lockedProvider}
-          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-          instanceEntries={props.instanceEntries}
-          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-          modelOptionsByInstance={props.modelOptionsByInstance}
-          onRequestClose={() => setIsMenuOpen(false)}
-          {...(props.getModelDisabledReason
-            ? { getModelDisabledReason: props.getModelDisabledReason }
-            : {})}
-          onInstanceModelChange={handleInstanceModelChange}
-        />
-      </PopoverPopup>
-    </Popover>
+      </MenuTrigger>
+      <MenuPopup align="start" side="top" sideOffset={8} className="composer-model-menu w-48">
+        {props.instanceEntries
+          .filter(
+            (entry) =>
+              !props.lockedProvider ||
+              (entry.driverKind === props.lockedProvider &&
+                (!props.lockedContinuationGroupKey ||
+                  entry.continuationGroupKey === props.lockedContinuationGroupKey)),
+          )
+          .map((entry) => {
+            const icon = (
+              <ProviderInstanceIcon
+                driverKind={entry.driverKind}
+                displayName={entry.displayName}
+                className="size-3.5"
+                iconClassName="size-3.5"
+              />
+            );
+            if (!isProviderInstancePickerReady(entry))
+              return (
+                <MenuItem key={entry.instanceId} disabled>
+                  {icon}
+                  <span className="truncate">{entry.displayName}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground">Unavailable</span>
+                </MenuItem>
+              );
+            return (
+              <MenuSub key={entry.instanceId}>
+                <MenuSubTrigger>
+                  {icon}
+                  <span className="truncate">{entry.displayName}</span>
+                </MenuSubTrigger>
+                <MenuSubPopup sideOffset={6} alignOffset={-4} className="composer-model-menu w-64">
+                  <ProviderModelSubmenu
+                    keybindings={props.keybindings}
+                    entry={entry}
+                    models={props.modelOptionsByInstance.get(entry.instanceId) ?? []}
+                    activeInstanceId={activeInstanceId}
+                    model={props.model}
+                    getModelDisabledReason={props.getModelDisabledReason}
+                    onSelect={handleInstanceModelChange}
+                  />
+                </MenuSubPopup>
+              </MenuSub>
+            );
+          })}
+        <MenuSeparator />
+        <MenuItem render={<Link to="/settings/providers" />} onClick={() => setIsMenuOpen(false)}>
+          <PlusIcon className="size-3.5" />
+          Add providers
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
   );
 });

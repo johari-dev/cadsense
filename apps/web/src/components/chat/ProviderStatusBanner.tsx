@@ -1,6 +1,6 @@
 import { type ServerProvider } from "@cadsense/contracts";
 import { memo } from "react";
-import { InfoIcon, XIcon } from "lucide-react";
+import { InfoIcon, XIcon } from "@phosphor-icons/react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { formatProviderDriverKindLabel } from "../../providerModels";

@@ -1,4 +1,4 @@
-import { RotateCcwIcon } from "lucide-react";
+import { ArrowCounterClockwiseIcon as RotateCcwIcon } from "@phosphor-icons/react";
 import {
   Outlet,
   createFileRoute,

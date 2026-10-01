@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import { CircleAlertIcon, XIcon } from "lucide-react";
+import { WarningCircleIcon as CircleAlertIcon, XIcon } from "@phosphor-icons/react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export function getThreadErrorBannerKey(threadKey: string, error: string | null): string | null {

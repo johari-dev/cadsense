@@ -22,7 +22,7 @@ import {
   type PreviewViewportSetting,
 } from "@cadsense/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@cadsense/shared/previewViewport";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";

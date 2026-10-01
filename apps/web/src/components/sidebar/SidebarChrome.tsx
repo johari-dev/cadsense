@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, GearSixIcon as SettingsIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
@@ -76,7 +76,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
-      aria-label="Go to threads"
+      aria-label="Go to design workspace"
       className={cn(
         "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
         onBackdrop ? "text-white" : "text-foreground",
@@ -85,7 +85,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     >
       <span
         className={cn(
-          "truncate text-sm font-semibold tracking-tight",
+          "truncate text-base font-semibold tracking-tight",
           onBackdrop ? "text-white" : "text-foreground",
         )}
       >

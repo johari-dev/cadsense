@@ -1,4 +1,4 @@
-import { MousePointerClick, X } from "lucide-react";
+import { CursorClickIcon as MousePointerClick, XIcon as X } from "@phosphor-icons/react";
 
 import {
   COMPOSER_INLINE_CHIP_CLASS_NAME,

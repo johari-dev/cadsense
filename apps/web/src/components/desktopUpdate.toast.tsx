@@ -1,5 +1,5 @@
 import type { DesktopBridge, DesktopUpdateState } from "@cadsense/contracts";
-import { ArrowRightIcon } from "lucide-react";
+import { ArrowRightIcon } from "@phosphor-icons/react";
 
 import {
   getDesktopUpdateDownloadedVersion,

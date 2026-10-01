@@ -1,17 +1,17 @@
 import {
-  ActivityIcon,
-  AlertTriangleIcon,
-  BatteryIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
+  PulseIcon as ActivityIcon,
+  WarningIcon as AlertTriangleIcon,
+  BatteryFullIcon as BatteryIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon as ChevronRightIcon,
   CpuIcon,
   DatabaseIcon,
   GaugeIcon,
   HardDriveIcon,
-  MemoryStickIcon,
-  RefreshCwIcon,
-  RotateCcwIcon,
-} from "lucide-react";
+  MemoryIcon as MemoryStickIcon,
+  ArrowsClockwiseIcon as RefreshCwIcon,
+  ArrowCounterClockwiseIcon as RotateCcwIcon,
+} from "@phosphor-icons/react";
 import type {
   BackgroundBooleanState,
   ResourceAttributionEntry,

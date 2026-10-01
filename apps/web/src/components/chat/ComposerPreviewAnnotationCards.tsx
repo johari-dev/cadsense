@@ -1,5 +1,12 @@
 import type { PreviewAnnotationPayload } from "@cadsense/contracts";
-import { Frame, MousePointerClick, Paintbrush, PenLine, RotateCcw, X } from "lucide-react";
+import {
+  FrameCornersIcon as Frame,
+  CursorClickIcon as MousePointerClick,
+  PaintBrushIcon as Paintbrush,
+  PenIcon as PenLine,
+  ArrowCounterClockwiseIcon as RotateCcw,
+  XIcon as X,
+} from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";

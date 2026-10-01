@@ -38,6 +38,13 @@ export function CadAutoPreview({
   const visible = useCadFloatingStore(
     (store) => store.byThread[scopedThreadKey(threadRef)]?.visible ?? false,
   );
+  useLayoutEffect(() => {
+    const key = scopedThreadKey(threadRef);
+    const panels = useRightPanelStore.getState();
+    if (data?.view && !panels.byThreadKey[key] && project.cad?.roots.some((root) => root.current)) {
+      panels.open(threadRef, "cad");
+    }
+  }, [data?.view, project.cad?.roots, threadRef]);
   const activityTurn = data?.agentActivityTurnId ?? null;
   const noticeRun = runId ?? activityTurn;
   useLayoutEffect(() => {

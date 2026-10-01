@@ -1,5 +1,5 @@
 import type { CadViewState } from "@cadsense/contracts";
-import { Boxes } from "lucide-react";
+import { StackIcon as Boxes } from "@phosphor-icons/react";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -25,7 +25,7 @@ function ViewCube({ view }: { view: Preset }) {
           strokeWidth="1.15"
           className={
             view === "isometric" || view === face
-              ? "fill-red-500/85 stroke-red-300"
+              ? "fill-primary/85 stroke-primary"
               : "fill-background stroke-current opacity-60"
           }
         />

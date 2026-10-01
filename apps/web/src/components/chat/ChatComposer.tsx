@@ -119,7 +119,6 @@ import {
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
-  renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
@@ -264,18 +263,18 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
-  CircleAlertIcon,
+  WarningCircleIcon as CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
   PlayIcon,
-  type LucideIcon,
-  LockIcon,
-  LockOpenIcon,
-  PenLineIcon,
-  RotateCcwIcon,
-  SparklesIcon,
+  type Icon as LucideIcon,
+  LockSimpleIcon as LockIcon,
+  LockSimpleOpenIcon as LockOpenIcon,
+  PenIcon as PenLineIcon,
+  ArrowCounterClockwiseIcon as RotateCcwIcon,
+  SparkleIcon as SparklesIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import {
   applyProviderInstanceSettings,
@@ -1270,17 +1269,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
   );
 
-  const providerTraitsMenuContent = renderProviderTraitsMenuContent({
-    provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
-    models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
-    prompt,
-    onPromptChange: setPromptFromTraits,
-  });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -2664,7 +2652,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             data-chat-composer-surface="true"
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
-              "rounded-[20px] transition-[background-color] duration-200",
+              "rounded-md transition-[background-color] duration-200",
               isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
               projectSelectionRequired ? "opacity-75" : null,
               composerProviderState.composerSurfaceClassName,
@@ -2688,7 +2676,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     ? activePendingProgress.customAnswer ||
                       "Type your own answer, or leave this blank to use the selected option"
                     : prompt.trim() ||
-                      (noProviderAvailable ? "Enable a provider in Settings" : "Ask anything...")}
+                      (noProviderAvailable
+                        ? "Enable a provider in Settings"
+                        : "Describe a design change...")}
                 </button>
                 {inlineTasksBadge}
                 <button
@@ -3091,7 +3081,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Enable a provider in Settings to send a message"
                               : phase === "disconnected"
                                 ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                : "Ask anything, @tag files/folders, or / for commands and skills"
+                                : "Describe a change or ask about your model. @ for files, / for tools."
                   }
                   disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
                 />
@@ -3181,23 +3171,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     />
                   )}
 
+                  {providerTraitsPicker}
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
                       runtimeMode={runtimeMode}
-                      traitsMenuContent={providerTraitsMenuContent}
                       onRuntimeModeChange={handleRuntimeModeChange}
                     />
                   ) : (
                     <>
-                      {providerTraitsPicker ? (
-                        <>
-                          <Separator
-                            orientation="vertical"
-                            className="mx-0.5 hidden h-4 sm:block"
-                          />
-                          {providerTraitsPicker}
-                        </>
-                      ) : null}
                       <ComposerFooterModeControls
                         runtimeMode={runtimeMode}
                         onRuntimeModeChange={handleRuntimeModeChange}

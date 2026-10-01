@@ -1,7 +1,12 @@
 "use client";
 
 import type { DesktopPreviewColorScheme } from "@cadsense/contracts";
-import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
+import {
+  MinusIcon as Minus,
+  DotsThreeVerticalIcon as MoreVertical,
+  PlusIcon,
+  ArrowCounterClockwiseIcon as RotateCcw,
+} from "@phosphor-icons/react";
 
 import { Button } from "~/components/ui/button";
 import {

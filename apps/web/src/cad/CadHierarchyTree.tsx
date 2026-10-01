@@ -1,6 +1,10 @@
 import type { CadSnapshotManifest, CadViewState } from "@cadsense/contracts";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
-import { ChevronDown, ChevronRight, Focus } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDown,
+  CaretRightIcon as ChevronRight,
+  BoundingBoxIcon as Focus,
+} from "@phosphor-icons/react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";

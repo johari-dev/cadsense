@@ -146,7 +146,12 @@ import {
   foldSubagentActivities,
 } from "@cadsense/client-runtime/state/subagentRuntime";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { ChevronDownIcon, Minimize2Icon, PaperclipIcon, WifiOffIcon } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDownIcon,
+  ArrowsInSimpleIcon as Minimize2Icon,
+  PaperclipIcon,
+  WifiSlashIcon as WifiOffIcon,
+} from "@phosphor-icons/react";
 import { cn } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -4256,6 +4261,10 @@ function ChatViewContent(props: ChatViewProps) {
                         <DraftHeroHeadline
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          onChooseTask={(prompt) => {
+                            setComposerDraftPrompt(composerDraftTarget, prompt);
+                            scheduleComposerFocus();
+                          }}
                         />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
@@ -4273,7 +4282,7 @@ function ChatViewContent(props: ChatViewProps) {
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >
-                      <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+                      <div className="chat-composer-glass-host relative z-10 w-full rounded-[20px]">
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
                             composerRef={composerRef}
@@ -4400,11 +4409,18 @@ function ChatViewContent(props: ChatViewProps) {
 
       {!shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
         <RightPanelTabs
+          key={displayedRightPanelSurface?.kind === "cad" ? "design" : "tools"}
           open={rightPanelOpen}
           onExited={rightPanelPresence.onExited}
           onAddCad={addCadSurface}
           cadAvailable={cadAvailable}
           mode="inline"
+          {...(displayedRightPanelSurface?.kind === "cad"
+            ? {
+                widthStorageKey: "cadsense:design-viewport-width",
+                defaultWidth: Math.round(window.innerWidth * 0.6),
+              }
+            : {})}
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
           activeSurfaceId={displayedRightPanelSurface?.id ?? null}

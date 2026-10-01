@@ -14,16 +14,16 @@ import { useParams } from "@tanstack/react-router";
 import { type ScopedThreadRef, type ThreadId } from "@cadsense/contracts";
 import {
   CheckIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretUpIcon as ChevronUpIcon,
+  WarningCircleIcon as CircleAlertIcon,
+  CheckCircleIcon as CircleCheckIcon,
   CopyIcon,
   InfoIcon,
-  LoaderCircleIcon,
-  TriangleAlertIcon,
+  CircleNotchIcon as LoaderCircleIcon,
+  WarningIcon as TriangleAlertIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 
 import { cn } from "~/lib/utils";
 import { Button, buttonVariants } from "~/components/ui/button";

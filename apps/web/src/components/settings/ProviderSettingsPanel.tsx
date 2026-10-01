@@ -18,7 +18,13 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@cadsense/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Equal from "effect/Equal";
 import * as Result from "effect/Result";
-import { LaptopIcon, LoaderIcon, MonitorIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  LaptopIcon,
+  SpinnerIcon as LoaderIcon,
+  MonitorIcon,
+  PlusIcon,
+  ArrowsClockwiseIcon as RefreshCwIcon,
+} from "@phosphor-icons/react";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";

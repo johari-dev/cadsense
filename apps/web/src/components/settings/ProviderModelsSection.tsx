@@ -4,12 +4,12 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   EyeIcon,
-  EyeOffIcon,
+  EyeSlashIcon as EyeOffIcon,
   InfoIcon,
   PlusIcon,
   StarIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,

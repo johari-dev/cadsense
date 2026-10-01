@@ -7,7 +7,10 @@ import {
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDown,
+  CaretRightIcon as ChevronRight,
+} from "@phosphor-icons/react";
 import {
   useCallback,
   useContext,
@@ -30,6 +33,7 @@ import { loadCadAssetDelivery } from "./CadAssetDelivery";
 import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import { isCadProjectRunActive } from "./CadProjectState";
+import { captureModelThumbnail } from "./modelThumbnails";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
@@ -238,6 +242,7 @@ export function CadScene({
         setLoadProgress(null);
         setError(null);
         setManifest(state.manifest);
+        void captureModelThumbnail(threadRef.environmentId, view.snapshotId, current);
       } catch {
         setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
       }

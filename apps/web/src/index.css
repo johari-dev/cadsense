@@ -1,4 +1,9 @@
 @import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
@@ -6,11 +11,12 @@
 
 :root {
   --app-scrollbar-width: 6px;
+  --cad-viewport-background: #262626;
   /*
    * Compact UI geometry. Keep these values semantic so sidebar, palette,
    * tooltip, and toolbar controls cannot quietly drift apart.
    */
-  --control-radius: 0.5rem;
+  --control-radius: 0.25rem;
   --sidebar-content-inset: 0.5rem;
   --sidebar-control-gap: 0.5rem;
   --sidebar-icon-color: color-mix(
@@ -22,8 +28,8 @@
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
   --floating-content-inset: 0.75rem;
-  --glass-blur: 12px;
-  --glass-opacity: 80%;
+  --glass-blur: 0px;
+  --glass-opacity: 100%;
   --glass-saturation: 1.14;
   --desktop-window-right-resize-inset: 0px;
   --workspace-topbar-height: 52px;
@@ -36,7 +42,7 @@
   --workspace-titlebar-scroll-fade-height: 1.5rem;
 
   @variant dark {
-    --glass-blur: 16px;
+    --glass-blur: 0px;
     --glass-saturation: 1.08;
   }
 }
@@ -57,9 +63,11 @@
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans:
+    "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
-    ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    "IBM Plex Mono", ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
+    monospace;
 }
 
 @theme inline {
@@ -1114,32 +1122,32 @@
 
 :root {
   color-scheme: dark;
-  --radius: 0.625rem;
-  --app-theme-canvas: oklch(0.191251 0 0);
-  --app-theme-chrome: oklch(0.191251 0 0);
-  --app-theme-toolbar: oklch(0.191251 0 0);
-  --app-theme-toolbar-foreground: oklch(0.869944 0 0);
-  --app-theme-toolbar-border: oklch(0.305191 0 0);
-  --app-theme-toolbar-control: oklch(0.301184 0 0);
+  --radius: 0.375rem;
+  --app-theme-canvas: #191919;
+  --app-theme-chrome: #101010;
+  --app-theme-toolbar: #1f1f1f;
+  --app-theme-toolbar-foreground: #f2f2f2;
+  --app-theme-toolbar-border: #353535;
+  --app-theme-toolbar-control: #2b2b2b;
   --app-theme-toolbar-control-foreground: oklch(0.869944 0 0);
-  --app-theme-toolbar-control-hover: oklch(0.309186 0 0);
-  --app-theme-surface: oklch(0.217787 0 0);
-  --app-theme-surface-raised: oklch(0.239292 0 0);
-  --app-theme-surface-overlay: oklch(0.217787 0 0);
-  --app-theme-text: oklch(0.869944 0 0);
-  --app-theme-text-muted: oklch(0.731595 0 0);
-  --app-theme-border: oklch(0.305191 0 0);
-  --app-theme-input: oklch(0.379094 0 0);
-  --app-theme-focus: oklch(0.854514 0 0);
-  --app-theme-accent: oklch(0.854514 0 0);
-  --app-theme-accent-foreground: oklch(0.222003 0.03479 328.979);
-  --app-theme-secondary: oklch(0.301184 0 0);
-  --app-theme-secondary-foreground: oklch(0.990339 0.008411 325.64);
-  --app-theme-muted: oklch(0.301184 0 0);
-  --app-theme-muted-foreground: oklch(0.731595 0 0);
-  --app-theme-placeholder: oklch(0.731595 0 0);
-  --app-theme-secondary-label: oklch(0.731595 0 0);
-  --app-theme-icon-muted: oklch(0.731595 0 0);
+  --app-theme-toolbar-control-hover: #383838;
+  --app-theme-surface: #1f1f1f;
+  --app-theme-surface-raised: #282828;
+  --app-theme-surface-overlay: #232323;
+  --app-theme-text: #f2f2f2;
+  --app-theme-text-muted: #a3a3a3;
+  --app-theme-border: #353535;
+  --app-theme-input: #505050;
+  --app-theme-focus: #ededed;
+  --app-theme-accent: #ededed;
+  --app-theme-accent-foreground: #171717;
+  --app-theme-secondary: #2b2b2b;
+  --app-theme-secondary-foreground: #f5f5f5;
+  --app-theme-muted: #2b2b2b;
+  --app-theme-muted-foreground: #a3a3a3;
+  --app-theme-placeholder: #a3a3a3;
+  --app-theme-secondary-label: #a3a3a3;
+  --app-theme-icon-muted: #a3a3a3;
   --app-theme-error: oklch(0.734642 0.162647 21.864);
   --app-theme-error-foreground: oklch(0.702184 0.189226 22.228);
   --app-theme-error-surface: oklch(0.265257 0.046957 17.692);
@@ -1149,23 +1157,23 @@
   --app-theme-update: oklch(0.854514 0 0);
   --app-theme-update-foreground: oklch(0.854514 0 0);
   --app-theme-update-surface: oklch(0.430694 0 0);
-  --app-theme-accent-surface: oklch(0.309186 0 0);
-  --app-theme-accent-surface-foreground: oklch(0.990339 0.008411 325.64);
-  --app-theme-message-surface: oklch(0.260325 0 0);
-  --app-theme-message-foreground: oklch(0.990339 0.008411 325.64);
-  --app-theme-message-action: oklch(0.885305 0 0);
-  --app-theme-message-action-foreground: oklch(0.222003 0.03479 328.979);
-  --app-theme-message-action-hover: oklch(0.899257 0 0);
-  --app-theme-code-background: oklch(0.217787 0 0);
-  --app-theme-code-foreground: oklch(0.950445 0.009298 52.099);
-  --app-theme-sidebar: oklch(0.217787 0 0);
+  --app-theme-accent-surface: #343434;
+  --app-theme-accent-surface-foreground: #fafafa;
+  --app-theme-message-surface: #292929;
+  --app-theme-message-foreground: #f5f5f5;
+  --app-theme-message-action: #ededed;
+  --app-theme-message-action-foreground: #171717;
+  --app-theme-message-action-hover: #ffffff;
+  --app-theme-code-background: #141414;
+  --app-theme-code-foreground: #ededed;
+  --app-theme-sidebar: #101010;
   --app-theme-sidebar-foreground: oklch(0.91887 0 0);
   --app-theme-sidebar-muted-foreground: oklch(0.731595 0 0);
-  --app-theme-sidebar-control-surface: oklch(0.321093 0 0);
-  --app-theme-sidebar-row-hover: oklch(0.278896 0 0);
-  --app-theme-sidebar-row-active: oklch(0.313962 0 0);
-  --app-theme-sidebar-row-selected: oklch(0.336799 0 0);
-  --app-theme-sidebar-border: oklch(0.305191 0 0);
+  --app-theme-sidebar-control-surface: #262626;
+  --app-theme-sidebar-row-hover: #242424;
+  --app-theme-sidebar-row-active: #2d2d2d;
+  --app-theme-sidebar-row-selected: #363636;
+  --app-theme-sidebar-border: #2d2d2d;
 }
 
 /* Map the permanent application palette onto the semantic surface tokens. */
@@ -1869,4 +1877,62 @@ code {
   .preview-loading-progress[data-loading="true"] {
     transform: scaleX(0.9);
   }
+}
+
+/* Composer shell and menu proportions adapted from Synara; see THIRD_PARTY_NOTICES/Synara.txt. */
+:root .chat-composer-glass-shell {
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  backdrop-filter: blur(24px);
+  border-radius: 20px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 7%),
+    0 6px 24px -10px rgb(0 0 0 / 30%);
+}
+[data-chat-composer-surface="true"] {
+  border-radius: 20px;
+}
+[data-chat-composer-footer] {
+  border-top: 0;
+  padding: 0 10px 8px;
+}
+.composer-model-menu {
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--popover) 96%, transparent);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 8px 28px -8px rgb(0 0 0 / 45%);
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity 140ms ease,
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.composer-model-menu[data-starting-style],
+.composer-model-menu[data-ending-style] {
+  opacity: 0;
+  transform: translateY(3px) scale(0.97);
+}
+.composer-model-menu :is([data-slot="menu-item"], [data-slot="menu-sub-trigger"]) {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  transition: background-color 100ms ease;
+}
+.composer-model-menu [data-model-picker-content] > div {
+  background: transparent;
+}
+.composer-model-menu [data-slot="menu-sub-trigger"] > svg:last-child {
+  width: 12px;
+  height: 12px;
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-model-menu,
+  .composer-model-menu :is([data-slot="menu-item"], [data-slot="menu-sub-trigger"]) {
+    transition: none;
+  }
+}
+[data-app-sidebar] [aria-current="page"] svg {
+  color: var(--primary);
 }

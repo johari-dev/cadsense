@@ -124,7 +124,6 @@ describe("ComposerCommandMenu", () => {
 
     expect(markup).toContain('<span class="text-secondary-label">/</span>Ask Matt');
     expect(markup).toContain('data-slot="badge"');
-    expect(markup).toContain("lucide-folder");
     expect(markup).toContain(">Project</span>");
     expect(markup).toContain("Find the right skill or workflow");
     expect(markup).not.toContain("font-medium text-secondary-label");

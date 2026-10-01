@@ -1,7 +1,7 @@
 "use client";
 
 import type { DesktopPreviewPointerEvent } from "@cadsense/contracts";
-import { MousePointer2 } from "lucide-react";
+import { CursorIcon as MousePointer2 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";

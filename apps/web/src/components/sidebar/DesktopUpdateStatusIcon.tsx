@@ -1,4 +1,9 @@
-import { CheckIcon, DownloadIcon, RefreshCwIcon, RotateCwIcon } from "lucide-react";
+import {
+  CheckIcon,
+  DownloadIcon,
+  ArrowsClockwiseIcon as RefreshCwIcon,
+  ArrowClockwiseIcon as RotateCwIcon,
+} from "@phosphor-icons/react";
 import type { AnimationEventHandler } from "react";
 
 import { cn } from "../../lib/utils";

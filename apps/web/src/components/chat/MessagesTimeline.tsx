@@ -50,27 +50,27 @@ import ChatMarkdown from "../ChatMarkdown";
 import { CadCaptureCard } from "../../cad/CadCaptureCard";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
-  BotIcon,
+  RobotIcon as BotIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CircleAlertIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon as ChevronRightIcon,
+  WarningCircleIcon as CircleAlertIcon,
   DownloadIcon,
   EyeIcon,
   FileIcon,
   GlobeIcon,
   HammerIcon,
-  MessageCircleIcon,
-  MousePointerClickIcon,
-  PaintbrushIcon,
+  ChatCircleIcon as MessageCircleIcon,
+  CursorClickIcon as MousePointerClickIcon,
+  PaintBrushIcon as PaintbrushIcon,
   PlayIcon,
-  SearchIcon,
-  SquarePenIcon,
-  TerminalIcon,
+  MagnifyingGlassIcon as SearchIcon,
+  NotePencilIcon as SquarePenIcon,
+  TerminalWindowIcon as TerminalIcon,
   WrenchIcon,
   XIcon,
-  ZapIcon,
-} from "lucide-react";
+  LightningIcon as ZapIcon,
+} from "@phosphor-icons/react";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -2136,6 +2136,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     return (
       <CadCaptureCard
         capture={workEntry.cadCapture}
+        summary={workEntry.label}
         threadRef={threadRef}
         onImageExpand={onImageExpand}
       />

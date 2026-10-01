@@ -1,6 +1,6 @@
 "use client";
 
-import { PipetteIcon, XIcon } from "lucide-react";
+import { EyedropperIcon as PipetteIcon, XIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { ColorSelector } from "../color-selector";

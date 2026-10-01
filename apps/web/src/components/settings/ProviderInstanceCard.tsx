@@ -1,14 +1,14 @@
 "use client";
 
 import {
-  ArrowUpCircleIcon,
+  ArrowCircleUpIcon as ArrowUpCircleIcon,
   CopyIcon,
   DownloadIcon,
-  LoaderIcon,
+  SpinnerIcon as LoaderIcon,
   PlusIcon,
-  Trash2Icon,
+  TrashIcon as Trash2Icon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { useEffect, useRef, useState, type ReactNode } from "react";

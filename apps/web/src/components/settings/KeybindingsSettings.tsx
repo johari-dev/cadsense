@@ -1,14 +1,14 @@
 import {
-  ChevronDownIcon,
-  CircleXIcon,
-  EllipsisIcon,
-  FileJsonIcon,
+  CaretDownIcon as ChevronDownIcon,
+  XCircleIcon as CircleXIcon,
+  DotsThreeIcon as EllipsisIcon,
+  FileCodeIcon as FileJsonIcon,
   MinusIcon,
   PlusIcon,
-  SearchIcon,
-  TriangleAlertIcon,
+  MagnifyingGlassIcon as SearchIcon,
+  WarningIcon as TriangleAlertIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import {
   type KeyboardEvent,
   type ReactNode,

@@ -1,12 +1,12 @@
 import {
-  ArrowLeft,
-  ArrowRight,
-  Camera,
-  ExternalLink,
-  MousePointerClick,
-  PictureInPicture2,
-  RotateCw,
-} from "lucide-react";
+  ArrowLeftIcon as ArrowLeft,
+  ArrowRightIcon as ArrowRight,
+  CameraIcon as Camera,
+  ArrowSquareOutIcon as ExternalLink,
+  CursorClickIcon as MousePointerClick,
+  PictureInPictureIcon as PictureInPicture2,
+  ArrowClockwiseIcon as RotateCw,
+} from "@phosphor-icons/react";
 import {
   type FormEvent,
   type KeyboardEvent,
