@@ -4069,9 +4069,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           return { behavior: "cancelled" as const };
         }
 
-        // The question copy lives in @cadsense/shared/claudeCompaction because
-        // the web client recognizes this exact text (and the "never" answer)
-        // to mirror a permanent dismissal.
         const question = formatClaudeResumeCompactionQuestion({
           ageMinutes: finiteNonNegativeInteger(request.payload.sessionAgeMinutes) ?? 0,
           estimatedTokens: finiteNonNegativeInteger(request.payload.estimatedTokens) ?? 0,
