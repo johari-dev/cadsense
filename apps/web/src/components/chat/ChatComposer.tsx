@@ -3158,7 +3158,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       instanceEntries={providerInstanceEntries}
                       keybindings={keybindings}
                       modelOptionsByInstance={modelOptionsByInstance}
-                      triggerClassName="-ms-[calc(--spacing(2.5)-1px)]"
+                      // Cancel the control's px-1.5 padding and 1px border so the provider icon
+                      // sits on the footer padding, matching the send button's inset on the right.
+                      triggerClassName="-ms-[calc(--spacing(1.5)+1px)]"
                       open={isComposerModelPickerOpen}
                       {...(composerProviderState.modelPickerIconClassName
                         ? {
