@@ -124,10 +124,6 @@ function renderTraitsControl(
   );
 }
 
-export function renderProviderTraitsMenuContent(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsMenuContent, input);
-}
-
 export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
   return renderTraitsControl(TraitsPicker, input);
 }
