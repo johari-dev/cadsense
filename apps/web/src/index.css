@@ -28,8 +28,8 @@
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
   --floating-content-inset: 0.75rem;
-  --glass-blur: 0px;
-  --glass-opacity: 100%;
+  --glass-blur: 12px;
+  --glass-opacity: 80%;
   --glass-saturation: 1.14;
   --desktop-window-right-resize-inset: 0px;
   --workspace-topbar-height: 52px;
@@ -42,7 +42,7 @@
   --workspace-titlebar-scroll-fade-height: 1.5rem;
 
   @variant dark {
-    --glass-blur: 0px;
+    --glass-blur: 16px;
     --glass-saturation: 1.08;
   }
 }
