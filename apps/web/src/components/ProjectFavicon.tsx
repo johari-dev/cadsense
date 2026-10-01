@@ -1,3 +1,4 @@
+import { modelThumbnailKey, useModelThumbnails } from "../cad/modelThumbnails";
 import type { EnvironmentId, OnshapeProjectSource } from "@cadsense/contracts";
 import {
   getProjectFaviconCacheKey,
@@ -17,9 +18,11 @@ type ProjectFaviconProps = {
   className?: string | undefined;
   fallbackIcon?: ComponentType<{ className?: string }>;
   onshapeSource?: OnshapeProjectSource | undefined;
+  cadSnapshotId?: string | undefined;
 };
 
 export function ProjectFavicon(input: ProjectFaviconProps) {
+  if (input.cadSnapshotId) return <ProjectModelThumbnail {...input} />;
   if (input.onshapeSource) {
     return (
       <img
@@ -30,6 +33,23 @@ export function ProjectFavicon(input: ProjectFaviconProps) {
     );
   }
   return <LocalProjectFavicon {...input} />;
+}
+
+function ProjectModelThumbnail(input: ProjectFaviconProps) {
+  const thumbnail = useModelThumbnails((state) =>
+    input.cadSnapshotId
+      ? state.images[modelThumbnailKey(input.environmentId, input.cadSnapshotId)]
+      : undefined,
+  );
+  if (thumbnail)
+    return (
+      <img
+        src={thumbnail}
+        alt=""
+        className={cn("size-7 shrink-0 rounded object-cover", input.className)}
+      />
+    );
+  return <ProjectFavicon {...input} cadSnapshotId={undefined} />;
 }
 
 function LocalProjectFavicon(input: ProjectFaviconProps) {
