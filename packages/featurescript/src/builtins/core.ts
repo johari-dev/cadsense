@@ -394,8 +394,9 @@ export const CORE_BUILTINS = {
       [w * u * k - v * s, w * v * k + u * s, c + w * w * k],
     ];
   },
+  // Length vectors normalize too (std's fCylinder normalizes topCenter - bottomCenter).
   normalize: ([vector], call) => {
-    const v = numbers(call, vector, "vector");
+    const v = array(call, vector, "vector").map((x) => magnitude(call, x, "vector element"));
     const length = Math.hypot(...v);
     if (length === 0) call.fail("Cannot normalize a zero vector.");
     return v.map((x) => x / length);

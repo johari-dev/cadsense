@@ -1,0 +1,9 @@
+{
+  "description": "A 40 x 30 x 20 mm block with its top edges chamfered 2 mm with std's chamfer.",
+  "steps": [{ "file": "feature.fs", "feature": "chamferedBlock" }],
+  "expect": {
+    "source": "analytic: 24000 - integral of (140 t - 4 t^2) for t in [0, 2] mm^3",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 23730.6667, "faces": 10, "edges": 20, "vertices": 12 }]
+  }
+}

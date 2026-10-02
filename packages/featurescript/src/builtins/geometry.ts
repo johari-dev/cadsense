@@ -8,77 +8,15 @@ import {
   type Entity,
   type EntityAttribute,
 } from "../geometry/Model.ts";
-import { evaluateQuery } from "../geometry/Query.ts";
-import { Sketch, solveSketch, type SketchPlane, type Vec2, type Vec3 } from "../geometry/Sketch.ts";
+import { Sketch, solveSketch, type SketchPlane } from "../geometry/Sketch.ts";
 import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
-import {
-  equals,
-  FsBuiltin,
-  FsMap,
-  FsTagged,
-  untag,
-  type FsArray,
-  type FsValue,
-} from "../runtime/Value.ts";
-import { context, map } from "./args.ts";
-import { lengthVector, regenError, stdEnum, stdTagged, unitVector } from "./std.ts";
+import { equals, FsBuiltin, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
+import { map } from "./args.ts";
+import { idOf, kernel, magnitude, normalized, resolve, transient, vector } from "./geometryArgs.ts";
+import { lengthVector, regenError, stdTagged, unitVector } from "./std.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
-
-/** Geometry builtins, on OpenCascade. Lengths arrive in meters, plain or as `ValueWithUnits`. */
-
-/** The context's model and kernel; a runtime without a kernel stops here. */
-const kernel = (call: BuiltinCall, ctx: FsValue): { model: ModelContext; oc: Oc } => {
-  const model = context(call, ctx);
-  if (!model.oc)
-    return call.unsupported(
-      "Geometry needs the OpenCascade kernel; create the runtime with FeatureScriptRuntime.withGeometry().",
-    );
-  return { model, oc: model.oc };
-};
-
-/** A number, or the SI magnitude of a `ValueWithUnits`. */
-const magnitude = (call: BuiltinCall, value: FsValue, what: string): number => {
-  const v = untag(value);
-  if (typeof v === "number") return v;
-  if (v instanceof FsMap && typeof v.getField("value") === "number")
-    return v.getField("value") as number;
-  return call.fail(`${what} must be a number or a length.`);
-};
-const vector = <N extends 2 | 3>(
-  call: BuiltinCall,
-  value: FsValue,
-  size: N,
-  what: string,
-): N extends 2 ? Vec2 : Vec3 => {
-  const items = untag(value);
-  if (!Array.isArray(items) || items.length !== size)
-    return call.fail(`${what} must be a ${size}D vector.`);
-  return (items as FsArray).map((item) => magnitude(call, item, what)) as unknown as N extends 2
-    ? Vec2
-    : Vec3;
-};
-const normalized = (v: Vec3): Vec3 => {
-  const length = Math.hypot(...v);
-  return [v[0] / length, v[1] / length, v[2] / length];
-};
-
-/** A `Query` that names one entity. */
-const transient = (call: BuiltinCall, entity: Entity) =>
-  stdTagged(call, "query.fs", "Query", [
-    ["queryType", stdEnum(call, "query.fs", "QueryType", "TRANSIENT")],
-    ["transientId", entity.id],
-  ]);
-
-const resolve = (call: BuiltinCall, model: ModelContext, oc: Oc, query: FsValue): Entity[] =>
-  evaluateQuery(
-    { oc, state: model.geometry, fail: call.fail, unsupported: call.unsupported },
-    query,
-  );
-
-const idOf = (value: FsValue): readonly string[] =>
-  (untag(value) as FsArray).map((part) => String(untag(part)));
 
 // ------------------------------------------------------------------ sketches
 

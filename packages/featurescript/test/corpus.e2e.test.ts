@@ -32,6 +32,8 @@ interface CorpusCase {
       readonly edges: number;
       readonly vertices: number;
     }[];
+    /** Context variables the features set, as numbers (std's evaluators report in SI; cases divide by units). */
+    readonly variables?: Readonly<Record<string, number>>;
   };
 }
 
@@ -111,6 +113,14 @@ describe("corpus", () => {
       spec.steps.map(() => null),
     );
     expect(run.features.map((feature) => feature.status)).toEqual(spec.expect.statuses);
+    const variables = run.features.at(-1)?.variables;
+    for (const [name, wanted] of Object.entries(spec.expect.variables ?? {})) {
+      const actual = variables?.getField(name);
+      expect(typeof actual, name).toBe("number");
+      expect(Math.abs((actual as number) - wanted), name).toBeLessThan(
+        1e-6 * Math.max(1, Math.abs(wanted)),
+      );
+    }
     expect(solids.length).toBe(spec.expect.solids.length);
     spec.expect.solids.forEach((wanted, i) => {
       const actual = solids[i]!;

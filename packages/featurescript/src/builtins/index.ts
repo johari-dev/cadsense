@@ -2,7 +2,9 @@ import type { Oc } from "../geometry/occt.ts";
 import type { BuiltinImpl, BuiltinTable } from "../runtime/Interpreter.ts";
 import { contextBuiltins } from "./context.ts";
 import { CORE_BUILTINS } from "./core.ts";
+import { EVALUATOR_BUILTINS } from "./evaluators.ts";
 import { GEOMETRY_BUILTINS } from "./geometry.ts";
+import { OPERATION_BUILTINS } from "./operations.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 /**
@@ -23,7 +25,6 @@ export const UNSUPPORTED = [
   "opBodyDraft",
   "opBooleanedPattern",
   "opBoundarySurface",
-  "opChamfer",
   "opConstrainedSurface",
   "opCreateBSplineCurve",
   "opCreateBSplineSurface",
@@ -43,7 +44,6 @@ export const UNSUPPORTED = [
   "opExtractWires",
   "opFaceBlend",
   "opFillSurface",
-  "opFillet",
   "opFitSpline",
   "opFlipOrientation",
   "opFullRoundFillet",
@@ -62,15 +62,12 @@ export const UNSUPPORTED = [
   "opOffsetCurveOnFace",
   "opOffsetFace",
   "opOffsetWire",
-  "opPattern",
   "opPlane",
   "opPoint",
   "opPolyline",
   "opReplaceFace",
-  "opRevolve",
   "opRuledSurface",
   "opSMFlatOperation",
-  "opShell",
   "opSphere",
   "opSplineThroughEdges",
   "opSplitByIsocline",
@@ -81,33 +78,23 @@ export const UNSUPPORTED = [
   "opSweep",
   "opTessellatedLoft",
   "opThicken",
-  "opTransform",
   "opWrap",
   // Geometry evaluation
   "evApproximateBSplineCurve",
   "evApproximateBSplineSurface",
   "evApproximateCentroid",
   "evApproximateMassProperties",
-  "evArea",
-  "evAxis",
-  "evBox",
   "evCollisionDetection",
   "evCornerType",
-  "evCurveDefinition",
-  "evDistance",
   "evEdgeConvexity",
   "evEdgeCurvatureDerivatives",
   "evEdgeCurvatures",
-  "evEdgeTangentLines",
   "evFaceCurvatureDerivatives",
   "evFaceCurvatures",
   "evFacePeriodicity",
-  "evFaceTangentPlanes",
   "evFaceTangentPlanesAtEdge",
   "evFaults",
   "evFilletRadius",
-  "evLength",
-  "evLine",
   "evMateConnector",
   "evMateConnectorCoordSystem",
   "evMaxPathDeviation",
@@ -124,11 +111,8 @@ export const UNSUPPORTED = [
   "evSheetMetalFlatTransformation",
   "evSheetMetalFormToolBodies",
   "evSheetMetalHoleToolBodies",
-  "evSurfaceDefinition",
   "evTessellatedLoftMatches",
   "evTolerances",
-  "evVertexPoint",
-  "evVolume",
   "evaluateSpline",
   // Sketches
   "skBezier",
@@ -180,6 +164,8 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
     ...CORE_BUILTINS,
     ...contextBuiltins(oc),
     ...GEOMETRY_BUILTINS,
+    ...EVALUATOR_BUILTINS,
+    ...OPERATION_BUILTINS,
   }) satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">;
 
 /** Names with an implementation, for the test that nothing is both implemented and unsupported. */
@@ -187,4 +173,6 @@ export const IMPLEMENTED: readonly string[] = [
   ...Object.keys(CORE_BUILTINS),
   ...Object.keys(contextBuiltins(null)),
   ...Object.keys(GEOMETRY_BUILTINS),
+  ...Object.keys(EVALUATOR_BUILTINS),
+  ...Object.keys(OPERATION_BUILTINS),
 ];
