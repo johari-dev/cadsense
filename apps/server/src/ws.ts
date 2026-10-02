@@ -895,6 +895,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.localCadProjectsCreate, localCadProjects.create(input), {
             "rpc.aggregate": "local-cad",
           }),
+        [WS_METHODS.localCadProjectsSetFile]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadProjectsSetFile, localCadProjects.setFile(input), {
+            "rpc.aggregate": "local-cad",
+          }),
         [WS_METHODS.cadUserStart]: (input) =>
           observeRpcEffect(WS_METHODS.cadUserStart, cadUserOperations.start(input), {
             "rpc.aggregate": "cad-user",

@@ -59,8 +59,9 @@ export const localCadFormat = (filePath: string): LocalCadFormat | null => {
 };
 
 /**
- * Resolves a CAD file chosen inside a project folder. Rejects paths that leave the folder,
- * including through symlinks, files that are not STEP or IGES, and files that do not exist.
+ * Resolves a CAD file chosen inside a project folder, given workspace-relative or absolute (a
+ * native file picker's result). Rejects paths that leave the folder, including through symlinks,
+ * files that are not STEP or IGES, and files that do not exist.
  */
 export const resolveLocalCadFile = Effect.fn("resolveLocalCadFile")(function* (input: {
   readonly workspaceRoot: string;
@@ -69,11 +70,18 @@ export const resolveLocalCadFile = Effect.fn("resolveLocalCadFile")(function* (i
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths;
+  // Compared through real paths so a picker that resolved a symlinked folder still matches.
+  const relativePath = path.isAbsolute(input.filePath)
+    ? yield* Effect.all([
+        fileSystem.realPath(input.workspaceRoot),
+        fileSystem.realPath(input.filePath),
+      ]).pipe(
+        Effect.map(([root, file]) => path.relative(root, file)),
+        Effect.mapError(() => new LocalCadError({ reason: "file-not-found" })),
+      )
+    : input.filePath;
   const resolved = yield* workspacePaths
-    .resolveRelativePathWithinRoot({
-      workspaceRoot: input.workspaceRoot,
-      relativePath: input.filePath,
-    })
+    .resolveRelativePathWithinRoot({ workspaceRoot: input.workspaceRoot, relativePath })
     .pipe(Effect.mapError(() => new LocalCadError({ reason: "outside-folder" })));
   const format = localCadFormat(resolved.relativePath);
   if (format === null) return yield* new LocalCadError({ reason: "unsupported-file" });

@@ -359,6 +359,9 @@ const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const CadPanel = lazy(() =>
   import("../cad/CadPanel").then((module) => ({ default: module.CadPanel })),
 );
+const CadFilePrompt = lazy(() =>
+  import("../cad/CadFilePrompt").then((module) => ({ default: module.CadFilePrompt })),
+);
 const CadAutoPreview = lazy(() =>
   import("../cad/CadAutoPreview").then((module) => ({ default: module.CadAutoPreview })),
 );
@@ -1740,8 +1743,9 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
-  const cadAvailable =
-    !!activeProject && hasCadSource(activeProject) && activeProject.cad?.enabled !== false;
+  // Every project offers CAD unless it is turned off. Without a linked file, the panel asks for one.
+  const cadAvailable = !!activeProject && activeProject.cad?.enabled !== false;
+  const cadLinked = cadAvailable && hasCadSource(activeProject);
   const cadOpeningRef = useRef(false);
   const [cadOpening, setCadOpening] = useState(false);
   const addCadSurface = useCallback(() => {
@@ -3937,13 +3941,15 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelContent = activeThreadRef ? (
     displayedRightPanelSurface?.kind === "cad" && activeProject ? (
       <Suspense fallback={null}>
-        {cadAvailable && isServerThread ? (
+        {cadLinked && isServerThread ? (
           <CadPanel
             key={activeThreadKey}
             project={activeProject}
             threadRef={activeThreadRef}
             fullscreen={rightPanelMaximized}
           />
+        ) : cadAvailable && isServerThread ? (
+          <CadFilePrompt project={activeProject} />
         ) : (
           <div className="p-4 text-sm text-muted-foreground">
             {cadAvailable
@@ -4273,7 +4279,7 @@ function ChatViewContent(props: ChatViewProps) {
                 bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
               />
             ) : null}
-            {activeThreadRef && activeProject && cadAvailable && isServerThread ? (
+            {activeThreadRef && activeProject && cadLinked && isServerThread ? (
               <Suspense fallback={null}>
                 <CadAutoPreview
                   key={activeThreadKey}

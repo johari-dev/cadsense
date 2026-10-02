@@ -142,15 +142,29 @@ try {
       listed: (await form.locator("label").allInnerTexts()).map((text) => text.split("\n")[0]),
     };
   });
-  await run("file-chosen", (page) => page.getByText(stepName, { exact: true }).click());
+  // Start from the corrupt export, so the panel has to recover through its file prompt.
+  await run("corrupt-file-chosen", (page) =>
+    page.getByText("exports/old/corrupt.step", { exact: true }).click(),
+  );
   await run("project-created", async (page) => {
     await page.getByRole("button", { name: "Create project" }).click();
     await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
     return { url: page.url() };
   });
-  await run("cad-panel-model", async (page) => {
+  await run("cad-panel-import-failed", async (page) => {
     await page.getByRole("button", { name: "Toggle right panel" }).click();
-    await page.getByText("Inspect the project's CAD.").click();
+    await page.getByText("Review this project's CAD.").click();
+    await panel.getByText(/Could not read this CAD file/).waitFor({ timeout: 120_000 });
+    return { prompt: (await panel.innerText()).split("\n").filter(Boolean) };
+  });
+  await run("cad-panel-file-menu", async (page) => {
+    // A browser has no native file dialog, so the button lists the folder's CAD files.
+    await panel.getByRole("button", { name: "Pick a file" }).click();
+    await page.getByRole("menuitem", { name: stepName }).waitFor();
+    return { listed: await page.getByRole("menuitem").allInnerTexts() };
+  });
+  await run("cad-panel-model", async (page) => {
+    await page.getByRole("menuitem", { name: stepName }).click();
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
     return { title: (await panel.innerText()).split("\n")[0], components: await componentCount() };

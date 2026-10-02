@@ -54,12 +54,23 @@ export const LocalCadProjectCreateResult = Schema.Struct({
 });
 export type LocalCadProjectCreateResult = typeof LocalCadProjectCreateResult.Type;
 
+/**
+ * Links a CAD file to an existing folder project and imports it. `filePath` is workspace-relative
+ * or absolute (a native file picker returns absolute paths); either way it must be in the folder.
+ */
+export const LocalCadProjectSetFileInput = Schema.Struct({
+  projectId: ProjectId,
+  filePath: TrimmedNonEmptyString.check(Schema.isMaxLength(MAX_LOCAL_CAD_PATH_LENGTH)),
+});
+export type LocalCadProjectSetFileInput = typeof LocalCadProjectSetFileInput.Type;
+
 export const LocalCadErrorReason = Schema.Literals([
   "folder-not-found",
   "file-not-found",
   "outside-folder",
   "unsupported-file",
   "onshape-project",
+  "project-not-found",
   "busy",
   "operation-failed",
 ]);
@@ -80,10 +91,12 @@ export class LocalCadError extends Schema.TaggedErrorClass<LocalCadError>()("Loc
         return "Choose a STEP or IGES file.";
       case "onshape-project":
         return "That folder belongs to an Onshape project.";
+      case "project-not-found":
+        return "That project no longer exists.";
       case "busy":
         return "CAD is busy in that project. Wait for agent runs and imports to finish.";
       case "operation-failed":
-        return "Could not add the local CAD project.";
+        return "Could not save the local CAD change.";
     }
   }
 }

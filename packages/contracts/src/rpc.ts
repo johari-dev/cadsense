@@ -81,6 +81,7 @@ import {
   LocalCadFilesListResult,
   LocalCadProjectCreateInput,
   LocalCadProjectCreateResult,
+  LocalCadProjectSetFileInput,
 } from "./localCad.ts";
 import {
   ProviderUploadFeedbackError,
@@ -186,6 +187,7 @@ export const WS_METHODS = {
   onshapeProjectsSetConnection: "onshape.projects.setConnection",
   localCadFilesList: "localCad.files.list",
   localCadProjectsCreate: "localCad.projects.create",
+  localCadProjectsSetFile: "localCad.projects.setFile",
   cadUserStart: "cad.user.start",
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
@@ -481,6 +483,12 @@ export const WsLocalCadProjectsCreateRpc = Rpc.make(WS_METHODS.localCadProjectsC
   error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
 });
 
+export const WsLocalCadProjectsSetFileRpc = Rpc.make(WS_METHODS.localCadProjectsSetFile, {
+  payload: LocalCadProjectSetFileInput,
+  success: LocalCadProjectCreateResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
 export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
   payload: CadUserStartInput,
   success: CadUserStartResult,
@@ -744,6 +752,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeProjectsSetConnectionRpc,
   WsLocalCadFilesListRpc,
   WsLocalCadProjectsCreateRpc,
+  WsLocalCadProjectsSetFileRpc,
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
   WsCadPanelWatchRpc,

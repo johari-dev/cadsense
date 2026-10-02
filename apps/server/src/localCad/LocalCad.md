@@ -15,7 +15,23 @@ the project is created.
    duplicate being made. Onshape projects are rejected.
 4. The new chat opens with the CAD panel loading. The sync result also carries the folder's file
    list, so project settings can switch to another file without a separate catalog refresh.
-5. After editing and re-exporting the file, Sync in project settings imports the new revision.
+5. After editing and re-exporting the file, Sync in the CAD panel header or project settings imports
+   the new revision.
+
+### From the CAD panel
+
+Every folder project offers the CAD panel. Until a model is imported (no file linked yet, or the
+linked file's import failed, was interrupted, or never started), the panel shows the linked file and
+any failure reason above a **Pick a file** button:
+
+- The desktop app opens the native file dialog (`desktopBridge.pickFile`) in the project folder,
+  filtered to STEP and IGES. With a WSL backend the dialog browses the distro over
+  `\\wsl.localhost` and the chosen path is translated back, the same as the folder picker.
+- A browser cannot read a path from a native dialog, so the button lists the folder's CAD files
+  instead.
+
+Either way `localCad.projects.setFile` links the file, absolute or workspace-relative, and imports
+it. A plain folder project becomes a local CAD project this way.
 
 ## How it maps onto the Onshape snapshot model
 
@@ -76,5 +92,12 @@ and cancelling terminates the worker.
 `apps/server/scripts/local-cad-project-e2e.ts` runs the dev app on a fresh data directory and drives
 headless Chromium through the dialog, the first import, the CAD panel, a re-export with Sync, and
 project settings. With `--ask` and `--model` it also sends a prompt to a real agent. It keeps a
-screenshot per step, the dev log, and `summary.json` under `--out`. The dev server runs under
+screenshot per step, the dev log, and `summary.json` under `--out`. It starts from a corrupt file so
+the panel's file prompt has to recover, through the browser file menu. The dev server runs under
 `node --watch`, whose workers post their own messages on the parent port; only this run covers that.
+
+`apps/desktop/scripts/local-cad-file-picker-e2e.mjs` covers the native dialog in the dev desktop
+app. It stubs Electron's `dialog.showOpenDialog` in the main process, records the options it was
+called with, adds a plain folder project, presses Pick a file, and waits for the model. The WSL path
+translation is shared with the folder picker but only runs on a Windows host, so this Linux run does
+not cover it.

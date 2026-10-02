@@ -5,6 +5,7 @@ import {
   type LocalCadFilesListResult,
   type LocalCadProjectCreateInput,
   type LocalCadProjectCreateResult,
+  type LocalCadProjectSetFileInput,
   type ModelSelection,
 } from "@cadsense/contracts";
 import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
@@ -14,6 +15,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { CadUserOperations } from "../cad/CadUserOperations.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -39,6 +41,13 @@ export class LocalCadProjects extends Context.Service<
      */
     readonly create: (
       input: LocalCadProjectCreate,
+    ) => Effect.Effect<LocalCadProjectCreateResult, LocalCadError>;
+    /**
+     * Points an existing folder project at a CAD file and starts importing it. Used by the CAD
+     * panel's file prompt, so it turns a plain folder project into a local CAD project.
+     */
+    readonly setFile: (
+      input: LocalCadProjectSetFileInput,
     ) => Effect.Effect<LocalCadProjectCreateResult, LocalCadError>;
   }
 >()("@cadsense/server/localCad/LocalCadProjects") {}
@@ -78,6 +87,38 @@ export const make = Effect.gen(function* () {
     return { workspaceRoot, ...scan };
   });
 
+  /** Links a resolved file to a folder project, then starts its import. */
+  const link = Effect.fn("LocalCadProjects.link")(function* (
+    projectId: LocalCadProjectCreateResult["projectId"],
+    filePath: string,
+  ) {
+    // The only invariant a folder project can fail here is an active run or import.
+    yield* engine
+      .dispatch({
+        type: "project.local-cad.set",
+        commandId: yield* commandId("set"),
+        projectId,
+        localCadSource: { filePath },
+      })
+      .pipe(Effect.mapError(() => new LocalCadError({ reason: "busy" })));
+    // The project is usable without the import, and the panel and settings offer Sync.
+    yield* operations
+      .start({
+        projectId,
+        kind: "sync",
+        root: {
+          elementId: localCadElementId(filePath),
+          kind: "assembly",
+          configuration: "default",
+        },
+      })
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not start the local CAD import", { projectId, error }),
+        ),
+      );
+  });
+
   const create = Effect.fn("LocalCadProjects.create")(function* (input: LocalCadProjectCreate) {
     const workspaceRoot = yield* normalizeFolder(input.workspaceRoot);
     const file = yield* withFiles(resolveLocalCadFile({ workspaceRoot, filePath: input.filePath }));
@@ -102,35 +143,24 @@ export const make = Effect.gen(function* () {
           createdAt: DateTime.formatIso(yield* DateTime.now),
         })
         .pipe(Effect.mapError(failed));
-    // The only invariant an existing folder project can fail here is an active run or import.
-    yield* engine
-      .dispatch({
-        type: "project.local-cad.set",
-        commandId: yield* commandId("set"),
-        projectId,
-        localCadSource: { filePath: file.relativePath },
-      })
-      .pipe(Effect.mapError(() => new LocalCadError({ reason: "busy" })));
-    // The project is usable without the first import, and the panel and settings offer Sync.
-    yield* operations
-      .start({
-        projectId,
-        kind: "sync",
-        root: {
-          elementId: localCadElementId(file.relativePath),
-          kind: "assembly",
-          configuration: "default",
-        },
-      })
-      .pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Could not start the first local CAD import", { projectId, error }),
-        ),
-      );
+    yield* link(projectId, file.relativePath);
     return { projectId };
   });
 
-  return LocalCadProjects.of({ listFiles, create });
+  const setFile = Effect.fn("LocalCadProjects.setFile")(function* (
+    input: LocalCadProjectSetFileInput,
+  ) {
+    const project = yield* query.getProjectShellById(input.projectId).pipe(Effect.mapError(failed));
+    if (Option.isNone(project)) return yield* new LocalCadError({ reason: "project-not-found" });
+    if (project.value.onshapeSource) return yield* new LocalCadError({ reason: "onshape-project" });
+    const file = yield* withFiles(
+      resolveLocalCadFile({ workspaceRoot: project.value.workspaceRoot, filePath: input.filePath }),
+    );
+    yield* link(input.projectId, file.relativePath);
+    return { projectId: input.projectId };
+  });
+
+  return LocalCadProjects.of({ listFiles, create, setFile });
 });
 
 export const layer = Layer.effect(LocalCadProjects, make);

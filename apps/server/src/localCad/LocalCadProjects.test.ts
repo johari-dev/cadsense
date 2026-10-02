@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   LocalCadError,
+  OnshapeDocumentId,
   OnshapeProjectSource,
   ProjectId,
   type OrchestrationProjectShell,
@@ -149,6 +150,24 @@ const createError = Effect.fn(function* (workspaceRoot: string, filePath: string
       filePath,
     }),
   );
+  assert.instanceOf(error, LocalCadError);
+  return error.reason;
+});
+
+/** A folder project with no CAD linked, as the CAD panel's file prompt sees it. */
+const makeFolderProject = Effect.fn(function* (projectId: ProjectId, workspaceRoot: string) {
+  yield* (yield* OrchestrationEngineService).dispatch({
+    type: "project.create",
+    commandId: CommandId.make(`create-${projectId}`),
+    projectId,
+    title: "Folder",
+    workspaceRoot,
+    createdAt: DateTime.formatIso(yield* DateTime.now),
+  });
+});
+
+const setFileError = Effect.fn(function* (projectId: ProjectId, filePath: string) {
+  const error = yield* Effect.flip((yield* LocalCadProjects).setFile({ projectId, filePath }));
   assert.instanceOf(error, LocalCadError);
   return error.reason;
 });
@@ -379,6 +398,107 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         createdAt: DateTime.formatIso(yield* DateTime.now),
       });
       assert.strictEqual(yield* createError(onshapeRoot, "models/dm1.step"), "onshape-project");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("links a natively picked absolute path in a plain folder project and imports it", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const root = yield* makeFolder();
+      const projectId = ProjectId.make("local-cad-set-file-absolute");
+      yield* makeFolderProject(projectId, root);
+      assert.strictEqual((yield* getProject(projectId)).localCadSource, undefined);
+
+      const result = yield* (yield* LocalCadProjects).setFile({
+        projectId,
+        filePath: path.join(root, "models/dm1.step"),
+      });
+      assert.strictEqual(result.projectId, projectId);
+      const project = yield* settle(projectId);
+      // Stored workspace-relative, so the project survives the folder moving.
+      assert.deepStrictEqual(project.localCadSource, { filePath: "models/dm1.step" });
+      assert.strictEqual(project.cad?.lastOutcome?.status, "succeeded");
+      assert.isNotNull(project.cad?.roots[0]?.current ?? null);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("switches a linked project to another picked file", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* makeFolder();
+      yield* fs.copyFile(FIXTURE, path.join(root, "parts/second.stp"));
+      const projectId = ProjectId.make("local-cad-set-file-switch");
+      yield* (yield* LocalCadProjects).create({
+        projectId,
+        title: "Bracket",
+        workspaceRoot: root,
+        filePath: "models/dm1.step",
+      });
+      const first = yield* settle(projectId);
+
+      yield* (yield* LocalCadProjects).setFile({ projectId, filePath: "parts/second.stp" });
+      const project = yield* settle(projectId);
+      assert.notStrictEqual(
+        project.cad?.lastOutcome?.operationId,
+        first.cad?.lastOutcome?.operationId,
+      );
+      assert.deepStrictEqual(project.localCadSource, { filePath: "parts/second.stp" });
+      assert.strictEqual(project.cad?.lastOutcome?.status, "succeeded");
+      assert.strictEqual(
+        project.cad?.catalog?.sourceElement?.elementId,
+        catalogRoot(project, "parts/second.stp").elementId,
+      );
+      assert.strictEqual(project.cad?.roots.length, 2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("rejects picked files outside the folder, non-CAD files, and non-folder projects", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const engineService = yield* OrchestrationEngineService;
+      const root = yield* makeFolder();
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-local-cad-outside-" });
+      yield* fs.copyFile(FIXTURE, path.join(outside, "outside.step"));
+      yield* fs.symlink(path.join(outside, "outside.step"), path.join(root, "models/link.step"));
+      const projectId = ProjectId.make("local-cad-set-file-rejected");
+      yield* makeFolderProject(projectId, root);
+
+      assert.strictEqual(
+        yield* setFileError(projectId, path.join(outside, "outside.step")),
+        "outside-folder",
+      );
+      assert.strictEqual(
+        yield* setFileError(projectId, path.join(root, "models/link.step")),
+        "outside-folder",
+      );
+      assert.strictEqual(
+        yield* setFileError(projectId, path.join(root, "notes.txt")),
+        "unsupported-file",
+      );
+      assert.strictEqual(
+        yield* setFileError(ProjectId.make("local-cad-no-such-project"), "models/dm1.step"),
+        "project-not-found",
+      );
+      assert.strictEqual((yield* getProject(projectId)).localCadSource, undefined);
+
+      const onshapeProjectId = ProjectId.make("local-cad-set-file-onshape");
+      yield* engineService.dispatch({
+        type: "project.onshape.create",
+        commandId: CommandId.make("local-cad-set-file-onshape"),
+        projectId: onshapeProjectId,
+        title: "Onshape",
+        workspaceRoot: yield* makeFolder(),
+        defaultModelSelection: null,
+        // A second document: the first Onshape test project still owns `onshapeSource`.
+        onshapeSource: { ...onshapeSource, documentId: OnshapeDocumentId.make("c".repeat(24)) },
+        createdAt: DateTime.formatIso(yield* DateTime.now),
+      });
+      assert.strictEqual(
+        yield* setFileError(onshapeProjectId, "models/dm1.step"),
+        "onshape-project",
+      );
     }).pipe(Effect.scoped),
   );
 
