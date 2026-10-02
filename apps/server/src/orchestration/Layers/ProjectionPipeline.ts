@@ -435,6 +435,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.defaultModelSelection !== undefined
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),
+            ...(event.payload.localCadSource !== undefined
+              ? { localCadSource: event.payload.localCadSource }
+              : {}),
             ...((event.payload.onshapeConnectionId !== undefined ||
               event.payload.onshapeManagedWorkspaceReady !== undefined) &&
             existingRow.value.onshapeSource !== null

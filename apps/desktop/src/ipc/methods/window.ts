@@ -3,6 +3,7 @@ import {
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
   OpenInFileManagerInput,
+  PickFileOptionsSchema,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   type DesktopEnvironmentBootstrap,
@@ -157,70 +158,107 @@ export const getLocalEnvironmentBearerToken = DesktopIpc.makeIpcMethod({
   }),
 });
 
+/**
+ * Shows a native dialog against the primary backend's filesystem, or a WSL distro's when
+ * `targetEnvironmentId` names one, and returns the chosen path in that backend's filesystem.
+ * `pick` opens the dialog; folder and file pickers differ only there.
+ */
+const pickNativePath = Effect.fn("desktop.ipc.window.pickNativePath")(function* <E>(
+  options:
+    | { readonly initialPath?: string | null; readonly targetEnvironmentId?: string }
+    | undefined,
+  pick: (
+    input: ElectronDialog.ElectronDialogPickFolderInput,
+  ) => Effect.Effect<Option.Option<string>, E>,
+) {
+  const electronWindow = yield* ElectronWindow.ElectronWindow;
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
+  // Three picker modes:
+  //   - targetEnvironmentId omitted: default to the primary picker. Keeps
+  //     the historical behavior unchanged for users who never enabled the
+  //     WSL backend, and is what unfamiliar callers should get out of the
+  //     box.
+  //   - targetEnvironmentId starts with "wsl:": route to the WSL picker
+  //     using the distro encoded in the id (or the user's selected
+  //     wslDistro when the id is the "wsl:default" sentinel).
+  //   - anything else (incl. PRIMARY_LOCAL_ENVIRONMENT_ID): primary picker.
+  const targetId = options?.targetEnvironmentId;
+  const wslDistroFromTarget =
+    targetId !== undefined && targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX)
+      ? extractWslDistroFromEnvironmentId(targetId)
+      : null;
+  const useWsl =
+    targetId !== undefined &&
+    targetId !== PRIMARY_LOCAL_ENVIRONMENT_ID &&
+    targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX);
+  const settings = yield* appSettings.get;
+  // Fall back to the persisted wslDistro when the id is the
+  // "wsl:default" sentinel; the orchestrator uses the same fallback
+  // for the actual backend.
+  const wslDistro = useWsl ? (wslDistroFromTarget ?? settings.wslDistro) : null;
+  const defaultPath = useWsl
+    ? Option.fromNullishOr(
+        resolveWslPickFolderDefaultPath(
+          options,
+          { distro: wslDistro },
+          yield* wslEnvironment.listDistros,
+          Option.getOrNull(yield* wslEnvironment.getUserHome(wslDistro)),
+        ),
+      )
+    : environment.resolvePickFolderDefaultPath(options);
+  const selectedPath = yield* pick({
+    owner: yield* electronWindow.focusedMainOrFirst,
+    defaultPath,
+  });
+  if (Option.isNone(selectedPath)) {
+    return null;
+  }
+  if (!useWsl) {
+    return selectedPath.value;
+  }
+
+  const linuxUncPath = wslUncPathToLinuxPath(selectedPath.value);
+  if (linuxUncPath !== null) {
+    return linuxUncPath;
+  }
+
+  const converted = yield* wslEnvironment.windowsToWslPath(
+    extractDistroFromUncPath(selectedPath.value) ?? wslDistro,
+    selectedPath.value,
+  );
+  return Option.getOrElse(converted, () => selectedPath.value);
+});
+
 export const pickFolder = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PICK_FOLDER_CHANNEL,
   payload: Schema.UndefinedOr(PickFolderOptionsSchema),
   result: Schema.NullOr(Schema.String),
   handler: Effect.fn("desktop.ipc.window.pickFolder")(function* (options) {
     const dialog = yield* ElectronDialog.ElectronDialog;
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
-    const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
-    const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
-    // Three picker modes:
-    //   - targetEnvironmentId omitted: default to the primary picker. Keeps
-    //     the historical behavior unchanged for users who never enabled the
-    //     WSL backend, and is what unfamiliar callers should get out of the
-    //     box.
-    //   - targetEnvironmentId starts with "wsl:": route to the WSL picker
-    //     using the distro encoded in the id (or the user's selected
-    //     wslDistro when the id is the "wsl:default" sentinel).
-    //   - anything else (incl. PRIMARY_LOCAL_ENVIRONMENT_ID): primary picker.
-    const targetId = options?.targetEnvironmentId;
-    const wslDistroFromTarget =
-      targetId !== undefined && targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX)
-        ? extractWslDistroFromEnvironmentId(targetId)
-        : null;
-    const useWsl =
-      targetId !== undefined &&
-      targetId !== PRIMARY_LOCAL_ENVIRONMENT_ID &&
-      targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX);
-    const settings = yield* appSettings.get;
-    // Fall back to the persisted wslDistro when the id is the
-    // "wsl:default" sentinel; the orchestrator uses the same fallback
-    // for the actual backend.
-    const wslDistro = useWsl ? (wslDistroFromTarget ?? settings.wslDistro) : null;
-    const defaultPath = useWsl
-      ? Option.fromNullishOr(
-          resolveWslPickFolderDefaultPath(
-            options,
-            { distro: wslDistro },
-            yield* wslEnvironment.listDistros,
-            Option.getOrNull(yield* wslEnvironment.getUserHome(wslDistro)),
-          ),
-        )
-      : environment.resolvePickFolderDefaultPath(options);
-    const selectedPath = yield* dialog.pickFolder({
-      owner: yield* electronWindow.focusedMainOrFirst,
-      defaultPath,
-    });
-    if (Option.isNone(selectedPath)) {
-      return null;
-    }
-    if (!useWsl) {
-      return selectedPath.value;
-    }
+    return yield* pickNativePath(options, dialog.pickFolder);
+  }),
+});
 
-    const linuxUncPath = wslUncPathToLinuxPath(selectedPath.value);
-    if (linuxUncPath !== null) {
-      return linuxUncPath;
-    }
-
-    const converted = yield* wslEnvironment.windowsToWslPath(
-      extractDistroFromUncPath(selectedPath.value) ?? wslDistro,
-      selectedPath.value,
+export const pickFile = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PICK_FILE_CHANNEL,
+  payload: Schema.UndefinedOr(PickFileOptionsSchema),
+  result: Schema.NullOr(Schema.String),
+  handler: Effect.fn("desktop.ipc.window.pickFile")(function* (options) {
+    const dialog = yield* ElectronDialog.ElectronDialog;
+    return yield* pickNativePath(options, (input) =>
+      dialog
+        .pickFiles({
+          ...input,
+          filters: (options?.filters ?? []).map((filter) => ({
+            name: filter.name,
+            extensions: [...filter.extensions],
+          })),
+          multiple: false,
+        })
+        .pipe(Effect.map((paths) => Option.fromNullishOr(paths[0]))),
     );
-    return Option.getOrElse(converted, () => selectedPath.value);
   }),
 });
 

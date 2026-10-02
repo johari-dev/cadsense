@@ -1,6 +1,7 @@
 import Migration0053 from "./Migrations/053_CadComments.ts";
 import Migration0054 from "./Migrations/054_CadCommentSeverity.ts";
 import Migration0055 from "./Migrations/055_CadReviewLearnings.ts";
+import Migration0056 from "./Migrations/056_LocalCadProjectSources.ts";
 /**
  * MigrationsLive - Migration runner with inline loader
  *
@@ -111,6 +112,7 @@ export const migrationEntries = [
   [53, "CadComments", Migration0053],
   [54, "CadCommentSeverity", Migration0054],
   [55, "CadReviewLearnings", Migration0055],
+  [56, "LocalCadProjectSources", Migration0056],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

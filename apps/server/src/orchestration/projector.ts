@@ -349,6 +349,9 @@ export function projectEvent(
                         },
                       }
                     : {}),
+                  ...(payload.localCadSource !== undefined
+                    ? { localCadSource: payload.localCadSource }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,

@@ -38,6 +38,8 @@ import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
+import { CadLocalSyncButton } from "./CadLocalSyncButton";
+import { CadFilePrompt } from "./CadFilePrompt";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
@@ -561,6 +563,7 @@ export function CadPanel({
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
+    localCad: project.localCadSource !== undefined,
   });
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;
@@ -715,6 +718,11 @@ export function CadPanel({
                 });
             }}
           />
+          <CadLocalSyncButton
+            project={project}
+            rootId={view?.rootId ?? data?.unavailableRootId ?? null}
+            disabled={!!runBlocker || !!data?.agentControlling || !!historicalView}
+          />
         </div>
       )}
       {error && (
@@ -756,6 +764,8 @@ export function CadPanel({
         !AsyncResult.isFailure(state) &&
         cadVisibleViewer.hasResident(threadRef.environmentId) ? (
         <PendingCadScene environmentId={threadRef.environmentId} />
+      ) : data && !data.unavailableRootId && !roots.length && project.localCadSource ? (
+        <CadFilePrompt project={project} />
       ) : (
         <div
           role="status"

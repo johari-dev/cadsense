@@ -254,6 +254,18 @@ export const PickFolderOptionsSchema = Schema.Struct({
   targetEnvironmentId: Schema.optionalKey(Schema.String),
 });
 
+/** A native open-file dialog. Folder-picker options apply; `initialPath` may be a folder. */
+export interface PickFileOptions extends PickFolderOptions {
+  filters?: readonly { readonly name: string; readonly extensions: readonly string[] }[];
+}
+
+export const PickFileOptionsSchema = Schema.Struct({
+  ...PickFolderOptionsSchema.fields,
+  filters: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ name: Schema.String, extensions: Schema.Array(Schema.String) })),
+  ),
+});
+
 export interface DesktopWslDistro {
   name: string;
   isDefault: boolean;
@@ -882,6 +894,7 @@ export interface DesktopBridge {
   setWslDistro: (distro: string | null) => Promise<DesktopWslState>;
   setWslOnly: (enabled: boolean) => Promise<DesktopWslState>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
+  pickFile: (options?: PickFileOptions) => Promise<string | null>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },
@@ -1008,6 +1021,8 @@ export interface ConfirmDialogOptions {
 export interface LocalApi {
   dialogs: {
     pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
+    /** Resolves null when cancelled, or when this host has no native file picker. */
+    pickFile: (options?: PickFileOptions) => Promise<string | null>;
     confirm: (message: string, options?: ConfirmDialogOptions) => Promise<boolean>;
   };
   shell: {

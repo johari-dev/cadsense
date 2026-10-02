@@ -97,6 +97,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import { LocalCadProjects } from "./localCad/LocalCadProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
 import { CadStorage } from "./cad/CadStorage.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
@@ -389,6 +390,7 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
+      const localCadProjects = yield* LocalCadProjects;
       const cadUserOperations = yield* CadUserOperations;
       const cadStorage = yield* CadStorage;
       const cadRenderBroker = yield* CadRenderBroker;
@@ -885,6 +887,18 @@ const makeWsRpcLayer = (
             onshapeProjects.setConnection(input),
             { "rpc.aggregate": "onshape-projects" },
           ),
+        [WS_METHODS.localCadFilesList]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadFilesList, localCadProjects.listFiles(input), {
+            "rpc.aggregate": "local-cad",
+          }),
+        [WS_METHODS.localCadProjectsCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadProjectsCreate, localCadProjects.create(input), {
+            "rpc.aggregate": "local-cad",
+          }),
+        [WS_METHODS.localCadProjectsSetFile]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadProjectsSetFile, localCadProjects.setFile(input), {
+            "rpc.aggregate": "local-cad",
+          }),
         [WS_METHODS.cadUserStart]: (input) =>
           observeRpcEffect(WS_METHODS.cadUserStart, cadUserOperations.start(input), {
             "rpc.aggregate": "cad-user",

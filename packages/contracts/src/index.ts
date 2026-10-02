@@ -14,6 +14,7 @@ export * from "./server.ts";
 export * from "./settings.ts";
 export * from "./orchestration.ts";
 export * from "./onshape.ts";
+export * from "./localCad.ts";
 export * from "./cad.ts";
 export * from "./cadSessions.ts";
 export * from "./cadsenseProjectFile.ts";

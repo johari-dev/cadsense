@@ -74,6 +74,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.onshape.cleanup.complete":
     case "project.onshape.cleanup.request":
     case "project.onshape.restore":
+    case "project.local-cad.set":
     case "project.cad.enabled.set":
     case "project.cad.operation.reserve":
     case "project.cad.operation.complete":

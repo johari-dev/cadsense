@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
-import { FolderPlusIcon } from "lucide-react";
+import { FileBoxIcon, FolderPlusIcon } from "lucide-react";
+import type { ProjectId } from "@cadsense/contracts";
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
+import { isElectron } from "../env";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { readLocalApi } from "../localApi";
 import { inferProjectTitleFromPath } from "../lib/projectPaths";
@@ -14,15 +16,17 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import { useProjects, useThreadShells } from "../state/entities";
 import { projectEnvironment } from "../state/projects";
 import { onshapeProjectEnvironment } from "../state/onshapeProjects";
+import { localCadProjectEnvironment } from "../state/localCadProjects";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { OnshapeProjectCreateForm } from "./OnshapeProjectCreateForm";
+import { LocalCadProjectCreateForm } from "./LocalCadProjectCreateForm";
 import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 
 export function AddProjectDialog() {
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<"onshape" | null>(null);
+  const [kind, setKind] = useState<"onshape" | "local-cad" | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -38,6 +42,15 @@ export function AddProjectDialog() {
   const createOnshapeProject = useAtomCommand(onshapeProjectEnvironment.create, {
     reportFailure: false,
   });
+  const createLocalCadProject = useAtomCommand(localCadProjectEnvironment.create, {
+    reportFailure: false,
+  });
+  // Folder pickers are native, so folder-based projects need the desktop app's local backend.
+  const canPickFolder =
+    !!environment &&
+    environment.connection.phase === "connected" &&
+    (environment.entry.target._tag === "PrimaryConnectionTarget" ||
+      desktopLocalBackendId(environment.entry.target) !== null);
 
   useEffect(
     () =>
@@ -51,20 +64,44 @@ export function AddProjectDialog() {
     [],
   );
 
-  async function addFolder() {
+  async function pickFolder() {
     const api = readLocalApi();
-    if (!api || !environment || busyRef.current) return;
+    if (!api || !environment) return null;
+    const backendId = desktopLocalBackendId(environment.entry.target);
+    return api.dialogs.pickFolder({
+      ...(backendId ? { targetEnvironmentId: backendId } : {}),
+      initialPath:
+        environment.serverConfig?.settings?.addProjectBaseDirectory ||
+        (environment.serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/"),
+    });
+  }
+
+  /** Opens the project's most recent chat, or a new one when it has none. */
+  async function openProject(projectId: ProjectId) {
+    if (!environment) return;
+    const latest = threads
+      .filter(
+        (thread) =>
+          thread.environmentId === environment.environmentId &&
+          thread.projectId === projectId &&
+          thread.archivedAt === null,
+      )
+      .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    if (latest)
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(environment.environmentId, latest.id)),
+      });
+    else await handleNewThread(scopeProjectRef(environment.environmentId, projectId));
+  }
+
+  async function addFolder() {
+    if (!environment || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      const backendId = desktopLocalBackendId(environment.entry.target);
-      const cwd = await api.dialogs.pickFolder({
-        ...(backendId ? { targetEnvironmentId: backendId } : {}),
-        initialPath:
-          environment.serverConfig?.settings?.addProjectBaseDirectory ||
-          (environment.serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/"),
-      });
+      const cwd = await pickFolder();
       if (!cwd) return;
       const normalize = (path: string) =>
         environment.serverConfig?.environment.platform.os === "windows" ? path.toLowerCase() : path;
@@ -90,20 +127,7 @@ export function AddProjectDialog() {
         });
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       }
-      const latest = threads
-        .filter(
-          (thread) =>
-            thread.environmentId === environment.environmentId &&
-            thread.projectId === projectId &&
-            thread.archivedAt === null,
-        )
-        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      if (latest)
-        await navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(scopeThreadRef(environment.environmentId, latest.id)),
-        });
-      else await handleNewThread(scopeProjectRef(environment.environmentId, projectId));
+      await openProject(projectId);
       setOpen(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to add project.");
@@ -187,22 +211,61 @@ export function AddProjectDialog() {
               }
             }}
           />
+        ) : kind === "local-cad" && environment ? (
+          <LocalCadProjectCreateForm
+            key={environment.environmentId}
+            environmentId={environment.environmentId}
+            environmentLabel={environment.label}
+            connected={environment.connection.phase === "connected"}
+            pickFolder={isElectron && canPickFolder ? pickFolder : null}
+            onCancel={() => setKind(null)}
+            onCreate={async (input) => {
+              busyRef.current = true;
+              setBusy(true);
+              try {
+                const result = await createLocalCadProject({
+                  environmentId: environment.environmentId,
+                  input: {
+                    ...input,
+                    projectId: newProjectId(),
+                    defaultModelSelection: resolveDefaultProviderModelSelection(
+                      environment.serverConfig?.providers ?? [],
+                      null,
+                    ),
+                  },
+                });
+                if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                // The server reuses an existing project for this folder, which may have chats.
+                await openProject(result.value.projectId);
+                setOpen(false);
+                return null;
+              } catch (cause) {
+                return cause instanceof Error ? cause.message : "Unable to add local CAD project.";
+              } finally {
+                busyRef.current = false;
+                setBusy(false);
+              }
+            }}
+          />
         ) : (
           <div className="grid gap-3 p-5">
             <Button
               variant="outline"
               className="h-auto justify-start gap-3 px-4 py-4"
-              disabled={
-                busy ||
-                !environment ||
-                environment.connection.phase !== "connected" ||
-                (environment.entry.target._tag !== "PrimaryConnectionTarget" &&
-                  desktopLocalBackendId(environment.entry.target) === null)
-              }
+              disabled={busy || !canPickFolder}
               onClick={() => void addFolder()}
             >
               <FolderPlusIcon className="size-5" />
               Folder project
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto justify-start gap-3 px-4 py-4"
+              disabled={busy || !environment || environment.connection.phase !== "connected"}
+              onClick={() => setKind("local-cad")}
+            >
+              <FileBoxIcon className="size-5" />
+              Local CAD file
             </Button>
             <Button
               variant="outline"

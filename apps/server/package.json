@@ -22,6 +22,7 @@
     "manifold-3d": "3.0.1",
     "meshoptimizer": "1.1.1",
     "msgpackr-extract": "3.0.4",
+    "occt-import-js": "0.0.23",
     "playwright-core": "1.60.0",
     "saxes": "^6.0.0",
     "yaml": "catalog:"

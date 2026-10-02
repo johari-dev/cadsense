@@ -1,4 +1,5 @@
 import {
+  hasCadSource,
   initialCadProjectState,
   type CadProjectState,
   type OrchestrationCommand,
@@ -22,7 +23,7 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
 ): Effect.fn.Return<CadProjectState, OrchestrationCommandInvariantError> {
   const fail = (detail: string) =>
     new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-  if (!project.onshapeSource) return yield* fail("This project has no Onshape source.");
+  if (!hasCadSource(project)) return yield* fail("This project has no CAD source.");
   const cad = project.cad ?? initialCadProjectState();
   if (
     command.type === "project.cad.enabled.set" ||
@@ -31,7 +32,7 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
     yield* requireProjectCadIdle({ readModel, command, projectId: project.id, includeRuns: true });
     if (command.type === "project.cad.enabled.set") return { ...cad, enabled: command.enabled };
     if (!cad.enabled && command.kind !== "cleanup")
-      return yield* fail("Onshape is disabled for this project.");
+      return yield* fail("CAD is disabled for this project.");
     if (
       (command.kind === "sync" && command.root === null) ||
       (command.kind === "discover" && command.root !== null)
@@ -79,7 +80,9 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
     if (command.result.kind !== operation.kind)
       return yield* fail("The CAD result does not match its operation.");
     if (command.result.kind === "discover") catalog = command.result.catalog;
-    else if (operation.root) {
+    else if (command.result.kind === "sync" && command.result.catalog)
+      catalog = command.result.catalog;
+    if (command.result.kind !== "discover" && operation.root) {
       const target = operation.root;
       const existing = roots.find((root) => root.rootId === target.rootId);
       const current = command.result.kind === "sync" ? command.result.snapshot : null;
@@ -94,14 +97,17 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
         ? roots.map((root) => (root.rootId === target.rootId ? nextRoot : root))
         : [...roots, nextRoot];
     }
-  } else if (operation.root) {
-    const target = operation.root;
-    const existing = roots.find((root) => root.rootId === target.rootId);
-    roots = existing
-      ? roots.map((root) =>
-          root.rootId === target.rootId ? { ...root, lastOutcome: outcome } : root,
-        )
-      : [...roots, { ...target, current: null, rollback: null, lastOutcome: outcome }];
+  } else {
+    if (command.catalog) catalog = command.catalog;
+    if (operation.root) {
+      const target = operation.root;
+      const existing = roots.find((root) => root.rootId === target.rootId);
+      roots = existing
+        ? roots.map((root) =>
+            root.rootId === target.rootId ? { ...root, lastOutcome: outcome } : root,
+          )
+        : [...roots, { ...target, current: null, rollback: null, lastOutcome: outcome }];
+    }
   }
   return { ...cad, catalog, roots, operation: null, lastOutcome: outcome };
 });
