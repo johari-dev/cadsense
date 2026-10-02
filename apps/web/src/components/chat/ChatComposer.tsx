@@ -119,7 +119,6 @@ import {
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
-  renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
@@ -1270,17 +1269,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
   );
 
-  const providerTraitsMenuContent = renderProviderTraitsMenuContent({
-    provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
-    models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
-    prompt,
-    onPromptChange: setPromptFromTraits,
-  });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -3168,7 +3156,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       instanceEntries={providerInstanceEntries}
                       keybindings={keybindings}
                       modelOptionsByInstance={modelOptionsByInstance}
-                      triggerClassName="-ms-[calc(--spacing(2.5)-1px)]"
+                      // Cancel the control's px-1.5 padding and 1px border so the provider icon
+                      // sits on the footer padding, matching the send button's inset on the right.
+                      triggerClassName="-ms-[calc(--spacing(1.5)+1px)]"
                       open={isComposerModelPickerOpen}
                       {...(composerProviderState.modelPickerIconClassName
                         ? {
@@ -3184,23 +3174,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     />
                   )}
 
+                  {providerTraitsPicker}
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
                       runtimeMode={runtimeMode}
-                      traitsMenuContent={providerTraitsMenuContent}
                       onRuntimeModeChange={handleRuntimeModeChange}
                     />
                   ) : (
                     <>
-                      {providerTraitsPicker ? (
-                        <>
-                          <Separator
-                            orientation="vertical"
-                            className="mx-0.5 hidden h-4 sm:block"
-                          />
-                          {providerTraitsPicker}
-                        </>
-                      ) : null}
                       <ComposerFooterModeControls
                         runtimeMode={runtimeMode}
                         onRuntimeModeChange={handleRuntimeModeChange}
