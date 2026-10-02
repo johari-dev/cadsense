@@ -209,6 +209,68 @@ export const CadDiffResult = Schema.Struct({
 });
 export type CadDiffResult = typeof CadDiffResult.Type;
 
+const WorkspaceFile = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
+/** One feature to run: a workspace `.fs` file, which feature in it, and inputs as FeatureScript expressions. */
+export const CadFeatureScriptPreviewStep = Schema.Struct({
+  path: WorkspaceFile,
+  feature: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
+  parameters: Schema.optionalKey(
+    Schema.Record(
+      Schema.String.check(Schema.isMaxLength(256)),
+      Schema.String.check(Schema.isMaxLength(4096)),
+    ),
+  ),
+});
+export const FEATURESCRIPT_PREVIEW_VIEWS = ["iso", "top", "front", "right"] as const;
+/** Runs `before` features, then this one, locally on top of an optional workspace STEP `base`. */
+export const CadFeatureScriptPreviewInput = Schema.Struct({
+  ...CadFeatureScriptPreviewStep.fields,
+  before: Schema.optionalKey(
+    Schema.Array(CadFeatureScriptPreviewStep).check(Schema.isMaxLength(16)),
+  ),
+  base: Schema.optionalKey(WorkspaceFile),
+  view: Schema.optionalKey(Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS)),
+});
+export type CadFeatureScriptPreviewInput = typeof CadFeatureScriptPreviewInput.Type;
+export const CadFeatureScriptPreviewResult = Schema.Struct({
+  /**
+   * The worst feature status. INVALID: the script didn't load (syntax errors, a missing feature, a
+   * bad parameter or base file). STOPPED: the preview timed out or its worker crashed.
+   */
+  status: Schema.Literals(["OK", "INFO", "WARNING", "ERROR", "INVALID", "STOPPED"]),
+  /** Inputs, outcome and cause per feature, and the resulting solids, as plain text. */
+  summary: Schema.String,
+  features: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      feature: Schema.String,
+      typeName: Schema.String,
+      status: Schema.Literals(["OK", "INFO", "WARNING", "ERROR", "NOT_RUN"]),
+      message: Schema.NullOr(Schema.String),
+      cause: Schema.NullOr(Schema.String),
+    }),
+  ),
+  solids: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      createdBy: Schema.String,
+      volumeMm3: Schema.Number,
+      faces: Schema.Int,
+      edges: Schema.Int,
+      vertices: Schema.Int,
+    }),
+  ),
+  /** PNGs of every view, result.glb and report.json, when the features ran. */
+  artifacts: Schema.NullOr(
+    Schema.Struct({
+      directory: Schema.String,
+      image: Schema.String,
+      view: Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS),
+    }),
+  ),
+});
+export type CadFeatureScriptPreviewResult = typeof CadFeatureScriptPreviewResult.Type;
+
 /** Live tool feedback includes the rendered pose; historical capture records keep their own pose. */
 export const CadCaptureToolResult = Schema.Struct({
   ...CadCaptureResult.fields,
@@ -229,4 +291,5 @@ export const CAD_TOOL_INPUTS = {
   cad_find_parts: CadFindPartsInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
+  cad_featurescript_preview: CadFeatureScriptPreviewInput,
 } as const;

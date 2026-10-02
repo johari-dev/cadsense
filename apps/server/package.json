@@ -23,11 +23,13 @@
     "meshoptimizer": "1.1.1",
     "msgpackr-extract": "3.0.4",
     "playwright-core": "1.60.0",
+    "replicad-opencascadejs": "1.1.0",
     "saxes": "^6.0.0",
     "yaml": "catalog:"
   },
   "devDependencies": {
     "@cadsense/contracts": "workspace:*",
+    "@cadsense/featurescript": "workspace:*",
     "@cadsense/shared": "workspace:*",
     "@cadsense/web": "workspace:*",
     "@effect/vitest": "catalog:",

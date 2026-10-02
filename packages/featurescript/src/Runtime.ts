@@ -13,7 +13,8 @@ import { formatDiagnostic, locate } from "./syntax/Diagnostic.ts";
 import { parseExpression } from "./syntax/Parser.ts";
 import { sourceFile } from "./syntax/Source.ts";
 
-const STD_DIR = new URL("../std/", import.meta.url);
+/** The vendored std, next to `src/` in the package. Bundled builds copy it and pass `stdDir`. */
+export const STD_DIR = new URL("../std/", import.meta.url);
 
 /**
  * Bodies from a base STEP file are created by this pseudo-feature, so `qCreatedBy(makeId("Base"))`
@@ -21,13 +22,13 @@ const STD_DIR = new URL("../std/", import.meta.url);
  */
 export const BASE_FEATURE_ID = ["Base"] as const;
 
-/** Reads `onshape/std/*.fs` from the vendored std. */
-export const readStd = (path: string): string | undefined => {
+/** Reads `onshape/std/*.fs` from the vendored std in `dir`. */
+export const readStd = (path: string, dir: URL = STD_DIR): string | undefined => {
   if (!path.startsWith(STD_PREFIX)) return undefined;
   const name = path.slice(STD_PREFIX.length);
   if (!/^[A-Za-z0-9_.]+\.fs$/.test(name)) return undefined;
   try {
-    return NodeFS.readFileSync(new URL(name, STD_DIR), "utf8");
+    return NodeFS.readFileSync(new URL(name, dir), "utf8");
   } catch {
     return undefined;
   }
@@ -37,6 +38,8 @@ export interface RuntimeOptions {
   /** Sources for non-std modules, by import path. */
   readonly readModule?: (path: string) => string | undefined;
   readonly maxSteps?: number;
+  /** Where the vendored std lives, as a directory URL ending in `/`. Defaults to {@link STD_DIR}. */
+  readonly stdDir?: URL;
   /** The geometry kernel. Without it, geometry builtins stop the run as unsupported. */
   readonly oc?: Oc | null;
 }
@@ -92,8 +95,8 @@ export class FeatureScriptRuntime {
   readonly interpreter: Interpreter;
 
   constructor(options: RuntimeOptions = {}) {
-    const readModule = options.readModule;
-    this.loader = new ModuleLoader((path) => readStd(path) ?? readModule?.(path));
+    const { readModule, stdDir } = options;
+    this.loader = new ModuleLoader((path) => readStd(path, stdDir) ?? readModule?.(path));
     this.interpreter = new Interpreter(
       this.loader,
       createBuiltins(options.oc ?? null),

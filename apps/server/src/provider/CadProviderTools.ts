@@ -53,6 +53,13 @@ const descriptions = {
     "Use the returned revision for the next update or capture. Changes remain private until captured.",
     "An invalid-operation error includes details naming the field or operation to correct; fix it and retry.",
   ].join(" "),
+  cad_featurescript_preview: [
+    "Run an Onshape custom feature (FeatureScript) locally and see what it does, without calling Onshape. Use it after writing or editing a .fs file, and again after each fix.",
+    `Input: {path, feature?, parameters?, before?, base?, view?}. path is a .fs file in the project workspace. feature names its defineFeature constant (default: the first one). parameters maps input ids to FeatureScript expressions evaluated in the script, for example {count:"8", diameter:"6 * millimeter", face:'qContainsPoint(qCreatedBy(makeId("Base"), EntityType.FACE), vector(50, 30, 10) * millimeter)'}; unset inputs take their defaults.`,
+    'before lists features to run first as Feature1, Feature2, ..., so queries can reference what they create with makeId("Feature1"). base is a STEP file in the workspace (exported from the Part Studio) whose bodies are created by makeId("Base"). view picks the returned image: iso (default), top, front or right.',
+    "Returns status, a summary of each feature's inputs, outcome and cause with file:line:column, the resulting solids with volumes in mm^3 and face, edge and vertex counts, and a PNG with the faces the previewed feature created in amber. INVALID means the script did not load: fix the reported lines. ERROR comes with its cause. STOPPED means it timed out or crashed.",
+    "This runs Onshape's own standard library on OpenCascade, not Onshape: results usually match, so say the user should confirm in Onshape before relying on it. A cause like '@opLoft is not supported locally yet' is a gap in the local runtime, not a bug in the script.",
+  ].join(" "),
   cad_capture:
     "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-* errors are rendering failures, not CAD being off: follow their details to recover.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
@@ -66,6 +73,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_diff",
   "cad_measure",
   "cad_find_parts",
+  "cad_featurescript_preview",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -147,6 +155,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.updateView(input) };
     case "cad_capture":
       return yield* tools.capture(input);
+    case "cad_featurescript_preview":
+      return yield* tools.featureScriptPreview(input);
     default:
       return yield* new CadViewError({ reason: "capability-unavailable" });
   }
