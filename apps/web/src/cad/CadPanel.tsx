@@ -39,6 +39,7 @@ import {
 } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
+import { captureModelThumbnail } from "./modelThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
@@ -264,6 +265,7 @@ export function CadScene({
         setLoadProgress(null);
         setError(null);
         setManifest(state.manifest);
+        void captureModelThumbnail(threadRef.environmentId, view.snapshotId, current);
       } catch {
         setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
       }
