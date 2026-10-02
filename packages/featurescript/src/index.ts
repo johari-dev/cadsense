@@ -16,3 +16,14 @@ export {
   type SourceFile,
   type Span,
 } from "./syntax/Source.ts";
+export { FeatureScriptRuntime, type FeatureRun, type RuntimeOptions } from "./Runtime.ts";
+export { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
+export { ModuleLoadError, type ModuleInstance } from "./runtime/Modules.ts";
+export { equals, formatValue, FsMap, FsTagged, type FsValue } from "./runtime/Value.ts";
+export {
+  defaultDefinition,
+  featureSpecs,
+  type FeatureInput,
+  type FeatureSpec,
+  type InputKind,
+} from "./spec/FeatureSpec.ts";

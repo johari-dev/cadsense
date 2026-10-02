@@ -9,7 +9,8 @@ export type DiagnosticCode =
   | "expected"
   | "unexpected-token"
   | "invalid-assignment-target"
-  | "missing-version";
+  | "missing-version"
+  | "unresolved-import";
 
 /** A compile-time problem in one source file. */
 export interface Diagnostic {
