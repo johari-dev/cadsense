@@ -56,6 +56,8 @@ export const buildCadSceneModel = (
     entry.offset.normalize().multiplyScalar(scale * 0.45);
   }
   let planes: THREE.Plane[] = [];
+  // Bounds of every part the last applied view shows, ignoring any camera fit selection.
+  let shownBounds = bounds.clone();
   const overrides = new Map<
     THREE.Mesh | THREE.Line | THREE.Points,
     { original: THREE.Material | THREE.Material[]; copies: THREE.Material[] }
@@ -154,6 +156,7 @@ export const buildCadSceneModel = (
       }
     }
     group.updateMatrixWorld(true);
+    shownBounds = visibleBounds.isEmpty() ? bounds.clone() : visibleBounds;
     // All-hidden/empty fits remain deterministic and never produce NaN camera positions.
     return fitBounds.isEmpty()
       ? visibleBounds.isEmpty()
@@ -169,6 +172,7 @@ export const buildCadSceneModel = (
     apply,
     isClipped,
     clippingPlanes: () => planes,
+    visibleBounds: () => shownBounds.clone(),
     dispose: clearOverrides,
   };
 };
