@@ -44,13 +44,15 @@ export interface PreviewResult {
 
 /**
  * Runs `steps` in order in one context (on top of `base`, a STEP file, if given) and summarizes the
- * result. Faces created by the last feature are highlighted in the meshes.
+ * result. Faces created by the last feature are highlighted in the meshes. Each preview loads its
+ * sources fresh, so a warm runtime can preview a script again after it is edited.
  */
 export function runPreview(
   runtime: FeatureScriptRuntime,
   steps: readonly PreviewStep[],
   base?: Uint8Array,
 ): PreviewResult {
+  runtime.loader.unloadUserModules();
   const prepared = steps.map((step) => {
     const module = runtime.load(step.path, step.source);
     const specs = featureSpecs(runtime.interpreter, module);

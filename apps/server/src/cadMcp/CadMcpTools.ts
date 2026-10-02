@@ -32,5 +32,7 @@ export const cadMcpToolDefinitions: ReadonlyArray<CadMcpToolDefinition> = [
     inputSchema: { ...openSchema.schema, type: "object", $defs: openSchema.definitions },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
-  ...mcpCadToolDefinitions,
+  // FeatureScript previews read scripts from the project workspace. A review's workspace is managed by
+  // Cadsense, so an outside agent has no way to put a script there.
+  ...mcpCadToolDefinitions.filter((tool) => tool.name !== "cad_featurescript_preview"),
 ];

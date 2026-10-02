@@ -63,6 +63,10 @@ import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
+import {
+  FeatureScriptPreviews,
+  type FeatureScriptPreviewDelivery,
+} from "../featurescript/FeatureScriptPreviews.ts";
 
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
 const conflict = () => new CadViewError({ reason: "revision-conflict" });
@@ -80,6 +84,9 @@ export interface CadAgentTools {
   readonly findParts: (input: unknown) => Effect.Effect<CadFindPartsResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
+  readonly featureScriptPreview: (
+    input: unknown,
+  ) => Effect.Effect<FeatureScriptPreviewDelivery, CadViewError>;
 }
 export interface CadViewingShape {
   readonly watchActivity: (threadId: ThreadId) => Stream.Stream<CadToolActivityState>;
@@ -115,6 +122,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
   const commentService = yield* Effect.serviceOption(CadComments);
+  const featureScriptPreviews = yield* Effect.serviceOption(FeatureScriptPreviews);
   const active = new Set<string>();
   const activity = yield* makeCadToolActivity;
   const db = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
@@ -572,6 +580,13 @@ export const make = Effect.gen(function* () {
               });
             }),
           );
+        // Previews read the workspace and run locally; they don't touch the view, so skip the FIFO.
+        const featureScriptPreview: CadAgentTools["featureScriptPreview"] = (input) =>
+          Effect.gen(function* () {
+            if (!open || Option.isNone(featureScriptPreviews)) return yield* unavailable();
+            const project = yield* projectFor(session.threadId);
+            return yield* featureScriptPreviews.value.preview(project.workspaceRoot, input);
+          });
         const commentActivation =
           turnId && Option.isSome(commentService)
             ? yield* commentService.value
@@ -606,6 +621,8 @@ export const make = Effect.gen(function* () {
           findParts: (input) => activity.track(session.threadId, turnId, findParts(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
+          featureScriptPreview: (input) =>
+            activity.track(session.threadId, turnId, featureScriptPreview(input)),
         });
       }),
     );

@@ -301,6 +301,7 @@ const toolActionLabels: Readonly<Record<string, string>> = {
   cad_find_parts: "Finding CAD parts",
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",
+  cad_featurescript_preview: "Previewing FeatureScript",
   cad_comments_list: "Reading CAD comments",
   cad_comment_locate: "Placing comment markers",
   cad_comment_inspect: "Checking comment markers",

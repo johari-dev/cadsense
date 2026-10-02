@@ -260,6 +260,7 @@ it.effect(
           "cad_find_parts",
           "cad_update_view",
           "cad_capture",
+          "cad_featurescript_preview",
         ],
       );
       yield* runtime.close;

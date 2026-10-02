@@ -61,6 +61,10 @@ import * as Queue from "effect/Queue";
 import * as Option from "effect/Option";
 import { make as makeRenderBroker } from "./CadRenderBroker.ts";
 import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
+import {
+  FeatureScriptPreviews,
+  make as makeFeatureScriptPreviews,
+} from "../featurescript/FeatureScriptPreviews.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
@@ -105,6 +109,39 @@ it.effect("dispatches read-only measurements through an activation with revision
     assert.equal(next.result.distanceMeters, 5);
     yield* tools.end(null, turnId);
     assert.equal(h.pins(), 0);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.live("previews a FeatureScript from the project workspace through the agent's CAD tools", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-fs-" });
+    yield* fs.writeFileString(
+      `${workspaceRoot}/cube.fs`,
+      `FeatureScript 3083;
+import(path : "onshape/std/geometry.fs", version : "3083.0");
+annotation { "Feature Type Name" : "Cube" }
+export const cube = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition {}
+    {
+        fCuboid(context, id + "c", { "corner1" : vector(0, 0, 0) * millimeter, "corner2" : vector(10, 10, 10) * millimeter });
+    });
+`,
+    );
+    const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+    const service = yield* h.recreate.pipe(
+      Effect.provideService(FeatureScriptPreviews, yield* makeFeatureScriptPreviews()),
+    );
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, service),
+    );
+    const turnId = TurnId.make("featurescript-preview");
+    const delivery = yield* tools.invoke(null, turnId, "cad_featurescript_preview", {
+      path: "cube.fs",
+    });
+    assert.deepInclude(delivery.result, { status: "OK" });
+    assert.ok(delivery.png && delivery.png.byteLength > 0);
+    yield* tools.end(null, turnId);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
