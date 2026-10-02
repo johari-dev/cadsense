@@ -1,11 +1,16 @@
 // @effect-diagnostics nodeBuiltinImport:off - the runtime reads vendored std files from disk.
 import * as NodeFS from "node:fs";
-import { BUILTINS } from "./builtins/index.ts";
+import { createBuiltins } from "./builtins/index.ts";
+import type { GeometryState } from "./geometry/Model.ts";
+import { loadOcct, type Oc } from "./geometry/occt.ts";
 import { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
 import { Interpreter } from "./runtime/Interpreter.ts";
 import { ModelContext } from "./runtime/ModelContext.ts";
 import { ModuleLoader, STD_PREFIX, type ModuleInstance } from "./runtime/Modules.ts";
 import { formatValue, FsBuiltin, FsMap, untag, type FsValue } from "./runtime/Value.ts";
+import { formatDiagnostic, locate } from "./syntax/Diagnostic.ts";
+import { parseExpression } from "./syntax/Parser.ts";
+import { sourceFile } from "./syntax/Source.ts";
 
 const STD_DIR = new URL("../std/", import.meta.url);
 
@@ -25,31 +30,50 @@ export interface RuntimeOptions {
   /** Sources for non-std modules, by import path. */
   readonly readModule?: (path: string) => string | undefined;
   readonly maxSteps?: number;
+  /** The geometry kernel. Without it, geometry builtins stop the run as unsupported. */
+  readonly oc?: Oc | null;
 }
 
 export type FeatureStatusType = "OK" | "INFO" | "WARNING" | "ERROR";
 
-/** The result of running one feature in a fresh context. */
+/** A stop FeatureScript can't catch, such as an unsupported builtin. */
+export interface RunFault {
+  readonly reason: FsFault["reason"];
+  readonly message: string;
+  readonly stack: readonly FsFrame[];
+}
+
+/** One feature's outcome. */
 export interface FeatureRun {
   readonly status: FeatureStatusType;
   /** The `ErrorStringEnum` member reported, e.g. `REGEN_ERROR` or `CUSTOM_ERROR`. */
   readonly statusEnum: string | null;
   /** The custom message from `regenError("...")`, if any. */
   readonly message: string | null;
-  /** Context variables after the run. A failed feature's are rolled back. */
+  /** Context variables after the feature. A failed feature's are rolled back. */
   readonly variables: FsMap;
   readonly console: readonly string[];
-  /** Set when the run stopped for a reason FeatureScript can't catch, e.g. an unsupported builtin. */
-  readonly fault: {
-    readonly reason: FsFault["reason"];
-    readonly message: string;
-    readonly stack: readonly FsFrame[];
-  } | null;
+  readonly fault: RunFault | null;
+}
+
+/** A feature to run: a `defineFeature` constant, its definition, and its feature id. */
+export interface FeatureStep {
+  readonly module: ModuleInstance;
+  readonly feature: string;
+  readonly definition?: FsMap;
+}
+
+/** Several features run in order in one context, like a Part Studio's feature list. */
+export interface PartStudioRun {
+  readonly features: readonly FeatureRun[];
+  /** The context's geometry after the last feature; null without a kernel. */
+  readonly geometry: GeometryState | null;
+  readonly oc: Oc | null;
 }
 
 /**
  * Loads modules and runs FeatureScript against the vendored std. One runtime keeps std's evaluated
- * constants between runs; each feature run gets a new context.
+ * constants between runs; each run gets a new context.
  */
 export class FeatureScriptRuntime {
   readonly loader: ModuleLoader;
@@ -60,64 +84,90 @@ export class FeatureScriptRuntime {
     this.loader = new ModuleLoader((path) => readStd(path) ?? readModule?.(path));
     this.interpreter = new Interpreter(
       this.loader,
-      BUILTINS,
+      createBuiltins(options.oc ?? null),
       options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps },
     );
+  }
+
+  /** A runtime with the OpenCascade geometry kernel loaded. */
+  static async withGeometry(
+    options: Omit<RuntimeOptions, "oc"> = {},
+  ): Promise<FeatureScriptRuntime> {
+    return new FeatureScriptRuntime({ ...options, oc: await loadOcct() });
   }
 
   load(path: string, source?: string): ModuleInstance {
     return this.loader.load(path, source);
   }
 
-  /** Calls a top-level std function by module and name, e.g. `("context.fs", "newContext")`. */
+  /** Calls a top-level std function by file and name, e.g. `("context.fs", "newContext")`. */
   callStd(file: string, name: string, args: readonly FsValue[] = []): FsValue {
     const module = this.loader.load(`${STD_PREFIX}${file}`);
     return this.interpreter.callFunction(this.interpreter.topLevelValue(module, name), args);
   }
 
   /**
-   * Runs `featureName` (a `defineFeature` constant in `module`) as feature `Feature1` of a new context.
-   * Errors the feature raises become its status, as in Onshape.
+   * Evaluates a FeatureScript expression in `module`'s scope, e.g. a parameter value such as
+   * `qContainsPoint(qCreatedBy(makeId("Feature1"), EntityType.FACE), vector(0, 0, 10) * millimeter)`.
    */
-  runFeature(
-    module: ModuleInstance,
-    featureName: string,
-    definition: FsMap = FsMap.empty,
-  ): FeatureRun {
-    const consoleStart = this.interpreter.console.length;
+  evaluate(module: ModuleInstance, source: string): FsValue {
+    const file = sourceFile(`${module.path} (expression)`, source);
+    const { expression, diagnostics } = parseExpression(file);
+    if (!expression || diagnostics.length)
+      throw new Error(diagnostics.map((d) => formatDiagnostic(locate(file, d))).join("\n"));
+    return this.interpreter.evaluate(expression, module);
+  }
+
+  /** Runs one feature as `Feature1` of a new context. */
+  runFeature(module: ModuleInstance, feature: string, definition: FsMap = FsMap.empty): FeatureRun {
+    return this.runFeatures([{ module, feature, definition }]).features[0]!;
+  }
+
+  /**
+   * Runs features in order in one new context, as `Feature1`, `Feature2`, ... Errors a feature raises
+   * become its status, as in Onshape. A fault stops the run; later features don't run.
+   * Parameters that reference earlier features are queries, which resolve when the feature runs.
+   */
+  runFeatures(steps: readonly FeatureStep[]): PartStudioRun {
     const context = this.callStd("context.fs", "newContext");
-    const id = this.callStd("context.fs", "makeId", ["Feature1"]);
     const model = (untag(context) as FsBuiltin<ModelContext>).native;
-    let fault: FeatureRun["fault"] = null;
-    try {
-      const feature = this.interpreter.topLevelValue(module, featureName);
-      this.interpreter.callFunction(feature, [context, id, definition]);
-    } catch (error) {
-      if (error instanceof FsFault)
-        fault = { reason: error.reason, message: error.message, stack: error.fsStack };
-      else if (error instanceof FsThrow)
-        fault = {
-          reason: "internal",
-          message: `Uncaught: ${formatValue(error.value)}`,
-          stack: error.stack,
-        };
-      else throw error;
+    const results: FeatureRun[] = [];
+    for (const [index, step] of steps.entries()) {
+      const consoleStart = this.interpreter.console.length;
+      const id = this.callStd("context.fs", "makeId", [`Feature${index + 1}`]);
+      let fault: RunFault | null = null;
+      try {
+        const feature = this.interpreter.topLevelValue(step.module, step.feature);
+        this.interpreter.callFunction(feature, [context, id, step.definition ?? FsMap.empty]);
+      } catch (error) {
+        if (error instanceof FsFault)
+          fault = { reason: error.reason, message: error.message, stack: error.fsStack };
+        else if (error instanceof FsThrow)
+          fault = {
+            reason: "internal",
+            message: `Uncaught: ${formatValue(error.value)}`,
+            stack: error.stack,
+          };
+        else throw error;
+      }
+      const status = model.status(id);
+      const statusType = untag(status.getField("statusType"));
+      const statusEnum = untag(status.getField("statusEnum"));
+      const message = untag(status.getField("statusMsg"));
+      results.push({
+        status: fault
+          ? "ERROR"
+          : statusType === "INFO" || statusType === "WARNING" || statusType === "ERROR"
+            ? statusType
+            : "OK",
+        statusEnum: typeof statusEnum === "string" ? statusEnum : null,
+        message: typeof message === "string" ? message : null,
+        variables: model.variables(),
+        console: this.interpreter.console.slice(consoleStart),
+        fault,
+      });
+      if (fault) break;
     }
-    const status = model.status(id);
-    const statusType = untag(status.getField("statusType"));
-    const statusEnum = untag(status.getField("statusEnum"));
-    const message = untag(status.getField("statusMsg"));
-    return {
-      status: fault
-        ? "ERROR"
-        : statusType === "INFO" || statusType === "WARNING" || statusType === "ERROR"
-          ? statusType
-          : "OK",
-      statusEnum: typeof statusEnum === "string" ? statusEnum : null,
-      message: typeof message === "string" ? message : null,
-      variables: model.variables(),
-      console: this.interpreter.console.slice(consoleStart),
-      fault,
-    };
+    return { features: results, geometry: model.oc ? model.geometry : null, oc: model.oc };
   }
 }

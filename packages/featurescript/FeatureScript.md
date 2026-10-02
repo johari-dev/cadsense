@@ -18,8 +18,15 @@ they are expected to drift in places (different geometry kernel), and the tests 
 - `src/builtins/`: native builtins. `index.ts` lists every builtin std calls as implemented or
   unsupported, and the type check fails if one is missing.
 - `src/spec/`: reads a feature's inputs from its precondition, the way Onshape builds the dialog.
+- `src/geometry/`: the OpenCascade layer. `Model.ts` is the topology registry (transient ids that
+  survive operations through OpenCascade's history), `Sketch.ts` sketches and regions, `Query.ts`
+  query evaluation, `Tessellate.ts` and `Glb.ts` preview meshes.
 - `src/Runtime.ts`: loads std and runs a feature in a fresh context.
-- `corpus/`: feature scripts used as end-to-end cases. `bolt-circle/` runs up to its first geometry call.
+- `corpus/<case>/`: end-to-end cases. `case.json` lists the features to run, their parameters as
+  FeatureScript expressions, and the expected statuses, volumes and topology counts (and where the
+  expectations come from). `test/corpus.e2e.test.ts` runs them and writes
+  `.cadsense/fs-corpus/<case>/result.png` (the last feature's faces in amber), `result.glb` and
+  `report.json`.
 - `test/broken/`: files with syntax errors; each lists the exact diagnostics it must produce.
 - `spikes/`: throwaway measurements from milestone M0. Results are below.
 
@@ -157,6 +164,28 @@ Runs without Onshape. Checked by:
 
 Not yet checked against Onshape recordings (the API quota is out). Builtins still unsupported: all
 geometry (M4), attributes, sketches, and `@matrixSvd`.
+
+## M4 status: geometry
+
+Started. Std's own `fCuboid` and `extrude` run unmodified on OpenCascade:
+
+- Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
+  helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
+- `opExtrude` (blind and through-all, both ends, start/end caps), `opBoolean` (subtract, union,
+  intersect on solids), `opDeleteBodies`, `evPlane`, attributes, and the query types std's extrude
+  path needs.
+- The bolt circle corpus case cuts six 5 mm holes through a plate: volume 58821.9028 mm³ (the analytic
+  value), 12 faces, 24 edges, 8 vertices (Parasolid-style counts), about 80 ms for both features. The
+  hole walls are created by the bolt circle's extrude, so `qCreatedBy` and the amber preview find them.
+
+To confirm against Onshape recordings:
+
+- `evPlane` puts the plane origin at the face's centroid; Onshape doesn't document where it goes.
+- A sketch makes one wire body and one region sheet body here.
+- Query results come back in creation order.
+- "Through all" extrudes to a generous model extent rather than exactly through.
+
+Next: revolve, fillet, chamfer, transform, pattern, and more evaluators, driven by more corpus cases.
 
 ## M0 spike results
 
