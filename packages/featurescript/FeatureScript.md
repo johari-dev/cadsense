@@ -146,7 +146,9 @@ shape the design:
   and raise on failure; they don't pick another overload.
 - Predicates and preconditions succeed when every executed expression statement is `true`.
 - A call to a name holding a function value calls it; otherwise the name means top-level overloads,
-  even when a local of that name holds something else.
+  even when a local of that name holds something else. Functions overload across imports, but a
+  module's own constant or enum shadows any import of the same name (a custom feature named
+  `sphere` runs, not std's `sphere` function).
 - Language errors (reading a field of `undefined`, a bad index, no matching overload, a failed
   precondition) are exceptions FeatureScript can catch, and std depends on that: it probes with
   `try silent(...)` all over. Only "not supported locally" builtins and runtime limits bypass `try`,
@@ -179,6 +181,12 @@ Failure modes:
     shrink, never grow silently.
 19. **Slow std.** Loading and evaluating std on every run is too slow for previews. Guard: the std test
     records cold load time.
+20. **Stale modules.** A warm runtime keeps serving the first source it loaded for a path after the
+    file is edited. Guard: preview tests that edit a script between runs. (Found building the server
+    worker.)
+21. **Split ids.** An operation that splits one body into several (a split, a cut through) gives a
+    face cut in two the same id in both pieces, so one piece loses its faces. Guard: the
+    `split-block` corpus case checks both pieces' counts. (Found adding `opSplitPart`.)
 
 ### To confirm against Onshape (conformance recordings)
 
@@ -212,20 +220,26 @@ geometry (M4), attributes, sketches, and `@matrixSvd`.
 
 Std's own features run unmodified on OpenCascade: `fCuboid`, `fCylinder`, `extrude`, `revolve`,
 `fillet`, `chamfer`, `shell`, plus the operations they call and `opPattern`, `opTransform`,
-`opBoolean`, `opDeleteBodies`.
+`opBoolean`, `opDeleteBodies`. Custom features can also call `opSphere`, `opPlane` and `opPoint`
+(construction geometry, left out of preview images), `opThicken` (planar faces both ways, curved
+faces one way), `opLoft` (solid or surface, without guides or connections), `opSweep` (the profile
+turns with the path) and `opSplitPart` (by a plane, a planar face or a sheet).
 
 - Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
   helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
 - Evaluators: `evAxis`, `evLine`, `evBox3d`, `evVolume`, `evArea`, `evLength`, `evDistance` (minimum,
   without edge/face parameters), `evVertexPoint`, `evEdgeTangentLine(s)`, `evFaceTangentPlane(s)`,
-  `evPlane`, `evSurfaceDefinition` and `evCurveDefinition` (planes, cylinders, spheres, lines, circles).
-- Corpus: seven cases (bolt circle, turned shaft, filleted block, chamfered block, shelled box, boss
-  pattern, evaluators). Every volume matches its hand-calculated value and every face/edge/vertex
+  `evPlane`, `evSurfaceDefinition` and `evCurveDefinition` (planes, cylinders, spheres, lines, circles),
+  `evApproximateCentroid`, and `evApproximateMassProperties` without a `referenceFrame`.
+- Corpus: fourteen cases (bolt circle, turned shaft, filleted block, chamfered block, shelled box,
+  boss pattern, evaluators, sphere, construction, lofted frustum, swept tube, thickened plate, split
+  block, mass properties). Every volume matches its hand-calculated value and every face/edge/vertex
   count matches Parasolid's conventions. Each case runs in 5-100 ms.
 
-Not supported locally yet (each stops the run with the calling line): sweep, loft, draft, hole,
-helix, thicken, split, mate connectors, sheet metal, variable/partial/conic fillets, chamfers other
-than equal offsets, face patterns, evaluators on B-spline geometry, and sketch constraint solving.
+Not supported locally yet (each stops the run with the calling line): draft, hole, helix, loft guides
+and connections, sweeps that lock or keep the profile's orientation, mate connectors, sheet metal,
+variable/partial/conic fillets, chamfers other than equal offsets, face patterns, evaluators on
+B-spline geometry, and sketch constraint solving.
 
 To confirm against Onshape recordings:
 
@@ -235,6 +249,11 @@ To confirm against Onshape recordings:
 - Query results come back in creation order.
 - "Through all" extrudes to a generous model extent rather than exactly through.
 - Edge tangent parameters are uniform over the curve, which is arc length only for lines and circles.
+- `opSplitPart` leaves the original part id on one piece (the lower one in `split-block`).
+- `evApproximateMassProperties` products of inertia are `-integral(x y)`, the usual tensor convention.
+- `opPlane` without a size makes a 1 m plane, like std's plane feature; `opPoint` points are
+  construction entities.
+- `qContainsPoint` on solid bodies matches points on their boundary, not inside them.
 
 ## M0 spike results
 

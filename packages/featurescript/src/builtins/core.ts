@@ -343,6 +343,8 @@ export const CORE_BUILTINS = {
   },
   matrixMultiply: ([a, b], call) => {
     const m = rows(call, a, "matrix");
+    const scalar = untag(b);
+    if (typeof scalar === "number") return m.map((row) => row.map((x) => x * scalar));
     if (isVector(b)) {
       const v = numbers(call, b, "vector");
       if (m[0]!.length !== v.length) call.fail("Matrix and vector sizes don't match.");
