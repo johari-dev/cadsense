@@ -4302,11 +4302,18 @@ function ChatViewContent(props: ChatViewProps) {
 
       {!shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
         <RightPanelTabs
+          key={displayedRightPanelSurface?.kind === "cad" ? "design" : "tools"}
           open={rightPanelOpen}
           onExited={rightPanelPresence.onExited}
           onAddCad={addCadSurface}
           cadAvailable={cadAvailable}
           mode="inline"
+          {...(displayedRightPanelSurface?.kind === "cad"
+            ? {
+                widthStorageKey: "cadsense:design-viewport-width",
+                defaultWidth: Math.round(window.innerWidth * 0.6),
+              }
+            : {})}
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
           activeSurfaceId={displayedRightPanelSurface?.id ?? null}
