@@ -1,0 +1,9 @@
+{
+  "description": "A 4 mm boss on an 80 mm plate, patterned to four corners with opPattern and merged with opBoolean.",
+  "steps": [{ "file": "feature.fs", "feature": "bossPattern" }],
+  "expect": {
+    "source": "analytic: 80 * 80 * 5 + 4 * PI * 4^2 * 10 mm^3",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 34010.6193, "faces": 14, "edges": 20, "vertices": 8 }]
+  }
+}

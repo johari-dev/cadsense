@@ -167,25 +167,31 @@ geometry (M4), attributes, sketches, and `@matrixSvd`.
 
 ## M4 status: geometry
 
-Started. Std's own `fCuboid` and `extrude` run unmodified on OpenCascade:
+Std's own features run unmodified on OpenCascade: `fCuboid`, `fCylinder`, `extrude`, `revolve`,
+`fillet`, `chamfer`, `shell`, plus the operations they call and `opPattern`, `opTransform`,
+`opBoolean`, `opDeleteBodies`.
 
 - Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
   helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
-- `opExtrude` (blind and through-all, both ends, start/end caps), `opBoolean` (subtract, union,
-  intersect on solids), `opDeleteBodies`, `evPlane`, attributes, and the query types std's extrude
-  path needs.
-- The bolt circle corpus case cuts six 5 mm holes through a plate: volume 58821.9028 mm³ (the analytic
-  value), 12 faces, 24 edges, 8 vertices (Parasolid-style counts), about 80 ms for both features. The
-  hole walls are created by the bolt circle's extrude, so `qCreatedBy` and the amber preview find them.
+- Evaluators: `evAxis`, `evLine`, `evBox3d`, `evVolume`, `evArea`, `evLength`, `evDistance` (minimum,
+  without edge/face parameters), `evVertexPoint`, `evEdgeTangentLine(s)`, `evFaceTangentPlane(s)`,
+  `evPlane`, `evSurfaceDefinition` and `evCurveDefinition` (planes, cylinders, spheres, lines, circles).
+- Corpus: seven cases (bolt circle, turned shaft, filleted block, chamfered block, shelled box, boss
+  pattern, evaluators). Every volume matches its hand-calculated value and every face/edge/vertex
+  count matches Parasolid's conventions. Each case runs in 5-100 ms.
+
+Not supported locally yet (each stops the run with the calling line): sweep, loft, draft, hole,
+helix, thicken, split, mate connectors, sheet metal, variable/partial/conic fillets, chamfers other
+than equal offsets, face patterns, evaluators on B-spline geometry, and sketch constraint solving.
 
 To confirm against Onshape recordings:
 
 - `evPlane` puts the plane origin at the face's centroid; Onshape doesn't document where it goes.
-- A sketch makes one wire body and one region sheet body here.
+- A sketch makes one wire body and one region sheet body here, and connected sketch lines don't
+  share vertices.
 - Query results come back in creation order.
 - "Through all" extrudes to a generous model extent rather than exactly through.
-
-Next: revolve, fillet, chamfer, transform, pattern, and more evaluators, driven by more corpus cases.
+- Edge tangent parameters are uniform over the curve, which is arc length only for lines and circles.
 
 ## M0 spike results
 
