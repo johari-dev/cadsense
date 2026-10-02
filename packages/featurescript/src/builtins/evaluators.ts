@@ -1,7 +1,7 @@
 import type { Entity, EntityType } from "../geometry/Model.ts";
 import { distance } from "../geometry/Query.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import { subShapes, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, untag, type FsArray, type FsValue } from "../runtime/Value.ts";
@@ -109,7 +109,90 @@ function distanceSide(call: BuiltinCall, input: Definition, field: string): Shap
   );
 }
 
+/**
+ * Mass properties at unit density of the highest-dimension entities in `entities`: volume for solid
+ * bodies, area for faces and sheets, length for edges and wires, a count of points otherwise. The
+ * inertia tensor is about the centroid, with axes parallel to the world's; its products of inertia
+ * are -integral(x y), the usual tensor convention.
+ */
+function massProperties(oc: Oc, entities: readonly Entity[]) {
+  const dimension = (entity: Entity): number => {
+    if (entity.type === "BODY") return { SOLID: 3, SHEET: 2, WIRE: 1, POINT: 0 }[entity.bodyType];
+    return { FACE: 2, EDGE: 1, VERTEX: 0 }[entity.type];
+  };
+  const highest = Math.max(...entities.map(dimension));
+  const chosen = entities.filter((entity) => dimension(entity) === highest);
+  if (highest === 0) {
+    const points = chosen.map((entity) =>
+      xyz(oc.BRep_Tool.Pnt(oc.TopoDS.Vertex(subShapes(oc, entity.shape, "VERTEX")[0]!))),
+    );
+    const centroid = [0, 1, 2].map(
+      (axis) => points.reduce((sum, point) => sum + point[axis]!, 0) / points.length,
+    ) as unknown as Vec3;
+    const inertia = [0, 1, 2].map((row) =>
+      [0, 1, 2].map((column) =>
+        points.reduce((sum, point) => {
+          const d = [0, 1, 2].map((axis) => point[axis]! - centroid[axis]!);
+          const squared = d[0]! ** 2 + d[1]! ** 2 + d[2]! ** 2;
+          return sum + (row === column ? squared - d[row]! ** 2 : -d[row]! * d[column]!);
+        }, 0),
+      ),
+    );
+    return { dimension: 0, amount: points.length, centroid, inertia };
+  }
+  const total = new oc.GProp_GProps();
+  for (const entity of chosen) {
+    const props = new oc.GProp_GProps();
+    if (highest === 3) oc.BRepGProp.VolumeProperties(entity.shape, props, false, false, false);
+    else if (highest === 2) oc.BRepGProp.SurfaceProperties(entity.shape, props, false, false);
+    else oc.BRepGProp.LinearProperties(entity.shape, props, false, false);
+    total.Add(props, 1);
+  }
+  // The bindings can't return gp_Mat, so build the tensor from moments about axes through the
+  // centroid: I(n) = n^T I n gives the diagonal for n = x, y, z and each product from n = (x + y) / sqrt 2.
+  const centroid = xyz(total.CentreOfMass());
+  const about = (direction: Vec3) =>
+    total.MomentOfInertia(
+      new oc.gp_Ax1(new oc.gp_Pnt(...centroid), new oc.gp_Dir(...normalized(direction))),
+    );
+  const axes: Vec3[] = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  const diagonal = axes.map(about);
+  const inertia = axes.map((a, row) =>
+    axes.map((b, column) =>
+      row === column
+        ? diagonal[row]!
+        : about([a[0] + b[0], a[1] + b[1], a[2] + b[2]]) - (diagonal[row]! + diagonal[column]!) / 2,
+    ),
+  );
+  return { dimension: highest, amount: total.Mass(), centroid, inertia };
+}
+
 export const EVALUATOR_BUILTINS = {
+  evApproximateCentroid: ([ctx, args], call) => {
+    const input = open(call, ctx, args);
+    const entities = resolve(call, input.model, input.oc, input.definition.getField("entities"));
+    if (entities.length === 0) return call.fail("entities resolves to nothing.");
+    return lengthVector(call, massProperties(input.oc, entities).centroid);
+  },
+  evApproximateMassProperties: ([ctx, args], call) => {
+    const input = open(call, ctx, args);
+    if (input.definition.getField("referenceFrame") !== undefined)
+      return call.unsupported("Mass properties in a referenceFrame are not supported locally yet.");
+    const entities = resolve(call, input.model, input.oc, input.definition.getField("entities"));
+    if (entities.length === 0) return call.fail("entities resolves to nothing.");
+    const { dimension, amount, centroid, inertia } = massProperties(input.oc, entities);
+    // std's wrapper attaches units and the density.
+    return FsMap.fromEntries([
+      ["highestDimension", dimension],
+      [["count", "length", "area", "volume"][dimension]!, amount],
+      ["centroid", [...centroid]],
+      ["inertia", inertia],
+    ]);
+  },
   evAxis: ([ctx, args], call) => {
     const input = open(call, ctx, args);
     const entity = resolve(call, input.model, input.oc, input.definition.getField("axis"))[0];

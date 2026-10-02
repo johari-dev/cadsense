@@ -1,0 +1,10 @@
+{
+  "description": "opSweep of a 2 mm circle along a quarter arc of radius 20 mm.",
+  "steps": [{ "file": "feature.fs", "feature": "sweptTube" }],
+  "expect": {
+    "source": "analytic (Pappus): PI 2^2 * (PI / 2) 20",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 394.7842, "faces": 3, "edges": 2, "vertices": 0 }],
+    "variables": { "endCapX": 20, "endCapZ": 20 }
+  }
+}
