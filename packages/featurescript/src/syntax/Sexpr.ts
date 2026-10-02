@@ -44,7 +44,7 @@ export function sexpr(node: Expression | Statement | Declaration): string {
     case "Index":
       return list(node.optional ? "?[]" : "[]", sexpr(node.object), sexpr(node.index));
     case "Deref":
-      return list("deref", sexpr(node.object));
+      return list(node.optional ? "?deref" : "deref", sexpr(node.object));
     case "Lambda":
       return list(
         "lambda",
