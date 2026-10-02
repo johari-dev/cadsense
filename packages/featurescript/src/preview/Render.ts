@@ -1,21 +1,44 @@
 // @effect-diagnostics nodeBuiltinImport:off - encodes PNGs with Node's zlib.
 import * as NodeZlib from "node:zlib";
-import type { BodyMesh } from "../src/geometry/Tessellate.ts";
+import type { BodyMesh } from "../geometry/Tessellate.ts";
 
 /**
- * A small software renderer for corpus artifacts: an isometric, flat-shaded, z-buffered PNG of
- * tessellated bodies, so a reviewer can see a result without a browser. Not used by the app.
+ * A small software renderer: a flat-shaded, z-buffered orthographic PNG of tessellated bodies, so a
+ * person or an agent can see a preview without a browser. Z is up, as in CAD.
  */
 const COLORS: Record<0 | 1, readonly [number, number, number]> = {
   0: [150, 158, 168],
   1: [245, 196, 66],
 };
 
-export function renderPng(meshes: readonly BodyMesh[], size = 640): Uint8Array {
-  // Isometric camera: view direction (-1, -1, -1), Z up.
-  const right = [Math.SQRT1_2, -Math.SQRT1_2, 0];
-  const up = [-1 / Math.sqrt(6), -1 / Math.sqrt(6), 2 / Math.sqrt(6)];
-  const toward = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)];
+export type View = "iso" | "top" | "front" | "right";
+
+/** Screen right, screen up, and toward the viewer, per view. */
+const CAMERAS: Record<View, readonly [readonly number[], readonly number[], readonly number[]]> = {
+  iso: [
+    [Math.SQRT1_2, -Math.SQRT1_2, 0],
+    [-1 / Math.sqrt(6), -1 / Math.sqrt(6), 2 / Math.sqrt(6)],
+    [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)],
+  ],
+  top: [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ],
+  front: [
+    [1, 0, 0],
+    [0, 0, 1],
+    [0, -1, 0],
+  ],
+  right: [
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 0],
+  ],
+};
+
+export function renderPng(meshes: readonly BodyMesh[], view: View = "iso", size = 640): Uint8Array {
+  const [right, up, toward] = CAMERAS[view];
   const light = [0.3, 0.5, 0.81];
   const dot = (a: readonly number[], b: ArrayLike<number>, o = 0) =>
     a[0]! * b[o]! + a[1]! * b[o + 1]! + a[2]! * b[o + 2]!;

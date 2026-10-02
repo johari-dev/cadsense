@@ -131,6 +131,8 @@ export class Interpreter {
   private steps = 0;
   private readonly calls: CallRecord[] = [];
   private silentDepth = 0;
+  /** The last predicate statement that came out false, for precondition error messages. */
+  private failedStatement: { readonly module: ModuleInstance; readonly span: Span } | null = null;
   /** `print` output. */
   readonly console: string[] = [];
   /** Exceptions caught by a non-silent `try`; Onshape lists these in the notices pane. */
@@ -321,7 +323,10 @@ export class Interpreter {
       case "ExpressionStatement": {
         const value = this.eval(statement.expression, env);
         if (!env.predicate || value === true) return NORMAL;
-        if (value === false) return FAILED;
+        if (value === false) {
+          this.failedStatement = { module: env.module, span: statement.span };
+          return FAILED;
+        }
         return this.fail(
           `A predicate statement must be true or false, got ${this.describe(value)}.`,
           env.module,
@@ -1154,7 +1159,20 @@ export class Interpreter {
           precondition.kind === "Block"
             ? this.execBlock(precondition, { ...env, predicate: true }) !== FAILED
             : this.predicateValue(precondition, env);
-        if (!ok) this.fail(`Precondition of ${name} failed.`, module, precondition.span);
+        if (!ok) {
+          const failed =
+            precondition.kind === "Block"
+              ? this.failedStatement
+              : { module, span: precondition.span };
+          const detail = failed
+            ? `: ${failed.module.file.text.slice(failed.span.start, failed.span.end).trim()}`
+            : ".";
+          this.fail(
+            `Precondition of ${name} failed${detail}`,
+            module,
+            failed?.module === module ? failed.span : precondition.span,
+          );
+        }
       }
       if (node.kind === "Predicate")
         return this.execBlock(node.body as Block, { ...env, predicate: true }) !== FAILED;

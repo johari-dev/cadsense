@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import { createBuiltins } from "./builtins/index.ts";
 import type { GeometryState } from "./geometry/Model.ts";
 import { loadOcct, type Oc } from "./geometry/occt.ts";
+import { importStep } from "./geometry/Step.ts";
 import { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
 import { Interpreter } from "./runtime/Interpreter.ts";
 import { ModelContext } from "./runtime/ModelContext.ts";
@@ -13,6 +14,12 @@ import { parseExpression } from "./syntax/Parser.ts";
 import { sourceFile } from "./syntax/Source.ts";
 
 const STD_DIR = new URL("../std/", import.meta.url);
+
+/**
+ * Bodies from a base STEP file are created by this pseudo-feature, so `qCreatedBy(makeId("Base"))`
+ * finds them. Features run after it as `Feature1`, `Feature2`, ...
+ */
+export const BASE_FEATURE_ID = ["Base"] as const;
 
 /** Reads `onshape/std/*.fs` from the vendored std. */
 export const readStd = (path: string): string | undefined => {
@@ -54,6 +61,11 @@ export interface FeatureRun {
   readonly variables: FsMap;
   readonly console: readonly string[];
   readonly fault: RunFault | null;
+  /**
+   * Exceptions raised and caught during the feature (std reports these as notices). When a feature
+   * fails with a generic `REGEN_ERROR`, the first one is usually the cause.
+   */
+  readonly exceptions: readonly { readonly message: string; readonly stack: readonly FsFrame[] }[];
 }
 
 /** A feature to run: a `defineFeature` constant, its definition, and its feature id. */
@@ -124,16 +136,28 @@ export class FeatureScriptRuntime {
   }
 
   /**
-   * Runs features in order in one new context, as `Feature1`, `Feature2`, ... Errors a feature raises
+   * Runs features in order in one new context, as `Feature1`, `Feature2`, ..., on top of the bodies in
+   * `base` (a STEP file) if given. Errors a feature raises
    * become its status, as in Onshape. A fault stops the run; later features don't run.
    * Parameters that reference earlier features are queries, which resolve when the feature runs.
    */
-  runFeatures(steps: readonly FeatureStep[]): PartStudioRun {
+  runFeatures(
+    steps: readonly FeatureStep[],
+    options: { readonly base?: Uint8Array } = {},
+  ): PartStudioRun {
     const context = this.callStd("context.fs", "newContext");
     const model = (untag(context) as FsBuiltin<ModelContext>).native;
+    if (options.base) {
+      if (!model.oc)
+        throw new Error(
+          "A base model needs the geometry kernel; use FeatureScriptRuntime.withGeometry().",
+        );
+      model.geometry = importStep(model.oc, model.geometry, options.base, BASE_FEATURE_ID);
+    }
     const results: FeatureRun[] = [];
     for (const [index, step] of steps.entries()) {
       const consoleStart = this.interpreter.console.length;
+      const noticesStart = this.interpreter.notices.length;
       const id = this.callStd("context.fs", "makeId", [`Feature${index + 1}`]);
       let fault: RunFault | null = null;
       try {
@@ -165,6 +189,10 @@ export class FeatureScriptRuntime {
         variables: model.variables(),
         console: this.interpreter.console.slice(consoleStart),
         fault,
+        exceptions: this.interpreter.notices.slice(noticesStart).map((notice) => ({
+          message: typeof notice.value === "string" ? notice.value : formatValue(notice.value),
+          stack: notice.stack,
+        })),
       });
       if (fault) break;
     }

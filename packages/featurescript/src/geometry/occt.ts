@@ -12,8 +12,11 @@ export type Shape = InstanceType<Oc["TopoDS_Shape"]>;
 type ShapeList = InstanceType<Oc["NCollection_List_TopoDS_Shape"]>;
 
 let loading: Promise<Oc> | undefined;
-/** Instantiates OpenCascade once per process (~100 ms warm, ~0.5 GB of WASM memory). */
-export const loadOcct = (): Promise<Oc> => (loading ??= init());
+/**
+ * Instantiates OpenCascade once per process (~100 ms warm, ~0.5 GB of WASM memory). Its stdout
+ * chatter (STEP transfer statistics) is dropped; failures surface as exceptions and status codes.
+ */
+export const loadOcct = (): Promise<Oc> => (loading ??= init({ print: () => {} }));
 
 export type ShapeKind = "SOLID" | "SHELL" | "FACE" | "WIRE" | "EDGE" | "VERTEX" | "COMPOUND";
 
