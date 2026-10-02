@@ -85,10 +85,11 @@ describe("bolt circle spec", () => {
     expectFs(byId.get("circleDiameter")!.bounds!.min, "1 * millimeter");
   });
 
-  it("runs with its defaults through std's feature wrapper until the first geometry builtin", () => {
+  it("runs with its defaults through std's feature wrapper until the first geometry call", () => {
     const run = runtime.runFeature(module, "boltCircle", defaultDefinition(spec!));
     expect(run.fault?.reason).toBe("unsupported-builtin");
-    expect(run.fault?.message).toBe("@evPlane is not supported locally yet.");
+    // This runtime has no geometry kernel, so the first geometry call stops the run.
+    expect(run.fault?.message).toContain("OpenCascade kernel");
     const userFrame = run.fault!.stack.find(
       (frame) => frame.file === "corpus/bolt-circle/feature.fs",
     )!;

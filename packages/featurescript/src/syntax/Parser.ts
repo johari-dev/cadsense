@@ -74,6 +74,21 @@ export function parseModule(file: SourceFile): { module: Module; diagnostics: Di
   return result;
 }
 
+/**
+ * Parses a single expression, such as a feature parameter value (`5 * millimeter`,
+ * `qCreatedBy(makeId("Feature1"), EntityType.FACE)`). Anything after the expression is an error.
+ */
+export function parseExpression(file: SourceFile): {
+  expression: Expression | null;
+  diagnostics: Diagnostic[];
+} {
+  const { tokens, diagnostics } = tokenize(file);
+  const parser = new Parser(tokens, diagnostics);
+  const expression = parser.standaloneExpression();
+  diagnostics.sort((a, b) => a.span.start - b.span.start);
+  return { expression, diagnostics };
+}
+
 class Parser {
   private index = 0;
   private readonly tokens: readonly Token[];
@@ -151,6 +166,22 @@ class Parser {
   }
 
   // ---------------------------------------------------------------- module
+
+  standaloneExpression(): Expression | null {
+    try {
+      const expression = this.expression();
+      if (this.token.kind !== "eof")
+        this.fail(
+          "unexpected-token",
+          `Expected the end of the expression but found ${this.describe(this.token)}.`,
+        );
+      return expression;
+    } catch (error) {
+      if (!(error instanceof ParseFailure)) throw error;
+      this.report(error.diagnostic);
+      return null;
+    }
+  }
 
   module(): { module: Module; diagnostics: Diagnostic[] } {
     let version: number | null = null;
