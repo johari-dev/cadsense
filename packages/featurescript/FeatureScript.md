@@ -7,6 +7,26 @@ interpreter, with the native `@builtins` implemented on OpenCascade (`replicad-o
 Onshape stays the reference. Local results are checked against values recorded from real Onshape;
 they are expected to drift in places (different geometry kernel), and the tests make that visible.
 
+## Previewing a feature
+
+From the repo root:
+
+```sh
+pnpm fs:preview path/to/feature.fs \
+  --param 'count=8' --param 'holeDiameter=6 * millimeter' \
+  --param 'face=qContainsPoint(qCreatedBy(makeId("Base"), EntityType.FACE), vector(50, 30, 10) * millimeter)' \
+  --base part.step
+```
+
+It runs the file's first feature (or `--feature name`) on top of `--base` (a STEP file; its bodies are
+created by `makeId("Base")`) and any `--before file.fs:feature` steps, then prints the feature's
+inputs, its status, and the resulting solids. When a feature fails it prints the cause and the line.
+Parameters are FeatureScript expressions; unset inputs take their defaults. It writes `iso.png`,
+`top.png`, `front.png`, `right.png` (faces the feature created in amber), `result.glb` and
+`report.json` to `--out` (default `.cadsense/fs-preview/<file name>`), and exits 1 if a feature fails.
+
+An agent can run this, read the PNGs and the summary, edit the script, and run it again.
+
 ## Layout
 
 - `std/`: vendored Standard Library, re-pinned with `scripts/vendor-std.ts`. `std/VERSION.json`
@@ -21,7 +41,9 @@ they are expected to drift in places (different geometry kernel), and the tests 
 - `src/geometry/`: the OpenCascade layer. `Model.ts` is the topology registry (transient ids that
   survive operations through OpenCascade's history), `Sketch.ts` sketches and regions, `Query.ts`
   query evaluation, `Tessellate.ts` and `Glb.ts` preview meshes.
-- `src/Runtime.ts`: loads std and runs a feature in a fresh context.
+- `src/Runtime.ts`: loads std and runs features in a fresh context, optionally on a STEP base.
+- `src/preview/`: runs a preview and writes its artifacts (`Preview.ts`), and a small software
+  renderer for PNGs (`Render.ts`). `scripts/preview.ts` is the CLI.
 - `corpus/<case>/`: end-to-end cases. `case.json` lists the features to run, their parameters as
   FeatureScript expressions, and the expected statuses, volumes and topology counts (and where the
   expectations come from). `test/corpus.e2e.test.ts` runs them and writes
