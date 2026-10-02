@@ -264,18 +264,18 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
-  CircleAlertIcon,
+  WarningCircleIcon as CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
   PlayIcon,
-  type LucideIcon,
-  LockIcon,
-  LockOpenIcon,
-  PenLineIcon,
-  RotateCcwIcon,
-  SparklesIcon,
+  type Icon as LucideIcon,
+  LockSimpleIcon as LockIcon,
+  LockSimpleOpenIcon as LockOpenIcon,
+  PenIcon as PenLineIcon,
+  ArrowCounterClockwiseIcon as RotateCcwIcon,
+  SparkleIcon as SparklesIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import {
   applyProviderInstanceSettings,
@@ -2937,7 +2937,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             {isOpening ? (
                               <span className="relative z-10 text-[10px]">Loading…</span>
                             ) : (
-                              <PlayIcon className="relative z-10 size-4 fill-current drop-shadow-md" />
+                              <PlayIcon
+                                className="relative z-10 size-4 drop-shadow-md"
+                                weight="fill"
+                              />
                             )}
                           </button>
                           {upload?.status === "uploading" && (

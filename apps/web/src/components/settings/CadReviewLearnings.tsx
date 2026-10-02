@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { XIcon } from "lucide-react";
+import { XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { newCommandId } from "../../lib/utils";
 import { cadPanelEnvironment } from "../../state/cadPanel";

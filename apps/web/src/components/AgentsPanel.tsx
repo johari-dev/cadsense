@@ -22,7 +22,14 @@ import {
   formatSubagentTokenCount,
 } from "@cadsense/client-runtime/state/subagentRuntime";
 import type { EnvironmentId, ThreadId } from "@cadsense/contracts";
-import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
+import {
+  RobotIcon as Bot,
+  BracketsCurlyIcon as Braces,
+  CheckIcon as Check,
+  CaretDownIcon as ChevronDown,
+  CaretRightIcon as ChevronRight,
+  XIcon as X,
+} from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";

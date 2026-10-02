@@ -4,12 +4,12 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   EyeIcon,
-  EyeOffIcon,
+  EyeSlashIcon as EyeOffIcon,
   InfoIcon,
   PlusIcon,
   StarIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,
@@ -293,7 +293,7 @@ export function ProviderModelsSection({
                       />
                     }
                   >
-                    <StarIcon className={cn("size-3", isFavorite && "fill-current")} />
+                    <StarIcon className="size-3" weight={isFavorite ? "fill" : "regular"} />
                   </TooltipTrigger>
                   <TooltipPopup side="top">
                     {isFavorite ? "Remove from favorites" : "Add to favorites"}

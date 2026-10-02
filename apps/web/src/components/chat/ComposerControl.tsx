@@ -1,5 +1,9 @@
 import type { ComponentProps } from "react";
-import { ChevronDownIcon, type LucideIcon } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDownIcon,
+  type Icon as LucideIcon,
+  type IconWeight,
+} from "@phosphor-icons/react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -28,16 +32,19 @@ export function ComposerControlIcon({
   icon: Icon,
   className,
   opticalSize = "default",
+  weight = "regular",
 }: {
   icon: LucideIcon;
   className?: string | undefined;
   opticalSize?: "default" | "large";
+  weight?: IconWeight;
 }) {
   return (
     <Icon
       aria-hidden="true"
       className={cn("shrink-0", opticalSize === "large" ? "size-4.5" : "size-4", className)}
       data-composer-control-icon
+      weight={weight}
     />
   );
 }
@@ -48,7 +55,7 @@ export function ComposerControlChevron() {
       aria-hidden="true"
       className="-mx-0.5 size-3.5 shrink-0 text-icon-muted"
       data-composer-control-chevron
-      strokeWidth={2.25}
+      weight="bold"
     />
   );
 }

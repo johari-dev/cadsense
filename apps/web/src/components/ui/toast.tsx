@@ -14,16 +14,16 @@ import { useParams } from "@tanstack/react-router";
 import { type ScopedThreadRef, type ThreadId } from "@cadsense/contracts";
 import {
   CheckIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretUpIcon as ChevronUpIcon,
+  WarningCircleIcon as CircleAlertIcon,
+  CheckCircleIcon as CircleCheckIcon,
   CopyIcon,
   InfoIcon,
-  LoaderCircleIcon,
-  TriangleAlertIcon,
+  CircleNotchIcon as LoaderCircleIcon,
+  WarningIcon as TriangleAlertIcon,
   XIcon,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 
 import { cn } from "~/lib/utils";
 import { Button, buttonVariants } from "~/components/ui/button";
@@ -165,9 +165,9 @@ function ToastExpandableSection({
         type="button"
       >
         {open ? (
-          <ChevronUpIcon className="size-3.5 shrink-0 opacity-80" strokeWidth={2.25} />
+          <ChevronUpIcon className="size-3.5 shrink-0 opacity-80" weight="bold" />
         ) : (
-          <ChevronDownIcon className="size-3.5 shrink-0 opacity-80" strokeWidth={2.25} />
+          <ChevronDownIcon className="size-3.5 shrink-0 opacity-80" weight="bold" />
         )}
         {open ? collapseLabel : expandLabel}
       </button>
@@ -670,7 +670,7 @@ function Toasts({ position }: { position: ToastPosition }) {
                   }
                   type="button"
                 >
-                  <XIcon className="size-3" strokeWidth={2.25} />
+                  <XIcon className="size-3" weight="bold" />
                 </button>
               </div>
               <Toast.Content
@@ -765,7 +765,7 @@ function AnchoredToasts() {
                           }
                           type="button"
                         >
-                          <XIcon className="size-3" strokeWidth={2.25} />
+                          <XIcon className="size-3" weight="bold" />
                         </button>
                       </div>
                       <Toast.Content

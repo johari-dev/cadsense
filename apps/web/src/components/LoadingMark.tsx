@@ -1,10 +1,10 @@
-import { Box } from "lucide-react";
+import { CubeIcon as Box } from "@phosphor-icons/react";
 
 /** Composited trails suggest motion blur without animating a blur filter. */
 export function LoadingMark({ kind }: { kind: "app" | "cad" }) {
   const icon = (className: string) =>
     kind === "cad" ? (
-      <Box className={className} aria-hidden="true" strokeWidth={1.5} />
+      <Box className={className} aria-hidden="true" weight="light" />
     ) : (
       <img className={className} src="/app-icon.png" alt="" aria-hidden="true" />
     );

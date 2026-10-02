@@ -1,5 +1,13 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@cadsense/contracts";
-import { Bot, Box, Files, Globe2, Plus, Volume2, VolumeOff } from "lucide-react";
+import {
+  RobotIcon as Bot,
+  CubeIcon as Box,
+  FilesIcon as Files,
+  GlobeIcon as Globe2,
+  PlusIcon as Plus,
+  SpeakerHighIcon as Volume2,
+  SpeakerSlashIcon as VolumeOff,
+} from "@phosphor-icons/react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,

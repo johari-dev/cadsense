@@ -9,7 +9,14 @@ import {
 } from "@cadsense/contracts";
 import { newCommandId } from "../lib/utils";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
-import { MessageSquare, X, LocateFixed, Check, RotateCcw, Box } from "lucide-react";
+import {
+  ChatIcon as MessageSquare,
+  XIcon as X,
+  CrosshairIcon as LocateFixed,
+  CheckIcon as Check,
+  ArrowCounterClockwiseIcon as RotateCcw,
+  CubeIcon as Box,
+} from "@phosphor-icons/react";
 import { Button } from "../components/ui/button";
 import { cadPanelEnvironment } from "../state/cadPanel";
 import { useAtomCommand } from "../state/use-atom-command";

@@ -1,4 +1,9 @@
-import { CheckIcon, DownloadIcon, RefreshCwIcon, RotateCwIcon } from "lucide-react";
+import {
+  CheckIcon,
+  DownloadIcon,
+  ArrowsClockwiseIcon as RefreshCwIcon,
+  ArrowClockwiseIcon as RotateCwIcon,
+} from "@phosphor-icons/react";
 import type { AnimationEventHandler } from "react";
 
 import { cn } from "../../lib/utils";
@@ -94,7 +99,7 @@ function DesktopUpdateDownloadedIcon() {
     <span className="relative grid size-4 place-items-center">
       <RotateCwIcon className="size-4" />
       <span className="absolute -right-1 -bottom-1 grid size-2.5 place-items-center rounded-full bg-update-foreground text-background ring-2 ring-background">
-        <CheckIcon className="size-2" strokeWidth={3} />
+        <CheckIcon className="size-2" weight="bold" />
       </span>
     </span>
   );

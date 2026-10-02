@@ -1,7 +1,13 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import type { ServerProvider } from "@cadsense/contracts";
-import { CircleCheckIcon, DownloadIcon, LoaderIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import {
+  CheckCircleIcon as CircleCheckIcon,
+  DownloadIcon,
+  SpinnerIcon as LoaderIcon,
+  WarningIcon as TriangleAlertIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { primaryServerProvidersAtom } from "../../state/server";

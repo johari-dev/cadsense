@@ -4,7 +4,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import { ChevronDownIcon } from "lucide-react";
+import { CaretDownIcon as ChevronDownIcon } from "@phosphor-icons/react";
 import {
   memo,
   useCallback,

@@ -6,7 +6,10 @@ import {
 import { resolveSelectableModel } from "@cadsense/shared/model";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { ChevronRightIcon, SearchIcon } from "lucide-react";
+import {
+  CaretRightIcon as ChevronRightIcon,
+  MagnifyingGlassIcon as SearchIcon,
+} from "@phosphor-icons/react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import {

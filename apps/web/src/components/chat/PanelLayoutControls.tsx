@@ -1,4 +1,9 @@
-import { Maximize2Icon, Minimize2Icon, PanelRightCloseIcon, PanelRightIcon } from "lucide-react";
+import {
+  ArrowsOutSimpleIcon as Maximize2Icon,
+  ArrowsInSimpleIcon as Minimize2Icon,
+  SidebarIcon as PanelRightCloseIcon,
+  SidebarIcon as PanelRightIcon,
+} from "@phosphor-icons/react";
 import { memo } from "react";
 
 import { Toggle } from "../ui/toggle";

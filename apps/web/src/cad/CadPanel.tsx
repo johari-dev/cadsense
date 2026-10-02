@@ -7,7 +7,10 @@ import {
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDown,
+  CaretRightIcon as ChevronRight,
+} from "@phosphor-icons/react";
 import {
   useCallback,
   useContext,

@@ -1,5 +1,5 @@
 import { type PointerEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { PanelRightIcon, XIcon } from "lucide-react";
+import { SidebarIcon as PanelRightIcon, XIcon } from "@phosphor-icons/react";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {

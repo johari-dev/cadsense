@@ -1,4 +1,4 @@
-import { InfoIcon, Undo2Icon } from "lucide-react";
+import { InfoIcon, ArrowUUpLeftIcon as Undo2Icon } from "@phosphor-icons/react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   createContext,

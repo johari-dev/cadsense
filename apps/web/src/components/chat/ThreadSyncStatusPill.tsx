@@ -1,4 +1,4 @@
-import { LoaderCircleIcon } from "lucide-react";
+import { CircleNotchIcon as LoaderCircleIcon } from "@phosphor-icons/react";
 
 import { threadSyncLabel, type ThreadSyncPhase } from "../../threadSync";
 

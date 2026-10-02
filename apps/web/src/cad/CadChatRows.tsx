@@ -4,7 +4,10 @@ import type {
   CadCommentsPublishedCard,
   ScopedThreadRef,
 } from "@cadsense/contracts";
-import { CircleAlertIcon, MessageSquareIcon } from "lucide-react";
+import {
+  WarningCircleIcon as CircleAlertIcon,
+  ChatIcon as MessageSquareIcon,
+} from "@phosphor-icons/react";
 import { useMemo } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderPlusIcon } from "@phosphor-icons/react";
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";

@@ -1,5 +1,5 @@
 import type { ProjectContentMatch } from "@cadsense/contracts";
-import { LoaderCircle } from "lucide-react";
+import { CircleNotchIcon as LoaderCircle } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";

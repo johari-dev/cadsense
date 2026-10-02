@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
-import { FlaskConicalIcon } from "lucide-react";
+import { FlaskIcon as FlaskConicalIcon } from "@phosphor-icons/react";
 
 import { Button } from "./button";
 

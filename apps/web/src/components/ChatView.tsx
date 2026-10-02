@@ -145,7 +145,11 @@ import {
   foldSubagentActivities,
 } from "@cadsense/client-runtime/state/subagentRuntime";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { ChevronDownIcon, PaperclipIcon, WifiOffIcon } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDownIcon,
+  PaperclipIcon,
+  WifiSlashIcon as WifiOffIcon,
+} from "@phosphor-icons/react";
 import { cn } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
