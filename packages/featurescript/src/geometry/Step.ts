@@ -13,8 +13,9 @@ export function readStep(oc: Oc, bytes: Uint8Array): { solids: Shape[]; sheets: 
   const path = `/import-${fileCounter++}.step`;
   oc.FS.writeFile(path, bytes);
   try {
-    oc.Interface_Static.SetCVal("xstep.cascade.unit", "M");
+    // The first reader resets STEP settings to their defaults, so set the unit after creating it.
     const reader = new oc.STEPControl_Reader();
+    oc.Interface_Static.SetCVal("xstep.cascade.unit", "M");
     const status = String(reader.ReadFile(path));
     if (!status.endsWith("RetDone")) throw new Error(`The STEP file couldn't be read (${status}).`);
     reader.TransferRoots(new oc.Message_ProgressRange());
@@ -52,9 +53,9 @@ export function writeStep(oc: Oc, shapes: readonly Shape[]): Uint8Array {
   const toMillimeters = new oc.gp_Trsf();
   toMillimeters.SetScaleFactor(1000);
   const path = `/export-${fileCounter++}.step`;
+  const writer = new oc.STEPControl_Writer();
   oc.Interface_Static.SetCVal("xstep.cascade.unit", "MM");
   oc.Interface_Static.SetCVal("write.step.unit", "MM");
-  const writer = new oc.STEPControl_Writer();
   for (const shape of shapes)
     writer.Transfer(
       new oc.BRepBuilderAPI_Transform(shape, toMillimeters, true, false).Shape(),

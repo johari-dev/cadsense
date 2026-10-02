@@ -46,6 +46,22 @@ describe("preview CLI", () => {
       expect(NodeFS.existsSync(NodePath.join(out, file)), file).toBe(true);
   });
 
+  it("cuts into a STEP base in millimeters, in a process that never wrote a STEP file", () => {
+    const out = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fs-preview-"));
+    const result = preview([
+      "corpus/bolt-circle/feature.fs",
+      "--base",
+      "corpus/bolt-circle/plate.step",
+      "--param",
+      'face=qContainsPoint(qCreatedBy(makeId("Base"), EntityType.FACE), vector(50, 30, 10) * millimeter)',
+      "--out",
+      out,
+    ]);
+    expect(result.status, result.stdout).toBe(0);
+    // 60000 - 6 * PI * 2.5^2 * 10
+    expect(result.stdout).toContain("from Base: 58821.903 mm^3, 12 faces");
+  });
+
   it("explains a failure with its cause and the line that caused it", () => {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fs-preview-"));
     const file = NodePath.join(dir, "bad.fs");
