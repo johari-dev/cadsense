@@ -122,8 +122,13 @@ export type Expression =
       readonly optional: boolean;
       readonly span: Span;
     }
-  /** `x[]`: the value inside a box. */
-  | { readonly kind: "Deref"; readonly object: Expression; readonly span: Span }
+  /** `x[]`: the value inside a box. `x?[]` is undefined when `x` is. */
+  | {
+      readonly kind: "Deref";
+      readonly object: Expression;
+      readonly optional: boolean;
+      readonly span: Span;
+    }
   | ({
       readonly kind: "Lambda";
       readonly body: Block | Expression;

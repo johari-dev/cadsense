@@ -134,6 +134,13 @@ export type Token =
 const isIdentifierStart = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
 const isDigit = (c: number) => c >= 48 && c <= 57;
 const isIdentifierPart = (c: number) => isIdentifierStart(c) || isDigit(c);
+/** `e5`, `E+5`, `e-5` starting at `i`. */
+const isExponent = (text: string, i: number) => {
+  const c = text.charCodeAt(i);
+  if (c !== 101 && c !== 69) return false;
+  const sign = text.charCodeAt(i + 1) === 43 || text.charCodeAt(i + 1) === 45 ? 1 : 0;
+  return isDigit(text.charCodeAt(i + 1 + sign));
+};
 const isKeyword = (word: string): word is Keyword => KEYWORDS.has(word as Keyword);
 const ESCAPES: Readonly<Record<string, string>> = {
   b: "\b",
@@ -194,13 +201,14 @@ export function tokenize(file: SourceFile): { tokens: Token[]; diagnostics: Diag
       if (text.charCodeAt(i) === 46 && isDigit(text.charCodeAt(i + 1))) {
         i++;
         while (isDigit(text.charCodeAt(i))) i++;
-      } else if (text.charCodeAt(i) === 46 && !isIdentifierStart(text.charCodeAt(i + 1))) i++; // `1.`
-      if (text.charCodeAt(i) === 101 || text.charCodeAt(i) === 69) {
-        const sign = text.charCodeAt(i + 1) === 43 || text.charCodeAt(i + 1) === 45 ? 1 : 0;
-        if (isDigit(text.charCodeAt(i + 1 + sign))) {
-          i += 1 + sign;
-          while (isDigit(text.charCodeAt(i))) i++;
-        }
+      } else if (
+        text.charCodeAt(i) === 46 &&
+        (!isIdentifierStart(text.charCodeAt(i + 1)) || isExponent(text, i + 1))
+      )
+        i++; // `1.`, `1.e-4`
+      if (isExponent(text, i)) {
+        i += text.charCodeAt(i + 1) === 43 || text.charCodeAt(i + 1) === 45 ? 2 : 1;
+        while (isDigit(text.charCodeAt(i))) i++;
       }
       if (isIdentifierPart(text.charCodeAt(i))) {
         while (isIdentifierPart(text.charCodeAt(i))) i++;
