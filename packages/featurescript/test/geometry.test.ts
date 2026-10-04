@@ -102,4 +102,44 @@ describe("base models", () => {
     expect(props.Mass() * 1e9).toBeCloseTo(60000 - Math.PI * 25 * 10, 3);
     expect(plate!.createdBy).toEqual(["Base"]);
   });
+
+  it("qClosestTo finds a curved face from a point on its tessellation, where qContainsPoint can't", () => {
+    // A click in the preview lands on a triangle, up to the tessellation's deflection off the exact
+    // face. 4.98 mm from the axis is 20 µm inside a 5 mm cylinder wall.
+    const faces = "qCreatedBy(id, EntityType.FACE)";
+    const near = "vector(4.98, 0, 5) * millimeter";
+    const count = (name: string, query: string) =>
+      `setVariable(context, "${name}", size(evaluateQuery(context, ${query})));`;
+    const run = runtime.runFeatures([
+      {
+        module: feature(
+          [
+            'fCylinder(context, id + "cylinder", { "bottomCenter" : vector(0, 0, 0) * millimeter, "topCenter" : vector(0, 0, 10) * millimeter, "radius" : 5 * millimeter });',
+            count("contains", `qContainsPoint(${faces}, ${near})`),
+            count("closest", `qClosestTo(${faces}, ${near})`),
+            count("wall", `qGeometry(qClosestTo(${faces}, ${near}), GeometryType.CYLINDER)`),
+            // On the rim, the wall and the top cap are equally close: both come back.
+            count("rim", `qClosestTo(${faces}, vector(5, 0, 10) * millimeter)`),
+          ].join("\n"),
+        ),
+        feature: "test",
+      },
+    ]);
+    expect(run.features[0]?.status).toBe("OK");
+    const variable = (name: string) => run.features[0]!.variables.getField(name);
+    expect(variable("contains")).toBe(0);
+    expect(variable("closest")).toBe(1);
+    expect(variable("wall")).toBe(1);
+    expect(variable("rim")).toBe(2);
+  });
+
+  it("a feature that faults after modeling leaves no geometry, like one that fails", () => {
+    // An unsupported builtin stops the run past std's try, so std's rollback never runs.
+    const run = runtime.runFeatures([
+      { module: feature(`${cube}\n@opHelix(context, id + "helix", {});`), feature: "test" },
+    ]);
+    expect(run.features[0]?.status).toBe("ERROR");
+    expect(run.features[0]?.fault?.message).toMatch(/opHelix/);
+    expect(run.geometry!.entities.size).toBe(0);
+  });
 });

@@ -12,6 +12,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
+  CadViewError,
   type AuthEnvironmentScope,
   ClientDeviceType,
   ClientOs,
@@ -102,6 +103,7 @@ import { CadStorage } from "./cad/CadStorage.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
 import { CadPanel } from "./cad/CadPanel.ts";
 import { CadViewing } from "./cad/CadViewing.ts";
+import { FeatureScriptPreviews } from "./featurescript/FeatureScriptPreviews.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -395,6 +397,7 @@ const makeWsRpcLayer = (
       const cadPanel = yield* CadPanel;
       const cadComments = yield* CadComments;
       const cadViewing = yield* CadViewing;
+      const featureScriptPreviews = yield* Effect.serviceOption(FeatureScriptPreviews);
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -912,6 +915,14 @@ const makeWsRpcLayer = (
           observeRpcStream(
             WS_METHODS.cadPanelScene,
             cadPanel.scene(input.threadId, input.snapshotId),
+          ),
+        [WS_METHODS.featureScriptPreview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.featureScriptPreview,
+            Option.isSome(featureScriptPreviews)
+              ? featureScriptPreviews.value.panel(input)
+              : Effect.fail(new CadViewError({ reason: "capability-unavailable" })),
+            { "rpc.aggregate": "featurescript" },
           ),
         [WS_METHODS.cadPanelSave]: (input) =>
           observeRpcEffect(

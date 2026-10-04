@@ -48,6 +48,7 @@ import {
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { CadFilmstrip, CadPublishedComments } from "../../cad/CadChatRows";
+import { FeatureScriptChatCard } from "../../featurescript/FeatureScriptChatCard";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
   BotIcon,
@@ -927,6 +928,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "work" ||
                   row.kind === "cad-filmstrip" ||
                   row.kind === "cad-comments" ||
+                  row.kind === "featurescript-preview" ||
                   row.kind === "work-live" ||
                   row.kind === "work-toggle" ||
                   row.kind === "turn-plan"
@@ -947,6 +949,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "cad-filmstrip" ? <CadFilmstripTimelineRow row={row} /> : null}
       {row.kind === "cad-comments" ? <CadCommentsTimelineRow row={row} /> : null}
+      {row.kind === "featurescript-preview" ? <FeatureScriptPreviewTimelineRow row={row} /> : null}
       {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
@@ -977,6 +980,23 @@ function CadCommentsTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "ca
   const { threadRef } = use(TimelineRowCtx);
   if (!threadRef) return null;
   return <CadPublishedComments card={row.card} threadRef={threadRef} />;
+}
+
+function FeatureScriptPreviewTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "featurescript-preview" }>;
+}) {
+  const { threadRef, workspaceRoot, onImageExpand } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return (
+    <FeatureScriptChatCard
+      card={row.card}
+      threadRef={threadRef}
+      workspaceRoot={workspaceRoot}
+      onImageExpand={onImageExpand}
+    />
+  );
 }
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {

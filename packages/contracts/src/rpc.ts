@@ -28,6 +28,7 @@ import {
   CadPanelSceneTicket,
 } from "./cadPanel.ts";
 
+import { FeatureScriptPanelPreview, FeatureScriptPanelPreviewInput } from "./featurescript.ts";
 import { FileManagerError, OpenInFileManagerInput } from "./fileManager.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
 import {
@@ -190,6 +191,7 @@ export const WS_METHODS = {
   cadPanelScene: "cad.panel.scene",
   cadStorageWatch: "cad.storage.watch",
   cadStorageRun: "cad.storage.run",
+  featureScriptPreview: "featurescript.preview",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -518,6 +520,12 @@ export const WsCadPanelSaveRpc = Rpc.make(WS_METHODS.cadPanelSave, {
   success: CadViewState,
   error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
 });
+/** Runs a `.fs` file locally for the file panel's preview. */
+export const WsFeatureScriptPreviewRpc = Rpc.make(WS_METHODS.featureScriptPreview, {
+  payload: FeatureScriptPanelPreviewInput,
+  success: FeatureScriptPanelPreview,
+  error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+});
 export const WsCadUserCancelRpc = Rpc.make(WS_METHODS.cadUserCancel, {
   payload: CadUserOperationInput,
   success: Schema.Void,
@@ -729,6 +737,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCadStorageRunRpc,
   WsCadPanelSceneRpc,
   WsCadPanelSaveRpc,
+  WsFeatureScriptPreviewRpc,
   WsCadUserCancelRpc,
   WsCadUserSetEnabledRpc,
   WsPreviewOpenRpc,

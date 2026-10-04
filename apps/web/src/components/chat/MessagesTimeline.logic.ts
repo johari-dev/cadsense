@@ -12,6 +12,7 @@ import { type ChatMessage, type ProposedPlan } from "../../types";
 import {
   type CadCaptureCard,
   type CadCommentsPublishedCard,
+  type CadFeatureScriptPreviewCard,
   type MessageId,
   type OrchestrationLatestTurn,
   type TurnId,
@@ -197,6 +198,13 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       card: CadCommentsPublishedCard;
+    }
+  | {
+      /** One agent FeatureScript preview. A turn's last one stays visible when the turn folds. */
+      kind: "featurescript-preview";
+      id: string;
+      createdAt: string;
+      card: CadFeatureScriptPreviewCard;
     }
   | {
       kind: "work";
@@ -732,6 +740,9 @@ function deriveTurnFolds(input: {
     const firstAssistantEntry = group.entries.find(
       (entry): entry is Extract<TimelineEntry, { kind: "message" }> => entry.kind === "message",
     );
+    const lastPreviewEntryId = group.entries.findLast(
+      (entry) => entry.kind === "work" && entry.entry.featureScriptPreview !== undefined,
+    )?.id;
     const hiddenEntryIds = new Set<string>();
     for (const entry of group.entries) {
       if (entry.id === firstAssistantEntry?.id || entry.id === group.terminalEntry?.id) {
@@ -745,6 +756,10 @@ function deriveTurnFolds(input: {
       }
       // Published comments are the result of a CAD review, so they stay visible too.
       if (entry.kind === "work" && entry.entry.cadComments !== undefined) {
+        continue;
+      }
+      // The turn's final preview is where the agent's script ended up.
+      if (entry.id === lastPreviewEntryId) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
@@ -984,6 +999,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "work" && timelineEntry.entry.featureScriptPreview !== undefined) {
+      nextRows.push({
+        kind: "featurescript-preview",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        card: timelineEntry.entry.featureScriptPreview,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "work" && timelineEntry.entry.cadComments !== undefined) {
       const card = cadCommentRows.get(timelineEntry.id);
       if (card)
@@ -1016,6 +1041,7 @@ export function deriveMessagesTimelineRows(input: {
           !nextEntry ||
           nextEntry.kind !== "work" ||
           nextEntry.entry.cadComments !== undefined ||
+          nextEntry.entry.featureScriptPreview !== undefined ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
@@ -1260,6 +1286,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "cad-comments":
       return Equal.equals(a.card, (b as typeof a).card);
+
+    case "featurescript-preview":
+      return a.id === (b as typeof a).id;
 
     case "working":
       return (

@@ -107,6 +107,14 @@ export class ModuleLoader {
 
   /** Loads `path` and everything it imports. Throws `ModuleLoadError` on syntax errors or missing imports. */
   load(path: string, source?: string): ModuleInstance {
+    // Std is shared by every run of a warm runtime, so its source only ever comes from `read`.
+    if (source !== undefined && path.startsWith(STD_PREFIX))
+      throw new ModuleLoadError(
+        path,
+        null,
+        [],
+        `${path} is a standard library path; a script can't be loaded there.`,
+      );
     const existing = this.modules.get(path);
     if (existing) return existing;
     const text = source ?? this.read(path);

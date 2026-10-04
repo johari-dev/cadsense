@@ -232,14 +232,49 @@ export const CadFeatureScriptPreviewInput = Schema.Struct({
   view: Schema.optionalKey(Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS)),
 });
 export type CadFeatureScriptPreviewInput = typeof CadFeatureScriptPreviewInput.Type;
+export const FEATURESCRIPT_PREVIEW_STATUSES = [
+  "OK",
+  "INFO",
+  "WARNING",
+  "ERROR",
+  "INVALID",
+  "STOPPED",
+] as const;
+export type FeatureScriptPreviewStatus = (typeof FEATURESCRIPT_PREVIEW_STATUSES)[number];
+/** A line in a workspace script; line and column start at 1. */
+export const FeatureScriptLocation = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Int,
+  column: Schema.Int,
+});
+export type FeatureScriptLocation = typeof FeatureScriptLocation.Type;
+/**
+ * The first thing that went wrong: a syntax error, the cause of the first failed feature, or why the
+ * preview stopped. A failure inside std is located at the user's line that called into it.
+ */
+export const FeatureScriptFailure = Schema.Struct({
+  message: Schema.String,
+  location: Schema.NullOr(FeatureScriptLocation),
+});
+export type FeatureScriptFailure = typeof FeatureScriptFailure.Type;
+/** What the previewed (last) feature did to the model. */
+export const FeatureScriptChanges = Schema.Struct({
+  /** Solid volume after the feature minus before it. */
+  volumeMm3: Schema.Number,
+  /** Faces the feature created, the ones drawn in amber. */
+  createdFaces: Schema.Int,
+});
+export type FeatureScriptChanges = typeof FeatureScriptChanges.Type;
 export const CadFeatureScriptPreviewResult = Schema.Struct({
   /**
    * The worst feature status. INVALID: the script didn't load (syntax errors, a missing feature, a
    * bad parameter or base file). STOPPED: the preview timed out or its worker crashed.
    */
-  status: Schema.Literals(["OK", "INFO", "WARNING", "ERROR", "INVALID", "STOPPED"]),
+  status: Schema.Literals(FEATURESCRIPT_PREVIEW_STATUSES),
   /** Inputs, outcome and cause per feature, and the resulting solids, as plain text. */
   summary: Schema.String,
+  failure: Schema.NullOr(FeatureScriptFailure),
+  changes: Schema.NullOr(FeatureScriptChanges),
   features: Schema.Array(
     Schema.Struct({
       path: Schema.String,
