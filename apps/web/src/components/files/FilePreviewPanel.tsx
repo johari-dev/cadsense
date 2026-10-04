@@ -149,20 +149,33 @@ function EditableFileSurface(props: {
   const [contents, setContents] = useState(props.contents);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const save = useFileSaveCoordinator(props);
+  // A reveal request focuses the editor on its line once. While the text then loads or refreshes
+  // (replacing the value moves the caret to the end), it keeps the caret there, but only while the
+  // editor still has focus and the person hasn't taken over by typing, clicking, scrolling or moving
+  // the caret.
+  const revealedRequest = useRef<number | null>(null);
+  const handledRequest = useRef<number | null>(null);
   useEffect(() => setContents(props.contents), [props.contents, props.relativePath]);
   useEffect(() => {
-    if (props.revealLine === null) return;
+    if (props.revealLine === null || handledRequest.current === props.revealRequestId) return;
     const textarea = textareaRef.current;
     if (!textarea) return;
+    const first = revealedRequest.current !== props.revealRequestId;
+    if (!first && document.activeElement !== textarea) return;
+    revealedRequest.current = props.revealRequestId;
     const offset = lineOffset(contents, props.revealLine);
-    textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(offset, offset);
+    if (!first) return;
+    textarea.focus({ preventScroll: true });
     const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 20;
     textarea.scrollTop = Math.max(
       0,
       (props.revealLine - 1) * lineHeight - textarea.clientHeight / 2,
     );
   }, [contents, props.revealLine, props.revealRequestId]);
+  const takeOver = () => {
+    handledRequest.current = props.revealRequestId;
+  };
 
   return (
     <textarea
@@ -175,7 +188,11 @@ function EditableFileSurface(props: {
       spellCheck={false}
       value={contents}
       wrap={props.wordWrap ? "soft" : "off"}
+      onKeyDown={takeOver}
+      onPointerDown={takeOver}
+      onWheel={takeOver}
       onChange={(event) => {
+        takeOver();
         const next = event.currentTarget.value;
         setContents(next);
         setProjectFileQueryData(props.environmentId, props.cwd, props.relativePath, next);
