@@ -83,6 +83,8 @@ export interface PartStudioRun {
   readonly features: readonly FeatureRun[];
   /** The context's geometry after the last feature; null without a kernel. */
   readonly geometry: GeometryState | null;
+  /** The geometry the last step started from, for before/after previews; null without a kernel. */
+  readonly geometryBeforeLast: GeometryState | null;
   readonly oc: Oc | null;
 }
 
@@ -158,7 +160,9 @@ export class FeatureScriptRuntime {
       model.geometry = importStep(model.oc, model.geometry, options.base, BASE_FEATURE_ID);
     }
     const results: FeatureRun[] = [];
+    let geometryBeforeLast = model.geometry;
     for (const [index, step] of steps.entries()) {
+      geometryBeforeLast = model.geometry;
       const consoleStart = this.interpreter.console.length;
       const noticesStart = this.interpreter.notices.length;
       const id = this.callStd("context.fs", "makeId", [`Feature${index + 1}`]);
@@ -197,8 +201,17 @@ export class FeatureScriptRuntime {
           stack: notice.stack,
         })),
       });
-      if (fault) break;
+      if (fault) {
+        // A fault skips std's own rollback; undo the feature's partial geometry the same way.
+        model.geometry = geometryBeforeLast;
+        break;
+      }
     }
-    return { features: results, geometry: model.oc ? model.geometry : null, oc: model.oc };
+    return {
+      features: results,
+      geometry: model.oc ? model.geometry : null,
+      geometryBeforeLast: model.oc ? geometryBeforeLast : null,
+      oc: model.oc,
+    };
   }
 }

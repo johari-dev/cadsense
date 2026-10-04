@@ -40,7 +40,12 @@ import { makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import type { Options as ClaudeOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ClaudeSettings, EnvironmentId } from "@cadsense/contracts";
+import {
+  CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+  type CadFeatureScriptPreviewCard,
+  ClaudeSettings,
+  EnvironmentId,
+} from "@cadsense/contracts";
 import { makeClaudeAdapter } from "../provider/Layers/ClaudeAdapter.ts";
 import { SYNTHETIC_CLAUDE_MODEL_CATALOG } from "../provider/ClaudeModelCatalog.testFixtures.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -141,6 +146,22 @@ export const cube = defineFeature(function(context is Context, id is Id, definit
     });
     assert.deepInclude(delivery.result, { status: "OK" });
     assert.ok(delivery.png && delivery.png.byteLength > 0);
+    // The chat card is for people; the agent gets the result and image only.
+    assert.notProperty(delivery, "card");
+    const thread = yield* (yield* ProjectionSnapshotQuery).getThreadDetailById(threadId);
+    assert.equal(thread._tag, "Some");
+    const cards =
+      thread._tag === "Some"
+        ? thread.value.activities.filter(
+            (activity) => activity.kind === CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+          )
+        : [];
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.turnId, turnId);
+    const card = cards[0]?.payload as CadFeatureScriptPreviewCard;
+    assert.deepInclude(card, { status: "OK", path: "cube.fs", typeName: "Cube" });
+    assert.closeTo(card.changes!.volumeMm3, 1000, 1e-6);
+    assert.equal(card.changes!.createdFaces, 6);
     yield* tools.end(null, turnId);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );

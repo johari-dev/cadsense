@@ -21,24 +21,27 @@ export interface TessellateOptions {
 }
 
 /**
- * Meshes every solid and sheet body in the state. Wire and point bodies have no faces to draw, and
- * sketch regions and construction planes aren't drawn as surfaces (they'd hide what's under them).
+ * Whether a preview draws `body`: solids and sheets. Wire and point bodies have no faces to draw,
+ * and sketch regions and construction planes aren't drawn as surfaces (they'd hide what's under
+ * them).
  */
+export const isDrawnBody = (state: GeometryState, body: Entity): boolean =>
+  body.type === "BODY" &&
+  !body.construction &&
+  (body.bodyType === "SOLID" ||
+    (body.bodyType === "SHEET" &&
+      !ordered(state, (entity) => entity.body === body.id && entity.type === "FACE").every(
+        (face) => face.sketch !== null,
+      )));
+
+/** Meshes every body {@link isDrawnBody} accepts. */
 export function tessellate(
   oc: Oc,
   state: GeometryState,
   options: TessellateOptions = {},
 ): BodyMesh[] {
   const deflection = options.deflection ?? 5e-5;
-  const drawn = (body: Entity) =>
-    body.type === "BODY" &&
-    !body.construction &&
-    (body.bodyType === "SOLID" ||
-      (body.bodyType === "SHEET" &&
-        !ordered(state, (entity) => entity.body === body.id && entity.type === "FACE").every(
-          (face) => face.sketch !== null,
-        )));
-  return ordered(state, drawn).map((body) => {
+  return ordered(state, (body) => isDrawnBody(state, body)).map((body) => {
     const mesher = new oc.BRepMesh_IncrementalMesh(body.shape, deflection, false, 0.35, false);
     mesher.delete();
     const buckets: [number[], number[]][] = [

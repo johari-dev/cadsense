@@ -70,6 +70,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.cadStorageRun]: AuthOrchestrationOperateScope,
   [WS_METHODS.cadPanelScene]: AuthOrchestrationOperateScope,
   [WS_METHODS.cadPanelSave]: AuthOrchestrationOperateScope,
+  [WS_METHODS.featureScriptPreview]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
   [WS_METHODS.previewOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewNavigate]: AuthOrchestrationOperateScope,

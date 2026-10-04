@@ -8,7 +8,10 @@ import {
   CadCaptureInput,
   CadDiffInput,
   CadRenderError,
+  CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
   CommandId,
+  EventId,
+  type CadFeatureScriptPreviewCard,
   type CadDiffResult,
   type CadDiffSnapshot,
   type CadRetainedSnapshot,
@@ -25,6 +28,7 @@ import {
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -585,8 +589,43 @@ export const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if (!open || Option.isNone(featureScriptPreviews)) return yield* unavailable();
             const project = yield* projectFor(session.threadId);
-            return yield* featureScriptPreviews.value.preview(project.workspaceRoot, input);
+            const delivery = yield* featureScriptPreviews.value.preview(
+              project.workspaceRoot,
+              input,
+              session.threadId,
+            );
+            if (delivery.card) yield* recordFeatureScriptPreview(delivery.card);
+            const { card: _card, ...forAgent } = delivery;
+            return forAgent;
           });
+        /** Shows the preview as a card in the chat. Display only, so failures never fail the tool. */
+        const recordFeatureScriptPreview = (card: CadFeatureScriptPreviewCard) =>
+          Effect.gen(function* () {
+            const id = yield* commandId;
+            const createdAt = DateTime.formatIso(yield* DateTime.now);
+            const name = card.typeName ?? card.path.split("/").at(-1) ?? card.path;
+            yield* dispatch({
+              type: "thread.activity.append",
+              commandId: id,
+              threadId: session.threadId,
+              activity: {
+                id: EventId.make(`cad-featurescript-${id}`),
+                tone: "info",
+                kind: CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+                summary: `Previewed ${name}: ${card.status}`,
+                payload: card,
+                turnId: turnId ?? null,
+                createdAt,
+              },
+              createdAt,
+            });
+          }).pipe(
+            Effect.catch(() =>
+              Effect.logWarning("FeatureScript preview chat activity was not recorded", {
+                threadId: session.threadId,
+              }),
+            ),
+          );
         const commentActivation =
           turnId && Option.isSome(commentService)
             ? yield* commentService.value
