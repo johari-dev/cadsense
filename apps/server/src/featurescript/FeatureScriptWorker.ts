@@ -50,6 +50,11 @@ export type PreviewOutput =
 export interface PreviewJob {
   readonly id: number;
   readonly steps: readonly PreviewStep[];
+  /**
+   * The workspace (its real path) that `.fs` files the steps import are read from, relative to the
+   * importing file, and their size limit.
+   */
+  readonly workspace: { readonly root: string; readonly maxModuleBytes: number };
   /** A STEP file whose bodies are created by `makeId("Base")`. */
   readonly base: Uint8Array | null;
   readonly output: PreviewOutput;
@@ -110,14 +115,36 @@ const locateFailure = (error: unknown, summary: string): FeatureScriptFailure =>
   return { message: summary, location: null };
 };
 
+/**
+ * Reads a module the job's scripts import, by workspace-relative path. Anything that isn't a `.fs`
+ * file inside the workspace (through links too) or is over the limit reads as missing.
+ */
+const readImport = ({ root, maxModuleBytes }: PreviewJob["workspace"], relative: string) => {
+  if (!relative.endsWith(".fs")) return undefined;
+  try {
+    const real = NodeFS.realpathSync(NodePath.resolve(root, relative));
+    const inside = NodePath.relative(root, real);
+    if (inside.startsWith("..") || NodePath.isAbsolute(inside)) return undefined;
+    const info = NodeFS.statSync(real);
+    if (!info.isFile() || info.size > maxModuleBytes) return undefined;
+    return NodeFS.readFileSync(real, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
 const port = NodeWorkerThreads.parentPort;
 const { stdDir } = NodeWorkerThreads.workerData as FeatureScriptWorkerData;
 let runtime: Promise<FeatureScriptRuntime> | undefined;
+/** The running job's workspace; the warm runtime reads imports through it. */
+let workspace: PreviewJob["workspace"] | undefined;
 
 const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
-  const loaded = await (runtime ??= FeatureScriptRuntime.withGeometry(
-    stdDir ? { stdDir: new URL(stdDir) } : {},
-  ));
+  const loaded = await (runtime ??= FeatureScriptRuntime.withGeometry({
+    ...(stdDir ? { stdDir: new URL(stdDir) } : {}),
+    readModule: (path) => (workspace ? readImport(workspace, path) : undefined),
+  }));
+  workspace = job.workspace;
   const { output } = job;
   let result;
   try {
@@ -167,10 +194,9 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
       typeName: spec.typeName,
       status: run?.status ?? "NOT_RUN",
       message: run?.message ?? null,
-      // Why it failed: the fault that stopped it, or the first exception std caught.
-      cause:
-        run?.fault?.message ??
-        (run?.status === "ERROR" ? (run.exceptions[0]?.message ?? null) : null),
+      // Why it failed: the fault that stopped it, the exception behind its error, or else its
+      // reported message.
+      cause: featureFailure(loaded, run)?.message ?? null,
     })),
     solids: result.solids,
     elapsedMs: result.elapsedMs,

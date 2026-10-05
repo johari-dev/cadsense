@@ -104,6 +104,22 @@ export class ModuleLoadError extends Error {
 export const STD_PREFIX = "onshape/std/";
 
 /**
+ * The module path an `import` in module `from` names. Std and Onshape element paths are absolute;
+ * any other path is relative to the importing file's folder, so `wire-run.fs` imported by
+ * `wiring/robot.fs` is `wiring/wire-run.fs`. Null for a path that climbs above the root.
+ */
+export function resolveImport(from: string, path: string): string | null {
+  if (path.startsWith(STD_PREFIX) || isOnshapeElementPath(path)) return path;
+  const parts = from.split("/").slice(0, -1);
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part !== "..") parts.push(part);
+    else if (parts.pop() === undefined) return null;
+  }
+  return parts.join("/");
+}
+
+/**
  * Loads modules and resolves names between them. `read` returns a module's source by import path:
  * `onshape/std/x.fs` for std, anything else for user modules.
  */
@@ -150,7 +166,10 @@ export class ModuleLoader {
       if (node.kind !== "Import") continue;
       let imported: ModuleInstance;
       try {
-        imported = this.load(node.path);
+        const target = resolveImport(path, node.path);
+        if (target === null)
+          throw new ModuleLoadError(node.path, null, [], `${node.path} is outside the workspace.`);
+        imported = this.load(target);
       } catch (error) {
         if (!(error instanceof ModuleLoadError && error.file === null)) throw error;
         // Icons, images and libraries from other Onshape documents can't be fetched here.

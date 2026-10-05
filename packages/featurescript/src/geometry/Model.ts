@@ -42,6 +42,11 @@ export interface Entity {
   readonly cap: "START" | "END" | null;
   /** Attributes follow the entity through operations, and split pieces inherit them. */
   readonly attributes: readonly EntityAttribute[];
+  /**
+   * A body's properties from `setProperty`, keyed by `PropertyType` member (`"NAME"`) or
+   * `CUSTOM:<id>`. They stay with the body's id through operations. Empty on faces, edges, vertices.
+   */
+  readonly properties: ReadonlyMap<string, FsValue>;
   /** Creation order; query results follow it. */
   readonly order: number;
   /** A mate connector's coordinate system, on its body and its one vertex. */
@@ -56,11 +61,13 @@ export interface GeometryState {
 
 export const emptyGeometry: GeometryState = { entities: new Map(), next: 1 };
 
-/** Per-entity details an operation knows about (caps, sketch origin, construction). */
+export const NO_PROPERTIES: ReadonlyMap<string, FsValue> = new Map();
+
+/** Per-entity details an operation knows about (caps, sketch origin, construction, copies). */
 export type Annotate = (
   shape: Shape,
   type: EntityType,
-) => Partial<Pick<Entity, "cap" | "sketch" | "construction" | "attributes">>;
+) => Partial<Pick<Entity, "cap" | "sketch" | "construction" | "attributes" | "properties">>;
 
 /** What an OpenCascade operation did to one input sub-shape. */
 export interface History {
@@ -144,6 +151,7 @@ export function addBodies(
       sketch: null,
       cap: null,
       attributes: [],
+      properties: NO_PROPERTIES,
       order: next,
       ...(body.frame ? { frame: body.frame } : {}),
       ...body.annotate?.(shape, type),
@@ -182,8 +190,12 @@ interface Replacement {
    * identity), or the earliest in `keepIds` that contributes at all (union keeps the first tool's).
    */
   readonly keepIdBy?: "most" | "earliest";
-  /** Result body shapes. */
-  readonly results: readonly { readonly shape: Shape; readonly bodyType: BodyType }[];
+  /** Result body shapes; a moved mate connector brings its moved frame. */
+  readonly results: readonly {
+    readonly shape: Shape;
+    readonly bodyType: BodyType;
+    readonly frame?: Frame;
+  }[];
   readonly history: History;
   /** Id components of the operation, for anything it creates. */
   readonly createdBy: readonly string[];
@@ -235,12 +247,16 @@ export function replaceBodies(
         if (!assigned.has(shape))
           assigned.set(shape, { id: allModified.length === 1 ? entity.id : null, from: entity });
     }
-    // The body keeps the id of the target it mostly came from.
+    // The body keeps the id of the target it mostly came from. Wire and point bodies (mate
+    // connectors) have no faces, so their edges or vertices vote instead.
     const votes = new Map<string, number>();
-    for (const face of faces) {
-      const from = assigned.get(face)?.from;
-      if (from && replacement.keepIds.includes(from.body))
-        votes.set(from.body, (votes.get(from.body) ?? 0) + 1);
+    for (const voters of [faces, edges, vertices]) {
+      for (const shape of voters) {
+        const from = assigned.get(shape)?.from;
+        if (from && replacement.keepIds.includes(from.body))
+          votes.set(from.body, (votes.get(from.body) ?? 0) + 1);
+      }
+      if (votes.size > 0) break;
     }
     const candidates = [...votes].filter(([id]) => !usedBodyIds.has(id));
     const keptBody =
@@ -262,7 +278,9 @@ export function replaceBodies(
       sketch: null,
       cap: null,
       attributes: keptEntity?.attributes ?? [],
+      properties: keptEntity?.properties ?? NO_PROPERTIES,
       order: keptEntity?.order ?? next,
+      ...(result.frame ? { frame: result.frame } : {}),
     });
     for (const [type, shapes] of [
       ["FACE", faces],
@@ -283,7 +301,9 @@ export function replaceBodies(
           sketch: link?.from?.sketch ?? null,
           cap: link?.from?.cap ?? null,
           attributes: link?.from?.attributes ?? [],
+          properties: NO_PROPERTIES,
           order: link?.id ? link.from!.order : next,
+          ...(result.frame && type === "VERTEX" ? { frame: result.frame } : {}),
           ...replacement.annotate?.(shape, type),
         });
       }
@@ -291,16 +311,16 @@ export function replaceBodies(
   return { state: { entities, next }, ids };
 }
 
-/** A copy of `state` with `update` applied to the attributes of the entities in `ids`. */
-export function withAttributes(
+/** A copy of `state` with `update` applied to the entities in `ids`, e.g. to set attributes. */
+export function updateEntities(
   state: GeometryState,
   ids: readonly string[],
-  update: (attributes: readonly EntityAttribute[]) => readonly EntityAttribute[],
+  update: (entity: Entity) => Entity,
 ): GeometryState {
   const entities = new Map(state.entities);
   for (const id of ids) {
     const entity = entities.get(id);
-    if (entity) entities.set(id, { ...entity, attributes: update(entity.attributes) });
+    if (entity) entities.set(id, update(entity));
   }
   return { entities, next: state.next };
 }

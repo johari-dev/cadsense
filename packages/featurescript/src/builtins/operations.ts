@@ -4,6 +4,7 @@ import {
   removeBodies,
   replaceBodies,
   type Entity,
+  type Frame,
   type History,
 } from "../geometry/Model.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
@@ -46,6 +47,20 @@ function toTrsf(call: BuiltinCall, oc: Oc, value: FsValue): InstanceType<Oc["gp_
     t[2],
   );
   return trsf;
+}
+
+/** A mate connector's `frame` moved by `trsf`, for a connector that moves with its body. */
+function movedFrame(oc: Oc, trsf: InstanceType<Oc["gp_Trsf"]>, frame: Frame): Frame {
+  const origin = new oc.gp_Pnt(...frame.origin).Transformed(trsf);
+  const axis = (direction: Frame["xAxis"]) => {
+    const moved = new oc.gp_Dir(...direction).Transformed(trsf);
+    return [moved.X(), moved.Y(), moved.Z()] as const;
+  };
+  return {
+    origin: [origin.X(), origin.Y(), origin.Z()],
+    xAxis: axis(frame.xAxis),
+    zAxis: axis(frame.zAxis),
+  };
 }
 
 /** Runs an OpenCascade algorithm, raising std's error enum if the kernel throws or reports failure. */
@@ -304,9 +319,10 @@ export const OPERATION_BUILTINS = {
         shape: new oc.BRepBuilderAPI_Transform(body.shape, trsf, true, false).Shape(),
         bodyType: body.bodyType,
         createdBy: [...idOf(id), names[i]!],
+        ...(body.frame ? { frame: movedFrame(oc, trsf, body.frame) } : {}),
         annotate: (_: Shape, type: string) =>
           type === "BODY" && untag(definition.getField("copyPropertiesAndAttributes")) !== false
-            ? { attributes: body.attributes }
+            ? { attributes: body.attributes, properties: body.properties }
             : {},
       }));
     });
@@ -326,7 +342,13 @@ export const OPERATION_BUILTINS = {
       model.geometry = replaceBodies(oc, model.geometry, {
         consumed: [body.id],
         keepIds: [body.id],
-        results: [{ shape: moved.Shape(), bodyType: body.bodyType }],
+        results: [
+          {
+            shape: moved.Shape(),
+            bodyType: body.bodyType,
+            ...(body.frame ? { frame: movedFrame(oc, trsf, body.frame) } : {}),
+          },
+        ],
         history: historyOf(oc, moved),
         createdBy: idOf(id),
       }).state;
