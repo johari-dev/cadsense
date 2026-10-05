@@ -7,29 +7,31 @@ const MATERIALS = [
 ] as const;
 
 /**
- * One binary glTF with a node and mesh per body, one primitive per material, flat normals, meters,
- * Z up (as CAD). Positions and normals only; no indices since vertices are per triangle.
+ * One binary glTF with a node and mesh per body, one indexed primitive per material, meters, Z up
+ * (as CAD).
  */
 export function toGlb(meshes: readonly BodyMesh[]): Uint8Array {
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
   const bufferViews: object[] = [];
   const accessors: object[] = [];
-  const addView = (data: Float32Array, min?: number[], max?: number[]) => {
+  // Every view is 4-byte data, so offsets stay aligned as glTF requires.
+  const addView = (data: Float32Array | Uint32Array, min?: number[], max?: number[]) => {
     const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const indices = data instanceof Uint32Array;
     bufferViews.push({
       buffer: 0,
       byteOffset: byteLength,
       byteLength: bytes.byteLength,
-      target: 34962,
+      target: indices ? 34963 : 34962,
     });
     chunks.push(bytes);
     byteLength += bytes.byteLength;
     accessors.push({
       bufferView: bufferViews.length - 1,
-      componentType: 5126,
-      count: data.length / 3,
-      type: "VEC3",
+      componentType: indices ? 5125 : 5126,
+      count: indices ? data.length : data.length / 3,
+      type: indices ? "SCALAR" : "VEC3",
       ...(min && max ? { min, max } : {}),
     });
     return accessors.length - 1;
@@ -52,6 +54,7 @@ export function toGlb(meshes: readonly BodyMesh[]): Uint8Array {
           POSITION: addView(group.positions, min, max),
           NORMAL: addView(group.normals),
         },
+        indices: addView(group.indices),
         material: group.material,
       };
     }),

@@ -65,13 +65,23 @@ export function renderPng(meshes: readonly BodyMesh[], view: View = "iso", size 
 
   for (const mesh of meshes)
     for (const group of mesh.groups)
-      for (let i = 0; i < group.positions.length; i += 9) {
-        const corners = [0, 3, 6].map((k) => ({
-          x: (dot(right, group.positions, i + k) - cx) * scale + size / 2,
-          y: size / 2 - (dot(up, group.positions, i + k) - cy) * scale,
-          z: dot(toward, group.positions, i + k),
+      for (let t = 0; t < group.indices.length; t += 3) {
+        const at = [0, 1, 2].map((k) => group.indices[t + k]! * 3);
+        const corners = at.map((o) => ({
+          x: (dot(right, group.positions, o) - cx) * scale + size / 2,
+          y: size / 2 - (dot(up, group.positions, o) - cy) * scale,
+          z: dot(toward, group.positions, o),
         }));
-        const shade = 0.35 + 0.65 * Math.abs(dot(light, group.normals, i));
+        // Flat shading from the triangle itself, as the images always had.
+        const p = (o: number, k: number) => group.positions[o + k]!;
+        const u = [0, 1, 2].map((k) => p(at[1]!, k) - p(at[0]!, k));
+        const v = [0, 1, 2].map((k) => p(at[2]!, k) - p(at[0]!, k));
+        const n = [
+          u[1]! * v[2]! - u[2]! * v[1]!,
+          u[2]! * v[0]! - u[0]! * v[2]!,
+          u[0]! * v[1]! - u[1]! * v[0]!,
+        ];
+        const shade = 0.35 + 0.65 * Math.abs(dot(light, n) / (Math.hypot(...n) || 1));
         const color = COLORS[group.material].map((c) => Math.round(c * shade));
         const [a, b, c] = corners as [
           (typeof corners)[number],

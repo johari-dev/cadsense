@@ -61,10 +61,13 @@ export class FeatureScriptPreviews extends Context.Service<
 export interface FeatureScriptPreviewOptions {
   /** A preview's limit, including the worker's first load of std and OpenCascade (a few seconds). */
   readonly timeout: Duration.Input;
-  /** Shut the worker down when idle this long; it holds roughly 1 GB of WASM memory. */
+  /** Shut the worker down when idle this long; it holds a few hundred MB of WASM memory. */
   readonly idleShutdown: Duration.Input;
-  /** Start a fresh worker after this many previews. Geometry is never freed inside a worker. */
-  readonly recycleAfter: number;
+  /**
+   * Replace the worker once its WASM memory reaches this many bytes (OpenCascade's limit is 4 GB).
+   * Shapes are never freed inside a worker; a preview adds a few MB.
+   */
+  readonly recycleAtBytes: number;
   /** Keep the newest artifact directories and remove older ones. */
   readonly keepRuns: number;
   /** Keep the newest panel models (before and after each count) and remove older ones... */
@@ -78,7 +81,7 @@ export interface FeatureScriptPreviewOptions {
 const DEFAULT_OPTIONS: FeatureScriptPreviewOptions = {
   timeout: "2 minutes",
   idleShutdown: "10 minutes",
-  recycleAfter: 20,
+  recycleAtBytes: 1.5 * 1024 ** 3,
   keepRuns: 50,
   keepPanelModels: 40,
   keepPanelModelsFor: "30 minutes",
@@ -102,10 +105,11 @@ const STATUS_BY_RANK = ["OK", "INFO", "WARNING", "ERROR"] as const;
 
 export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
   Effect.gen(function* () {
-    const { timeout, idleShutdown, recycleAfter, keepRuns, keepPanelModels, keepPanelModelsFor } = {
-      ...DEFAULT_OPTIONS,
-      ...options,
-    };
+    const { timeout, idleShutdown, recycleAtBytes, keepRuns, keepPanelModels, keepPanelModelsFor } =
+      {
+        ...DEFAULT_OPTIONS,
+        ...options,
+      };
     const config = yield* ServerConfig;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -128,7 +132,6 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
 
     interface Running {
       readonly worker: NodeWorkerThreads.Worker;
-      jobs: number;
     }
     let current: Running | null = null;
     let idle: Fiber.Fiber<void> | undefined;
@@ -140,7 +143,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
     };
     const start = (): Running => {
       const worker = new NodeWorkerThreads.Worker(workerUrl, { workerData });
-      const running: Running = { worker, jobs: 0 };
+      const running: Running = { worker };
       // Errors between jobs would otherwise be thrown on the main thread.
       worker.on("error", () => stop(running));
       worker.on("exit", () => stop(running));
@@ -152,12 +155,16 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
     const send = (job: PreviewJob) =>
       Effect.callback<PreviewJobResult, string>((resume) => {
         const running = (current ??= start());
-        running.jobs += 1;
         const { worker } = running;
         const onMessage = (result: PreviewJobResult) => {
           if (result.id !== job.id) return;
           detach();
-          if (running.jobs >= recycleAfter) stop(running);
+          if (result.memoryBytes >= recycleAtBytes) {
+            stop(running);
+            // Start the replacement now: it loads and warms up while the person looks at this
+            // result, instead of during their next edit.
+            current ??= start();
+          }
           resume(Effect.succeed(result));
         };
         const onError = (error: Error) => {

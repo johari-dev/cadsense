@@ -2,7 +2,7 @@
 import * as NodeFS from "node:fs";
 import { createBuiltins } from "./builtins/index.ts";
 import type { GeometryState } from "./geometry/Model.ts";
-import { loadOcct, type Oc } from "./geometry/occt.ts";
+import { loadOcct, wasmMemoryBytes, type Oc } from "./geometry/occt.ts";
 import { addConnectors } from "./geometry/Connectors.ts";
 import { importStep } from "./geometry/Step.ts";
 import { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
@@ -125,9 +125,11 @@ export interface PartStudioRun {
 export class FeatureScriptRuntime {
   readonly loader: ModuleLoader;
   readonly interpreter: Interpreter;
+  private readonly oc: Oc | null;
 
   constructor(options: RuntimeOptions = {}) {
     const { readModule, stdDir } = options;
+    this.oc = options.oc ?? null;
     // A std path only ever reads the vendored std, so no other file can become std (which stays
     // loaded across runs and may call builtins).
     this.loader = new ModuleLoader((path) =>
@@ -145,6 +147,11 @@ export class FeatureScriptRuntime {
     options: Omit<RuntimeOptions, "oc"> = {},
   ): Promise<FeatureScriptRuntime> {
     return new FeatureScriptRuntime({ ...options, oc: await loadOcct() });
+  }
+
+  /** WASM memory the geometry kernel holds, in bytes; it only grows. Zero without a kernel. */
+  memoryBytes(): number {
+    return this.oc ? wasmMemoryBytes(this.oc) : 0;
   }
 
   load(path: string, source?: string): ModuleInstance {
