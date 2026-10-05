@@ -32,6 +32,7 @@ import {
   type ClaudeSettings,
   EventId,
   type ProviderApprovalDecision,
+  type ProviderApprovalOption,
   ProviderDriverKind,
   ProviderInstanceId,
   type ModelSelection,
@@ -178,12 +179,15 @@ interface AssistantTextBlockState {
 interface PendingApproval {
   readonly requestType: CanonicalRequestType;
   readonly detail?: string;
-  readonly suggestions?: ReadonlyArray<PermissionUpdate>;
+  /** Applied when the user picks "acceptForSession"; see `toSessionGrant`. */
+  readonly sessionPermissions: Array<PermissionUpdate>;
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
 }
 
 /**
- * Permission updates applied for an "Always allow this session" decision.
+ * What an "acceptForSession" decision grants for a tool call, decided when the
+ * request opens so `options` can relabel the button when the default
+ * "Always allow this session" would not say what it grants.
  *
  * Claude Code's suggestions are reused when present but rescoped to
  * `destination: "session"` — echoing them verbatim would persist the
@@ -192,25 +196,38 @@ interface PendingApproval {
  * offers no suggestion — common for MCP tools — fall back to a whole-tool
  * session allow rule so the decision still sticks for the session instead of
  * silently degrading into a one-shot accept.
+ *
+ * Bash always gets the whole-tool rule, and the button names it. Claude Code's
+ * Bash suggestions only match the literal command it saw (`python3 -` for a
+ * heredoc, a full `sed -i ...` line) or are missing, so reusing them
+ * re-prompted on the next command. Claude Code still asks for commands its
+ * own safety checks flag.
  */
-function toSessionPermissionUpdates(
+function toSessionGrant(
   toolName: string,
   suggestions: ReadonlyArray<PermissionUpdate> | undefined,
-): Array<PermissionUpdate> {
+): {
+  readonly permissions: Array<PermissionUpdate>;
+  readonly options?: ReadonlyArray<ProviderApprovalOption>;
+} {
+  const wholeTool: Array<PermissionUpdate> = [
+    { type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "session" },
+  ];
+  if (toolName === "Bash") {
+    return {
+      permissions: wholeTool,
+      options: [
+        { decision: "cancel", label: "Cancel" },
+        { decision: "decline", label: "Decline" },
+        { decision: "acceptForSession", label: "Allow Bash this session" },
+        { decision: "accept", label: "Approve" },
+      ],
+    };
+  }
   const sessionScoped = (suggestions ?? []).map(
     (suggestion): PermissionUpdate => ({ ...suggestion, destination: "session" }),
   );
-  if (sessionScoped.length > 0) {
-    return sessionScoped;
-  }
-  return [
-    {
-      type: "addRules",
-      rules: [{ toolName }],
-      behavior: "allow",
-      destination: "session",
-    },
-  ];
+  return { permissions: sessionScoped.length > 0 ? sessionScoped : wholeTool };
 }
 
 interface PendingUserInput {
@@ -4219,11 +4236,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const requestType = classifyRequestType(toolName);
         const detail = summarizeToolRequest(toolName, toolInput);
         const decisionDeferred = yield* Deferred.make<ProviderApprovalDecision>();
+        const sessionGrant = toSessionGrant(toolName, callbackOptions.suggestions);
         const pendingApproval: PendingApproval = {
           requestType,
           detail,
           decision: decisionDeferred,
-          ...(callbackOptions.suggestions ? { suggestions: callbackOptions.suggestions } : {}),
+          sessionPermissions: sessionGrant.permissions,
         };
 
         const requestedStamp = yield* makeEventStamp();
@@ -4238,6 +4256,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           payload: {
             requestType,
             detail,
+            ...(sessionGrant.options ? { options: sessionGrant.options } : {}),
             args: {
               toolName,
               input: toolInput,
@@ -4309,12 +4328,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             behavior: "allow",
             updatedInput: toolInput,
             ...(decision === "acceptForSession"
-              ? {
-                  updatedPermissions: toSessionPermissionUpdates(
-                    toolName,
-                    pendingApproval.suggestions,
-                  ),
-                }
+              ? { updatedPermissions: pendingApproval.sessionPermissions }
               : {}),
           } satisfies PermissionResult;
         }

@@ -1219,6 +1219,70 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  // Codex remembers an acceptForSession approval for that exact command, or
+  // those files, only ("don't ask again for this command in this session").
+  it.effect("labels session approvals with what Codex will stop asking about", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const sessionLabel = (event: ProviderEvent) =>
+        Effect.gen(function* () {
+          const opened = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+          yield* runtime.emit(event);
+          const firstEvent = yield* Fiber.join(opened);
+          if (firstEvent._tag !== "Some" || firstEvent.value.type !== "request.opened") {
+            return NodeAssert.fail("expected request.opened");
+          }
+          const options = firstEvent.value.payload.options;
+          NodeAssert.deepStrictEqual(
+            options?.map((option) => option.decision),
+            ["cancel", "decline", "acceptForSession", "accept"],
+          );
+          return options?.find((option) => option.decision === "acceptForSession")?.label;
+        });
+      const request = {
+        kind: "request",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-10-04T00:00:00.000Z",
+        turnId: asTurnId("turn-1"),
+      } as const;
+
+      NodeAssert.equal(
+        yield* sessionLabel({
+          ...request,
+          id: asEventId("evt-command-approval"),
+          method: "item/commandExecution/requestApproval",
+          requestKind: "command",
+          requestId: ApprovalRequestId.make("req-command"),
+          payload: {
+            threadId: "provider-thread-1",
+            turnId: "turn-1",
+            itemId: "item-1",
+            command: "sed -i 's#a#b#' wiring.fs && grep -n b wiring.fs",
+            startedAtMs: 0,
+          },
+        }),
+        "Allow command this session",
+      );
+      NodeAssert.equal(
+        yield* sessionLabel({
+          ...request,
+          id: asEventId("evt-file-change-approval"),
+          method: "item/fileChange/requestApproval",
+          requestKind: "file-change",
+          requestId: ApprovalRequestId.make("req-file-change"),
+          payload: {
+            threadId: "provider-thread-1",
+            turnId: "turn-1",
+            itemId: "item-2",
+            startedAtMs: 0,
+          },
+        }),
+        "Allow these files this session",
+      );
+    }),
+  );
+
   it.effect("preserves MCP elicitation type when an app access request resolves", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
