@@ -93,6 +93,32 @@ interface Review {
 }
 
 /**
+ * Says what is wrong with an Onshape tab URL, or null when its shape is right. It needs no network,
+ * so cad_open runs it before contacting Onshape: models copy long URLs badly (dropped characters, a
+ * dropped /e/ tab), and a later network error would hide the real problem.
+ */
+export const onshapeUrlProblem = (url: string) => {
+  const generic =
+    "Use the URL of an Onshape tab exactly as the user gave it: https://cad.onshape.com/documents/<id>/w|v|m/<id>/e/<elementId>.";
+  if (!URL.canParse(url)) return generic;
+  const path = new URL(url).pathname.split("/").filter(Boolean);
+  if (path[0] !== "documents" || !["w", "v", "m"].includes(path[2] ?? "")) return generic;
+  const ids: ReadonlyArray<readonly [index: number, label: string]> = [
+    [1, "document ID after /documents/"],
+    [3, `ID after /${path[2]}/`],
+    [5, "element ID after /e/"],
+  ];
+  for (const [index, label] of ids) {
+    const id = path[index];
+    if (id !== undefined && !/^[0-9a-f]{24}$/i.test(id))
+      return `The ${label} has ${id.length} characters, but Onshape IDs have 24 hex characters. Copy the URL again character for character from the user's message. ${generic}`;
+  }
+  if (path.length === 4)
+    return "The URL opens a document, not a tab. Copy the user's URL again exactly: it continues with /e/<elementId>.";
+  return path.length === 6 && path[4] === "e" ? null : generic;
+};
+
+/**
  * Reviews opened by one `cadsense mcp` process. The process is the MCP session, so every call comes
  * from one client and needs no per-call capability token. Each opened review is a Cadsense chat in
  * the MCP data directory, with a synthetic turn ID that scopes its CAD activation, captures, and
@@ -175,6 +201,48 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
     return projectId;
   });
 
+  /**
+   * A microversion URL (/m/) names CAD that can never change, so when this data directory already
+   * holds that microversion of the element, the review opens from it without contacting Onshape:
+   * no key verification and no sync. Workspace and version URLs still sync.
+   */
+  const storedMicroversion = Effect.fn("CadMcpReviews.storedMicroversion")(function* (
+    url: string,
+    host: string,
+  ) {
+    const listed = yield* connections.list().pipe(Effect.option);
+    const connection = Option.isSome(listed)
+      ? listed.value.connections.find(
+          (entry) => entry.host === host && entry.name === CONNECTION_NAME,
+        )
+      : undefined;
+    if (!connection) return null;
+    const parsed = yield* OnshapeSourceUrl.parse({ url, connection }).pipe(Effect.option);
+    if (Option.isNone(parsed) || parsed.value.workspaceType !== "m" || !parsed.value.elementId)
+      return null;
+    const source = parsed.value;
+    const identity = onshapeProjectSourceIdentity(source);
+    const project = (yield* query.getCommandReadModel()).projects.find(
+      (entry) =>
+        entry.deletedAt === null &&
+        entry.onshapeSource !== undefined &&
+        onshapeProjectSourceIdentity(entry.onshapeSource) === identity,
+    );
+    if (!project) return null;
+    const shell = yield* query.getProjectShellById(project.id);
+    const current = Option.isSome(shell)
+      ? shell.value.cad?.roots.find(
+          // Syncs store an unconfigured root as "default", the same rule CadUserOperations applies.
+          (root) =>
+            root.elementId === source.elementId &&
+            root.configuration === (source.configuration || "default"),
+        )?.current
+      : undefined;
+    if (current?.microversionId !== source.workspaceId) return null;
+    synced.add(project.id);
+    return { connection, source };
+  });
+
   /** Drives discover then sync for the URL's element. Returns false if still importing at the deadline. */
   const importRoot = Effect.fn("CadMcpReviews.importRoot")(function* (
     projectId: ProjectId,
@@ -242,8 +310,13 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
 
   const closeReview = Effect.fn("CadMcpReviews.closeReview")(function* (review: Review) {
     yield* review.tools.close;
+    // Closing runs the cad_checks draft backstop, which can publish, so refresh the report.
+    yield* writeReport(review).pipe(
+      Effect.catch((error) => Effect.logWarning("CAD review report was not written", error)),
+    );
     yield* Scope.close(review.scope, Exit.void);
     yield* broker.endRun(review.turnId);
+    yield* Effect.logInfo("CAD MCP review closed", { threadId: review.threadId });
   });
 
   const reviewFor = Effect.fn("CadMcpReviews.reviewFor")(function* (
@@ -295,15 +368,22 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
       try: () => new URL(request.url).origin,
       catch: () => fail("invalid-url", "The url is not a valid Onshape URL."),
     });
-    const connection = yield* connectionFor(host);
-    const source = yield* OnshapeSourceUrl.parse({ url: request.url, connection }).pipe(
-      Effect.mapError(() =>
-        fail(
-          "invalid-url",
-          "Use the URL of an Onshape document tab: https://cad.onshape.com/documents/<id>/w/<id>/e/<elementId>.",
+    const problem = onshapeUrlProblem(request.url);
+    if (problem) return yield* fail("invalid-url", problem);
+    const stored = yield* storedMicroversion(request.url, host);
+    const connection = stored?.connection ?? (yield* connectionFor(host));
+    const source =
+      stored?.source ??
+      (yield* OnshapeSourceUrl.parse({ url: request.url, connection }).pipe(
+        Effect.mapError((error) =>
+          fail(
+            "invalid-url",
+            error._tag === "OnshapeProjectHostMismatchError"
+              ? "The URL is not on the Onshape host this server's API key belongs to."
+              : "Use an https Onshape tab URL with at most one configuration parameter.",
+          ),
         ),
-      ),
-    );
+      ));
     const elementId = source.elementId;
     if (elementId === undefined)
       return yield* fail(

@@ -18,6 +18,9 @@ const script = JSON.parse(NodeFS.readFileSync(process.env.CADSENSE_CODEX_COLLAB_
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 let turnStartCount = 0;
 let activeTurn;
+// The turn a per-turn hold (holdTurns) left open, for completeHeldTurnOnNextStart and
+// completeOnInterrupt.
+let heldTurn;
 let serverResponseCount = 0;
 
 const rl = NodeReadline.createInterface({ input: process.stdin });
@@ -128,14 +131,30 @@ rl.on("line", (line) => {
         `${JSON.stringify({ method, params: message.params })}\n`,
       );
     }
-    const turnId = script.turnIds?.[turnStartCount];
+    // Per-turn options are indexed by turn/start order and fall back to the script-wide ones.
+    const index = turnStartCount;
+    turnStartCount += 1;
+    if (script.failTurnStartAt === index) {
+      write({ id, error: { code: -32000, message: "turn/start failed" } });
+      return;
+    }
+    const turnId = script.turnIds?.[index];
     const turn = turnId
       ? { ...fixture.responses.turnStart.turn, id: turnId }
       : fixture.responses.turnStart.turn;
     activeTurn = turn;
-    turnStartCount += 1;
     write({ id, result: { ...fixture.responses.turnStart, turn } });
     const rootThreadId = script.rootThreadId;
+    // A turn requested while another is held open queues behind it, as in Codex: the held turn
+    // completes first.
+    if (script.completeHeldTurnOnNextStart && heldTurn) {
+      write({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: { threadId: rootThreadId, turn: { ...heldTurn, status: "completed" } },
+      });
+      heldTurn = undefined;
+    }
     if (script.onlyFirstTurnStarts !== true || turnStartCount === 1) {
       write({
         jsonrpc: "2.0",
@@ -143,19 +162,20 @@ rl.on("line", (line) => {
         params: { threadId: rootThreadId, turn },
       });
     }
-    for (const notification of script.notifications) {
+    for (const notification of script.turnNotifications?.[index] ?? script.notifications) {
       write({ jsonrpc: "2.0", method: notification.method, params: notification.params });
     }
-    for (const request of script.serverRequests ?? []) {
+    for (const request of script.turnServerRequests?.[index] ?? script.serverRequests ?? []) {
       write({ jsonrpc: "2.0", id: request.id, method: request.method, params: request.params });
     }
-    if (script.holdTurnOpen !== true) {
+    if (script.holdTurns?.[index] === true) heldTurn = turn;
+    if (script.holdTurnOpen !== true && script.holdTurns?.[index] !== true) {
       write({
         jsonrpc: "2.0",
         method: "turn/completed",
         params: {
           threadId: rootThreadId,
-          turn: { ...turn, status: "completed" },
+          turn: { ...turn, status: script.turnStatuses?.[index] ?? "completed" },
         },
       });
     }
@@ -182,6 +202,20 @@ rl.on("line", (line) => {
           message: `expected active turn id ${message.params?.turnId} but found ${script.expectedActiveTurnId}`,
         },
       });
+      return;
+    }
+    if (script.completeOnInterrupt && heldTurn && target === script.rootThreadId) {
+      write({ id, result: {} });
+      write({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        // interruptStatus "completed" models a turn that finished as Stop arrived.
+        params: {
+          threadId: target,
+          turn: { ...heldTurn, status: script.interruptStatus ?? "interrupted" },
+        },
+      });
+      heldTurn = undefined;
       return;
     }
     if (script.failInterruptFor && script.failInterruptFor === target) {

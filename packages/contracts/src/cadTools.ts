@@ -1,5 +1,7 @@
 import { CadFindPartsInput } from "./cadFindParts.ts";
 import {
+  CadCommentCategory,
+  CadCommentSeverity,
   CadCommentsListInput,
   CadCommentLocateInput,
   CadCommentInspectInput,
@@ -38,6 +40,7 @@ export const CadHierarchyResult = Schema.Struct({
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
 export const CAD_CHECK_NAMES = [
+  "drivetrain",
   "mesh-interference",
   "overlapping-bounds",
   "coincident-instances",
@@ -65,6 +68,25 @@ export const CadCheckFinding = Schema.Union([
     intersectionFraction: Schema.Number,
     // Both parts sit in one subassembly below the root, such as a vendor kit's own screw and nut.
     withinSubassembly: Schema.Boolean,
+    // The overlap in plain words: a likely duplicate, a collision, or a usually intended overlap.
+    reading: Schema.String,
+  }),
+  Schema.Struct({
+    check: Schema.Literal("drivetrain"),
+    kind: Schema.Literals([
+      "power-path",
+      "unpowered",
+      "gear-mesh",
+      "loop",
+      "shaft-support",
+      "stacked-shafts",
+      "motor-mount",
+      "collision",
+    ]),
+    // True when the drive will not work as modeled; false for traced facts such as ratios.
+    problem: Schema.Boolean,
+    summary: Schema.String,
+    occurrences: Schema.Array(CadCheckOccurrence),
   }),
   Schema.Struct({
     check: Schema.Literal("overlapping-bounds"),
@@ -87,6 +109,54 @@ export const CadCheckFinding = Schema.Union([
   }),
 ]);
 export type CadCheckFinding = typeof CadCheckFinding.Type;
+const Point3 = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
+/**
+ * A ready cad_comments_publish item for one defect the checks proved. The agent may reword or drop
+ * it. `placements` is server-internal: where the checks proved the defect is, one per affected
+ * part, which the provider turns into inspected point targets before the agent sees the draft. The
+ * agent sees point targets (with inspection images) or the whole-part targets.
+ */
+export const CadCheckDraft = Schema.Struct({
+  kind: Schema.Literal("new"),
+  publicationKey: Schema.String,
+  inspectedSnapshotId: CadSnapshotId,
+  title: Schema.String,
+  body: Schema.String,
+  severity: CadCommentSeverity,
+  category: CadCommentCategory,
+  targets: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("part"),
+        label: Schema.String,
+        occurrenceId: CadHash,
+        preciseLocationLimitation: Schema.String,
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("point"),
+        label: Schema.String,
+        candidateId: Schema.String,
+        inspectionId: Schema.String,
+        confirmationReason: Schema.String,
+      }),
+    ]),
+  ),
+  placements: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        // A surface point in the occurrence's own coordinates and the world direction to view it from.
+        occurrenceId: CadHash,
+        point: Point3,
+        normal: Point3,
+        // Parts the inspection view shows; everything else is hidden.
+        isolate: Schema.Array(CadHash),
+        // Where the marker sits, in words, for the agent to confirm against the image.
+        expected: Schema.String,
+      }),
+    ),
+  ),
+});
+export type CadCheckDraft = typeof CadCheckDraft.Type;
 export const CadChecksResult = Schema.Struct({
   revision: Schema.Int,
   snapshotId: CadSnapshotId,
@@ -94,6 +164,12 @@ export const CadChecksResult = Schema.Struct({
   // What each selected check does and does not prove, stated once per page rather than per finding.
   explanations: Schema.Record(Schema.String, Schema.String),
   findings: Schema.Array(CadCheckFinding),
+  // First page only, when the checks proved defects: one publishable item per defect.
+  drafts: Schema.optionalKey(Schema.Array(CadCheckDraft)),
+  // Which inspection image attached to this result shows each point-target draft's marker.
+  draftImages: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ publicationKey: Schema.String, image: Schema.Int })),
+  ),
   nextCursor: Schema.NullOr(Schema.String),
   summary: Schema.Struct({
     totalFindings: Schema.Int,

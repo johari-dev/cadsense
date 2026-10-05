@@ -1,0 +1,516 @@
+import { describe, expect, it } from "vite-plus/test";
+import type { CadTriangleMesh, PartOccurrence } from "./CadChecks.ts";
+import {
+  analyzeCadDrivetrain,
+  beltEndPlacement,
+  cadDrivetrainRole,
+  rotatingCollisions,
+  fitCadAxis,
+  recognizeDrivetrainParts,
+  type CadDrivetrainFinding,
+} from "./CadDrivetrain.ts";
+
+// Each case maps to one line of "Ways this can fail" in CadDrivetrain.md.
+
+const INCH = 0.0254;
+type Vector3 = readonly [number, number, number];
+interface Mesh {
+  readonly positions: number[];
+  readonly indices: number[];
+}
+
+/** Closed cylinder along local z, centered on the origin. */
+const cylinder = (radius: number, length: number, segments = 24): Mesh => {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (const z of [-length / 2, length / 2])
+    for (let i = 0; i < segments; i++) {
+      const angle = (2 * Math.PI * i) / segments;
+      positions.push(radius * Math.cos(angle), radius * Math.sin(angle), z);
+    }
+  positions.push(0, 0, -length / 2, 0, 0, length / 2);
+  for (let i = 0; i < segments; i++) {
+    const j = (i + 1) % segments;
+    const n = segments;
+    indices.push(i, j, n + j, i, n + j, n + i, 2 * n, j, i, 2 * n + 1, n + i, n + j);
+  }
+  return { positions, indices };
+};
+const box = ([x0, y0, z0]: Vector3, [x1, y1, z1]: Vector3): Mesh => ({
+  positions: [
+    x0,
+    y0,
+    z0,
+    x1,
+    y0,
+    z0,
+    x1,
+    y1,
+    z0,
+    x0,
+    y1,
+    z0,
+    x0,
+    y0,
+    z1,
+    x1,
+    y0,
+    z1,
+    x1,
+    y1,
+    z1,
+    x0,
+    y1,
+    z1,
+  ],
+  indices: [
+    0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0,
+    4, 3, 4, 7,
+  ],
+});
+/** A flat belt loop around two pulleys `centers` apart, in the local xy plane. */
+const beltLoop = (centers: number, radius: number, width: number, segments = 24): Mesh => {
+  const line: [number, number][] = [];
+  for (const [cx, start] of [
+    [centers / 2, -Math.PI / 2],
+    [-centers / 2, Math.PI / 2],
+  ] as const)
+    for (let i = 0; i <= segments; i++) {
+      const angle = start + (Math.PI * i) / segments;
+      line.push([cx + radius * Math.cos(angle), radius * Math.sin(angle)]);
+    }
+  const positions = line.flatMap(([x, y]) => [x, y, -width / 2, x, y, width / 2]);
+  const indices = line.flatMap((_, i) => {
+    const a = 2 * i;
+    const b = 2 * ((i + 1) % line.length);
+    return [a, b, b + 1, a, b + 1, a + 1];
+  });
+  return { positions, indices };
+};
+const merge = (...parts: Mesh[]): Mesh => {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (const part of parts) {
+    const base = positions.length / 3;
+    positions.push(...part.positions);
+    indices.push(...part.indices.map((index) => index + base));
+  }
+  return { positions, indices };
+};
+const toMesh = ({ positions, indices }: Mesh): CadTriangleMesh => ({
+  positions: Float64Array.from(positions),
+  indices: Uint32Array.from(indices),
+});
+/** Row-major transform that turns local z onto a world axis, then moves to `at` (inches). */
+const along = (axis: "x" | "y" | "z", [x, y, z]: Vector3) => {
+  const [tx, ty, tz] = [x * INCH, y * INCH, z * INCH];
+  return axis === "z"
+    ? [1, 0, 0, tx, 0, 1, 0, ty, 0, 0, 1, tz, 0, 0, 0, 1]
+    : axis === "y"
+      ? [1, 0, 0, tx, 0, 0, 1, ty, 0, -1, 0, tz, 0, 0, 0, 1]
+      : [0, 0, 1, tx, 0, 1, 0, ty, -1, 0, 0, tz, 0, 0, 0, 1];
+};
+
+/** A scene of named parts. `analyze` runs recognition and analysis the way cad_checks does. */
+const scene = () => {
+  const occurrences: PartOccurrence[] = [];
+  const meshes = new Map<string, CadTriangleMesh | null>();
+  let next = 0;
+  const id = () => (++next).toString(16).padStart(64, "0");
+  const add = (name: string, mesh: Mesh, transform: number[]) => {
+    const geometryKey = id();
+    const occurrenceId = id();
+    meshes.set(geometryKey, toMesh(mesh));
+    occurrences.push({ occurrenceId, name, geometryKey, transform });
+    return occurrenceId;
+  };
+  return {
+    add,
+    analyze: () => analyzeCadDrivetrain(recognizeDrivetrainParts(occurrences, meshes)),
+    /** Collisions among the given overlapping pairs, as cad_checks would pass them. */
+    collisions: (pairs: ReadonlyArray<readonly [string, string]>, withinSubassembly = false) => {
+      const parts = recognizeDrivetrainParts(occurrences, meshes);
+      const byId = new Map(occurrences.map((occurrence) => [occurrence.occurrenceId, occurrence]));
+      return rotatingCollisions(
+        parts,
+        pairs.map(([a, b]) => ({
+          occurrences: [a, b].map((occurrenceId) => {
+            const occurrence = byId.get(occurrenceId)!;
+            const mesh = meshes.get(occurrence.geometryKey);
+            return {
+              occurrenceId,
+              name: occurrence.name,
+              fit: mesh ? fitCadAxis(mesh, occurrence.transform) : null,
+            };
+          }) as [OverlapSide, OverlapSide],
+          volume: 1e-7,
+          withinSubassembly,
+        })),
+      );
+    },
+  };
+};
+type OverlapSide = Parameters<typeof rotatingCollisions>[1][number]["occurrences"][number];
+const ofKind = (findings: CadDrivetrainFinding[], kind: CadDrivetrainFinding["kind"]) =>
+  findings.filter((finding) => finding.kind === kind);
+
+// Parts sized like their FRC counterparts, in meters.
+const gear = (teeth: number) => cylinder(((teeth + 2) / 40) * INCH, 0.5 * INCH);
+const hexShaft = (inches: number) => cylinder(0.29 * INCH, inches * INCH);
+const bearing = () => cylinder(0.56 * INCH, 0.31 * INCH);
+const vortex = () => cylinder(1.4 * INCH, 3.1 * INCH);
+const pinionShaft = () => cylinder(0.29 * INCH, 2 * INCH);
+const gear40 = () => gear(40);
+
+describe("cadDrivetrainRole", () => {
+  it("reads roles from the right words", () => {
+    expect(cadDrivetrainRole("SPARK Flex Brushless Motor Controller <1>")?.kind).toBe("controller");
+    expect(cadDrivetrainRole('#10-32 x 0.5" L Shaft End Screw (V2, Steel, Black Oxide) <1>')).toBe(
+      null,
+    );
+    expect(cadDrivetrainRole("Roller Endcap_HTD_24_Tooth_Square Nut <2>")).toEqual({
+      kind: "pulley",
+      teeth: 24,
+    });
+    expect(cadDrivetrainRole('7/8" OD Aluminum Roller Hub (1/2" Hex Bore) (WCP-1239) <1>')).toEqual(
+      { kind: "roller" },
+    );
+    expect(cadDrivetrainRole("bottom motor support <1>")).toBe(null);
+    expect(
+      cadDrivetrainRole("8t Steel Spur Gear (20 DP, 10t Center Distance, 8mm SplineXS Bore)"),
+    ).toEqual({ kind: "gear", teeth: 8, meshTeeth: 10, diametralPitch: 20 });
+  });
+
+  it("recognizes common FRC motors, gearboxes, loops, and shafts", () => {
+    for (const name of ["Kraken X60 <1>", "Falcon 500 <2>", "NEO 550 Brushless Motor <1>"])
+      expect(cadDrivetrainRole(name)?.kind, name).toBe("motor");
+    expect(cadDrivetrainRole("MAXPlanetary 5:1 Slice <1>")).toEqual({ kind: "gearbox", ratio: 5 });
+    expect(cadDrivetrainRole("VersaPlanetary 7:1 Stage <1>")).toEqual({
+      kind: "gearbox",
+      ratio: 7,
+    });
+    expect(cadDrivetrainRole("GT2 3mm 20T Pulley <1>")).toEqual({ kind: "pulley", teeth: 20 });
+    expect(cadDrivetrainRole("70T 5M 9mm Wide Belt <1>")).toEqual({
+      kind: "loop",
+      wraps: "pulley",
+      teeth: 70,
+      pitchMm: 5,
+    });
+    expect(cadDrivetrainRole("60L #35 Chain <1>")).toEqual({
+      kind: "loop",
+      wraps: "sprocket",
+      teeth: 60,
+      pitchMm: 9.525,
+    });
+    for (const name of ['MAXSpline (16.5" L) <1>', '1/2" ThunderHex Shaft (6" L) <1>'])
+      expect(cadDrivetrainRole(name)?.kind, name).toBe("shaft");
+  });
+});
+
+describe("fitCadAxis and carrier alignment", () => {
+  // A pulley with a tab, like an endcap with its square nut: the raw fit picks the tab direction.
+  const tabbedPulley = merge(
+    cylinder(0.02, 0.03),
+    box([0.015, -0.006, -0.015], [0.035, 0.006, 0.015]),
+  );
+
+  it("fits discs and rods along their axes", () => {
+    expect(Math.abs(fitCadAxis(toMesh(gear(40)), along("y", [0, 0, 0]))!.axis[1])).toBeCloseTo(1);
+    expect(Math.abs(fitCadAxis(toMesh(hexShaft(12)), along("x", [0, 0, 0]))!.axis[0])).toBeCloseTo(
+      1,
+    );
+  });
+
+  it("snaps a part with an ambiguous fit onto the shaft through it", () => {
+    const raw = fitCadAxis(toMesh(tabbedPulley), along("y", [0, 0, 0]))!;
+    expect(Math.abs(raw.axis[1])).toBeLessThan(0.5);
+    const s = scene();
+    const pulley = s.add("HTD 24 Tooth Pulley <1>", tabbedPulley, along("y", [0, 0, 0]));
+    s.add('1/2" Hex Shaft (6" L) <1>', hexShaft(6), along("y", [0, 0, 0]));
+    const findings = s.analyze();
+    // The pulley joined the shaft's rotating group, so the shaft reports it as carried.
+    const support = ofKind(findings, "shaft-support")[0]!;
+    expect(support.occurrences.map((occurrence) => occurrence.occurrenceId)).toContain(pulley);
+  });
+});
+
+describe("gear meshes", () => {
+  const pair = (distance: number, pinion = "Vortex Shaft (20DP Gear - 7T) <1>", driven = 40) => {
+    const s = scene();
+    s.add(pinion, pinionShaft(), along("y", [0, 0, 0]));
+    s.add(
+      `${driven}t Pocketed Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>`,
+      gear(driven),
+      along("y", [distance, 0, 0]),
+    );
+    return ofKind(s.analyze(), "gear-mesh");
+  };
+
+  it("reports a pair set too close for its pitch", () => {
+    const [finding] = pair(1.152);
+    expect(finding?.problem).toBe(true);
+    expect(finding?.summary).toContain("0.023 in too close");
+    expect(finding?.summary).toContain("5.71:1");
+  });
+
+  it("accepts the exact center distance plus the usual 0.003 in", () => {
+    expect(pair(1.178)[0]?.problem).toBe(false);
+  });
+
+  it("checks a profile-shifted pinion at its center-distance tooth count", () => {
+    const [finding] = pair(1.603, "8t Steel Spur Gear (20 DP, 10t Center Distance) <1>", 54);
+    expect(finding?.problem).toBe(false);
+  });
+
+  it("ignores gears at mesh distance that sit far apart along their shafts", () => {
+    const s = scene();
+    s.add('20t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(20), along("y", [0, 0, 0]));
+    s.add('50t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(50), along("y", [1.75, 11, 0]));
+    expect(ofKind(s.analyze(), "gear-mesh")).toEqual([]);
+  });
+});
+
+describe("belts", () => {
+  // 70T HTD 5 mm on two 24T pulleys: 350 mm needs 115.1 mm (4.532 in) centers.
+  const centers = 115.1 / 1000 / INCH;
+  const pitchRadius = (24 * 5) / (2 * Math.PI) / 1000;
+  const loop = (pulleys: readonly number[]) => {
+    const s = scene();
+    s.add(
+      "70T 5M 9mm Wide Belt <1>",
+      beltLoop(centers * INCH, pitchRadius, 0.009),
+      along("y", [0, 0, 0]),
+    );
+    for (const x of pulleys)
+      s.add("HTD 24 Tooth Pulley <1>", cylinder(pitchRadius, 0.012), along("y", [x, 0, 0]));
+    return ofKind(s.analyze(), "loop");
+  };
+
+  it("passes a belt that wraps a pulley at each end and matches its length", () => {
+    const [finding] = loop([-centers / 2, centers / 2]);
+    expect(finding?.problem).toBe(false);
+    expect(finding?.summary).toContain("length matches");
+  });
+
+  it("places a bare-belt marker at the end that has no pulley", () => {
+    const occurrences: PartOccurrence[] = [];
+    const meshes = new Map<string, CadTriangleMesh | null>();
+    const add = (n: number, name: string, mesh: Mesh, transform: number[]) => {
+      const key = n.toString(16).padStart(64, "0");
+      meshes.set(key, toMesh(mesh));
+      occurrences.push({ occurrenceId: key, name, geometryKey: key, transform });
+    };
+    add(
+      1,
+      "70T 5M 9mm Wide Belt <1>",
+      beltLoop(centers * INCH, pitchRadius, 0.009),
+      along("y", [0, 0, 0]),
+    );
+    add(
+      2,
+      "HTD 24 Tooth Pulley <1>",
+      cylinder(pitchRadius, 0.012),
+      along("y", [-centers / 2, 0, 0]),
+    );
+    const parts = recognizeDrivetrainParts(occurrences, meshes);
+    const loop = parts.find((part) => part.role.kind === "loop")!;
+    const placement = beltEndPlacement(
+      loop,
+      meshes.get(loop.occurrenceId)!,
+      occurrences[0]!.transform,
+      parts,
+    );
+    // Local X is world X here; the pulley sits at -X, so the bare end is at +X.
+    expect(placement?.point[0]).toBeGreaterThan((centers * INCH) / 2);
+    // Viewed face-on: the loop lies in the world XZ plane, so the view runs along Y.
+    expect(Math.abs(placement!.normal[1])).toBeCloseTo(1, 3);
+  });
+
+  it("reports the end of a belt that has no pulley", () => {
+    const [finding] = loop([-centers / 2]);
+    expect(finding?.problem).toBe(true);
+    expect(finding?.summary).toContain("one end");
+  });
+});
+
+describe("power paths", () => {
+  it("never calls an untraceable motor a problem", () => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Deadaxle Tube_9.75_in <1>", cylinder(INCH, 9.75 * INCH), along("y", [6, 0, 0]));
+    const findings = s.analyze();
+    expect(ofKind(findings, "power-path")[0]?.problem).toBe(false);
+    expect(ofKind(findings, "unpowered")[0]?.problem).toBe(false);
+  });
+
+  it("calls a trace that ends at an unrecognized part untraced, not broken", () => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    // The 40T gear meshes but sits on no recognized shaft.
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [1.178, -2.4, 0]));
+    s.add("Deadaxle Tube_9.75_in <1>", cylinder(INCH, 9.75 * INCH), along("y", [6, 0, 0]));
+    const findings = s.analyze();
+    expect(findings.filter((finding) => finding.problem && finding.kind !== "gear-mesh")).toEqual(
+      [],
+    );
+    expect(ofKind(findings, "unpowered")[0]?.summary).toContain("could not be traced");
+  });
+
+  it("reports two motors driving one gear as one power path", () => {
+    const s = scene();
+    s.add('1/2" Hex Shaft (6" L) <1>', hexShaft(6), along("y", [0, 0, 0]));
+    s.add('50t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(50), along("y", [0, -2.4, 0]));
+    const motors = [1.75, -1.75].map((x, index) => {
+      const motor = s.add(
+        `NEO Vortex Brushless Motor <${index + 1}>`,
+        vortex(),
+        along("y", [x, 0, 0]),
+      );
+      s.add(
+        `Vortex Shaft (20DP Gear - 20T) <${index + 1}>`,
+        pinionShaft(),
+        along("y", [x, -2.4, 0]),
+      );
+      return motor;
+    });
+    const paths = ofKind(s.analyze(), "power-path");
+    expect(paths).toHaveLength(1);
+    const ids = paths[0]!.occurrences.map((occurrence) => occurrence.occurrenceId);
+    for (const motor of motors) expect(ids).toContain(motor);
+  });
+
+  it("returns the same findings in the same order every time", () => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [1.152, -2.4, 0]));
+    s.add("1.75 in. Hex Shaft <1>", hexShaft(1.75), along("y", [1.152, -2.4, 0]));
+    s.add('1/2" Hex Bore Bearing <1>', bearing(), along("y", [1.152, -3.1, 0]));
+    expect(s.analyze()).toEqual(s.analyze());
+  });
+});
+
+describe("motor mounts", () => {
+  const mounted = (controllerY: number) => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    // The pinion sticks out of the motor's -y face, so -y is the output side.
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    s.add(
+      "SPARK Flex Brushless Motor Controller <1>",
+      cylinder(1.45 * INCH, 1.17 * INCH),
+      along("y", [0, controllerY, 0]),
+    );
+    return ofKind(s.analyze(), "motor-mount");
+  };
+
+  it("reports a controller docked in front of the motor face", () => {
+    const [finding] = mounted(-2.1);
+    expect(finding?.problem).toBe(true);
+    expect(finding?.summary).toContain("SPARK Flex");
+  });
+
+  it("accepts a controller docked on the back of the motor", () => {
+    expect(mounted(2.1)).toEqual([]);
+  });
+});
+
+// Cases from "Check-placed points" in CadComments.md: only a spinning part running into a part it
+// should clear is a collision.
+describe("rotating collisions", () => {
+  const tube = () => box([-0.5 * INCH, -6 * INCH, -0.5 * INCH], [0.5 * INCH, 6 * INCH, 0.5 * INCH]);
+  it("reports a gear running into a tube, with the gear as the subject", () => {
+    const s = scene();
+    const gear = s.add(
+      '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+      gear40(),
+      along("y", [0, 0, 0]),
+    );
+    const frame = s.add('Tube 1"x1"x11" <1>', tube(), along("z", [1.2, 0, 0]));
+    const [finding] = s.collisions([[frame, gear]]);
+    expect(finding?.kind).toBe("collision");
+    expect(finding?.problem).toBe(true);
+    expect(finding?.occurrences.map((occurrence) => occurrence.occurrenceId)).toEqual([
+      gear,
+      frame,
+    ]);
+    expect(finding?.summary).toContain("runs into");
+  });
+  it("ignores intended fits", () => {
+    const s = scene();
+    const gear = s.add(
+      '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+      gear40(),
+      along("y", [0, 0, 0]),
+    );
+    const shaft = s.add('1/2" Hex Shaft (6" L) <1>', hexShaft(6), along("y", [0, 0, 0]));
+    const bearing = s.add(
+      '1/2" Hex Bore Bearing <1>',
+      cylinder(0.56 * INCH, 0.31 * INCH),
+      along("y", [0, 2, 0]),
+    );
+    const spacer = s.add(
+      '1/2" Hex Spacer (0.25" L) <1>',
+      cylinder(0.37 * INCH, 0.25 * INCH),
+      along("y", [0, 1, 0]),
+    );
+    const pulley = s.add(
+      "HTD 24 Tooth Pulley <1>",
+      cylinder(0.75 * INCH, 0.5 * INCH),
+      along("y", [0, -1, 0]),
+    );
+    const belt = s.add(
+      "70T 5M 9mm Wide Belt <1>",
+      beltLoop(0.1, 0.019, 0.009),
+      along("y", [2, -1, 0]),
+    );
+    const pinion = s.add(
+      "Vortex Shaft (20DP Gear - 7T) <1>",
+      pinionShaft(),
+      along("y", [1.15, 0, 0]),
+    );
+    const disc = s.add("FRC Game Piece <1>", cylinder(5 * INCH, 1 * INCH), along("z", [0, 0, 0]));
+    const screw = s.add(
+      '#10-32 x 0.5" L BHCS <1>',
+      cylinder(0.1 * INCH, 0.5 * INCH),
+      along("x", [0, 0, 0]),
+    );
+    expect(
+      s.collisions([
+        [gear, shaft],
+        [shaft, bearing],
+        [shaft, spacer],
+        [pulley, belt],
+        [gear, pinion],
+        [gear, disc],
+        [shaft, screw],
+      ]),
+    ).toEqual([]);
+  });
+  it("ignores a spacer or pin bolted through the spinning part, which turns with it", () => {
+    const s = scene();
+    const gear = s.add(
+      '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+      gear40(),
+      along("y", [0, 0, 0]),
+    );
+    // Parallel to the gear's axis, 0.7 in off it, entirely inside the gear's 1.05 in radius.
+    const pin = s.add(
+      "ROUND Spacer 1 in <1>",
+      cylinder(0.16 * INCH, INCH),
+      along("y", [0.7, 0, 0]),
+    );
+    expect(s.collisions([[gear, pin]])).toEqual([]);
+  });
+  it("ignores overlaps inside one vendor subassembly", () => {
+    const s = scene();
+    const gear = s.add(
+      '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+      gear40(),
+      along("y", [0, 0, 0]),
+    );
+    const frame = s.add('Tube 1"x1"x11" <1>', tube(), along("z", [1.2, 0, 0]));
+    expect(s.collisions([[gear, frame]], true)).toEqual([]);
+  });
+});

@@ -6,7 +6,8 @@
 
 Every finding carries the check name, the involved occurrence IDs and names, numbers in meters, and a one-line explanation of what it does and does not prove.
 
-- `mesh-interference`: pairs of unsuppressed part occurrences whose solids actually intersect by more than one cubic millimeter, computed with exact mesh booleans on the stored triangles. Reports the intersection volume, its fraction of the smaller solid, and `withinSubassembly`. Pairs that share a parent subassembly other than the root (a vendor kit's screw and nut, a motor and its own shaft) are usually the kit author's modeling choice, so they sort after every cross-subassembly pair; each group is ordered by volume, largest first. This is the default overlap check.
+- `drivetrain`: gear center distances, belt and chain lengths, shafts without bearings, shafts modeled inside shafts, and the power path from each motor, read from vendor part names and fitted mesh axes. See [the drivetrain analysis](CadDrivetrain.md). Its findings come first, `problem: true` ones before traced facts.
+- `mesh-interference`: pairs of unsuppressed part occurrences whose solids actually intersect by more than one cubic millimeter, computed with exact mesh booleans on the stored triangles. Reports the intersection volume, its fraction of the smaller solid, `withinSubassembly`, and a plain-language `reading`. Pairs that share a parent subassembly other than the root (a vendor kit's screw and nut, a motor and its own shaft) are usually the kit author's modeling choice, so they sort after every cross-subassembly pair. Pairs with a game piece (usually an intended squeeze) and then pairs with a fastener (usually modeled threads) sort after those. Each group is ordered by volume, largest first. This is the default overlap check.
 - `overlapping-bounds`: pairs of unsuppressed part occurrences whose world-space axis-aligned bounding boxes overlap by more than one cubic millimeter. Reports the overlap box size, volume, the overlap fraction of the smaller box, and whether one box lies fully inside the other. Findings are ordered by overlap volume, largest first. Fasteners in holes and parts in pockets overlap too, so the explanation says the result is a lead, not proof.
 - `coincident-instances`: two occurrences of the same source part whose transforms differ by at most one micron per element, which usually means a duplicate insertion.
 - `degenerate-geometry`: part occurrences whose bounds are unavailable (`size: null`) or thinner than 0.1 micron on some axis. Surface bodies trigger this on purpose.
@@ -19,7 +20,7 @@ The manifest caches no bounds, so `CadChecks.ts` reads them from each stored GLB
 
 ## Mesh interference
 
-Bounding boxes overlap for shafts in holes, parts in pockets, and every part near a tilted game piece, so on an 88-part transfer `overlapping-bounds` returns 312 leads and agents skip the real ones. `mesh-interference` uses the bounding-box sweep only as the broad phase, then intersects the two solids with `manifold-3d` (WASM, Apache-2.0). Intended fits touch at zero volume, so on the same transfer 70 pairs remain and the overlapping duplicate plate and the duplicated roller shafts lead the list.
+Bounding boxes overlap for shafts in holes, parts in pockets, and every part near a tilted game piece, so on an 88-part transfer `overlapping-bounds` returns 312 leads and agents skip the real ones. Exact intersection still left 65 pairs there, and a small model dismissed the whole list as noise ("including intended assemblies and the modeled game piece"). The `reading` and the game-piece and fastener ranks exist for that: the duplicate plate, the doubled roller shafts, and the gear and shafts running into the tube and motor controller now lead the page in words, with the game piece and fastener pairs at the end. `mesh-interference` uses the bounding-box sweep only as the broad phase, then intersects the two solids with `manifold-3d` (WASM, Apache-2.0). Intended fits touch at zero volume, so on the same transfer 70 pairs remain and the overlapping duplicate plate and the duplicated roller shafts lead the list.
 
 `CadChecks.ts` reads each stored GLB's indexed triangles once per call, composes the glTF node transforms, then applies each occurrence transform, so repeated instances of one asset are placed separately. A part whose triangles do not form a closed, consistently oriented solid after merging coincident vertices cannot be intersected exactly; it counts in `summary.meshUnknown`, its pairs are never reported as clear, and the agent can request `overlapping-bounds` for leads on those parts. The coarse tessellation limits accuracy to roughly the chord error of the export, so a contact of a few thousandths of an inch can read as a tiny intersection or as none.
 
@@ -51,9 +52,71 @@ Ways paging can fail, each covered by `CadChecks.test.ts`:
 - Numbers carry float noise such as `0.00012500001117587118`.
 - The byte cap drops or repeats a finding across pages, or returns an empty page when one finding alone is large.
 
+## Drafts, reminders, and the backstop
+
+The first page returns `drafts`: one ready `cad_comments_publish` item for each defect the checks
+prove outright (drivetrain problems and near-total duplicates). Smaller models found these
+defects but published one or two of six, citing "WIP" for the rest, so `CadProviderTools.ts`
+follows the drafts through the turn:
+
+- A draft's `publicationKey` is a digest of its kind, parts, and snapshot, so every `cad_checks` call on a snapshot gives a defect the same key whichever other checks ran, and the turn's ledger merges later calls' drafts into earlier ones by key. A new snapshot gives new keys, so a later review in the chat never reuses a published key.
+- Drafts whose spot the checks prove (collisions, gears set too close, bare belt ends) arrive with an inspected point target and its image; see "Check-placed points" in [CadComments.md](CadComments.md).
+- After each publication it lists the drafts no comment in this chat covers yet as `remainingDrafts`, and other CAD tool results carry `pendingDrafts` until they are covered or declined. `publishDrafts` publishes drafts as offered.
+- An agent can decline a draft with `declinedDrafts: [{publicationKey, explanation}]` in `cad_comments_publish`, for a part the user said is a placeholder or not modeled yet. A plan to rework, move, or merge parts later is not a reason to decline: the defect is in the model as drawn.
+- When the turn ends, it publishes every draft that is neither covered nor declined, worded as drafted, with a note that Cadsense's checks found it, and always with whole-part targets: no agent looked at a check-placed point the backstop would publish. The backstop is a finalizer on the turn's activation scope, added after the activation starts, so it runs while the activation is still alive however the scope closes.
+
+A comment covers a draft when it targets any part the draft targets. That errs toward skipping
+a draft: a comment about the 40T gear hitting a tube also covers the gear-spacing draft. A
+model that comments on everything, as Opus does, gets no backstop comments.
+
+Ways this can fail, each covered by `CadCheckBackstop.test.ts` or `CadViewing.test.ts`:
+
+- A draft states a defect without a next step, so a backstop comment tells the student what is wrong but not what to do.
+- A draft whose parts already have a comment in this chat is published again.
+- A draft the agent declined is published anyway.
+- A draft nobody commented on is not published when the turn ends.
+- The turn end runs twice (end, then close at shutdown) and publishes twice.
+- The owner's scope closes without `end` or `close` (MCP shutdown), the activation stops first, and the backstop cannot read the chat's comments.
+- Drafts from an earlier snapshot are published after a later `cad_checks` call.
+- A later `cad_checks` call that runs fewer checks forgets the drafts it did not reproduce, so neither the follow-up nor the backstop publishes them.
+- A draft's key depends on which checks ran, so one defect gets two keys, or a later review in the chat reuses a key already published for another comment and gets `idempotency-conflict`.
+- A failed backstop publication fails the turn or the shutdown instead of being logged.
+- `remainingDrafts` lists a draft that is covered or declined.
+- One child agent's turn end publishes drafts from another child's `cad_checks` call.
+
+### The follow-up
+
+Smaller models often stop with drafts still pending even after reading `pendingDrafts` on several
+results. When the main agent tries to end its turn with drafts that no comment covers and it did
+not decline, the app sends it back once with a message naming them, inside the same turn, and the
+backstop runs only when that turn really ends. `CadProviderTools.followUp` decides: it returns the
+message at most once per activation and null otherwise, and it never ends the activation. The
+adapters only deliver it:
+
+- Claude: a `Stop` hook answers `{decision: "block", reason}`, so the SDK continues the same turn with the message as hook feedback.
+- Codex: the app-server cannot reopen a finished turn, so `CodexSessionRuntime.ts` holds back the native turn's `turn/completed`, starts a second native turn with the message and the first turn's settings, and reports that turn's events and completion under the first turn's id.
+
+Child agents get no follow-up; their drafts still settle at their own turn end. Over plain MCP the
+server cannot start a turn, so outside the app only the e2e harness (`--follow-up`) sends one.
+
+Ways this can fail, each covered by `CadViewing.test.ts` or `CodexFollowUpRuntime.integration.test.ts`:
+
+- The agent ends its turn with uncovered, undeclined drafts and is never asked to finish them.
+- The follow-up is sent when every draft is covered or declined, or twice in one turn, so a model that will not publish loops.
+- Asking for the follow-up ends the activation, so the backstop publishes before the agent's own comments and duplicates them.
+- Asking for a follow-up on a turn with no CAD activity, an ended turn, or a child agent's turn starts an activation or reads the wrong drafts.
+- A failed chat read fails the turn end instead of skipping the follow-up.
+- Codex: the first native turn's completion reaches the app, so the app ends the turn before the follow-up.
+- Codex: the follow-up appears as a second turn, its events carry a turn id the app never saw, or its completion never completes the app's turn.
+- Codex: CAD calls in the follow-up open a new activation with an empty ledger.
+- Codex: Stop during the follow-up interrupts the finished first turn, so the agent keeps running.
+- Codex: Stop arrives as the first native turn finishes, and the follow-up starts anyway.
+- Codex: a follow-up is sent after an interrupted or failed turn, or while another turn the user sent is already queued.
+- Codex: a follow-up that fails to start leaves the app's turn running forever.
+
 ## Registration
 
-`CAD_TOOL_INPUTS` in `packages/contracts/src/cadTools.ts` declares the input; `CadProviderTools.ts` describes it, lists it as read-only, and routes it to `CadAgentTools.checks`, which `CadViewing.ts` implements inside the activation. Codex and Claude receive it with the other CAD tools; `CAD_REVIEW_INSTRUCTIONS` tells agents to run it early, explain each exact interference finding, and never publish an interference comment from bounds overlap alone. Without `checks`, a call runs `mesh-interference`, `coincident-instances`, and `degenerate-geometry`; `overlapping-bounds` runs only on request.
+`CAD_TOOL_INPUTS` in `packages/contracts/src/cadTools.ts` declares the input; `CadProviderTools.ts` describes it, lists it as read-only, and routes it to `CadAgentTools.checks`, which `CadViewing.ts` implements inside the activation. Codex and Claude receive it with the other CAD tools; `CAD_REVIEW_INSTRUCTIONS` tells agents to run it early, explain each exact interference finding, and never publish an interference comment from bounds overlap alone. Without `checks`, a call runs `drivetrain`, `mesh-interference`, `coincident-instances`, and `degenerate-geometry`; `overlapping-bounds` runs only on request.
 
 ## Verification
 

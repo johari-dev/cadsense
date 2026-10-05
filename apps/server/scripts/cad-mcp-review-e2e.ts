@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off preferSchemaOverJson:off
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off preferSchemaOverJson:off globalTimers:off
 /**
  * End-to-end check that an outside agent can review Onshape CAD through `cadsense mcp` with no
  * window. Runs Claude Code or Codex non-interactively against a fresh MCP data directory, then keeps
@@ -15,9 +15,19 @@
  *
  * The credential file is JSON with `accessKeyId` and `secretKey`. The web app must be built first
  * (`pnpm --filter @cadsense/web build`) because headless Chromium loads its render page.
+ *
+ * --seed-home <dir> starts from a copy of an earlier run's data directory, minus its reports. With a
+ * microversion (/m/) URL that directory already holds, cad_open makes no Onshape requests, so
+ * repeated runs neither wait on a download nor spend the key's rate limit.
+ *
+ * --follow-up resumes the agent's session once when it exits with cad_checks drafts still pending
+ * (the server logs "CAD drafts pending"), asking it to pin or decline them. The app sends its own
+ * follow-up inside the turn (see "The follow-up" in src/cad/CadChecks.md); over MCP only this
+ * harness can. Its reply goes to followup-message.md; final-message.md keeps the review.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
@@ -29,6 +39,8 @@ const { values } = NodeUtil.parseArgs({
     "prompt-file": { type: "string" },
     out: { type: "string" },
     model: { type: "string" },
+    "seed-home": { type: "string" },
+    "follow-up": { type: "boolean" },
   },
 });
 const agent = values.agent;
@@ -39,7 +51,7 @@ if (
   !values.out
 )
   throw new Error(
-    "Usage: --agent claude|codex --url <url> --prompt-file <file> --out <dir> [--model <id>]",
+    "Usage: --agent claude|codex --url <url> --prompt-file <file> --out <dir> [--model <id>] [--seed-home <dir>]",
   );
 const credentialFile = process.env.ONSHAPE_CREDENTIAL_FILE;
 if (!credentialFile)
@@ -53,28 +65,44 @@ const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
 const home = NodePath.join(out, "home");
 NodeFS.mkdirSync(out, { recursive: true });
+if (values["seed-home"]) {
+  NodeFS.cpSync(NodePath.resolve(values["seed-home"]), home, { recursive: true });
+  NodeFS.rmSync(NodePath.join(home, "reports"), { recursive: true, force: true });
+}
 // Outside the repository, so neither agent finds this repo's AGENTS.md or skills.
 const workspace = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cadsense-mcp-e2e-"));
 const bin = NodePath.resolve(import.meta.dirname, "../src/bin.ts");
 const prompt = `${NodeFS.readFileSync(values["prompt-file"], "utf8").trim()}\n\n${values.url}`;
 NodeFS.writeFileSync(NodePath.join(out, "prompt.md"), `${prompt}\n`);
 
-// The MCP server's stderr goes to a file this run owns. Its stdout stays the MCP channel.
-const mcpCommand = "/bin/sh";
-const mcpArgs = [
-  "-c",
-  'exec "$0" "$1" mcp --base-dir "$2" 2>>"$3"',
-  process.execPath,
-  bin,
-  home,
-  NodePath.join(out, "mcp-stderr.log"),
-];
 const env = {
   ...process.env,
   ONSHAPE_ACCESS_KEY: credential.accessKeyId,
   ONSHAPE_SECRET_KEY: credential.secretKey,
   CADSENSE_TELEMETRY_ENABLED: "false",
 };
+// This run owns the MCP server process, the way the app owns a provider turn. The agent reaches it
+// through a relay on a Unix socket: MCP clients kill their stdio servers when they exit, which can
+// cut off work the server does when a review ends (the cad_checks draft backstop). When the agent
+// exits, the run ends the server's stdin and waits for it to finish.
+const server = NodeChildProcess.spawn(process.execPath, [bin, "mcp", "--base-dir", home], {
+  env,
+  stdio: ["pipe", "pipe", "pipe"],
+});
+server.stderr.pipe(NodeFS.createWriteStream(NodePath.join(out, "mcp-stderr.log"), { flags: "a" }));
+const socketPath = NodePath.join(workspace, "mcp.sock");
+const relayServer = NodeNet.createServer((socket) => {
+  socket.pipe(server.stdin, { end: false });
+  server.stdout.pipe(socket);
+  socket.on("close", () => server.stdout.unpipe(socket));
+});
+await new Promise<void>((resolve) => relayServer.listen(socketPath, resolve));
+const mcpCommand = process.execPath;
+const mcpArgs = [
+  "-e",
+  "const s=require('node:net').connect(process.argv[1]);process.stdin.pipe(s);s.pipe(process.stdout);s.on('close',()=>process.exit(0));",
+  socketPath,
+];
 const toml = (value: unknown) => JSON.stringify(value);
 const command =
   agent === "claude"
@@ -108,9 +136,6 @@ const command =
           `mcp_servers.cadsense.command=${toml(mcpCommand)}`,
           "-c",
           `mcp_servers.cadsense.args=${toml(mcpArgs)}`,
-          // Codex starts MCP servers with a minimal environment; forward only what Cadsense reads.
-          "-c",
-          `mcp_servers.cadsense.env_vars=${toml(["ONSHAPE_ACCESS_KEY", "ONSHAPE_SECRET_KEY", "CADSENSE_TELEMETRY_ENABLED"])}`,
           // Without this, `codex exec` rejects every tool that is not marked read-only.
           "-c",
           'mcp_servers.cadsense.default_tools_approval_mode="approve"',
@@ -122,18 +147,82 @@ const command =
       };
 
 const startedAt = Date.now();
-const transcript = NodeFS.openSync(NodePath.join(out, "transcript.jsonl"), "w");
+const transcriptFile = NodePath.join(out, "transcript.jsonl");
+const transcript = NodeFS.openSync(transcriptFile, "w");
 const agentLog = NodeFS.openSync(NodePath.join(out, "agent-stderr.log"), "w");
-const exitCode = await new Promise<number | null>((resolve, reject) => {
-  const child = NodeChildProcess.spawn(command.file, command.args, {
-    cwd: workspace,
-    env,
-    stdio: ["ignore", transcript, agentLog],
+const runAgent = (file: string, args: readonly string[]) =>
+  new Promise<number | null>((resolve, reject) => {
+    const child = NodeChildProcess.spawn(file, args, {
+      cwd: workspace,
+      env,
+      stdio: ["ignore", transcript, agentLog],
+    });
+    child.once("error", reject);
+    child.once("exit", resolve);
   });
-  child.once("error", reject);
-  child.once("exit", resolve);
-});
+const exitCode = await runAgent(command.file, command.args);
+
+/** Draft keys the server last reported pending, from its "CAD drafts pending" log lines. */
+const pendingDrafts = () => {
+  const log = NodeFS.readFileSync(NodePath.join(out, "mcp-stderr.log"), "utf8");
+  const at = log.lastIndexOf("CAD drafts pending");
+  if (at < 0) return [];
+  const block = log.slice(at, log.indexOf("}", at) + 1);
+  return [...block.matchAll(/'([^']+)'/g)].map((match) => match[1]!);
+};
+const pendingBefore = pendingDrafts();
+let followUp:
+  | { readonly sent: boolean; readonly pendingBefore: number; readonly pendingAfter: number }
+  | undefined;
+if (values["follow-up"]) {
+  const firstLines = NodeFS.readFileSync(transcriptFile, "utf8").split("\n");
+  const sessionId = firstLines
+    .filter((line) => line.startsWith("{"))
+    .map((line) => JSON.parse(line) as Record<string, any>)
+    .map((event) => (agent === "claude" ? event.session_id : event.thread_id))
+    .find((value) => typeof value === "string");
+  if (pendingBefore.length > 0 && sessionId) {
+    const prompt = `Your review is not finished. Cadsense's checks proved ${pendingBefore.length} defects that still have no CAD comment (cad_checks draft keys: ${pendingBefore.join(", ")}). Pin each one now with cad_comments_publish, using publishDrafts or your own wording, or decline it with declinedDrafts and a reason when the user said that part is a placeholder or not modeled yet. Then tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.`;
+    const resume =
+      agent === "claude"
+        ? [
+            ...command.args.slice(command.args.indexOf("--mcp-config")),
+            "-p",
+            prompt,
+            "--resume",
+            sessionId,
+          ]
+        : [
+            "exec",
+            "resume",
+            "--json",
+            "--skip-git-repo-check",
+            ...command.args.flatMap((arg, i) => (command.args[i - 1] === "-c" ? ["-c", arg] : [])),
+            "-c",
+            'sandbox_mode="read-only"',
+            "-o",
+            NodePath.join(out, "followup-message.md"),
+            ...(values.model ? ["--model", values.model] : []),
+            sessionId,
+            prompt,
+          ];
+    await runAgent(command.file, resume);
+  }
+  followUp = {
+    sent: pendingBefore.length > 0 && sessionId !== undefined,
+    pendingBefore: pendingBefore.length,
+    pendingAfter: pendingDrafts().length,
+  };
+}
 const durationMs = Date.now() - startedAt;
+// End the server's session and let it finish its turn-end work before reading the report.
+server.stdin.end();
+const serverExit = await Promise.race([
+  new Promise<number | null>((resolve) => server.once("exit", resolve)),
+  new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 60_000)),
+]);
+if (serverExit === "timeout") server.kill();
+relayServer.close();
 
 // Tool calls from either agent's event stream, reduced to name, error flag, and error text.
 interface ToolCall {
@@ -152,7 +241,10 @@ if (agent === "claude") {
   const names = new Map<string, string>();
   for (const event of events) {
     if (event.type === "system" && event.subtype === "init") model = event.model;
-    if (event.type === "result") finalMessage = event.result;
+    if (event.type === "result") {
+      if (finalMessage === undefined) finalMessage = event.result;
+      else NodeFS.writeFileSync(NodePath.join(out, "followup-message.md"), `${event.result}\n`);
+    }
     for (const block of event.message?.content ?? []) {
       if (block.type === "tool_use")
         names.set(block.id, String(block.name).replace("mcp__cadsense__", ""));
@@ -221,6 +313,7 @@ const summary = {
   durationSeconds: Math.round(durationMs / 1000),
   toolCalls: counts,
   failedToolCalls: calls.filter((call) => call.isError),
+  ...(followUp ? { followUp } : {}),
   comments: comments.length,
   pointTargets: comments
     .flatMap((comment) => comment.targets)

@@ -10,6 +10,7 @@ import { cadReviewInstructions } from "../CadReviewInstructions.ts";
 import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import {
   type CanUseTool,
+  type HookCallback,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -4466,6 +4467,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           updatedAt: startedAt,
         } satisfies ProviderSession,
       };
+      /**
+       * When the main agent tries to end a turn with cad_checks drafts that no comment covers, blocks
+       * the stop once with a message naming them, so the same turn continues. See "The follow-up"
+       * in cad/CadChecks.md.
+       */
+      const cadStopHook: HookCallback = () =>
+        runPromise(
+          Effect.gen(function* () {
+            const turnId = cadContext?.turnState?.turnId;
+            if (!cad || !turnId) return {};
+            const reason = yield* cad.tools.followUp(null, asCanonicalTurnId(turnId));
+            return reason === null ? {} : { decision: "block" as const, reason };
+          }).pipe(Effect.catchCause(() => Effect.succeed({}))),
+        );
       const queryOptions: ClaudeQueryOptions = {
         spawnClaudeCodeProcess: processExit.spawn,
         ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -4500,6 +4515,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        ...(cad ? { hooks: { Stop: [{ hooks: [cadStopHook] }] } } : {}),
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
         env: claudeEnvironment,

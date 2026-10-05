@@ -50,6 +50,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
                 calls.push(input);
                 return { result: { revision: 3 }, png: new Uint8Array([1, 2, 3]) };
               }),
+            followUp: () => Effect.succeed(null),
             end: () => Effect.void,
             close: Effect.void,
           },

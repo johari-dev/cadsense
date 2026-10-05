@@ -220,8 +220,18 @@ export const CadCommentsPublishInput = Schema.Struct({
   items: Schema.Array(Schema.Unknown).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
 });
 export const CadCommentsPublishToolInput = Schema.Struct({
-  expectedCatalogVersion: Schema.Int,
-  items: Schema.Array(CadCommentPublication).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  // Filled from the current catalog when left out.
+  expectedCatalogVersion: Schema.optionalKey(Schema.Int),
+  items: Schema.optionalKey(Schema.Array(CadCommentPublication).check(Schema.isMaxLength(20))),
+  // cad_checks drafts to publish exactly as offered, by publicationKey. CadProviderTools expands them.
+  publishDrafts: Schema.optionalKey(Schema.Array(Id).check(Schema.isMaxLength(20))),
+  // cad_checks drafts the agent leaves unpublished, with the user's reason. CadProviderTools reads
+  // and strips these; the comment service never sees them.
+  declinedDrafts: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ publicationKey: Id, explanation: text(1000) })).check(
+      Schema.isMaxLength(20),
+    ),
+  ),
 });
 export const CadCommentPick = Schema.Struct({
   pickKey: Id,
@@ -361,5 +371,9 @@ export const CadCommentRenderHit = Schema.Struct({
   occurrenceId: Schema.NullOr(CadHash),
   point: Schema.NullOr(CadCommentPoint),
   normal: Schema.NullOr(CadCommentPoint),
+  // The image pixel a locate candidate came from, when the pick missed and a nearby pixel hit.
+  pixel: Schema.optionalKey(
+    Schema.Tuple([Schema.Number.check(Schema.isFinite()), Schema.Number.check(Schema.isFinite())]),
+  ),
 });
 export type CadCommentRenderHit = typeof CadCommentRenderHit.Type;

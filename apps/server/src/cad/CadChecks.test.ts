@@ -1,9 +1,16 @@
-import { CadSnapshotManifest, ProjectId } from "@cadsense/contracts";
+import {
+  type CadCheckFinding,
+  CadSnapshotId,
+  CadSnapshotManifest,
+  ProjectId,
+} from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CAD_CHECK_EXPLANATIONS,
+  draftCadComments,
+  readOverlap,
   CAD_CHECK_LIMITS,
   loadCadBounds,
   loadCadSolidKernel,
@@ -163,6 +170,22 @@ const meshGlb = (primitives: readonly Primitive[], nodes?: readonly object[]) =>
   return output;
 };
 const solidBox = (min: Point, max: Point) => meshGlb([boxPrimitive(min, max)]);
+/** Outward-wound closed cylinder along local Z, centered on the origin. */
+const solidCylinder = (radius: number, length: number, segments = 32) => {
+  const positions: number[] = [];
+  for (const z of [-length / 2, length / 2])
+    for (let i = 0; i < segments; i++) {
+      const angle = (2 * Math.PI * i) / segments;
+      positions.push(radius * Math.cos(angle), radius * Math.sin(angle), z);
+    }
+  positions.push(0, 0, -length / 2, 0, 0, length / 2);
+  const n = segments;
+  const indices = Array.from({ length: n }, (_, i) => {
+    const j = (i + 1) % n;
+    return [i, j, n + j, i, n + j, n + i, 2 * n, j, i, 2 * n + 1, n + i, n + j];
+  }).flat();
+  return meshGlb([{ positions, indices }]);
+};
 interface Occurrence {
   readonly number: number;
   readonly name?: string;
@@ -735,7 +758,9 @@ describe("cad_checks tool", () => {
         const whole = yield* readCadChecks(snapshot, state, geometry, { expectedRevision: 3 });
         assert.equal(whole.snapshotId, snapshotId);
         // Exact interference replaces bounding-box leads by default; these boxes are their own solids.
+        // The drivetrain check runs too but recognizes nothing in parts named Plate and Block.
         assert.deepEqual(whole.checks, [
+          "drivetrain",
           "mesh-interference",
           "coincident-instances",
           "degenerate-geometry",
@@ -864,6 +889,262 @@ describe("cad_checks tool", () => {
       assert.equal(seen.size, 780);
       // The cap, not the limit, ended the pages: 100 of these findings would not fit.
       assert.isAbove(pageCount, 8);
+    }),
+  );
+});
+
+describe("draftCadComments", () => {
+  // Ways drafts can go wrong: a draft from a finding that is not a problem, a duplicate drafted
+  // when a drivetrain draft already names its parts, a repeated issue left as separate comments,
+  // or a target on a part that is only incidental to the issue (the gear a bare shaft carries),
+  // which lets an unrelated comment on that gear count as covering the draft.
+  const part = (n: number, name: string) => ({
+    occurrenceId: n.toString(16).padStart(64, "0"),
+    name,
+  });
+  const shaftA = part(1, "1.75 in. Hex Shaft <1>");
+  const shaftB = part(2, "2.39 in. Hex Shaft <1>");
+  const gear = part(3, "40t Spur Gear <1>");
+  const plateA = part(4, "Part 17 <2>");
+  const plateB = part(5, "Part 20 <3>");
+  const drivetrain = (
+    kind: Extract<CadCheckFinding, { check: "drivetrain" }>["kind"],
+    problem: boolean,
+    occurrences: ReturnType<typeof part>[],
+  ): CadCheckFinding => ({
+    check: "drivetrain",
+    kind,
+    problem,
+    summary: `${kind} summary.`,
+    occurrences,
+  });
+  const snapshotId = CadSnapshotId.make("00000000-0000-4000-8000-000000000003");
+  const drafts = draftCadComments(
+    [
+      drivetrain("power-path", false, [gear]),
+      drivetrain("gear-mesh", false, [gear, shaftA]),
+      drivetrain("shaft-support", true, [shaftA, gear]),
+      drivetrain("shaft-support", true, [shaftB]),
+      drivetrain("stacked-shafts", true, [shaftA, shaftB]),
+      {
+        check: "mesh-interference",
+        occurrences: [shaftA, shaftB],
+        intersectionVolume: 1e-6,
+        intersectionFraction: 0.95,
+        withinSubassembly: false,
+        reading: readOverlap(shaftA.name, shaftB.name, 1e-6, 0.95, false).reading,
+      },
+      {
+        check: "mesh-interference",
+        occurrences: [plateA, plateB],
+        intersectionVolume: 1e-4,
+        intersectionFraction: 1,
+        withinSubassembly: false,
+        reading: readOverlap(plateB.name, plateA.name, 1e-4, 1, false).reading,
+      },
+    ],
+    snapshotId,
+  );
+
+  it("drafts only problems, and merges a repeated issue into one comment", () => {
+    assert.deepEqual(
+      drafts.map((draft) => draft.title),
+      ["Shaft has no bearing", "Two shafts on one axis", "Duplicate part"],
+    );
+  });
+
+  it("keys a defect by its snapshot and parts, whichever other checks ran", () => {
+    const duplicate = drafts.find((draft) => draft.title === "Duplicate part")!;
+    // Drafted from a call that ran only mesh-interference, the plate keeps its key.
+    const alone = draftCadComments(
+      [
+        {
+          check: "mesh-interference",
+          occurrences: [plateA, plateB],
+          intersectionVolume: 1e-4,
+          intersectionFraction: 1,
+          withinSubassembly: false,
+          reading: readOverlap(plateB.name, plateA.name, 1e-4, 1, false).reading,
+        },
+      ],
+      snapshotId,
+    );
+    assert.equal(alone[0]!.publicationKey, duplicate.publicationKey);
+    assert.equal(new Set(drafts.map((draft) => draft.publicationKey)).size, drafts.length);
+    // A new snapshot gets new keys, so a later review in the chat never reuses a published key.
+    const later = draftCadComments(
+      [drivetrain("shaft-support", true, [shaftB])],
+      CadSnapshotId.make("00000000-0000-4000-8000-000000000004"),
+    );
+    const before = draftCadComments([drivetrain("shaft-support", true, [shaftB])], snapshotId);
+    assert.notEqual(later[0]!.publicationKey, before[0]!.publicationKey);
+  });
+
+  it("targets only the shafts a bearing draft is about, not the parts they carry", () => {
+    assert.deepEqual(
+      drafts[0]!.targets.flatMap((target) => (target.kind === "part" ? [target.occurrenceId] : [])),
+      [shaftA.occurrenceId, shaftB.occurrenceId],
+    );
+  });
+
+  it("ends every draft with a next step for the student", () => {
+    for (const draft of drafts) assert.match(draft.body, /\b(Add|Move|Keep|Remove)\b[^.]*\.$/);
+  });
+
+  it("merges collisions into one part into one draft that keeps every marker", () => {
+    const controller = part(6, "SPARK Flex Brushless Motor Controller <1>");
+    const collision = (shaft: ReturnType<typeof part>): CadCheckFinding => ({
+      check: "drivetrain",
+      kind: "collision",
+      problem: true,
+      summary: `${shaft.name} runs into ${controller.name}.`,
+      occurrences: [shaft, controller],
+    });
+    const findings = [collision(shaftA), collision(shaftB)];
+    const placementOf = (shaft: ReturnType<typeof part>) => ({
+      occurrenceId: shaft.occurrenceId,
+      point: [0, 0, 0] as const,
+      normal: [1, 0, 0] as const,
+      isolate: [shaft.occurrenceId, controller.occurrenceId],
+      expected: `where ${shaft.name} meets the controller`,
+    });
+    const merged = draftCadComments(
+      findings,
+      snapshotId,
+      new Map([
+        [findings[0]!, placementOf(shaftA)],
+        [findings[1]!, placementOf(shaftB)],
+      ]),
+    );
+    assert.equal(merged.length, 1);
+    assert.equal(
+      merged[0]!.title,
+      "1.75 in. Hex Shaft and 2.39 in. Hex Shaft run into SPARK Flex Brushless Motor Controller",
+    );
+    assert.deepEqual(
+      merged[0]!.placements?.map((placement) => placement.occurrenceId),
+      [shaftA.occurrenceId, shaftB.occurrenceId],
+    );
+  });
+
+  it("skips a duplicate whose parts a drivetrain draft already names", () => {
+    const duplicate = drafts.filter((draft) => draft.title === "Duplicate part");
+    assert.deepEqual(
+      duplicate.map((draft) =>
+        draft.targets.flatMap((target) => (target.kind === "part" ? [target.occurrenceId] : [])),
+      ),
+      [[plateA.occurrenceId, plateB.occurrenceId]],
+    );
+  });
+});
+
+// Cases from "Check-placed points" in CadComments.md.
+describe("check-placed points", () => {
+  const checks = new Set(["drivetrain", "mesh-interference"] as const);
+  const INCH = 0.0254;
+  /** Gear turned so its axis runs along world Y, then moved to (x, y, z). */
+  const onY = (x: number, y: number, z: number) => [
+    1,
+    0,
+    0,
+    x,
+    0,
+    0,
+    1,
+    y,
+    0,
+    -1,
+    0,
+    z,
+    0,
+    0,
+    0,
+    1,
+  ];
+  const apply = (m: readonly number[], [x, y, z]: Point): Point => [
+    m[0]! * x + m[1]! * y + m[2]! * z + m[3]!,
+    m[4]! * x + m[5]! * y + m[6]! * z + m[7]!,
+    m[8]! * x + m[9]! * y + m[10]! * z + m[11]!,
+  ];
+  it.effect("puts a collision marker at the seam, in the spinning part's own frame", () =>
+    Effect.gen(function* () {
+      const radius = 1.05 * INCH;
+      const half = 0.25 * INCH;
+      const gearAt = onY(0.3, 0.2, 0.1);
+      // A 1 in tube whose wall the gear's rim cuts into by about 0.1 in.
+      const tubeMin: Point = [0.3 + radius - 0.1 * INCH, 0.2 - 2 * INCH, 0.1 - 0.5 * INCH];
+      const tubeMax: Point = [tubeMin[0] + INCH, 0.2 + 2 * INCH, 0.1 + 0.5 * INCH];
+      const snapshot = manifest(
+        [
+          {
+            number: 1,
+            part: 10,
+            name: '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+            transform: gearAt,
+          },
+          { number: 2, part: 11, name: 'Tube 1"x1"x11" <1>' },
+        ],
+        [10, 11],
+      );
+      const assets = [solidCylinder(radius, 2 * half), solidBox(tubeMin, tubeMax)];
+      const bounds = new Map(
+        [10, 11].map((part, i) => [id(part), readCadGeometryBounds(assets[i]!)]),
+      );
+      const meshes = new Map(
+        [10, 11].map((part, i) => [id(part), readCadTriangleMesh(assets[i]!)]),
+      );
+      const kernel = yield* loadCadSolidKernel;
+      const result = runCadChecks(snapshot, bounds, checks, undefined, { meshes, kernel });
+      const collision = result.findings.find(
+        (finding) => finding.check === "drivetrain" && finding.kind === "collision",
+      );
+      assert.isDefined(collision);
+      const placement = result.placements.get(collision!);
+      assert.isDefined(placement);
+      assert.equal(placement!.occurrenceId, id(1));
+      assert.deepEqual([...placement!.isolate].sort(), [id(1), id(2)]);
+      // On the gear: its local point is on the rim or a face.
+      const [lx, ly, lz] = placement!.point;
+      // Within the seam offset (0.3 mm) of the rim or a face.
+      const onGear =
+        Math.abs(Math.hypot(lx, ly) - radius) < 4e-4 || Math.abs(Math.abs(lz) - half) < 4e-4;
+      assert.isTrue(onGear, `local ${placement!.point}`);
+      // On the tube: the world point is on one of the tube's faces.
+      const world = apply(gearAt, placement!.point);
+      const faceGap = Math.min(
+        ...[0, 1, 2].flatMap((axis) => [
+          Math.abs(world[axis]! - tubeMin[axis]!),
+          Math.abs(world[axis]! - tubeMax[axis]!),
+        ]),
+      );
+      assert.isBelow(faceGap, 4e-4, `world ${world}`);
+      assert.closeTo(Math.hypot(...placement!.normal), 1, 1e-6);
+    }),
+  );
+  it.effect("offers no placement when the parts do not overlap", () =>
+    Effect.gen(function* () {
+      const snapshot = manifest(
+        [
+          {
+            number: 1,
+            part: 10,
+            name: '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+            transform: onY(0, 0, 0),
+          },
+          { number: 2, part: 11, name: 'Tube 1"x1"x11" <1>' },
+        ],
+        [10, 11],
+      );
+      const assets = [solidCylinder(INCH, 0.5 * INCH), solidBox([0.2, 0.2, 0.2], [0.3, 0.3, 0.3])];
+      const bounds = new Map(
+        [10, 11].map((part, i) => [id(part), readCadGeometryBounds(assets[i]!)]),
+      );
+      const meshes = new Map(
+        [10, 11].map((part, i) => [id(part), readCadTriangleMesh(assets[i]!)]),
+      );
+      const kernel = yield* loadCadSolidKernel;
+      const result = runCadChecks(snapshot, bounds, checks, undefined, { meshes, kernel });
+      assert.equal(result.placements.size, 0);
     }),
   );
 });

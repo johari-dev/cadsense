@@ -1,5 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// Draft keys are digests computed at this trusted server boundary.
+import * as NodeCrypto from "node:crypto";
 import {
   CAD_CHECK_NAMES,
+  type CadCheckDraft,
   CadCheckFinding,
   CadChecksInput,
   CadChecksResult,
@@ -11,6 +15,17 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import Module from "manifold-3d";
+import {
+  analyzeCadDrivetrain,
+  beltEndPlacement,
+  type CadDrivetrainPart,
+  type CadOverlap,
+  FASTENER,
+  fitCadAxis,
+  GAME_PIECE,
+  recognizeDrivetrainParts,
+  rotatingCollisions,
+} from "./CadDrivetrain.ts";
 import { MAX_PART_EXPORT_BYTES } from "./CadGeometry.ts";
 import { decodeCadToolInput } from "./CadViewState.ts";
 
@@ -406,7 +421,7 @@ export interface CadCheckSolids {
   readonly kernel: CadSolidKernel;
 }
 
-interface PartOccurrence {
+export interface PartOccurrence {
   readonly occurrenceId: string;
   readonly name: string;
   readonly geometryKey: string;
@@ -424,6 +439,8 @@ const byPair = (a: CadCheckFinding, b: CadCheckFinding) =>
 const pair = (a: PartOccurrence, b: PartOccurrence) => [a, b].sort(byId).map(ref);
 /** What each check does and does not prove. Pages state these once instead of on every finding. */
 export const CAD_CHECK_EXPLANATIONS = {
+  drivetrain:
+    "Reads gears, pulleys, belts, chains, shafts, bearings, gearboxes, motors, and rollers from vendor part names, fits each part's rotation axis from its mesh, and traces power from every motor. problem: true means the drive will not work as modeled (gears at the wrong center distance, a belt or chain with no pulley or sprocket at an end, a shaft with no bearing, rollers no motor reaches). Each one is a finding for a CAD comment unless the user said that part is a placeholder or not modeled yet. problem: false findings are traced facts such as ratios and power paths. Parts without vendor names are not recognized, so a part missing from a trace is unrecognized, not absent.",
   "mesh-interference":
     "The two solids share this volume in their original placements. Intended fits touch at zero volume, so this is usually a modeling error or a real collision: a duplicate part, a gear or shaft in the wrong spot, a plate through a tube. Parts modeled undeformed on purpose (a compressed game piece, press fits, threads) also appear. Pairs inside one subassembly are listed last because they are usually the kit author's modeling choice.",
   "overlapping-bounds":
@@ -435,7 +452,7 @@ export const CAD_CHECK_EXPLANATIONS = {
 } satisfies Record<CadCheckName, string>;
 
 /** Unsuppressed part occurrences at their original placement (explosion ignored). */
-const partOccurrences = (manifest: CadSnapshotManifest): PartOccurrence[] => {
+export const partOccurrences = (manifest: CadSnapshotManifest): PartOccurrence[] => {
   const nodes = new Map(manifest.nodes.map((node) => [node.id, node]));
   const suppressed = new Map<string, boolean>();
   const isSuppressed = (id: string): boolean => {
@@ -554,6 +571,49 @@ const sharesSubassembly = (manifest: CadSnapshotManifest) => {
   };
 };
 
+const cubicInches = (cubicMeters: number) =>
+  `${Number((cubicMeters / 1.6387064e-5).toPrecision(2))} in³`;
+
+/**
+ * Ranks an exact overlap and says what it usually means, so an agent can triage a long list
+ * without decoding volumes: cross-subassembly duplicates and collisions first, then overlaps inside
+ * one subassembly, then a squeezed game piece, then fastener threads. Ranking only orders the
+ * list; every overlap stays in it.
+ */
+export const readOverlap = (
+  smaller: string,
+  larger: string,
+  volume: number,
+  fraction: number,
+  withinSubassembly: boolean,
+): { rank: number; reading: string } => {
+  const amount = `${cubicInches(volume)} (${Math.round(fraction * 100)}% of ${smaller})`;
+  if (GAME_PIECE.test(smaller) || GAME_PIECE.test(larger))
+    return {
+      rank: 2,
+      reading: `${smaller} and ${larger} share ${amount}. Game pieces are modeled undeformed, so this is usually an intended squeeze; mention it only if that part should not touch the piece.`,
+    };
+  if (FASTENER.test(smaller) || FASTENER.test(larger))
+    return {
+      rank: 3,
+      reading: `${smaller} and ${larger} share ${amount}. Fastener threads and nuts are often modeled overlapping, so this is usually not a problem.`,
+    };
+  const duplicate = `${smaller} sits almost entirely inside ${larger} (${amount}): a duplicate or stale copy, or a second part modeled in the same place. Remove or move one.`;
+  if (withinSubassembly)
+    return {
+      rank: 1,
+      reading:
+        fraction >= 0.9
+          ? duplicate
+          : `${smaller} and ${larger} share ${amount} inside one subassembly. Vendor kits sometimes overlap like this, but parts the team placed should not; check how they are mated.`,
+    };
+  if (fraction >= 0.9) return { rank: 0, reading: duplicate };
+  return {
+    rank: 0,
+    reading: `${smaller} runs into ${larger}, sharing ${amount}: a real collision or a part in the wrong place. Explain or fix it.`,
+  };
+};
+
 /** Exact intersection of every broad-phase pair whose parts both form closed solids.
  * Solids are built once per asset and placed per occurrence; every WASM object is freed before returning. */
 const meshInterference = (
@@ -601,8 +661,11 @@ const meshInterference = (
       return result;
     };
     const within = sharesSubassembly(manifest);
-    const findings = pairs.flatMap(
-      ({ a, b }): Extract<CadCheckFinding, { check: "mesh-interference" }>[] => {
+    const ranked = pairs.flatMap(
+      ({
+        a,
+        b,
+      }): { rank: number; finding: Extract<CadCheckFinding, { check: "mesh-interference" }> }[] => {
         const solidA = localSolid(a.occurrence.geometryKey);
         const solidB = localSolid(b.occurrence.geometryKey);
         if (!solidA || !solidB) return [];
@@ -612,27 +675,44 @@ const meshInterference = (
         owned.push(common);
         const intersectionVolume = common.volume();
         if (intersectionVolume <= CAD_CHECK_LIMITS.overlapVolume) return [];
+        const [smaller, larger] =
+          placedA.volume() <= placedB.volume()
+            ? [a.occurrence, b.occurrence]
+            : [b.occurrence, a.occurrence];
+        const intersectionFraction = Math.min(
+          1,
+          intersectionVolume / Math.min(placedA.volume(), placedB.volume()),
+        );
+        const withinSubassembly = within(a.occurrence.occurrenceId, b.occurrence.occurrenceId);
+        const { rank, reading } = readOverlap(
+          smaller.name,
+          larger.name,
+          intersectionVolume,
+          intersectionFraction,
+          withinSubassembly,
+        );
         return [
           {
-            check: "mesh-interference",
-            occurrences: pair(a.occurrence, b.occurrence),
-            intersectionVolume,
-            intersectionFraction: Math.min(
-              1,
-              intersectionVolume / Math.min(placedA.volume(), placedB.volume()),
-            ),
-            withinSubassembly: within(a.occurrence.occurrenceId, b.occurrence.occurrenceId),
+            rank,
+            finding: {
+              check: "mesh-interference",
+              occurrences: pair(a.occurrence, b.occurrence),
+              intersectionVolume,
+              intersectionFraction,
+              withinSubassembly,
+              reading,
+            },
           },
         ];
       },
     );
-    findings.sort(
+    ranked.sort(
       (a, b) =>
-        Number(a.withinSubassembly) - Number(b.withinSubassembly) ||
-        b.intersectionVolume - a.intersectionVolume ||
-        byPair(a, b),
+        a.rank - b.rank ||
+        b.finding.intersectionVolume - a.finding.intersectionVolume ||
+        byPair(a.finding, b.finding),
     );
-    return { findings, meshUnknown };
+    return { findings: ranked.map(({ finding }) => finding), meshUnknown };
   } finally {
     for (const solid of owned) solid.delete();
   }
@@ -684,6 +764,267 @@ const degenerateGeometry = (
       ];
     });
 
+/**
+ * Where a check-placed comment marker goes: a surface point in the part's own coordinates, the
+ * world direction to look at it from, the parts an inspection should show, and a description of the
+ * spot for the agent to confirm against the inspection image.
+ */
+export interface CadCheckPlacement {
+  readonly occurrenceId: string;
+  readonly point: Vector3;
+  readonly normal: Vector3;
+  readonly isolate: readonly string[];
+  readonly expected: string;
+}
+
+/** Inverse of a row-major affine transform. */
+const inverseAffine = (m: Matrix): Matrix => {
+  const [a, b, c, d, e, f, g, h, i] = [
+    m[0]!,
+    m[1]!,
+    m[2]!,
+    m[4]!,
+    m[5]!,
+    m[6]!,
+    m[8]!,
+    m[9]!,
+    m[10]!,
+  ];
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  const r = [
+    (e * i - f * h) / det,
+    (c * h - b * i) / det,
+    (b * f - c * e) / det,
+    (f * g - d * i) / det,
+    (a * i - c * g) / det,
+    (c * d - a * f) / det,
+    (d * h - e * g) / det,
+    (b * g - a * h) / det,
+    (a * e - b * d) / det,
+  ];
+  const t = [m[3]!, m[7]!, m[11]!];
+  return [
+    r[0]!,
+    r[1]!,
+    r[2]!,
+    -(r[0]! * t[0]! + r[1]! * t[1]! + r[2]! * t[2]!),
+    r[3]!,
+    r[4]!,
+    r[5]!,
+    -(r[3]! * t[0]! + r[4]! * t[1]! + r[5]! * t[2]!),
+    r[6]!,
+    r[7]!,
+    r[8]!,
+    -(r[6]! * t[0]! + r[7]! * t[1]! + r[8]! * t[2]!),
+    0,
+    0,
+    0,
+    1,
+  ];
+};
+
+/**
+ * The point where the subject's surface enters the other part, nearest the middle of their overlap:
+ * a vertex of the exact intersection shared by triangles from both parts' surfaces, moved
+ * SEAM_OFFSET out into the open corner between them (the bisector of both outward normals), so the
+ * marker is not buried in either solid. The view direction is that bisector. Null when the meshes
+ * are not closed solids or do not overlap.
+ */
+const seamPoint = (
+  kernel: CadSolidKernel,
+  subject: { mesh: CadTriangleMesh; transform: Matrix },
+  other: { mesh: CadTriangleMesh; transform: Matrix },
+): { point: Vector3; normal: Vector3 } | null => {
+  const owned: CadSolid[] = [];
+  const keep = (solid: CadSolid) => {
+    owned.push(solid);
+    return solid;
+  };
+  try {
+    const place = ({ mesh, transform }: typeof subject) => {
+      const input = new kernel.Mesh({
+        numProp: 3,
+        vertProperties: Float32Array.from(mesh.positions),
+        triVerts: mesh.indices,
+      });
+      input.merge();
+      const local = keep(new kernel.Manifold(input));
+      return keep(keep(local.transform(columnMajor(transform))).asOriginal());
+    };
+    const a = place(subject);
+    const b = place(other);
+    const common = keep(a.intersect(b));
+    if (common.volume() <= CAD_CHECK_LIMITS.overlapVolume) return null;
+    const out = common.getMesh();
+    const vertices = out.vertProperties.length / out.numProp;
+    const at = (v: number): Vector3 => [
+      out.vertProperties[v * out.numProp]!,
+      out.vertProperties[v * out.numProp + 1]!,
+      out.vertProperties[v * out.numProp + 2]!,
+    ];
+    // Vertices can repeat at boundaries between the two inputs' triangles; merge them by position.
+    const keyOf = (v: number) =>
+      at(v)
+        .map((value) => Math.round(value * 1e7))
+        .join(",");
+    const canonical = new Map<string, number>();
+    const merged = Array.from({ length: vertices }, (_, v) => {
+      const key = keyOf(v);
+      if (!canonical.has(key)) canonical.set(key, v);
+      return canonical.get(key)!;
+    });
+    const sides = new Uint8Array(vertices);
+    // Outward normals summed per vertex: index 0 for the subject's surface, 1 for the other part's.
+    const normals = [
+      new Map<number, [number, number, number]>(),
+      new Map<number, [number, number, number]>(),
+    ];
+    const subjectId = a.originalID();
+    for (let run = 0; run < out.runOriginalID.length; run++) {
+      const bit = out.runOriginalID[run] === subjectId ? 1 : 2;
+      for (let t = out.runIndex[run]!; t < out.runIndex[run + 1]!; t += 3) {
+        const corners = [out.triVerts[t]!, out.triVerts[t + 1]!, out.triVerts[t + 2]!];
+        for (const corner of corners) sides[merged[corner]!]! |= bit;
+        const sums = normals[bit - 1]!;
+        const [p, q, r] = corners.map(at) as [Vector3, Vector3, Vector3];
+        const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+        const w = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+        const n: [number, number, number] = [
+          u[1]! * w[2]! - u[2]! * w[1]!,
+          u[2]! * w[0]! - u[0]! * w[2]!,
+          u[0]! * w[1]! - u[1]! * w[0]!,
+        ];
+        for (const corner of corners) {
+          const key = merged[corner]!;
+          const sum = sums.get(key) ?? [0, 0, 0];
+          sums.set(key, [sum[0] + n[0], sum[1] + n[1], sum[2] + n[2]]);
+        }
+      }
+    }
+    const middle: [number, number, number] = [0, 0, 0];
+    for (let v = 0; v < vertices; v++) {
+      const [x, y, z] = at(v);
+      middle[0] += x / vertices;
+      middle[1] += y / vertices;
+      middle[2] += z / vertices;
+    }
+    let best: number | null = null;
+    let bestDistance = Infinity;
+    for (let v = 0; v < vertices; v++) {
+      if (merged[v] !== v || sides[v] !== 3) continue;
+      const [x, y, z] = at(v);
+      const distance = Math.hypot(x - middle[0], y - middle[1], z - middle[2]);
+      if (distance < bestDistance) {
+        best = v;
+        bestDistance = distance;
+      }
+    }
+    if (best === null) return null;
+    const seam = at(best);
+    const unit = (v: readonly number[]) => {
+      const length = Math.hypot(...v);
+      return length > 0 ? v.map((value) => value / length) : [0, 0, 0];
+    };
+    // Out of both solids: the bisector of the two outward normals points into the open corner.
+    const outward = unit(
+      [0, 1, 2].map(
+        (axis) =>
+          unit(normals[0]!.get(best) ?? [0, 0, 0])[axis]! +
+          unit(normals[1]!.get(best) ?? [0, 0, 0])[axis]!,
+      ),
+    );
+    const direction =
+      Math.hypot(...outward) > 0 ? outward : unit(seam.map((v, i) => v - middle[i]!));
+    // A point exactly on both surfaces reads as hidden behind them, so sit just outside the seam.
+    const world: Vector3 = [
+      seam[0] + direction[0]! * SEAM_OFFSET,
+      seam[1] + direction[1]! * SEAM_OFFSET,
+      seam[2] + direction[2]! * SEAM_OFFSET,
+    ];
+    return {
+      point: applyPoint(inverseAffine(subject.transform), world),
+      normal: [direction[0]!, direction[1]!, direction[2]!],
+    };
+  } catch {
+    // manifold-3d throws for meshes that are not closed, consistently oriented solids.
+    return null;
+  } finally {
+    for (const solid of owned) solid.delete();
+  }
+};
+
+/** How far a seam marker sits off the surfaces it joins, in meters. */
+const SEAM_OFFSET = 0.0003;
+const plainName = (name: string) => name.replace(/\s*<\d+>$/, "");
+
+/**
+ * Placements for the drivetrain findings whose spot the geometry proves: a spinning part running
+ * into another part and two gears set so close they overlap (the seam of the overlap), and a belt or
+ * chain with a bare end (that end of the loop).
+ */
+const drivetrainPlacements = (
+  findings: readonly CadCheckFinding[],
+  occurrences: readonly PartOccurrence[],
+  parts: readonly CadDrivetrainPart[],
+  overlaps: readonly CadOverlap[],
+  solids: CadCheckSolids,
+) => {
+  const byId = new Map(occurrences.map((occurrence) => [occurrence.occurrenceId, occurrence]));
+  const recognized = new Map(parts.map((part) => [part.occurrenceId, part]));
+  const overlapping = new Set(
+    overlaps.map((overlap) =>
+      overlap.occurrences
+        .map((side) => side.occurrenceId)
+        .sort()
+        .join("|"),
+    ),
+  );
+  const solidOf = (occurrenceId: string) => {
+    const occurrence = byId.get(occurrenceId);
+    const mesh = occurrence ? solids.meshes.get(occurrence.geometryKey) : null;
+    return occurrence && mesh ? { mesh, transform: occurrence.transform } : null;
+  };
+  const placements = new Map<CadCheckFinding, CadCheckPlacement>();
+  for (const finding of findings) {
+    if (finding.check !== "drivetrain" || !finding.problem) continue;
+    const [first, second] = finding.occurrences;
+    if (
+      (finding.kind === "collision" || finding.kind === "gear-mesh") &&
+      first &&
+      second &&
+      overlapping.has([first.occurrenceId, second.occurrenceId].sort().join("|"))
+    ) {
+      const subject = solidOf(first.occurrenceId);
+      const other = solidOf(second.occurrenceId);
+      const seam = subject && other ? seamPoint(solids.kernel, subject, other) : null;
+      if (seam)
+        placements.set(finding, {
+          occurrenceId: first.occurrenceId,
+          ...seam,
+          isolate: [first.occurrenceId, second.occurrenceId],
+          expected: `where ${plainName(first.name)} meets ${plainName(second.name)}`,
+        });
+    }
+    if (finding.kind === "loop" && first) {
+      const belt = recognized.get(first.occurrenceId);
+      const occurrence = byId.get(first.occurrenceId);
+      const mesh = occurrence ? solids.meshes.get(occurrence.geometryKey) : null;
+      const end =
+        belt && occurrence && mesh
+          ? beltEndPlacement(belt, mesh, occurrence.transform, parts)
+          : null;
+      if (end)
+        placements.set(finding, {
+          occurrenceId: first.occurrenceId,
+          ...end,
+          isolate: finding.occurrences.map((occurrence) => occurrence.occurrenceId),
+          expected: `at the end of ${plainName(first.name)} that has no pulley`,
+        });
+    }
+  }
+  return placements;
+};
+
 /** Pure, deterministic pass over one snapshot. Same inputs always yield the same ordered findings. */
 export const runCadChecks = (
   manifest: CadSnapshotManifest,
@@ -704,7 +1045,45 @@ export const runCadChecks = (
   const interference = checks.has("mesh-interference")
     ? meshInterference(manifest, occurrences, broad.pairs, solids)
     : { findings: [], meshUnknown: 0 };
+  const parts =
+    checks.has("drivetrain") && solids ? recognizeDrivetrainParts(occurrences, solids.meshes) : [];
+  const byId = new Map(occurrences.map((occurrence) => [occurrence.occurrenceId, occurrence]));
+  const recognized = new Map(parts.map((part) => [part.occurrenceId, part]));
+  // Exact overlaps, with each side's axis, for the collision check and its placements.
+  const overlaps: CadOverlap[] = interference.findings.flatMap((finding) => {
+    const sides = finding.occurrences.map((side) => {
+      const occurrence = byId.get(side.occurrenceId);
+      const mesh = occurrence ? solids?.meshes.get(occurrence.geometryKey) : null;
+      return {
+        ...side,
+        fit:
+          recognized.get(side.occurrenceId)?.fit ??
+          (occurrence && mesh ? fitCadAxis(mesh, occurrence.transform) : null),
+      };
+    });
+    const [a, b] = sides;
+    return a && b
+      ? [
+          {
+            occurrences: [a, b],
+            volume: finding.intersectionVolume,
+            withinSubassembly: finding.withinSubassembly,
+          },
+        ]
+      : [];
+  });
+  const drivetrain =
+    checks.has("drivetrain") && solids
+      ? [...analyzeCadDrivetrain(parts), ...rotatingCollisions(parts, overlaps)]
+          // Problems first; the sort is stable, so each group keeps occurrence order.
+          .sort((a, b) => Number(b.problem) - Number(a.problem))
+          .map((finding): CadCheckFinding => ({ check: "drivetrain", ...finding }))
+      : [];
+  const placements = solids
+    ? drivetrainPlacements(drivetrain, occurrences, parts, overlaps, solids)
+    : new Map<CadCheckFinding, CadCheckPlacement>();
   const findings: CadCheckFinding[] = [
+    ...drivetrain,
     ...interference.findings,
     ...(checks.has("overlapping-bounds") ? overlappingBounds(broad.pairs) : []),
     ...(checks.has("coincident-instances") ? coincidentInstances(occurrences) : []),
@@ -712,6 +1091,7 @@ export const runCadChecks = (
   ];
   return {
     findings,
+    placements,
     summary: {
       totalFindings: findings.length,
       partOccurrences: occurrences.length,
@@ -762,8 +1142,208 @@ const presentFinding = (finding: CadCheckFinding): CadCheckFinding => {
       return { ...finding, maxDeviation: significant(finding.maxDeviation) };
     case "degenerate-geometry":
       return { ...finding, size: finding.size && significant3(finding.size) };
+    case "drivetrain":
+      return finding;
   }
 };
+type DraftedKind = Exclude<Extract<CadCheckFinding, { check: "drivetrain" }>["kind"], "power-path">;
+// Each draft ends with a next step: a backstop comment is published as drafted, and a defect
+// without one tells the student what is wrong but not what to do.
+const DRAFT_LABELS = {
+  "gear-mesh": {
+    title: "Gears are at the wrong spacing",
+    severity: "blocker",
+    category: "interference",
+    action: "Move one shaft so the centers match the spacing these gears need.",
+  },
+  loop: {
+    title: "Belt or chain does not fit its pulleys",
+    severity: "blocker",
+    category: "assembly",
+    action:
+      "Add a pulley or sprocket at each end, or remove it if it is left over, then check its length against the centers.",
+  },
+  "shaft-support": {
+    title: "Shaft has no bearing",
+    severity: "blocker",
+    category: "structure",
+    action: "Add a bearing where each shaft passes through a plate.",
+  },
+  "stacked-shafts": {
+    title: "Two shafts on one axis",
+    severity: "concern",
+    category: "assembly",
+    action: "Keep the shaft the parts are designed for and remove the other.",
+  },
+  unpowered: {
+    title: "Motor does not reach the rollers",
+    severity: "blocker",
+    category: "other",
+    action: "Add a gear, belt, or chain stage from the last driven shaft to the rollers.",
+  },
+  collision: {
+    title: "A spinning part runs into another part",
+    severity: "blocker",
+    category: "interference",
+    action: "Move one of them or cut clearance, then check the gap through a full turn.",
+  },
+  "motor-mount": {
+    title: "Motor is not held by its plate",
+    severity: "blocker",
+    category: "assembly",
+    action: "Move the controller to the back of the motor so the motor face bolts to its plate.",
+  },
+} satisfies Record<
+  DraftedKind,
+  Pick<CadCheckDraft, "title" | "severity" | "category"> & { action: string }
+>;
+/**
+ * Findings that state one problem across several parts share a key and become one comment with
+ * several targets: every shaft without a bearing, every doubled shaft, and every spinning part
+ * that runs into the same other part.
+ */
+const mergeKey = (finding: Extract<CadCheckFinding, { check: "drivetrain" }>) =>
+  finding.kind === "shaft-support" || finding.kind === "stacked-shafts"
+    ? finding.kind
+    : finding.kind === "collision"
+      ? `collision:${finding.occurrences[1]?.occurrenceId}`
+      : null;
+/**
+ * A draft's key names the defect: its kind and parts on this snapshot. Every call that drafts the
+ * defect on the snapshot gives it the same key, whichever other checks ran, and a new snapshot
+ * gives new keys, so a later review in the chat never reuses a key published for another comment.
+ */
+const draftKey = (kind: string, snapshotId: string, targets: CadCheckDraft["targets"]) => {
+  const parts = targets.flatMap((target) => (target.kind === "part" ? [target.occurrenceId] : []));
+  const digest = NodeCrypto.createHash("sha256")
+    .update([snapshotId, kind, ...parts.toSorted()].join("|"))
+    .digest("hex");
+  return `check-${kind}-${digest.slice(0, 6)}`;
+};
+const shortName = (name: string) =>
+  name
+    .replace(/\s*<\d+>$/, "")
+    .replace(/\s*\(.*\)$/, "")
+    .trim();
+const WHOLE_PART = "The problem is where this part sits, not one spot on it.";
+const withAction = (draft: CadCheckDraft, action: string): CadCheckDraft => ({
+  ...draft,
+  body: `${draft.body} ${action}`.slice(0, 4000),
+});
+
+/**
+ * Publishable drafts for the defects the checks prove outright: drivetrain problems and near-total
+ * duplicates. Partial collisions are left to the agent, because exact overlaps there mix real
+ * problems (a gear through a tube) with tessellation noise (a bearing pressed into its plate).
+ * Smaller models found these defects but rarely spent the effort to publish them; a draft makes
+ * the right action one call. A duplicate whose parts a drivetrain draft already names is skipped.
+ */
+export const draftCadComments = (
+  findings: readonly CadCheckFinding[],
+  snapshotId: CadCheckDraft["inspectedSnapshotId"],
+  placements: ReadonlyMap<CadCheckFinding, CadCheckPlacement> = new Map(),
+): CadCheckDraft[] => {
+  const target = (occurrence: { occurrenceId: string; name: string }) => ({
+    kind: "part" as const,
+    label: occurrence.name.replace(/\s*<\d+>$/, "").slice(0, 120),
+    occurrenceId: occurrence.occurrenceId,
+    preciseLocationLimitation: WHOLE_PART,
+  });
+  const drafts: CadCheckDraft[] = [];
+  const merged = new Map<
+    string,
+    { kind: DraftedKind; draft: CadCheckDraft; subjects: string[]; other: string | undefined }
+  >();
+  const named = new Set<string>();
+  for (const finding of findings) {
+    if (finding.check !== "drivetrain" || !finding.problem || finding.kind === "power-path")
+      continue;
+    for (const occurrence of finding.occurrences) named.add(occurrence.occurrenceId);
+    // A bearing draft is about the shaft; the parts it carries are named in the text. Targeting
+    // them too would let an unrelated comment on a carried gear count as covering this draft.
+    const subjects =
+      finding.kind === "shaft-support" ? finding.occurrences.slice(0, 1) : finding.occurrences;
+    const targets = subjects.slice(0, 20).map(target);
+    const placement = placements.get(finding);
+    const key = mergeKey(finding);
+    const prior = key === null ? undefined : merged.get(key);
+    if (prior) {
+      const known = new Set(
+        prior.draft.targets.flatMap((t) => (t.kind === "part" ? [t.occurrenceId] : [])),
+      );
+      prior.subjects.push(finding.occurrences[0]!.name);
+      prior.draft = {
+        ...prior.draft,
+        body: `${prior.draft.body} ${finding.summary}`.slice(0, 4000),
+        targets: [
+          ...prior.draft.targets,
+          ...targets.filter((t) => !known.has(t.occurrenceId)),
+        ].slice(0, 20),
+        ...(placement || prior.draft.placements
+          ? { placements: [...(prior.draft.placements ?? []), ...(placement ? [placement] : [])] }
+          : {}),
+      };
+      continue;
+    }
+    const { action: _action, ...labels } = DRAFT_LABELS[finding.kind];
+    const draft: CadCheckDraft = {
+      kind: "new",
+      // A merged draft's key is set below, once all its parts are known.
+      publicationKey: draftKey(finding.kind, snapshotId, targets),
+      inspectedSnapshotId: snapshotId,
+      ...labels,
+      body: finding.summary.slice(0, 4000),
+      targets,
+      ...(placement ? { placements: [placement] } : {}),
+    };
+    if (key === null) drafts.push(withAction(draft, DRAFT_LABELS[finding.kind].action));
+    else
+      merged.set(key, {
+        kind: finding.kind,
+        draft,
+        subjects: [finding.occurrences[0]!.name],
+        other: finding.occurrences[1]?.name,
+      });
+  }
+  // A merged draft states its next step once, after every instance. A collision names its parts.
+  for (const { kind, draft, subjects, other } of merged.values()) {
+    const verb = subjects.length > 1 ? "run" : "runs";
+    const title =
+      kind === "collision" && other
+        ? `${subjects.map(shortName).join(" and ")} ${verb} into ${shortName(other)}`.slice(0, 160)
+        : draft.title;
+    drafts.push(
+      withAction(
+        { ...draft, title, publicationKey: draftKey(kind, snapshotId, draft.targets) },
+        DRAFT_LABELS[kind].action,
+      ),
+    );
+  }
+  for (const finding of findings) {
+    if (
+      finding.check !== "mesh-interference" ||
+      finding.withinSubassembly ||
+      finding.intersectionFraction < 0.9 ||
+      finding.occurrences.every((occurrence) => named.has(occurrence.occurrenceId)) ||
+      readOverlap(finding.occurrences[0]!.name, finding.occurrences[1]?.name ?? "", 0, 1, false)
+        .rank !== 0
+    )
+      continue;
+    const targets = finding.occurrences.map(target);
+    drafts.push({
+      kind: "new",
+      publicationKey: draftKey("duplicate", snapshotId, targets),
+      inspectedSnapshotId: snapshotId,
+      title: "Duplicate part",
+      body: finding.reading,
+      severity: "concern",
+      category: "assembly",
+      targets,
+    });
+  }
+  return drafts;
+};
+
 /** Exact interference replaces bounding-box leads unless the agent asks for them. */
 export const CAD_DEFAULT_CHECKS: readonly CadCheckName[] = CAD_CHECK_NAMES.filter(
   (name) => name !== "overlapping-bounds",
@@ -805,10 +1385,11 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
     selected.has("overlapping-bounds") ||
     selected.has("degenerate-geometry");
   const bounds = needsBounds ? yield* geometry.bounds(keys) : new Map<string, CadBounds | null>();
-  const solids = selected.has("mesh-interference")
-    ? { meshes: yield* geometry.meshes(keys), kernel: yield* loadCadSolidKernel }
-    : undefined;
-  const { findings, summary } = runCadChecks(
+  const solids =
+    selected.has("mesh-interference") || selected.has("drivetrain")
+      ? { meshes: yield* geometry.meshes(keys), kernel: yield* loadCadSolidKernel }
+      : undefined;
+  const { findings, summary, placements } = runCadChecks(
     manifest,
     bounds,
     selected,
@@ -821,6 +1402,8 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
     checks.map((check) => [check, CAD_CHECK_EXPLANATIONS[check]]),
   );
   const limit = input.limit ?? CAD_CHECK_LIMITS.pageSize;
+  const drafts = offset === 0 ? draftCadComments(findings, state.snapshotId, placements) : [];
+  const withDrafts = drafts.length > 0 ? { drafts } : {};
   const bytes = (value: CadCheckFinding | CadChecksResult) =>
     new TextEncoder().encode("check" in value ? encodeFindingJson(value) : encodeResultJson(value))
       .byteLength;
@@ -831,6 +1414,7 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
     checks,
     explanations,
     findings: [],
+    ...withDrafts,
     nextCursor: `${prefix}${findings.length}`,
     summary,
   });
@@ -850,6 +1434,7 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
     checks,
     explanations,
     findings: page,
+    ...withDrafts,
     nextCursor: end < findings.length ? `${prefix}${end}` : null,
     summary,
   };
