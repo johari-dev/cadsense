@@ -11,7 +11,11 @@ import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePrevi
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
 import { failureLocationLabel, formatVolumeChange } from "./FeatureScriptPreview";
-import { featureScriptFileKey, useFeatureScriptPanelStore } from "./featureScriptPanelStore";
+import {
+  featureScriptFileKey,
+  useFeatureScriptPanelStore,
+  withDefaultInputs,
+} from "./featureScriptPanelStore";
 
 const FAILED = new Set(["ERROR", "INVALID", "STOPPED"]);
 /** Inputs longer than this (picked faces, mostly) are left out of the summary line. */
@@ -56,10 +60,10 @@ export function FeatureScriptChatCard(props: {
         .update(
           featureScriptFileKey(threadRef.environmentId, props.workspaceRoot, card.path),
           ({ feature: _feature, ...current }) => ({
-            ...current,
+            ...withDefaultInputs(current),
             ...(card.feature === null ? {} : { feature: card.feature }),
             parameters: card.parameters,
-            picks: {},
+            before: card.before,
             base: card.base,
           }),
         );

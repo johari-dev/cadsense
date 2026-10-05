@@ -1,6 +1,6 @@
 import type { EnvironmentId, FeatureScriptFailure, ScopedThreadRef } from "@cadsense/contracts";
 import { CircleAlertIcon, Code2Icon, RotateCcwIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "~/components/ui/button";
@@ -12,8 +12,11 @@ import {
 } from "~/featurescript/FeatureScriptPreview";
 import {
   featureScriptFileKey,
+  inputsChanged,
+  previewInputs,
   useFeatureScriptFileSettings,
   withoutInputs,
+  type FeatureScriptFileSettings,
 } from "~/featurescript/featureScriptPanelStore";
 import { useFeatureScriptPreview } from "~/featurescript/useFeatureScriptPreview";
 import { useSeedComposer } from "~/hooks/useSeedComposer";
@@ -24,14 +27,16 @@ import { useProjectEntriesQuery } from "./projectFilesQueryState";
 
 const isStepFile = (path: string) => /\.(?:step|stp)$/i.test(path);
 
-/** The composer text for "Ask the agent to fix it". */
+/** The composer text for "Ask the agent to fix it", or for a workaround to what can't run locally. */
 function fixRequest(path: string, failure: FeatureScriptFailure): string {
   const line = failure.location?.path === path ? ` at line ${failure.location.line}` : "";
   const elsewhere =
     failure.location && failure.location.path !== path
       ? ` (${failure.location.path}:${failure.location.line})`
       : "";
-  return `The FeatureScript preview of ${path} fails${line}${elsewhere}: ${failure.message}\nPlease fix it and preview it again.`;
+  return failure.unsupported
+    ? `The FeatureScript preview of ${path} stops${line}${elsewhere}: ${failure.message}\nThat's something the local preview can't run yet, not a bug in the script. If the script can get the same result with operations the preview supports, change it and preview it again; otherwise tell me to check it in Onshape.`
+    : `The FeatureScript preview of ${path} fails${line}${elsewhere}: ${failure.message}\nPlease fix it and preview it again.`;
 }
 
 /**
@@ -52,8 +57,21 @@ export function FeatureScriptFile(props: {
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
   readonly headerSlot: HTMLElement | null;
 }) {
-  const [settings, updateSettings] = useFeatureScriptFileSettings(
+  const [saved, updateSettings] = useFeatureScriptFileSettings(
     featureScriptFileKey(props.environmentId, props.cwd, props.relativePath),
+  );
+  // The saved feature, when the last run showed the file no longer defines it (renamed, moved, or
+  // mid-rename). Until it's back, runs use the first feature with its defaults; the saved inputs
+  // are kept, and only dropped once the person edits the dialog.
+  const [missingFeature, setMissingFeature] = useState<string | null>(null);
+  const masked = saved.feature !== undefined && saved.feature === missingFeature;
+  const settings = masked ? withoutInputs(saved) : saved;
+  const updateInputs = useCallback(
+    (change: (current: FeatureScriptFileSettings) => FeatureScriptFileSettings) =>
+      updateSettings((current) =>
+        change(current.feature === missingFeature ? withoutInputs(current) : current),
+      ),
+    [updateSettings, missingFeature],
   );
   const entries = useProjectEntriesQuery(props.environmentId, props.cwd);
   const stepFiles = useMemo(
@@ -68,15 +86,28 @@ export function FeatureScriptFile(props: {
   const base =
     settings.base !== undefined ? settings.base : stepFiles.length === 1 ? stepFiles[0]! : null;
   const baseKnown = settings.base !== undefined || entries.data !== null || entries.error !== null;
+  const inputs = previewInputs(settings);
   const run = useFeatureScriptPreview({
     environmentId: props.environmentId,
     cwd: props.cwd,
     path: props.relativePath,
     source: baseKnown ? props.contents : null,
-    parameters: settings.parameters,
+    parameters: inputs.parameters,
+    connectors: inputs.connectors,
+    listKeys: inputs.listKeys,
+    before: settings.before ?? [],
     base,
     feature: settings.feature,
   });
+  const latestFeatures = run.latest?.features ?? [];
+  const savedFeature = saved.feature;
+  useEffect(() => {
+    // Runs that didn't load list no features and say nothing about it.
+    if (savedFeature === undefined || latestFeatures.length === 0) return;
+    setMissingFeature(
+      latestFeatures.some((feature) => feature.name === savedFeature) ? null : savedFeature,
+    );
+  }, [latestFeatures, savedFeature]);
   // A request to reveal a line shows the code until the person switches back.
   const [handledReveal, setHandledReveal] = useState<number | null>(null);
   const revealing = props.revealLine !== null && handledReveal !== props.revealRequestId;
@@ -87,9 +118,6 @@ export function FeatureScriptFile(props: {
     useRightPanelStore.getState().openFile(props.threadRef, path, line);
   };
   const failure = run.latest?.failure ?? null;
-  // Changed inputs, or a picked feature, can be what fails; resetting them is offered with the error.
-  const inputsChanged =
-    Object.keys(settings.parameters).length > 0 || settings.feature !== undefined;
   const resetInputs = () => updateSettings(withoutInputs);
 
   return (
@@ -115,7 +143,7 @@ export function FeatureScriptFile(props: {
           path={props.relativePath}
           run={run}
           settings={settings}
-          updateSettings={updateSettings}
+          updateSettings={updateInputs}
           stepFiles={stepFiles}
           base={base}
           onShowLine={showLine}
@@ -145,7 +173,8 @@ export function FeatureScriptFile(props: {
                   Line {failure.location.line}
                 </Button>
               ) : null}
-              {inputsChanged ? (
+              {/* Changed inputs, or a picked feature, can be what fails. */}
+              {inputsChanged(settings) ? (
                 <Button variant="ghost" size="xs" onClick={resetInputs}>
                   <RotateCcwIcon />
                   Reset to defaults
