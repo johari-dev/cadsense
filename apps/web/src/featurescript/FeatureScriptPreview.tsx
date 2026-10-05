@@ -1,11 +1,15 @@
 import type {
+  CadFeatureScriptPreviewStep,
   EnvironmentId,
   FeatureScriptDialogInput,
+  FeatureScriptDialogItemInput,
   FeatureScriptFailure,
   FeatureScriptPanelPreview,
   FeatureScriptPreviewStatus,
 } from "@cadsense/contracts";
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -14,10 +18,11 @@ import {
   EyeIcon,
   FocusIcon,
   MessageSquareIcon,
+  PlusIcon,
   RotateCcwIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -30,11 +35,27 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { cn } from "../lib/utils";
-import { inputExpression, pickExpression, type ModelPoint } from "./featureScriptDialog";
-import { withoutInputs, type FeatureScriptFileSettings } from "./featureScriptPanelStore";
+import {
+  inputExpression,
+  newPickId,
+  pickExpression,
+  pickKind,
+  pointExpression,
+  type PickHit,
+} from "./featureScriptDialog";
+import {
+  inputsChanged,
+  withBase,
+  withDefaultInputs,
+  withoutInputs,
+  withValue,
+  type FeatureScriptFileSettings,
+  type FeatureScriptListItem,
+} from "./featureScriptPanelStore";
 import { FeatureScriptViewport } from "./FeatureScriptViewport";
-import type { FeatureScriptPreviewState } from "./useFeatureScriptPreview";
+import type { FeatureScriptPanelRun, FeatureScriptPreviewState } from "./useFeatureScriptPreview";
 
 const NO_BASE = "";
 const FAILED: ReadonlySet<FeatureScriptPreviewStatus> = new Set(["ERROR", "INVALID", "STOPPED"]);
@@ -135,6 +156,46 @@ export interface FeatureScriptPreviewProps {
   readonly onAskAgent: (failure: FeatureScriptFailure) => void;
 }
 
+/** Where an input's value lives: a top-level input, or an input inside one item of a list. */
+type InputSlot =
+  | { readonly input: string }
+  | { readonly input: string; readonly list: string; readonly item: string };
+
+/** The input being picked for, and what a click gives it. */
+type PickTarget = { readonly slot: InputSlot } & NonNullable<ReturnType<typeof pickKind>>;
+
+const sameSlot = (a: InputSlot, b: InputSlot) =>
+  a.input === b.input &&
+  ("list" in a ? a.list : null) === ("list" in b ? b.list : null) &&
+  ("item" in a ? a.item : null) === ("item" in b ? b.item : null);
+
+/** `settings` with `change` applied to the values that hold `slot`. */
+function updateSlot(
+  settings: FeatureScriptFileSettings,
+  slot: InputSlot,
+  change: <Values extends FeatureScriptListItem | FeatureScriptFileSettings>(
+    values: Values,
+  ) => Values,
+): FeatureScriptFileSettings {
+  if (!("list" in slot)) return change(settings);
+  const items = settings.lists?.[slot.list] ?? [];
+  // The item may have gone since (removed, or the list reset); nothing to change then.
+  if (!items.some((item) => item.key === slot.item)) return settings;
+  return {
+    ...settings,
+    lists: {
+      ...settings.lists,
+      [slot.list]: items.map((item) => (item.key === slot.item ? change(item) : item)),
+    },
+  };
+}
+
+/** The values that hold `slot`, if its list item still exists. */
+function slotValues(settings: FeatureScriptFileSettings, slot: InputSlot) {
+  if (!("list" in slot)) return settings;
+  return settings.lists?.[slot.list]?.find((item) => item.key === slot.item) ?? null;
+}
+
 /**
  * Preview mode for a `.fs` file: the model after the feature (its faces in amber) with an
  * Onshape-style dialog over it. Changing an input runs the preview again. A failure keeps the last
@@ -144,7 +205,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
   const { run, settings, updateSettings } = props;
   const { latest, lastGood } = run;
   const failure: FeatureScriptFailure | null = run.error
-    ? { message: run.error, location: null }
+    ? { message: run.error, location: null, unsupported: false }
     : (latest?.failure ?? null);
   const failed = run.error !== null || (latest !== null && FAILED.has(latest.status));
   // Under a failure, the last good model; otherwise the newest one.
@@ -153,7 +214,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
   // The newest run's dialog, or the last good one while the script doesn't load.
   const dialog = latest && latest.features.length > 0 ? latest : lastGood;
   const [view, setView] = useState<"after" | "before">("after");
-  const [picking, setPicking] = useState<string | null>(null);
+  const [picking, setPicking] = useState<PickTarget | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
   const [missingModel, setMissingModel] = useState<string | null>(null);
   const before = shown?.model?.before ?? null;
@@ -169,31 +230,58 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     return () => window.removeEventListener("keydown", cancel);
   }, [picking]);
 
-  const setParameter = (id: string, expression: string | null) =>
-    updateSettings((current) => {
-      const { [id]: _removed, ...parameters } = current.parameters;
-      const { [id]: _picks, ...picks } = current.picks;
-      return {
-        ...current,
-        parameters: expression === null ? parameters : { ...parameters, [id]: expression },
-        picks,
-      };
-    });
-  const pick = (point: ModelPoint, add: boolean) => {
+  const setParameter = (slot: InputSlot, expression: string | null) =>
+    updateSettings((current) =>
+      updateSlot(current, slot, (values) => withValue(values, slot.input, expression)),
+    );
+  const pick = (hit: PickHit, add: boolean) => {
     if (picking === null) return;
-    const id = picking;
-    updateSettings((current) => {
-      const points = add ? [...(current.picks[id] ?? []), point] : [point];
-      return {
-        ...current,
-        parameters: { ...current.parameters, [id]: pickExpression(points) },
-        picks: { ...current.picks, [id]: points },
-      };
-    });
+    const target = picking;
+    const { input } = target.slot;
+    updateSettings((current) =>
+      updateSlot(current, target.slot, (values) => {
+        if (target.kind === "face") {
+          const points = add ? [...(values.picks[input] ?? []), hit.point] : [hit.point];
+          return withValue(values, input, pickExpression(points), { picks: points });
+        }
+        const connector = { id: newPickId(), origin: hit.point, zAxis: hit.normal };
+        const connectors = add ? [...(values.points?.[input] ?? []), connector] : [connector];
+        return withValue(
+          values,
+          input,
+          pointExpression(
+            connectors.map((point) => point.id),
+            target.entity,
+          ),
+          { picks: connectors.map((point) => point.origin), points: connectors },
+        );
+      }),
+    );
     if (!add) setPicking(null);
   };
-  const resetInputs = () => updateSettings(withoutInputs);
-  const allPicks = Object.values(settings.picks).flat();
+  const updateList = (
+    list: string,
+    change: (items: readonly FeatureScriptListItem[]) => readonly FeatureScriptListItem[],
+  ) =>
+    updateSettings((current) => {
+      // A list set as one expression (by the agent) starts over as items.
+      const { [list]: _expression, ...parameters } = current.parameters;
+      return {
+        ...current,
+        parameters,
+        lists: { ...current.lists, [list]: change(current.lists?.[list] ?? []) },
+      };
+    });
+  const resetInputs = () => {
+    setPicking(null);
+    updateSettings(withoutInputs);
+  };
+  const allPicks = [
+    ...Object.values(settings.picks),
+    ...Object.values(settings.lists ?? {}).flatMap((items) =>
+      items.flatMap((item) => Object.values(item.picks)),
+    ),
+  ].flat();
   const emptyMessage =
     missingModel !== null && missingModel === shown?.model?.[showing]
       ? "This run's model isn't available anymore. Save or change an input to run it again."
@@ -231,12 +319,27 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
           preview={dialog}
           settings={settings}
           picking={picking}
-          onPickInput={(id) => setPicking((current) => (current === id ? null : id))}
-          onSetParameter={setParameter}
-          onFeature={(feature) =>
-            updateSettings((current) => ({ ...current, feature, parameters: {}, picks: {} }))
+          onPick={(target) =>
+            setPicking((current) =>
+              current !== null && sameSlot(current.slot, target.slot) ? null : target,
+            )
           }
-          onReset={() => updateSettings((current) => ({ ...current, parameters: {}, picks: {} }))}
+          onSetParameter={setParameter}
+          onList={(list, change) => {
+            // Picking for an item that's removed would land nowhere; stop.
+            setPicking((current) =>
+              current && "list" in current.slot && current.slot.list === list ? null : current,
+            );
+            updateList(list, change);
+          }}
+          onFeature={(feature) => {
+            setPicking(null);
+            updateSettings((current) => ({ ...withDefaultInputs(current), feature }));
+          }}
+          onReset={() => {
+            setPicking(null);
+            updateSettings(withDefaultInputs);
+          }}
         />
       ) : null}
       {stale ? (
@@ -246,8 +349,10 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
       ) : null}
       {picking !== null ? (
         <div className="absolute top-2.5 right-2.5 max-w-56 rounded-md border border-info/40 bg-background/90 px-2 py-1 text-[11px] text-foreground">
-          Click a face{showing === "before" ? " on the model before the feature" : ""}. Shift adds
-          more. Esc stops.
+          {picking.kind === "face"
+            ? `Click a face${showing === "before" ? " on the model before the feature" : ""}.`
+            : "Click where the point goes. Its Z axis points out of the face you click."}{" "}
+          Shift adds more. Esc stops.
         </div>
       ) : null}
       <div className="absolute inset-x-2.5 bottom-2.5 flex flex-col gap-2">
@@ -258,9 +363,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
             onShowLine={props.onShowLine}
             onAskAgent={props.onAskAgent}
             // A bad input or a renamed feature can fail before there's a dialog to fix it in.
-            {...(Object.keys(settings.parameters).length > 0 || settings.feature !== undefined
-              ? { onResetInputs: resetInputs }
-              : {})}
+            {...(inputsChanged(settings) ? { onResetInputs: resetInputs } : {})}
           />
         ) : null}
         <Footer
@@ -268,18 +371,14 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
           failed={failed}
           base={props.base}
           stepFiles={props.stepFiles}
-          // Picked faces belong to the old base; nearest-face queries would quietly land on the
-          // new one's, so the picks go with it.
-          onBase={(base) =>
-            updateSettings((current) => ({
-              ...current,
-              base,
-              parameters: Object.fromEntries(
-                Object.entries(current.parameters).filter(([id]) => !(id in current.picks)),
-              ),
-              picks: {},
-            }))
-          }
+          // Picked faces and points belong to the old base; nearest-face queries would quietly
+          // land on the new one's, so the picks go with it.
+          onBase={(base) => {
+            setPicking(null);
+            updateSettings((current) => withBase(current, base));
+          }}
+          earlier={settings.before ?? []}
+          onDropEarlier={() => updateSettings(({ before: _before, ...current }) => current)}
           view={before ? showing : null}
           onView={setView}
           onFit={() => setFitRequest((count) => count + 1)}
@@ -290,11 +389,15 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
 }
 
 function FeatureDialog(props: {
-  readonly preview: FeatureScriptPanelPreview;
+  readonly preview: FeatureScriptPanelRun;
   readonly settings: FeatureScriptFileSettings;
-  readonly picking: string | null;
-  readonly onPickInput: (id: string) => void;
-  readonly onSetParameter: (id: string, expression: string | null) => void;
+  readonly picking: PickTarget | null;
+  readonly onPick: (target: PickTarget) => void;
+  readonly onSetParameter: (slot: InputSlot, expression: string | null) => void;
+  readonly onList: (
+    list: string,
+    change: (items: readonly FeatureScriptListItem[]) => readonly FeatureScriptListItem[],
+  ) => void;
   readonly onFeature: (feature: string) => void;
   readonly onReset: () => void;
 }) {
@@ -303,14 +406,37 @@ function FeatureDialog(props: {
   const typeName =
     preview.features.find((feature) => feature.name === preview.feature)?.typeName ??
     preview.feature;
-  const changed = Object.keys(settings.parameters).length > 0;
+  const changed =
+    Object.keys(settings.parameters).length > 0 || Object.keys(settings.lists ?? {}).length > 0;
+  const rows = preview.inputs.filter((input) => input.visible);
+  const slotPicking = (slot: InputSlot) =>
+    props.picking !== null && sameSlot(props.picking.slot, slot);
+  const row = (input: FeatureScriptDialogItemInput, slot: InputSlot) => {
+    const values = slotValues(settings, slot);
+    return (
+      <InputRow
+        key={input.id}
+        input={input}
+        parameter={values?.parameters[input.id]}
+        picks={values?.picks[input.id]?.length ?? 0}
+        picking={slotPicking(slot)}
+        onPick={(target) => props.onPick({ slot, ...target })}
+        onSet={(expression) => props.onSetParameter(slot, expression)}
+      />
+    );
+  };
   return (
     <div
-      className="absolute top-2.5 left-2.5 flex max-h-[calc(100%-7rem)] w-64 max-w-[calc(100%-1.25rem)] flex-col overflow-hidden rounded-xl border border-border bg-popover/95 text-xs shadow-lg"
+      className="absolute top-2.5 left-2.5 flex max-h-[calc(100%-7rem)] w-72 max-w-[calc(100%-1.25rem)] flex-col overflow-hidden rounded-xl border border-border bg-popover/95 text-xs shadow-lg"
       aria-label="Feature inputs"
       role="group"
     >
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-2.5">
+      <div
+        className={cn(
+          "flex h-9 shrink-0 items-center gap-1.5 px-2.5",
+          rows.length > 0 && open && "border-b border-border",
+        )}
+      >
         {preview.features.length > 1 ? (
           <Select
             value={preview.feature ?? ""}
@@ -318,7 +444,12 @@ function FeatureDialog(props: {
               if (typeof value === "string" && value) props.onFeature(value);
             }}
           >
-            <SelectTrigger variant="ghost" size="xs" className="-ml-1.5 min-w-0 font-medium">
+            <SelectTrigger
+              variant="ghost"
+              size="xs"
+              className="-ml-1.5 min-w-0 font-medium"
+              aria-label="Feature"
+            >
               <SelectValue>{typeName}</SelectValue>
             </SelectTrigger>
             <SelectPopup>
@@ -333,53 +464,171 @@ function FeatureDialog(props: {
           <span className="truncate font-medium text-foreground">{typeName}</span>
         )}
         <span className="flex-1" />
-        {changed && open ? (
-          <Button variant="ghost-muted" size="xs" onClick={props.onReset}>
-            Reset
-          </Button>
-        ) : null}
-        <Button
-          variant="ghost-muted"
-          size="icon-xs"
-          aria-label={open ? "Hide the inputs" : "Show the inputs"}
-          aria-expanded={open}
-          onClick={() => setOpen((current) => !current)}
-        >
-          <ChevronDownIcon className={cn("transition-transform", !open && "-rotate-90")} />
-        </Button>
+        {rows.length === 0 ? (
+          <span className="shrink-0 text-muted-foreground">No inputs</span>
+        ) : (
+          <>
+            {changed && open ? (
+              <Button variant="ghost-muted" size="xs" onClick={props.onReset}>
+                Reset
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost-muted"
+              size="icon-xs"
+              aria-label={open ? "Hide the inputs" : "Show the inputs"}
+              aria-expanded={open}
+              onClick={() => setOpen((current) => !current)}
+            >
+              <ChevronDownIcon className={cn("transition-transform", !open && "-rotate-90")} />
+            </Button>
+          </>
+        )}
       </div>
-      {open ? (
+      {open && rows.length > 0 ? (
         <div className="min-h-0 overflow-y-auto py-1">
-          {preview.inputs
-            .filter((input) => input.visible)
-            .map((input) => (
-              <InputRow
+          {rows.map((input) =>
+            input.kind === "array" ? (
+              <ListInput
                 key={input.id}
                 input={input}
-                parameter={settings.parameters[input.id]}
-                picks={settings.picks[input.id]?.length ?? 0}
-                picking={props.picking === input.id}
-                onPick={() => props.onPickInput(input.id)}
-                onSet={(expression) => props.onSetParameter(input.id, expression)}
+                runKeys={preview.listKeys[input.id] ?? null}
+                items={settings.lists?.[input.id] ?? null}
+                expression={settings.parameters[input.id] ?? null}
+                onList={(change) => props.onList(input.id, change)}
+                onClearExpression={() => props.onSetParameter({ input: input.id }, null)}
+                row={(inner, item) => row(inner, { input: inner.id, list: input.id, item })}
               />
-            ))}
+            ) : (
+              row(input, { input: input.id })
+            ),
+          )}
         </div>
       ) : null}
     </div>
   );
 }
 
-/** Whether picking in the viewport can set this query: faces, or no filter at all. */
-const pickable = (input: FeatureScriptDialogInput) =>
-  input.kind === "query" && (input.filter === null || input.filter.includes("FACE"));
+/**
+ * A list input, such as a wire's waypoints: items to add, reorder and remove, each with its own
+ * inputs. The inputs come from the last run, so a new item fills in once it has run.
+ */
+function ListInput(props: {
+  readonly input: FeatureScriptDialogInput;
+  /** The keys of the items the run had, in its order; null when it ran the list as one expression. */
+  readonly runKeys: readonly string[] | null;
+  /** The items edited here, or null before the first edit. */
+  readonly items: readonly FeatureScriptListItem[] | null;
+  /** The list set as one expression (by the agent), when it hasn't been edited here. */
+  readonly expression: string | null;
+  readonly onList: (
+    change: (items: readonly FeatureScriptListItem[]) => readonly FeatureScriptListItem[],
+  ) => void;
+  readonly onClearExpression: () => void;
+  readonly row: (input: FeatureScriptDialogItemInput, item: string) => ReactNode;
+}) {
+  const { input } = props;
+  const name = input.itemName ?? "Item";
+  const add = () =>
+    props.onList((items) => [...items, { key: newPickId(), parameters: {}, picks: {} }]);
+  const move = (key: string, by: -1 | 1) =>
+    props.onList((items) => {
+      const from = items.findIndex((item) => item.key === key);
+      const to = from + by;
+      if (from < 0 || to < 0 || to >= items.length) return items;
+      const next = [...items];
+      [next[from], next[to]] = [next[to]!, next[from]!];
+      return next;
+    });
+  const remove = (key: string) => props.onList((items) => items.filter((item) => item.key !== key));
+  const fromExpression = props.items === null && props.expression !== null;
+  return (
+    <div className="px-2.5 py-1" role="group" aria-label={input.label}>
+      <div className="flex min-h-8 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{input.label}</span>
+        <Button variant="outline" size="xs" onClick={add}>
+          <PlusIcon />
+          Add {name.toLowerCase()}
+        </Button>
+      </div>
+      {fromExpression ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border/70 px-2 py-1.5 text-muted-foreground">
+          <span className="min-w-0 flex-1">
+            {input.items.length} {input.items.length === 1 ? name.toLowerCase() : "items"} set by
+            the agent. Adding one starts the list over.
+          </span>
+          <Button
+            variant="ghost-muted"
+            size="icon-xs"
+            aria-label={`Clear ${input.label}`}
+            onClick={props.onClearExpression}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      ) : null}
+      {(props.items ?? []).map((item, index, items) => {
+        // The run's values for this item, matched by key: after a move or removal the run's
+        // order is the old one until the next run.
+        const ran = props.runKeys?.indexOf(item.key) ?? -1;
+        const inner = ran >= 0 ? input.items[ran] : undefined;
+        return (
+          <div
+            key={item.key}
+            className="mt-1 rounded-lg border border-border/70 bg-background/40"
+            role="group"
+            aria-label={`${name} ${index + 1}`}
+          >
+            <div className="flex h-7 items-center gap-0.5 pr-1 pl-2">
+              <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                {name} {index + 1}
+              </span>
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label={`Move ${name.toLowerCase()} ${index + 1} up`}
+                disabled={index === 0}
+                onClick={() => move(item.key, -1)}
+              >
+                <ArrowUpIcon />
+              </Button>
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label={`Move ${name.toLowerCase()} ${index + 1} down`}
+                disabled={index === items.length - 1}
+                onClick={() => move(item.key, 1)}
+              >
+                <ArrowDownIcon />
+              </Button>
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label={`Remove ${name.toLowerCase()} ${index + 1}`}
+                onClick={() => remove(item.key)}
+              >
+                <XIcon />
+              </Button>
+            </div>
+            {inner ? (
+              inner.map((field) => props.row(field, item.key))
+            ) : (
+              <p className="px-2 pb-1.5 text-muted-foreground">Not run yet</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function InputRow(props: {
-  readonly input: FeatureScriptDialogInput;
+  readonly input: FeatureScriptDialogItemInput;
   /** The expression the person set, if any. */
   readonly parameter: string | undefined;
   readonly picks: number;
   readonly picking: boolean;
-  readonly onPick: () => void;
+  readonly onPick: (target: NonNullable<ReturnType<typeof pickKind>>) => void;
   readonly onSet: (expression: string | null) => void;
 }) {
   const { input } = props;
@@ -420,7 +669,8 @@ function InputRow(props: {
         </Select>
       </div>
     );
-  if (pickable(input))
+  const target = input.kind === "query" ? pickKind(input.filter) : null;
+  if (target)
     return (
       <div className="flex min-h-8 items-center gap-2 px-2.5">
         {label}
@@ -430,14 +680,14 @@ function InputRow(props: {
           className={cn("max-w-32 min-w-0", props.picking && "ring-2 ring-info/60")}
           aria-pressed={props.picking}
           aria-label={`Pick ${input.label}`}
-          onClick={props.onPick}
+          onClick={() => props.onPick(target)}
         >
           <CrosshairIcon />
           <span className="truncate">
             {props.picking
               ? "Click the model"
               : props.picks > 0
-                ? `${props.picks} picked`
+                ? `${props.picks} ${target.kind === "point" ? (props.picks === 1 ? "point" : "points") : "picked"}`
                 : props.parameter
                   ? "Set"
                   : "Pick"}
@@ -471,7 +721,7 @@ const enumLabel = (option: string) => {
 
 /** A typed value: a number with a unit, or any FeatureScript expression. Enter or blur applies it. */
 function ValueField(props: {
-  readonly input: FeatureScriptDialogInput;
+  readonly input: FeatureScriptDialogItemInput;
   readonly parameter: string | undefined;
   readonly onSet: (expression: string | null) => void;
 }) {
@@ -535,6 +785,11 @@ function FailureBanner(props: {
           {where ? <span className="mr-1.5 whitespace-nowrap text-foreground">{where}</span> : null}
           {failure.message}
         </p>
+        {failure.unsupported ? (
+          <p className="mb-2 text-muted-foreground">
+            The local preview can't run this yet. The script may still work in Onshape.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-1.5">
           {location ? (
             <Button
@@ -548,7 +803,7 @@ function FailureBanner(props: {
           ) : null}
           <Button variant="ghost" size="xs" onClick={() => props.onAskAgent(failure)}>
             <MessageSquareIcon />
-            Ask the agent to fix it
+            {failure.unsupported ? "Ask the agent for a workaround" : "Ask the agent to fix it"}
           </Button>
           {props.onResetInputs ? (
             <Button variant="ghost" size="xs" onClick={props.onResetInputs}>
@@ -569,6 +824,9 @@ function Footer(props: {
   readonly base: string | null;
   readonly stepFiles: readonly string[];
   readonly onBase: (base: string | null) => void;
+  /** Features the agent ran before this one, from its chat card. */
+  readonly earlier: readonly CadFeatureScriptPreviewStep[];
+  readonly onDropEarlier: () => void;
   /** Which model is showing, or null when there's no "before" to switch to. */
   readonly view: "after" | "before" | null;
   readonly onView: (view: "after" | "before") => void;
@@ -623,6 +881,28 @@ function Footer(props: {
         </>
       ) : null}
       <span className="ml-auto flex min-w-0 items-center gap-1 text-muted-foreground">
+        {props.earlier.length > 0 ? (
+          <span className="inline-flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger render={<span />}>
+                after {props.earlier.length} agent{" "}
+                {props.earlier.length === 1 ? "feature" : "features"}
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                The agent's preview ran{" "}
+                {props.earlier.map((step) => step.feature ?? step.path).join(", ")} first.
+              </TooltipPopup>
+            </Tooltip>
+            <Button
+              variant="ghost-muted"
+              size="icon-xs"
+              aria-label="Run without the agent's earlier features"
+              onClick={props.onDropEarlier}
+            >
+              <XIcon />
+            </Button>
+          </span>
+        ) : null}
         on
         <Select
           value={props.base ?? NO_BASE}

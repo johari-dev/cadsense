@@ -130,6 +130,8 @@ export class ModuleLoader {
   private nextTypeOrder = 0;
   /** Operator overloads from every loaded module, by operator. */
   readonly operators = new Map<string, Operator[]>();
+  /** Sources for this run's user modules, read before `read`; see `useSources`. */
+  private sources: ReadonlyMap<string, string> = new Map();
 
   constructor(read: (path: string) => string | undefined) {
     this.read = read;
@@ -147,7 +149,10 @@ export class ModuleLoader {
       );
     const existing = this.modules.get(path);
     if (existing) return existing;
-    const text = source ?? this.read(path);
+    const text =
+      source ??
+      (path.startsWith(STD_PREFIX) ? undefined : this.sources.get(path)) ??
+      this.read(path);
     if (text === undefined) throw new ModuleLoadError(path, null, [], `Module ${path} not found.`);
     const file = sourceFile(path, text);
     const { module: ast, diagnostics } = parseModule(file);
@@ -235,7 +240,16 @@ export class ModuleLoader {
    * drops modules a failed load left half-registered) while std stays loaded. Std never imports
    * user modules, so nothing that stays refers to what goes.
    */
+  /**
+   * Gives user modules these sources until the next `unloadUserModules`, so an import of a file a
+   * caller supplied (an editor's unsaved text) gets that text rather than the file on disk.
+   */
+  useSources(sources: ReadonlyMap<string, string>): void {
+    this.sources = sources;
+  }
+
   unloadUserModules(): void {
+    this.sources = new Map();
     for (const [path, module] of this.modules) if (!module.isStd) this.modules.delete(path);
     for (const [operator, list] of this.operators)
       this.operators.set(

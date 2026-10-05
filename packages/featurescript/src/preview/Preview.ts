@@ -6,7 +6,7 @@ import { toGlb } from "../geometry/Glb.ts";
 import { ordered, startsWith, type GeometryState } from "../geometry/Model.ts";
 import type { Oc, Shape } from "../geometry/occt.ts";
 import { isDrawnBody, tessellate, type BodyMesh } from "../geometry/Tessellate.ts";
-import type { FeatureRun, FeatureScriptRuntime } from "../Runtime.ts";
+import type { FeatureRun, FeatureScriptRuntime, PickedConnector } from "../Runtime.ts";
 import type { FsFrame } from "../runtime/Errors.ts";
 import { STD_PREFIX, type ModuleInstance } from "../runtime/Modules.ts";
 import { formatValue, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
@@ -22,6 +22,11 @@ export interface PreviewStep {
   readonly feature?: string;
   /** Input id to a FeatureScript expression, e.g. `{ "count" : "8" }`. Unset inputs take their defaults. */
   readonly parameters?: Readonly<Record<string, string>>;
+  /**
+   * When `feature` isn't in the module (the file panel's saved choice, after the feature was
+   * renamed or moved), run the first feature with its defaults instead of failing.
+   */
+  readonly fallbackToFirst?: boolean;
 }
 
 export interface SolidSummary {
@@ -81,15 +86,22 @@ export function runPreview(
   runtime: FeatureScriptRuntime,
   steps: readonly PreviewStep[],
   base?: Uint8Array,
-  options: { readonly before?: boolean } = {},
+  options: { readonly before?: boolean; readonly connectors?: readonly PickedConnector[] } = {},
 ): PreviewResult {
   runtime.loader.unloadUserModules();
+  // A step's source is that file's text for the whole run, imports included, and a later step's
+  // wins: the panel's unsaved text for its file over the copy an earlier step read from disk.
+  const sources = new Map(steps.map((step) => [step.path, step.source]));
+  runtime.loader.useSources(sources);
   const prepared = steps.map((step) => {
-    const module = runtime.load(step.path, step.source);
+    const module = runtime.load(step.path, sources.get(step.path));
     const specs = featureSpecs(runtime.interpreter, module);
-    const spec = step.feature
+    const named = step.feature
       ? specs.find((candidate) => candidate.name === step.feature)
       : specs[0];
+    // The inputs were set for the missing feature, so the fallback runs with its own defaults.
+    const fallback = !named && step.fallbackToFirst === true && specs.length > 0;
+    const spec = fallback ? specs[0] : named;
     if (!spec)
       throw new Error(
         step.feature
@@ -97,7 +109,7 @@ export function runPreview(
           : `${step.path} defines no feature.`,
       );
     const parameters = FsMap.fromEntries(
-      Object.entries(step.parameters ?? {}).map(
+      Object.entries(fallback ? {} : (step.parameters ?? {})).map(
         ([id, source]) => [id, runtime.evaluate(module, source)] as const,
       ),
     );
@@ -106,7 +118,10 @@ export function runPreview(
   const started = NodePerfHooks.performance.now();
   const run = runtime.runFeatures(
     prepared.map(({ module, spec, definition }) => ({ module, feature: spec.name, definition })),
-    base ? { base } : {},
+    {
+      ...(base ? { base } : {}),
+      ...(options.connectors ? { connectors: options.connectors } : {}),
+    },
   );
   const elapsedMs = NodePerfHooks.performance.now() - started;
   const { oc, geometry, geometryBeforeLast } = run;
@@ -235,11 +250,22 @@ function failureCause(
 export function featureFailure(
   runtime: FeatureScriptRuntime,
   run: FeatureRun | null,
-): { readonly message: string; readonly location: SourceLocation | null } | null {
+): {
+  readonly message: string;
+  readonly location: SourceLocation | null;
+  /** The local runtime can't run something the script calls; it isn't a bug in the script. */
+  readonly unsupported: boolean;
+} | null {
   if (run?.status !== "ERROR") return null;
+  const unsupported = run.fault?.reason === "unsupported-builtin";
   const cause = run.fault ?? failureCause(runtime, run);
-  if (cause) return { message: cause.message, location: userLocation(runtime, cause.stack) };
-  return { message: run.message ?? run.statusEnum ?? "The feature failed.", location: null };
+  if (cause)
+    return { message: cause.message, location: userLocation(runtime, cause.stack), unsupported };
+  return {
+    message: run.message ?? run.statusEnum ?? "The feature failed.",
+    location: null,
+    unsupported,
+  };
 }
 
 export const VIEWS: readonly View[] = ["iso", "top", "front", "right"];
@@ -305,9 +331,41 @@ export function formatInput(value: FsValue): string {
       if (unit.getField("radian") === 1)
         return `${+((magnitude * 180) / Math.PI).toPrecision(12)} deg`;
     }
-    if (untag(inner.getField("queryType")) === "NOTHING") return "(nothing selected)";
+    if (inner.getField("queryType") !== undefined) return describeQuery(inner);
   }
   return formatValue(value);
+}
+
+/** A query as a short phrase: `created by Feature1.port`, `closest to (10, 0, 5) mm`. */
+function describeQuery(query: FsMap): string {
+  const field = (name: string) => untag(query.getField(name) ?? "");
+  const type = field("queryType");
+  const subquery = field("subquery");
+  const millimeters = (point: ReturnType<typeof field>) =>
+    `(${Array.isArray(point) ? point.map((n) => +(Number(untag(n)) * 1000).toFixed(2)).join(", ") : "?"}) mm`;
+  if (type === "NOTHING") return "(nothing selected)";
+  if (type === "CONTAINS_POINT" && subquery instanceof FsMap)
+    return `${describeQuery(subquery)} at ${millimeters(field("point"))}`;
+  if (type === "NTH_ELEMENT" && subquery instanceof FsMap)
+    return `item ${Number(field("n")) + 1} of ${describeQuery(subquery)}`;
+  if (type === "CREATED_BY") {
+    const id = field("featureId");
+    return `created by ${Array.isArray(id) ? id.map((part) => String(untag(part))).join(".") : "?"}`;
+  }
+  if (type === "CLOSEST_TO") return `closest to ${millimeters(field("point"))}`;
+  if (type === "UNION") {
+    const parts = field("subqueries");
+    if (!Array.isArray(parts)) return "union";
+    return parts.length > 3
+      ? `${parts.length} selections`
+      : parts.map((part) => formatInput(part)).join(" + ");
+  }
+  const words = String(type).toLowerCase().replaceAll("_", " ");
+  if (!(subquery instanceof FsMap)) return words;
+  // Filters narrow their subquery, which says what was picked; anything else picks from it.
+  return /_FILTER$|^BODY_TYPE$|^GEOMETRY$/.test(String(type))
+    ? describeQuery(subquery)
+    : `${words} of ${describeQuery(subquery)}`;
 }
 
 /** A plain-text summary for people and agents: inputs, outcome per feature, and the resulting solids. */

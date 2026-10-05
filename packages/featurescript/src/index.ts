@@ -18,9 +18,11 @@ export {
 } from "./syntax/Source.ts";
 export {
   BASE_FEATURE_ID,
+  PICKED_FEATURE_ID,
   FeatureScriptRuntime,
   STD_DIR,
   type FeatureRun,
+  type PickedConnector,
   type RuntimeOptions,
 } from "./Runtime.ts";
 export {

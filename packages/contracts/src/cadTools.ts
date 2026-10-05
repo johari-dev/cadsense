@@ -5,6 +5,7 @@ import {
   CadCommentInspectInput,
   CadCommentsPublishToolInput,
 } from "./cadComments.ts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadMeasureInput } from "./cadMeasure.ts";
 import { CadHash, CadSnapshotId, CadSnapshotNode } from "./cad.ts";
@@ -217,10 +218,12 @@ export const CadFeatureScriptPreviewStep = Schema.Struct({
   parameters: Schema.optionalKey(
     Schema.Record(
       Schema.String.check(Schema.isMaxLength(256)),
-      Schema.String.check(Schema.isMaxLength(4096)),
+      // A list input is one expression; a hundred picked waypoints are about 12 KB.
+      Schema.String.check(Schema.isMaxLength(64 * 1024)),
     ),
   ),
 });
+export type CadFeatureScriptPreviewStep = typeof CadFeatureScriptPreviewStep.Type;
 export const FEATURESCRIPT_PREVIEW_VIEWS = ["iso", "top", "front", "right"] as const;
 /** Runs `before` features, then this one, locally on top of an optional workspace STEP `base`. */
 export const CadFeatureScriptPreviewInput = Schema.Struct({
@@ -255,6 +258,8 @@ export type FeatureScriptLocation = typeof FeatureScriptLocation.Type;
 export const FeatureScriptFailure = Schema.Struct({
   message: Schema.String,
   location: Schema.NullOr(FeatureScriptLocation),
+  /** The local runtime can't run something the script calls, such as `opHelix`. */
+  unsupported: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type FeatureScriptFailure = typeof FeatureScriptFailure.Type;
 /** What the previewed (last) feature did to the model. */

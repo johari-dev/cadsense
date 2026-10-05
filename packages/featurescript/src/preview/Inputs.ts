@@ -1,7 +1,7 @@
 import type { FeatureScriptRuntime } from "../Runtime.ts";
 import type { ModuleInstance } from "../runtime/Modules.ts";
 import { FsMap, untag } from "../runtime/Value.ts";
-import type { FeatureSpec, InputKind } from "../spec/FeatureSpec.ts";
+import type { FeatureInput, FeatureSpec, InputKind } from "../spec/FeatureSpec.ts";
 import { formatInput } from "./Preview.ts";
 
 /** One row of a feature dialog: an input, its current value, and whether Onshape would show it. */
@@ -19,6 +19,10 @@ export interface DialogInput {
   /** Source of a query's "Filter" annotation. */
   readonly filter: string | null;
   readonly maxPicks: number | null;
+  /** A list input's "Item name", such as `Waypoint`. */
+  readonly itemName: string | null;
+  /** A list input's items as they ran, each its inner inputs with that item's values. */
+  readonly items: readonly (readonly DialogInput[])[];
 }
 
 /**
@@ -40,15 +44,32 @@ export function dialogInputs(
       return true;
     }
   };
-  return spec.inputs.map((input) => ({
-    id: input.id,
-    label: input.label,
-    kind: input.kind,
-    value: formatInput(definition.getField(input.id) ?? input.defaultValue),
-    options: input.enumType?.members.map((member) => `${input.enumType?.name}.${member}`) ?? [],
-    visible: input.conditions.every(holds),
-    group: input.group,
-    filter: input.filter,
-    maxPicks: input.maxPicks,
-  }));
+  // Conditions inside a list's loop name the item variable, so they can't be checked here; those
+  // inputs show.
+  const row = (input: FeatureInput, values: FsMap, inItem: boolean): DialogInput => {
+    const value = values.getField(input.id) ?? input.defaultValue;
+    const itemName = untag(input.annotation.getField("Item name") ?? "");
+    const items = untag(value);
+    return {
+      id: input.id,
+      label: input.label,
+      kind: input.kind,
+      value: input.kind === "array" ? "" : formatInput(value),
+      options: input.enumType?.members.map((member) => `${input.enumType?.name}.${member}`) ?? [],
+      visible: inItem || input.conditions.every(holds),
+      group: input.group,
+      filter: input.filter,
+      maxPicks: input.maxPicks,
+      itemName: typeof itemName === "string" && itemName !== "" ? itemName : null,
+      items:
+        input.kind === "array" && Array.isArray(items)
+          ? items.map((item) => {
+              const fields = untag(item);
+              const itemValues = fields instanceof FsMap ? fields : FsMap.empty;
+              return input.items.map((inner) => row(inner, itemValues, true));
+            })
+          : [],
+    };
+  };
+  return spec.inputs.map((input) => row(input, definition, false));
 }

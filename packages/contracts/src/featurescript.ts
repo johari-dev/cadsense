@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   CadFeatureScriptPreviewInput,
+  CadFeatureScriptPreviewStep,
   CadFeatureScriptPreviewResult,
   FEATURESCRIPT_PREVIEW_STATUSES,
   FEATURESCRIPT_PREVIEW_VIEWS,
@@ -13,9 +14,25 @@ import {
 const WorkspacePath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
 const MAX_SOURCE_LENGTH = 1024 * 1024;
 
+const Vector3 = Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]);
+
+/**
+ * A point picked in the panel, made into a mate connector before the features run. Parameters find
+ * it as `qCreatedBy(makeId("Picked") + "<id>", EntityType.BODY)`.
+ */
+export const FeatureScriptPickedConnector = Schema.Struct({
+  id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_]{1,40}$/)),
+  /** Meters, Z up. */
+  origin: Vector3,
+  /** Its Z axis, out of the picked face. */
+  zAxis: Vector3,
+});
+export type FeatureScriptPickedConnector = typeof FeatureScriptPickedConnector.Type;
+
 /**
  * The file panel's preview of a `.fs` file. The panel sends the editor's text, so a run never races
- * the save that follows a keystroke. Inputs and the STEP base work as in `cad_featurescript_preview`.
+ * the save that follows a keystroke. Inputs, `before` (read from disk) and the STEP base work as in
+ * `cad_featurescript_preview`.
  */
 export const FeatureScriptPanelPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -23,7 +40,11 @@ export const FeatureScriptPanelPreviewInput = Schema.Struct({
   source: Schema.String.check(Schema.isMaxLength(MAX_SOURCE_LENGTH)),
   feature: CadFeatureScriptPreviewInput.fields.feature,
   parameters: CadFeatureScriptPreviewInput.fields.parameters,
+  before: CadFeatureScriptPreviewInput.fields.before,
   base: Schema.optionalKey(WorkspacePath),
+  connectors: Schema.optionalKey(
+    Schema.Array(FeatureScriptPickedConnector).check(Schema.isMaxLength(200)),
+  ),
 });
 export type FeatureScriptPanelPreviewInput = typeof FeatureScriptPanelPreviewInput.Type;
 
@@ -42,8 +63,7 @@ export const FEATURESCRIPT_INPUT_KINDS = [
 ] as const;
 export type FeatureScriptInputKind = (typeof FEATURESCRIPT_INPUT_KINDS)[number];
 
-/** One row of the feature dialog, read from the feature's precondition. */
-export const FeatureScriptDialogInput = Schema.Struct({
+const dialogInputFields = {
   id: Schema.String,
   label: Schema.String,
   kind: Schema.Literals(FEATURESCRIPT_INPUT_KINDS),
@@ -57,6 +77,18 @@ export const FeatureScriptDialogInput = Schema.Struct({
   /** Source of a query's "Filter" annotation, e.g. `EntityType.FACE && GeometryType.PLANE`. */
   filter: Schema.NullOr(Schema.String),
   maxPicks: Schema.NullOr(Schema.Int),
+};
+/** An input inside a list item. Lists don't nest. */
+export const FeatureScriptDialogItemInput = Schema.Struct(dialogInputFields);
+export type FeatureScriptDialogItemInput = typeof FeatureScriptDialogItemInput.Type;
+
+/** One row of the feature dialog, read from the feature's precondition. */
+export const FeatureScriptDialogInput = Schema.Struct({
+  ...dialogInputFields,
+  /** A list's "Item name", such as `Waypoint`. */
+  itemName: Schema.NullOr(Schema.String),
+  /** A list's items as they ran: each item's inputs with its values. */
+  items: Schema.Array(Schema.Array(FeatureScriptDialogItemInput)),
 });
 export type FeatureScriptDialogInput = typeof FeatureScriptDialogInput.Type;
 
@@ -93,6 +125,10 @@ export const CadFeatureScriptPreviewCard = Schema.Struct({
   changes: Schema.NullOr(FeatureScriptChanges),
   /** The inputs the agent set, as FeatureScript expressions. */
   parameters: Schema.Record(Schema.String, Schema.String),
+  /** Features the agent ran first, so opening the file in the panel runs the same thing. */
+  before: Schema.Array(CadFeatureScriptPreviewStep).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   base: Schema.NullOr(Schema.String),
   images: Schema.Array(
     Schema.Struct({
