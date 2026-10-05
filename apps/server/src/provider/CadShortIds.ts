@@ -7,6 +7,9 @@
  *
  * The domain never sees short IDs: `CadProviderTools.invoke` expands input before calling a tool
  * and shortens the result after, so persistence and UI events keep full IDs.
+ *
+ * The book lives in memory for one provider session. After the app restarts, prefixes from earlier
+ * turns are unknown, and the tool error asks the model to copy an ID from a new result.
  */
 
 const FULL_ID = /^[a-f0-9]{64}$/;

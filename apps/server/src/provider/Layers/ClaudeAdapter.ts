@@ -365,6 +365,17 @@ export interface ClaudeAdapterLiveOptions {
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
 }
 
+/** Live tasks doing real work: not monitors or inert plan-mode tasks. */
+function workingTaskIds(context: {
+  readonly liveTaskIds: ReadonlySet<string>;
+  readonly taskAgents: ReadonlyMap<string, { readonly taskType: string | undefined }>;
+}): string[] {
+  return [...context.liveTaskIds].filter((id) => {
+    const type = context.taskAgents.get(id)?.taskType;
+    return type === undefined || (!MONITOR_TASK_TYPES.has(type) && !INERT_TASK_TYPES.has(type));
+  });
+}
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -2267,9 +2278,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* context.cad.tools.end(
         null,
         asCanonicalTurnId(context.turnState.turnId),
-        // A turn that ends while background tasks still run is not finished: their work may cover
-        // the drafts, so its leftovers are not published.
-        context.liveTaskIds.size > 0
+        // A turn that ends while background agents still work is not finished: their work may
+        // cover the drafts, so its leftovers are not published. Monitors, inert plan-mode tasks,
+        // and housekeeping tasks hidden from the transcript do not count.
+        workingTaskIds(context).some((id) => context.taskAgents.get(id)?.skipTranscript !== true)
           ? "stopped"
           : status === "completed" || status === "failed"
             ? status
@@ -4964,10 +4976,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       stoppingSessions.delete(stopped);
     }
     if (!context) return;
-    const working = [...context.liveTaskIds].some((id) => {
-      const type = context.taskAgents.get(id)?.taskType;
-      return type === undefined || (!MONITOR_TASK_TYPES.has(type) && !INERT_TASK_TYPES.has(type));
-    });
+    const working = workingTaskIds(context).length > 0;
     if (
       !context.processExit.hasSpawned() ||
       context.stopped ||

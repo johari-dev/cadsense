@@ -8,6 +8,7 @@ import {
   makeCadDraftLedger,
   recordCadChecks,
   preparePublication,
+  recordPublished,
   settleDrafts,
   uncoveredDrafts,
 } from "./CadCheckBackstop.ts";
@@ -127,6 +128,7 @@ describe("preparePublication", () => {
     });
     expect(taken).toEqual({
       input: { expectedCatalogVersion: 0, items: [] },
+      items: [],
       itemCount: 0,
       rejected: [],
       catalogMissing: false,
@@ -143,6 +145,14 @@ describe("preparePublication", () => {
     const later = preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
     expect(later.rejected).toEqual([]);
     expect(later.itemCount).toBe(1);
+    // The decline holds until the comment service accepts the publication.
+    recordPublished(ledger, later.items, {
+      results: [{ publicationKey: "gear-spacing", reason: "catalog-changed" }],
+    });
+    expect(ledger.declined.size).toBe(1);
+    recordPublished(ledger, later.items, {
+      results: [{ publicationKey: "gear-spacing", commentId: "comment-1" }],
+    });
     expect(ledger.declined.size).toBe(0);
     // Declining and publishing a key in one call still declines it.
     const both = preparePublication(ledger, {
@@ -152,14 +162,35 @@ describe("preparePublication", () => {
     expect(both.rejected).toEqual([{ publicationKey: "gear-spacing", reason: "declined" }]);
   });
 
-  it("publishes a key again with the content it was first sent with", () => {
+  it("publishes a key again with what the comment service first accepted for it", () => {
     const ledger = makeCadDraftLedger();
     ledger.offered = new Map([["gear-spacing", gears]]);
-    preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
+    const first = preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
+    recordPublished(ledger, first.items, {
+      results: [{ publicationKey: "gear-spacing", commentId: "comment-1" }],
+    });
     // A later cad_checks call offers the draft with other targets.
     ledger.offered = new Map([["gear-spacing", { ...gears, title: "re-placed" }]]);
     const again = preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
     expect(again.input).toMatchObject({ items: [gears] });
+  });
+
+  it("replays the agent's own wording of a draft, and never a rejected publication", () => {
+    const ledger = makeCadDraftLedger();
+    ledger.offered = new Map([
+      ["gear-spacing", gears],
+      ["bare-belt", belt],
+    ]);
+    const reworded = { ...gears, title: "Move the 40T gear out" };
+    recordPublished(ledger, [reworded, belt], {
+      results: [
+        { publicationKey: "gear-spacing", commentId: "comment-1" },
+        { publicationKey: "bare-belt", reason: "invalid-input" },
+      ],
+    });
+    const again = preparePublication(ledger, { publishDrafts: ["gear-spacing", "bare-belt"] });
+    expect(again.input).toMatchObject({ items: [reworded, belt] });
+    expect([...ledger.sent.keys()]).toEqual(["gear-spacing"]);
   });
 
   it("fills the catalog version only when the agent sends no items of its own", () => {

@@ -1031,8 +1031,7 @@ describe("draftCadComments", () => {
     );
   });
 
-  it("drafts one comment for a stack of copies, not one per pair", () => {
-    const plateC = part(7, "Part 20 <4>");
+  it("drafts one comment for a stack of copies, and keeps other overlaps as pairs", () => {
     const overlap = (a: ReturnType<typeof part>, b: ReturnType<typeof part>): CadCheckFinding => ({
       check: "mesh-interference",
       occurrences: [a, b],
@@ -1041,18 +1040,44 @@ describe("draftCadComments", () => {
       withinSubassembly: false,
       reading: readOverlap(a.name, b.name, 1e-4, 1, false).reading,
     });
-    const stacked = draftCadComments(
-      [overlap(plateA, plateB), overlap(plateA, plateC), overlap(plateB, plateC)],
+    const copies = [part(20, "Part 20 <1>"), part(21, "Part 20 <2>"), part(22, "Part 20 <3>")];
+    const ids = (draft: ReturnType<typeof draftCadComments>[number]) =>
+      draft.targets.flatMap((target) => (target.kind === "part" ? [target.occurrenceId] : []));
+    const [stack, ...rest] = draftCadComments(
+      [
+        overlap(copies[0]!, copies[1]!),
+        overlap(copies[0]!, copies[2]!),
+        overlap(copies[1]!, copies[2]!),
+      ],
       snapshotId,
     );
-    assert.equal(stacked.length, 1);
+    assert.deepEqual(rest, []);
     assert.deepEqual(
-      stacked[0]!.targets.flatMap((target) =>
-        target.kind === "part" ? [target.occurrenceId] : [],
-      ),
-      [plateA.occurrenceId, plateB.occurrenceId, plateC.occurrenceId],
+      ids(stack!),
+      copies.map((copy) => copy.occurrenceId),
     );
-    assert.match(stacked[0]!.body, /\bKeep\b[^.]*\.$/);
+    assert.match(stack!.body, /\bKeep\b[^.]*\.$/);
+    // A spacer inside two copies is not a third copy: it stays out of their stack.
+    const spacer = part(23, "Spacer <1>");
+    const withSpacer = draftCadComments(
+      [overlap(copies[0]!, copies[1]!), overlap(spacer, copies[0]!), overlap(spacer, copies[1]!)],
+      snapshotId,
+    );
+    assert.deepEqual(withSpacer.map(ids), [
+      [copies[0]!.occurrenceId, copies[1]!.occurrenceId],
+      [spacer.occurrenceId, copies[0]!.occurrenceId],
+      [spacer.occurrenceId, copies[1]!.occurrenceId],
+    ]);
+    // Two copies that each sit inside one large part, but not inside each other, are no stack.
+    const plate = part(24, "Side Plate <1>");
+    const contained = draftCadComments(
+      [overlap(copies[0]!, plate), overlap(copies[1]!, plate)],
+      snapshotId,
+    );
+    assert.deepEqual(
+      contained.map((draft) => draft.targets.length),
+      [2, 2],
+    );
   });
 
   it("merges collisions into one part into one draft that keeps every marker", () => {

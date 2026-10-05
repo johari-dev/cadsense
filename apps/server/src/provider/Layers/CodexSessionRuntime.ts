@@ -29,6 +29,7 @@ import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -1251,12 +1252,16 @@ export const makeCodexSessionRuntime = (
     /** Child provider-thread id → its currently running provider turn id. */
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
     /**
-     * Whether a registered child agent is mid-turn. The live-turn map also tracks other threads,
-     * such as memory upkeep, so Stop reaches them; those do not hold a review open.
+     * Whether a child agent, registered or known from a collab tool call's receivers, is mid-turn.
+     * The live-turn map also tracks other threads, such as memory upkeep, so Stop reaches them;
+     * those do not hold a review open.
      */
     const liveChildAgents = Effect.gen(function* () {
       const agents = yield* Ref.get(collabChildAgentsRef);
-      return [...(yield* Ref.get(collabChildLiveTurnsRef)).keys()].some((id) => agents.has(id));
+      const receivers = yield* Ref.get(collabReceiverTurnsRef);
+      return [...(yield* Ref.get(collabChildLiveTurnsRef)).keys()].some(
+        (id) => agents.has(id) || receivers.has(id),
+      );
     });
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
@@ -1367,15 +1372,23 @@ export const makeCodexSessionRuntime = (
       Ref.get(appTurnIdsRef).pipe(
         Effect.map((aliases) => (turnId === undefined ? turnId : (aliases.get(turnId) ?? turnId))),
       );
-    /** The follow-up from deciding to send it until its native turn completes, for Stop and idleness. */
+    /**
+     * The follow-up from deciding to send it until its native turn completes, for Stop and
+     * idleness. While its turn/start is outstanding (`starting`), the first primary turn/started is
+     * recorded as `startedTurnId`: the turn-start lock keeps every other turn/start out meanwhile.
+     */
     const cadFollowUpRef = yield* Ref.make<
       | {
           readonly appTurnId: TurnId;
           readonly nativeTurnId: TurnId | undefined;
           readonly interrupted: boolean;
+          readonly starting: boolean;
+          readonly startedTurnId: TurnId | undefined;
         }
       | undefined
     >(undefined);
+    /** One turn/start at a time, so a CAD follow-up's start never interleaves with sendTurn's. */
+    const turnStartLock = yield* Semaphore.make(1);
     /** App turns the user stopped. They get no follow-up, even when Codex finished them as Stop arrived. */
     const stoppedTurnsRef = yield* Ref.make(new Set<TurnId>());
     /**
@@ -1427,7 +1440,7 @@ export const makeCodexSessionRuntime = (
      * is on its way: that turn would run first. See "The follow-up" in cad/CadChecks.md.
      */
     const continueWithCadFollowUp = Effect.fn("CodexSessionRuntime.continueWithCadFollowUp")(
-      function* (cad: CadProviderTools, turnId: TurnId, finishedNativeTurnId: TurnId) {
+      function* (cad: CadProviderTools, turnId: TurnId) {
         // Read again after every wait: Stop and sendTurn run on other fibers.
         const blocked = Effect.gen(function* () {
           const requests = yield* Ref.get(turnRequestsRef);
@@ -1446,6 +1459,8 @@ export const makeCodexSessionRuntime = (
           appTurnId: turnId,
           nativeTurnId: undefined,
           interrupted: false,
+          starting: false,
+          startedTurnId: undefined,
         });
         const message = yield* cad.followUp(null, turnId);
         const params = (yield* Ref.get(turnRequestsRef)).latest?.params;
@@ -1454,25 +1469,31 @@ export const makeCodexSessionRuntime = (
           yield* Ref.set(cadFollowUpRef, undefined);
           return false;
         }
-        const started = yield* requestTurnStart({
-          ...params,
-          input: [{ type: "text", text: message }],
-        }).pipe(Effect.timeout(options.cadFollowUpStartTimeout ?? "30 seconds"), Effect.result);
-        // Codex may have started the turn although its answer is late or lost: nothing else was
-        // in flight, so a new active native turn is the follow-up.
-        const session = yield* Ref.get(sessionRef);
-        const accepted =
-          session.activeTurnId !== undefined &&
-          session.activeTurnId !== finishedNativeTurnId &&
-          !(yield* Ref.get(appTurnIdsRef)).has(session.activeTurnId)
-            ? session.activeTurnId
-            : undefined;
-        if (Result.isFailure(started) && accepted === undefined) {
-          yield* Effect.logWarning("CAD follow-up did not start", { cause: started.failure });
+        const nativeTurnId = yield* turnStartLock.withPermits(1)(
+          Effect.gen(function* () {
+            // sendTurn waits for the lock, so a turn the user sent is already in flight or not sent.
+            if (yield* blocked) return undefined;
+            yield* Ref.update(
+              cadFollowUpRef,
+              (current) => current && { ...current, starting: true },
+            );
+            const started = yield* requestTurnStart({
+              ...params,
+              input: [{ type: "text", text: message }],
+            }).pipe(Effect.timeout(options.cadFollowUpStartTimeout ?? "30 seconds"), Effect.result);
+            if (Result.isSuccess(started)) return started.success;
+            // Codex may have started the turn although its answer never came: with the lock held,
+            // a turn that started meanwhile is the follow-up.
+            const startedTurnId = (yield* Ref.get(cadFollowUpRef))?.startedTurnId;
+            if (startedTurnId === undefined)
+              yield* Effect.logWarning("CAD follow-up dropped", { turnId, cause: started.failure });
+            return startedTurnId;
+          }),
+        );
+        if (nativeTurnId === undefined) {
           yield* Ref.set(cadFollowUpRef, undefined);
           return false;
         }
-        const nativeTurnId = Result.isSuccess(started) ? started.success : accepted!;
         yield* Ref.update(appTurnIdsRef, (aliases) => new Map(aliases).set(nativeTurnId, turnId));
         // Codex's turn/started for it sets the session's active turn; closeIdleConfirmed and Stop
         // read cadFollowUpRef until then.
@@ -2007,7 +2028,7 @@ export const makeCodexSessionRuntime = (
             primary &&
             parentTurnId &&
             status === "completed" &&
-            (yield* continueWithCadFollowUp(options.cad, parentTurnId, nativeTurnId))
+            (yield* continueWithCadFollowUp(options.cad, parentTurnId))
           ) {
             // The app's turn goes on as the follow-up, so this native turn's end stays hidden.
             yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
@@ -2167,10 +2188,14 @@ export const makeCodexSessionRuntime = (
           if (providerThreadId && payload.threadId !== providerThreadId) {
             return Effect.void;
           }
-          return updateSession(sessionRef, {
-            status: "running",
-            activeTurnId: TurnId.make(payload.turn.id),
-          });
+          const started = TurnId.make(payload.turn.id);
+          return Ref.update(cadFollowUpRef, (followUp) =>
+            followUp?.starting && followUp.startedTurnId === undefined
+              ? { ...followUp, startedTurnId: started }
+              : followUp,
+          ).pipe(
+            Effect.andThen(updateSession(sessionRef, { status: "running", activeTurnId: started })),
+          );
         }),
       ),
     );
@@ -2753,11 +2778,16 @@ export const makeCodexSessionRuntime = (
                 cadReviewLearnings,
                 designBrief,
               });
-              const turnId = yield* requestTurnStart(params);
-              yield* Ref.update(turnRequestsRef, (requests) => ({
-                ...requests,
-                latest: { turnId, params },
-              }));
+              const turnId = yield* turnStartLock.withPermits(1)(
+                requestTurnStart(params).pipe(
+                  Effect.tap((turnId) =>
+                    Ref.update(turnRequestsRef, (requests) => ({
+                      ...requests,
+                      latest: { turnId, params },
+                    })),
+                  ),
+                ),
+              );
               yield* updateSession(sessionRef, (session) => ({
                 status: "running",
                 // Codex accepts follow-ups while the current turn is still
@@ -2792,11 +2822,23 @@ export const makeCodexSessionRuntime = (
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
           const session = yield* Ref.get(sessionRef);
+          // The app's turn may be running as a CAD follow-up. Decided in one step with the code that
+          // names the follow-up's native turn, so a Stop is never lost between them: before Codex
+          // names that turn the follow-up is marked interrupted, and stops once it starts.
+          const followUp = yield* Ref.modify(cadFollowUpRef, (current) =>
+            current !== undefined &&
+            (turnId === undefined || turnId === current.appTurnId) &&
+            current.nativeTurnId === undefined
+              ? ([current, { ...current, interrupted: true }] as const)
+              : ([current, current] as const),
+          );
+          const following =
+            followUp !== undefined && (turnId === undefined || turnId === followUp.appTurnId);
           // The app stops a thread with no turn id; with no native turn active, the turn it means
           // is the latest one, which may be about to continue as a CAD follow-up.
           const stopped =
             turnId ??
-            (yield* Ref.get(cadFollowUpRef))?.appTurnId ??
+            followUp?.appTurnId ??
             (yield* appTurnId(session.activeTurnId)) ??
             (yield* Ref.get(turnRequestsRef)).latest?.turnId;
           if (stopped !== undefined)
@@ -2821,18 +2863,7 @@ export const makeCodexSessionRuntime = (
                 .pipe(Effect.timeoutOption("3 seconds"), Effect.ignore),
             { concurrency: 8, discard: true },
           ).pipe(Effect.timeoutOption("10 seconds"), Effect.ignore);
-          // The app's turn may be running as a CAD follow-up's native turn. Before turn/start
-          // names that turn there is nothing to stop yet, so the follow-up stops once it starts.
-          const followUp = yield* Ref.get(cadFollowUpRef);
-          const following =
-            followUp !== undefined && (turnId === undefined || turnId === followUp.appTurnId);
-          if (following && followUp.nativeTurnId === undefined) {
-            yield* Ref.update(
-              cadFollowUpRef,
-              (current) => current && { ...current, interrupted: true },
-            );
-            return;
-          }
+          if (following && followUp.nativeTurnId === undefined) return;
           const effectiveTurnId = following
             ? followUp.nativeTurnId
             : (turnId ?? session.activeTurnId);

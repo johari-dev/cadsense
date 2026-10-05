@@ -29,6 +29,7 @@ import {
   currentCatalogVersion,
   presentPending,
   followUpMessage,
+  recordPublished,
 } from "./CadCheckBackstop.ts";
 import { acceptShortIds, makeCadShortIds } from "./CadShortIds.ts";
 
@@ -355,6 +356,7 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         ...delivery,
         result: ids.shorten({ ...delivery.result, ...presentPending(entry.ledger.pending) }),
       };
+    if (prepared) recordPublished(entry.ledger, prepared.items, delivery.result);
     // After each publication, name the proven defects that still have no comment.
     const reminder = yield* refreshRemaining;
     const results =

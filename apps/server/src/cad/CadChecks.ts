@@ -1349,16 +1349,12 @@ export const draftCadComments = (
       ),
     );
   }
-  // Near-total overlaps of the same part form stacks: one draft per stack, not one per pair.
-  const stackOf = new Map<string, string>();
-  const root = (id: string): string => {
-    const up = stackOf.get(id) ?? id;
-    return up === id ? id : root(up);
-  };
-  const stacked: { occurrences: ReturnType<typeof partOf>[]; reading: string }[] = [];
-  const members = new Map<string, Map<string, ReturnType<typeof partOf>>>();
+  // Copies of one part form stacks: one draft per stack, not one per pair. Only same-named parts
+  // stack, and a part joins only when it overlaps every part already in it: a spacer inside two
+  // bearings, or two parts inside one plate, are not copies of each other and stay pairs.
   const pairs: { a: ReturnType<typeof partOf>; b: ReturnType<typeof partOf>; reading: string }[] =
     [];
+  const overlapping = new Set<string>();
   for (const finding of findings) {
     if (
       finding.check !== "mesh-interference" ||
@@ -1371,19 +1367,41 @@ export const draftCadComments = (
       continue;
     const [a, b] = [partOf(finding.occurrences[0]!), partOf(finding.occurrences[1]!)];
     pairs.push({ a, b, reading: finding.reading });
-    const [ra, rb] = [root(a.occurrenceId), root(b.occurrenceId)];
-    if (ra !== rb) stackOf.set(rb, ra);
+    overlapping
+      .add(`${a.occurrenceId} ${b.occurrenceId}`)
+      .add(`${b.occurrenceId} ${a.occurrenceId}`);
   }
+  const stacks: { parts: Map<string, ReturnType<typeof partOf>>; reading: string }[] = [];
+  const baseName = (part: ReturnType<typeof partOf>) => part.name.replace(/\s*<\d+>$/, "");
+  const joins = (stack: (typeof stacks)[number], part: ReturnType<typeof partOf>) =>
+    [...stack.parts.values()].every(
+      (member) =>
+        baseName(member) === baseName(part) &&
+        overlapping.has(`${member.occurrenceId} ${part.occurrenceId}`),
+    );
   for (const { a, b, reading } of pairs) {
-    const key = root(a.occurrenceId);
-    if (!members.has(key)) stacked.push({ occurrences: [], reading });
-    const stack = members.get(key) ?? new Map<string, ReturnType<typeof partOf>>();
-    members.set(key, stack);
-    stack.set(a.occurrenceId, a);
-    stack.set(b.occurrenceId, b);
+    if (stacks.some((stack) => stack.parts.has(a.occurrenceId) && stack.parts.has(b.occurrenceId)))
+      continue;
+    const grown =
+      baseName(a) !== baseName(b)
+        ? undefined
+        : stacks.find(
+            (stack) =>
+              (stack.parts.has(a.occurrenceId) && joins(stack, b)) ||
+              (stack.parts.has(b.occurrenceId) && joins(stack, a)),
+          );
+    if (grown) grown.parts.set(a.occurrenceId, a).set(b.occurrenceId, b);
+    else
+      stacks.push({
+        parts: new Map([
+          [a.occurrenceId, a],
+          [b.occurrenceId, b],
+        ]),
+        reading,
+      });
   }
-  [...members.values()].forEach((stack, index) => {
-    const occurrences = [...stack.values()].slice(0, 20);
+  for (const stack of stacks) {
+    const occurrences = [...stack.parts.values()].slice(0, 20);
     const targets = occurrences.map(target);
     drafts.push({
       kind: "new",
@@ -1392,9 +1410,9 @@ export const draftCadComments = (
       title: "Duplicate part",
       // A pair keeps the overlap's own reading; a bigger stack names every copy.
       body:
-        stack.size === 2
-          ? stacked[index]!.reading
-          : `These ${stack.size} parts sit in the same place and overlap almost completely, so all but one are likely stale copies: ${occurrences.map((occurrence) => occurrence.name).join(", ")}. Keep one and remove the others.`.slice(
+        stack.parts.size === 2
+          ? stack.reading
+          : `These ${stack.parts.size} parts sit in the same place and overlap almost completely, so all but one are likely stale copies: ${occurrences.map((occurrence) => occurrence.name).join(", ")}${stack.parts.size > occurrences.length ? `, and ${stack.parts.size - occurrences.length} more` : ""}. Keep one and remove the others.`.slice(
               0,
               4000,
             ),
@@ -1402,7 +1420,7 @@ export const draftCadComments = (
       category: "assembly",
       targets,
     });
-  });
+  }
   // Where two targets of one draft read the same, as three copies of one rounded hex shaft do,
   // their labels keep the instance number (`<2>`).
   return drafts.map((draft) => {

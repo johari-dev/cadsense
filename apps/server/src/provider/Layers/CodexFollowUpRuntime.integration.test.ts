@@ -406,7 +406,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.live("keeps a follow-up Codex started although turn/start answered after its deadline", () =>
+  it.live("keeps a follow-up that started although turn/start missed its deadline", () =>
     Effect.gen(function* () {
       yield* writeScript({
         turnIds: ["turn-1", "turn-2"],
@@ -420,6 +420,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       yield* runtime.sendTurn({ input: "review my transfer" });
       const events = yield* Fiber.join(collected);
 
+      // Codex announced turn-2 before the deadline; the runtime kept it as the follow-up.
       assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
       assert.deepEqual(cad.calls, [
         "followUp null turn-1",
@@ -438,6 +439,49 @@ describe("CodexSessionRuntime CAD follow-up", () => {
         turnIds: ["turn-1", "turn-2"],
         notifications: [],
         turnNotifications: [[spawnedChild(), foreignTurnStarted(CHILD)]],
+      });
+      const cad = fakeCad();
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Fiber.join(collected);
+
+      assert.deepEqual(cad.calls, ["end null turn-1 stopped"]);
+      assert.equal(readLines(".requests").length, 1);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("treats a child known only from a collab tool call as still running", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        recordTurnRequests: true,
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnNotifications: [
+          [
+            {
+              method: "item/completed",
+              params: {
+                threadId: ROOT,
+                turnId: "turn-1",
+                completedAtMs: 1,
+                item: {
+                  type: "collabAgentToolCall",
+                  id: "call-spawn",
+                  tool: "wait",
+                  status: "completed",
+                  senderThreadId: ROOT,
+                  receiverThreadIds: ["legacy-child"],
+                  agentsStates: {},
+                },
+              },
+            },
+            foreignTurnStarted("legacy-child"),
+          ],
+        ],
       });
       const cad = fakeCad();
       const runtime = yield* startRuntime(cad.tools);

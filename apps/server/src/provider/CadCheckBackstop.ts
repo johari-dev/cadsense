@@ -60,7 +60,7 @@ export interface CadDraftLedger {
   offered: ReadonlyMap<string, CadCheckDraft>;
   readonly placements: CadPlacementCache;
   readonly declined: Map<string, string>;
-  readonly sent: Map<string, CadCheckDraft>;
+  readonly sent: Map<string, unknown>;
   pending: readonly string[];
   followedUp: boolean;
   settled: boolean;
@@ -72,7 +72,7 @@ export interface CadDraftLedger {
 export const makeCadDraftLedger = (
   session: {
     readonly declined: Map<string, string>;
-    readonly sent: Map<string, CadCheckDraft>;
+    readonly sent: Map<string, unknown>;
   } = { declined: new Map(), sent: new Map() },
 ): CadDraftLedger => ({
   drafts: [],
@@ -123,18 +123,19 @@ const keyOf = (item: unknown) =>
 /**
  * Turns a cad_comments_publish input into what the comment service takes, which knows nothing of
  * drafts: records `declinedDrafts`, expands `publishDrafts` into the drafts as offered, and drops
- * both fields. A key published before goes out with what it was first published with, so it replays.
- * Publishing a key declined in an earlier call takes the decline back; a key that is unknown or
- * declined in the same call is reported in `rejected` and not published; a key the agent also sent
- * as an item publishes once, as the agent's item. `catalogMissing` asks the
+ * both fields. A key published before goes out with what was first accepted for it, so it replays
+ * (see recordPublished). A key declined in an earlier call may be published, which takes the decline
+ * back once accepted; a key that is unknown or declined in the same call is reported in `rejected`
+ * and not published; a key the agent also sent as an item publishes once, as the agent's item. `catalogMissing` asks the
  * caller to fill `expectedCatalogVersion`, only for a publication with no items of the agent's own.
+ * `items` are the items forwarded, for recordPublished.
  * `itemCount` is null when the input is malformed, so the
  * comment service reports the error.
  */
 export const preparePublication = (ledger: CadDraftLedger, input: unknown) => {
   const parsed = decodeExtras(input);
   if (Option.isNone(parsed) || typeof input !== "object" || input === null)
-    return { input, itemCount: null, rejected: [], catalogMissing: false };
+    return { input, items: [], itemCount: null, rejected: [], catalogMissing: false };
   const declinedNow = new Set<string>();
   for (const decline of parsed.value.declinedDrafts ?? []) {
     ledger.declined.set(decline.publicationKey, decline.explanation);
@@ -143,17 +144,13 @@ export const preparePublication = (ledger: CadDraftLedger, input: unknown) => {
   const items = parsed.value.items ?? [];
   const sent = new Set(items.map(keyOf));
   const rejected: { publicationKey: string; reason: string }[] = [];
-  const fromDrafts: CadCheckDraft[] = [];
+  const fromDrafts: unknown[] = [];
   for (const key of new Set(parsed.value.publishDrafts ?? [])) {
     if (sent.has(key)) continue;
     const draft = ledger.sent.get(key) ?? ledger.offered.get(key);
     if (declinedNow.has(key)) rejected.push({ publicationKey: key, reason: "declined" });
     else if (!draft) rejected.push({ publicationKey: key, reason: "unknown-draft" });
-    else {
-      ledger.declined.delete(key);
-      ledger.sent.set(key, draft);
-      fromDrafts.push(draft);
-    }
+    else fromDrafts.push(draft);
   }
   const rest = Object.fromEntries(
     Object.entries(input).filter(([key]) => key !== "declinedDrafts" && key !== "publishDrafts"),
@@ -161,12 +158,52 @@ export const preparePublication = (ledger: CadDraftLedger, input: unknown) => {
   const forwarded = { ...rest, items: [...items, ...fromDrafts] };
   return {
     input: forwarded,
+    items: forwarded.items,
     itemCount: forwarded.items.length,
     rejected,
     // Only a publication of drafts alone gets the current version: for the agent's own items the
     // version guards against a catalog that changed under it.
     catalogMissing: parsed.value.expectedCatalogVersion === undefined && items.length === 0,
   };
+};
+
+const AcceptedResults = Schema.Struct({
+  results: Schema.Array(
+    Schema.Struct({
+      publicationKey: Schema.String,
+      commentId: Schema.optionalKey(Schema.String),
+      reason: Schema.optionalKey(Schema.String),
+    }),
+  ),
+});
+const decodeAccepted = Schema.decodeUnknownOption(AcceptedResults);
+/**
+ * After a publication, remembers what the comment service accepted for each draft key, the agent's
+ * own wording or the draft as offered, so publishing the key again replays it instead of
+ * conflicting, and takes back any decline of an accepted key. A rejected item changes nothing.
+ */
+export const recordPublished = (
+  ledger: CadDraftLedger,
+  items: readonly unknown[],
+  result: unknown,
+) => {
+  const parsed = decodeAccepted(result);
+  if (Option.isNone(parsed)) return;
+  const accepted = new Set(
+    parsed.value.results
+      .filter((entry) => entry.commentId !== undefined && entry.reason === undefined)
+      .map((entry) => entry.publicationKey),
+  );
+  for (const item of items) {
+    const key = keyOf(item);
+    if (typeof key !== "string" || !accepted.has(key)) continue;
+    ledger.declined.delete(key);
+    if (
+      !ledger.sent.has(key) &&
+      (ledger.offered.has(key) || ledger.drafts.some((draft) => draft.publicationKey === key))
+    )
+      ledger.sent.set(key, item);
+  }
 };
 
 /** The chat's current comment catalog version, for a publication that left it out. */
@@ -245,11 +282,11 @@ export const settleDrafts = Effect.fn("CadCheckBackstop.settleDrafts")(function*
   for (let start = 0; start < uncovered.length; start += 20) {
     if (start > 0) catalogVersion = yield* currentCatalogVersion(tools);
     const items = uncovered.slice(start, start + 20).map(backstopItem);
-    for (const item of items) ledger.sent.set(item.publicationKey, item);
     const delivery = yield* tools.comments("cad_comments_publish", {
       expectedCatalogVersion: catalogVersion,
       items,
     });
+    recordPublished(ledger, items, delivery.result);
     yield* Effect.logInfo("CAD check backstop published drafts", {
       drafts: uncovered.slice(start, start + 20).map((draft) => draft.publicationKey),
       result: delivery.result,
