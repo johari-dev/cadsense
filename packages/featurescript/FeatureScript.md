@@ -103,7 +103,12 @@ Sources: [Lexical conventions](https://cad.onshape.com/FsDoc/tokens.html),
   used by std as a map-lookup expression.
 - Assignment operators: `= += -= *= /= ^= %= ||= &&= ??= ~=`. No `++`/`--`.
 - Map literal keys: a bare identifier is a string (`{ a : 1 }` is `{ "a" : 1 }`); string and number
-  literals are themselves; `(expr)` and other expressions (`Enum.VALUE`) are evaluated.
+  literals are themselves; `(expr)` and other expressions (`Enum.VALUE`) are evaluated. Maps (and so
+  `switch` maps) take a trailing comma, which std never uses but community scripts do; arrays don't.
+- Imports by Onshape element id (`img::import(path : "87ad57ff25961bfc9686bd3e", ...)`, or
+  `document/version/element`) bring in icons, images and other documents' code. They can't be
+  fetched locally, so they load as unavailable modules: annotations that use them (icons) are
+  skipped, and a name or type that may have come from one fails where it's used, naming the element.
 - `x->f(a)` is `f(x, a)`; `f` must be an identifier. `x[]` reads a box. `x?.y`, `x?[i]` and `a ?? b`
   are undefined-safe.
 - Lambdas: `function (params) returns T precondition ... { body }`, or `x => expr`,

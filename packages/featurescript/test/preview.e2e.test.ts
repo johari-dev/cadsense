@@ -68,4 +68,49 @@ describe("runPreview on a warm runtime", () => {
     expect(stopped.features[1]?.run).toBeNull();
     expect(stopped.changes).toBeNull();
   });
+
+  it("loads imports of other Onshape documents as unavailable, and names them where they're used", () => {
+    // Community scripts import icons, images and libraries by Onshape element id. Icons only feed
+    // annotations, so a script that imports nothing else runs; a missing library fails at its use.
+    const withIcon = cube(10)
+      .replace(
+        'import(path : "onshape/std/geometry.fs", version : "3083.0");',
+        'import(path : "onshape/std/geometry.fs", version : "3083.0");\nicon::import(path : "48b129c6e2a454acde3a3baf", version : "53bdfee7fd2c348eaa0b8dc3");',
+      )
+      .replace(
+        '"Feature Type Name" : "Cube"',
+        '"Feature Type Name" : "Cube", "Icon" : icon::BLOB_DATA',
+      );
+    const ran = runPreview(runtime, [{ path: "icon.fs", source: withIcon }]);
+    expect(ran.features[0]?.spec.typeName).toBe("Cube");
+    expect(ran.features[0]?.run?.status).toBe("OK");
+
+    const usesLibrary = cube(10)
+      .replace(
+        'import(path : "onshape/std/geometry.fs", version : "3083.0");',
+        'import(path : "onshape/std/geometry.fs", version : "3083.0");\nimport(path : "9f4c9835d8018ff7dbdb5683/ffaca39d1d22450f59e60d16/c60f4a6e12f07acee647a2a1", version : "198e65e227da4b79f32bd021");',
+      )
+      .replace("fCuboid(", "libraryHelper(context); fCuboid(");
+    const fault = runPreview(runtime, [{ path: "lib.fs", source: usesLibrary }]).features[0]?.run
+      ?.fault;
+    expect(fault?.message).toMatch(/libraryHelper not found/);
+    expect(fault?.message).toMatch(/c60f4a6e12f07acee647a2a1.*isn't available locally/);
+
+    // Types from a missing library (an enum in the feature's precondition) say the same.
+    const usesLibraryType = usesLibrary
+      .replace("libraryHelper(context); ", "")
+      .replace("precondition {}", "precondition { definition.mode is LibraryMode; }");
+    expect(() => runPreview(runtime, [{ path: "lib.fs", source: usesLibraryType }])).toThrow(
+      /Type LibraryMode not found\. It may come from Onshape element .*c60f4a6e12f07acee647a2a1/,
+    );
+
+    // A missing file that isn't an Onshape reference is still a load error.
+    const missingFile = cube(10).replace(
+      'import(path : "onshape/std/geometry.fs", version : "3083.0");',
+      'import(path : "onshape/std/geometry.fs", version : "3083.0");\nimport(path : "nope.fs", version : "1.0");',
+    );
+    expect(() => runPreview(runtime, [{ path: "missing.fs", source: missingFile }])).toThrow(
+      /nope\.fs not found/,
+    );
+  });
 });
