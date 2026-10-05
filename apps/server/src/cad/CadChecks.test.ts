@@ -891,6 +891,30 @@ describe("cad_checks tool", () => {
       assert.isAbove(pageCount, 8);
     }),
   );
+  it.effect("keeps a first page with many drafts under the byte cap", () =>
+    Effect.gen(function* () {
+      // 12 copies at one placement: 66 near-total overlaps, each a duplicate draft.
+      const crowded = manifest(
+        Array.from({ length: 12 }, (_, i) => ({
+          number: i + 1,
+          part: 10,
+          name: `Bracket ${i + 1} ${"x".repeat(180)}`,
+        })),
+      );
+      const crowdedState = { ...initialCadView(crowded), revision: 1 };
+      const page = yield* readCadChecks(crowded, crowdedState, geometry, {
+        expectedRevision: 1,
+        checks: ["mesh-interference"],
+        limit: 1,
+      });
+      assert.isNotEmpty(page.drafts ?? []);
+      assert.isNotEmpty(page.findings);
+      assert.isAtMost(
+        new TextEncoder().encode(encodeJson(page)).length,
+        CAD_CHECK_LIMITS.pageBytes,
+      );
+    }),
+  );
 });
 
 describe("draftCadComments", () => {

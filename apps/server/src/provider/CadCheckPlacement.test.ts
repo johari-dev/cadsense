@@ -2,7 +2,8 @@ import { CadSnapshotId, CadViewError, type CadCheckDraft } from "@cadsense/contr
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { placeCadDrafts } from "./CadCheckPlacement.ts";
+import type { CadAgentTools } from "../cad/CadViewing.ts";
+import { makeCadPlacementCache, placeCadDrafts } from "./CadCheckPlacement.ts";
 
 // Cases from "Check-placed points" in cad/CadComments.md.
 
@@ -58,23 +59,25 @@ type Outcome = "visible" | "occluded" | "fail" | "render-failed" | "part-missing
  * A comment activation whose placements are visible unless their key says otherwise. Like the real
  * activation, it reports a comment error as a result carrying `error`.
  */
-const comments = (outcome: (key: string) => Outcome) => (name: string, input: unknown) => {
-  assert.equal(name, "cad_comment_place");
-  const { key } = decodePlaceInput(input);
-  const kind = outcome(key);
-  if (kind === "fail") return Effect.fail(new CadViewError({ reason: "render-unavailable" }));
-  if (kind === "render-failed")
-    return Effect.succeed({ result: { error: "render-invalid-result" } });
-  if (kind === "part-missing")
-    return Effect.succeed({ result: { error: "occurrence-unavailable" } });
-  return Effect.succeed({
-    result: {
-      candidateId: `candidate-${key}`,
-      inspectionId: kind === "visible" ? `inspection-${key}` : null,
-    },
-    png: new TextEncoder().encode(`png-${key}`),
-  });
-};
+const comments =
+  (outcome: (key: string) => Outcome): NonNullable<CadAgentTools["comments"]> =>
+  (name, input) => {
+    assert.equal(name, "cad_comment_place");
+    const { key } = decodePlaceInput(input);
+    const kind = outcome(key);
+    if (kind === "fail") return Effect.fail(new CadViewError({ reason: "render-unavailable" }));
+    if (kind === "render-failed")
+      return Effect.succeed({ result: { error: "render-invalid-result" } });
+    if (kind === "part-missing")
+      return Effect.succeed({ result: { error: "occurrence-unavailable" } });
+    return Effect.succeed({
+      result: {
+        candidateId: `candidate-${key}`,
+        inspectionId: kind === "visible" ? `inspection-${key}` : null,
+      },
+      png: new TextEncoder().encode(`png-${key}`),
+    });
+  };
 const run = (drafts: CadCheckDraft[], outcome: (key: string) => Outcome) =>
   placeCadDrafts(comments(outcome), result(drafts));
 const text = (pngs: readonly Uint8Array[]) => pngs.map((png) => new TextDecoder().decode(png));
@@ -129,6 +132,51 @@ describe("placeCadDrafts", () => {
         placed.result.drafts!.every((d) => d.targets.every((target) => target.kind === "part")),
       );
       assert.isUndefined(placed.result.draftImages);
+    }),
+  );
+
+  it.effect("reuses a turn's earlier placements without rendering or attaching them again", () =>
+    Effect.gen(function* () {
+      const asked: string[] = [];
+      const counting = (name: string, input: unknown) => {
+        asked.push(decodePlaceInput(input).key);
+        return comments((key) => (key === "hidden" ? "occluded" : "visible"))(name, input);
+      };
+      const cache = makeCadPlacementCache();
+      const drafts = [draft("hidden", true), draft("collision", true)];
+      const first = yield* placeCadDrafts(counting, result(drafts), cache);
+      const again = yield* placeCadDrafts(counting, result(drafts), cache);
+      assert.deepEqual(asked, ["hidden", "collision"]);
+      // Offered with the same words, so publishing it from either result replays one comment.
+      assert.deepEqual(again.result.drafts, first.result.drafts);
+      assert.deepEqual(text(first.pngs), ["png-collision"]);
+      assert.deepEqual(again.pngs, []);
+      assert.isUndefined(again.result.draftImages);
+    }),
+  );
+
+  it.live("places each marker once when two calls run at once", () =>
+    Effect.gen(function* () {
+      const asked: string[] = [];
+      const slow = (name: string, input: unknown) =>
+        Effect.sleep("20 millis").pipe(
+          Effect.andThen(
+            Effect.suspend(() => {
+              asked.push(decodePlaceInput(input).key);
+              return comments(() => "visible")(name, input);
+            }),
+          ),
+        );
+      const cache = makeCadPlacementCache();
+      const [one, two] = yield* Effect.all(
+        [
+          placeCadDrafts(slow, result([draft("collision", true)]), cache),
+          placeCadDrafts(slow, result([draft("collision", true)]), cache),
+        ],
+        { concurrency: 2 },
+      );
+      assert.deepEqual(asked, ["collision"]);
+      assert.deepEqual(one.result.drafts, two.result.drafts);
     }),
   );
 

@@ -363,8 +363,62 @@ so all eight `publishDrafts` keys came back `unknown-draft`; Sol recovered by se
 items. The draft ledger now keeps offered drafts across pages, covered in `CadViewing.test.ts`. No
 other recorded run hit it.
 
-The follow-up turn ran in the e2e harness by resuming the agent's session (`--follow-up`); the app
-does not send one yet. Over MCP outside the harness, the server cannot start a turn.
+The follow-up turn ran in the e2e harness by resuming the agent's session (`--follow-up`). The app
+now sends it itself; see the next check. Over MCP outside the harness, the server cannot start a
+turn.
+
+## Recorded check: October 5, 2026, follow-up in the app
+
+The same transfer and prompt, run through the app's own turn handling with
+`cad-app-review-e2e.ts`: the orchestration engine, the Codex or Claude adapter, and headless
+Chromium rendering, on a copy of the seeded data directory. The follow-up is now part of the turn
+(see "The follow-up" in [CadChecks.md](CadChecks.md)). One blind grader scored all eight runs with
+the same rubric; packets list every assistant message the student saw, since after a follow-up the
+last message is a one-line wrap-up.
+
+| Model                 | Runs | Score per run | Mean | Comments | Point markers | Follow-ups | Backstop comments |
+| --------------------- | ---- | ------------- | ---- | -------- | ------------- | ---------- | ----------------- |
+| GPT-6-Luna, medium    | 4    | 7, 8, 8, 8    | 7.75 | 8.5      | 2.0           | 2 of 4     | 0                 |
+| GPT-6-Sol, medium     | 2    | 8, 8          | 8.00 | 9.5      | 4.0           | 0 of 2     | 0                 |
+| Opus 5.5, high effort | 2    | 8, 8          | 8.00 | 12.0     | 4.0           | 0 of 2     | 0                 |
+
+No run had a misplaced marker or a backstop comment. When the follow-up fired, Luna published
+every remaining draft itself in one call and closed with a line such as "I added CAD comments for
+the gear spacing, belt path, motor mounting and roller drive, unsupported and stacked shafts, the
+gear and controller collisions, and the apparent duplicate plate." Sol and Opus never needed it.
+The run that scored 7 lost half points on items 2 and 3: it pinned the gear spacing and the motor
+mount, and a comment covers a draft when it targets any of the draft's parts, so the two collision
+drafts counted as covered and nothing asked for them. That leniency is deliberate: a stricter rule would
+send Opus back for drafts its own comments already cover.
+
+With "Just answer in chat, I don't want CAD comments on this one yet" (a gear-ratio question),
+Opus declined every draft, answered 5.71:1 with the tight mesh, and offered to pin the rest later.
+Nothing was published.
+
+The runs found three problems, fixed before the graded runs:
+
+- A `cad_checks` call that ran fewer checks replaced the turn's drafts. One Luna run called it again
+  with `checks: ["drivetrain"]`, which erased the two collision drafts and the duplicate plate, so
+  neither the follow-up nor the backstop published them. Opus and Sol make such calls too (Opus ran
+  default, drivetrain-only, and mesh-interference-only calls in one review). Draft keys are now
+  digests of snapshot, kind, and parts, and later calls merge into the ledger by key.
+- When the first render of a turn was a placement inspection, a cold renderer under heavy load
+  missed the 60-second worker deadline, the worker restarted, and every placement failed the same
+  way: `cad_checks` took 12.5 minutes and offered no points. Placement now stops after a render
+  failure (83 and 110 seconds in the two graded Luna runs where it happened), and a turn reuses
+  its placements when `cad_checks` runs again.
+- Ordinal draft keys could repeat across reviews in one chat, so a later review's draft could hit
+  `idempotency-conflict` against an earlier comment. Snapshot-based keys never repeat.
+
+The machine ran at load averages of 80 to 300 on 32 cores during these runs, and two Opus runs
+were discarded after the Claude API stalled for 23 and 29 minutes with nothing in flight. Durations
+here are not representative; harness runs of the same review take 2 to 4 minutes.
+
+The Claude follow-up never fired in a real review, because Opus never stopped with drafts
+pending, and Haiku 4.5 could not run through the local model proxy. The SDK behavior it relies on
+was checked directly: a `Stop` hook answering `{decision: "block", reason}` made Claude continue in
+the same query with the reason as feedback, one result came back, and the hook fired again with
+`stop_hook_active` set, where the ledger allows the stop.
 
 ## Matched evaluation before the review-process update
 

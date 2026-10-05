@@ -205,6 +205,17 @@ describe("cadDrivetrainRole", () => {
     for (const name of ['MAXSpline (16.5" L) <1>', '1/2" ThunderHex Shaft (6" L) <1>'])
       expect(cadDrivetrainRole(name)?.kind, name).toBe("shaft");
   });
+
+  it("does not read standoffs, adapters, or couplers as shafts, and reads bushings as bearings", () => {
+    for (const name of [
+      "1/4-20 x 1.5in Hex Standoff <1>",
+      "REV-41-1500 Hex Standoff <1>",
+      "MAXSpline Hex Adapter <1>",
+      '1/2" Hex Shaft Coupler <1>',
+    ])
+      expect(cadDrivetrainRole(name), name).toBe(null);
+    expect(cadDrivetrainRole("Bronze Bushing 1/2 Hex <1>")).toEqual({ kind: "bearing" });
+  });
 });
 
 describe("fitCadAxis and carrier alignment", () => {
@@ -274,7 +285,7 @@ describe("belts", () => {
   // 70T HTD 5 mm on two 24T pulleys: 350 mm needs 115.1 mm (4.532 in) centers.
   const centers = 115.1 / 1000 / INCH;
   const pitchRadius = (24 * 5) / (2 * Math.PI) / 1000;
-  const loop = (pulleys: readonly number[]) => {
+  const loop = (pulleys: readonly number[], kind: CadDrivetrainFinding["kind"] = "loop") => {
     const s = scene();
     s.add(
       "70T 5M 9mm Wide Belt <1>",
@@ -283,13 +294,33 @@ describe("belts", () => {
     );
     for (const x of pulleys)
       s.add("HTD 24 Tooth Pulley <1>", cylinder(pitchRadius, 0.012), along("y", [x, 0, 0]));
-    return ofKind(s.analyze(), "loop");
+    return ofKind(s.analyze(), kind);
   };
 
   it("passes a belt that wraps a pulley at each end and matches its length", () => {
-    const [finding] = loop([-centers / 2, centers / 2]);
+    const [finding] = loop([-centers / 2, centers / 2], "loop-length");
     expect(finding?.problem).toBe(false);
     expect(finding?.summary).toContain("length matches");
+  });
+
+  it("reports a belt too long for its centers as a length problem, not a bare loop", () => {
+    const [finding] = loop([-centers / 2 + 0.2, centers / 2 - 0.2], "loop-length");
+    expect(finding?.problem).toBe(true);
+    expect(finding?.summary).toContain("too long");
+  });
+
+  it("calls chain slack a lead, since a tensioner may take it up", () => {
+    // 60L #35 on two 22T sprockets: 571.5 mm of chain at centers that need about 2 links less.
+    const pitch = 9.525;
+    const radius = (22 * pitch) / (2 * Math.PI) / 1000;
+    const slackCenters = (571.5 - 2 * pitch - 2 * Math.PI * radius * 1000) / 2 / 1000;
+    const s = scene();
+    s.add("60L #35 Chain <1>", beltLoop(slackCenters, radius, 0.006), along("y", [0, 0, 0]));
+    for (const x of [-slackCenters / 2, slackCenters / 2])
+      s.add("#35 22T Sprocket <1>", cylinder(radius, 0.006), along("y", [x / INCH, 0, 0]));
+    const [finding] = ofKind(s.analyze(), "loop-length");
+    expect(finding?.summary).toContain("slack");
+    expect(finding?.problem).toBe(false);
   });
 
   it("places a bare-belt marker at the end that has no pulley", () => {
@@ -355,6 +386,19 @@ describe("power paths", () => {
       [],
     );
     expect(ofKind(findings, "unpowered")[0]?.summary).toContain("could not be traced");
+  });
+
+  it("calls a roller left out while others are driven a lead, since it may be an idler", () => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [1.178, -2.4, 0]));
+    s.add("Driven Hex Shaft <1>", hexShaft(10), along("y", [1.178, -6, 0]));
+    s.add("Deadaxle Tube_9.75_in <1>", cylinder(INCH, 9.75 * INCH), along("y", [1.178, -6, 0]));
+    s.add("Deadaxle Tube_9.75_in <2>", cylinder(INCH, 9.75 * INCH), along("y", [6, -6, 0]));
+    const [unpowered] = ofKind(s.analyze(), "unpowered");
+    expect(unpowered?.occurrences).toHaveLength(1);
+    expect(unpowered?.problem).toBe(false);
   });
 
   it("reports two motors driving one gear as one power path", () => {

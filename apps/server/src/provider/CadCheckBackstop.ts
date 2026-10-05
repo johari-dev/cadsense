@@ -2,7 +2,9 @@ import type { CadCheckDraft, CadChecksResult } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { CAD_DRAFT_DECLINE_RULE } from "../cad/CadChecks.ts";
 import type { CadAgentTools } from "../cad/CadViewing.ts";
+import { type CadPlacementCache, makeCadPlacementCache } from "./CadCheckPlacement.ts";
 
 /**
  * Drafts that still need a comment: not declined by the agent, and no comment in the chat targets
@@ -49,21 +51,24 @@ export const BACKSTOP_NOTE = "(Found by Cadsense's automatic checks.)";
 /**
  * One activation's drafts: as cad_checks proved them (`drafts`, with whole-part targets, for coverage
  * and the backstop), as offered to the agent (`offered`, with any inspected point targets, for
- * publishing by key), the ones its agent declined, the keys still uncovered (`pending`), and whether
- * the follow-up was sent.
+ * publishing by key), the markers placed for them (`placements`), the ones its agent declined, the
+ * keys still uncovered (`pending`), and whether the follow-up was sent.
  */
 export interface CadDraftLedger {
   drafts: readonly CadCheckDraft[];
   offered: ReadonlyMap<string, CadCheckDraft>;
+  readonly placements: CadPlacementCache;
   readonly declined: Map<string, string>;
   pending: readonly string[];
   followedUp: boolean;
   settled: boolean;
 }
-export const makeCadDraftLedger = (): CadDraftLedger => ({
+/** `declined` is shared by the main agent's turns in a session: draft keys repeat on one snapshot. */
+export const makeCadDraftLedger = (declined = new Map<string, string>()): CadDraftLedger => ({
   drafts: [],
   offered: new Map(),
-  declined: new Map(),
+  placements: makeCadPlacementCache(),
+  declined,
   pending: [],
   followedUp: false,
   settled: false,
@@ -109,7 +114,8 @@ const keyOf = (item: unknown) =>
  * drafts: records `declinedDrafts`, expands `publishDrafts` into the drafts as offered, and drops
  * both fields. A key that is unknown or declined is reported in `rejected` and not published; a key
  * the agent also sent as an item publishes once, as the agent's item. `catalogMissing` asks the
- * caller to fill `expectedCatalogVersion`. `itemCount` is null when the input is malformed, so the
+ * caller to fill `expectedCatalogVersion`, only for a publication with no items of the agent's own.
+ * `itemCount` is null when the input is malformed, so the
  * comment service reports the error.
  */
 export const preparePublication = (ledger: CadDraftLedger, input: unknown) => {
@@ -137,7 +143,9 @@ export const preparePublication = (ledger: CadDraftLedger, input: unknown) => {
     input: forwarded,
     itemCount: forwarded.items.length,
     rejected,
-    catalogMissing: parsed.value.expectedCatalogVersion === undefined,
+    // Only a publication of drafts alone gets the current version: for the agent's own items the
+    // version guards against a catalog that changed under it.
+    catalogMissing: parsed.value.expectedCatalogVersion === undefined && items.length === 0,
   };
 };
 
@@ -200,7 +208,8 @@ export const presentRemaining = (drafts: readonly CadCheckDraft[], note: string)
 
 /**
  * The turn-end backstop: publishes every draft that no comment covers and the agent did not
- * decline, worded as drafted with BACKSTOP_NOTE appended. Runs once per activation.
+ * decline, worded as drafted with BACKSTOP_NOTE appended, in batches of 20. Runs once per
+ * activation, and only when armed; see makeCadProviderTools.
  */
 export const settleDrafts = Effect.fn("CadCheckBackstop.settleDrafts")(function* (
   tools: CadAgentTools,
@@ -211,15 +220,19 @@ export const settleDrafts = Effect.fn("CadCheckBackstop.settleDrafts")(function*
   const chat = yield* chatComments(tools);
   if (!chat) return;
   const uncovered = uncoveredDrafts(ledger.drafts, chat.comments, new Set(ledger.declined.keys()));
-  if (uncovered.length === 0) return;
-  const delivery = yield* tools.comments("cad_comments_publish", {
-    expectedCatalogVersion: chat.catalogVersion,
-    items: uncovered.slice(0, 20).map(backstopItem),
-  });
-  yield* Effect.logInfo("CAD check backstop published drafts", {
-    drafts: uncovered.map((draft) => draft.publicationKey),
-    result: delivery.result,
-  });
+  // One publication takes at most 20 items; each batch expects the catalog the last one left.
+  let catalogVersion = chat.catalogVersion;
+  for (let start = 0; start < uncovered.length; start += 20) {
+    if (start > 0) catalogVersion = yield* currentCatalogVersion(tools);
+    const delivery = yield* tools.comments("cad_comments_publish", {
+      expectedCatalogVersion: catalogVersion,
+      items: uncovered.slice(start, start + 20).map(backstopItem),
+    });
+    yield* Effect.logInfo("CAD check backstop published drafts", {
+      drafts: uncovered.slice(start, start + 20).map((draft) => draft.publicationKey),
+      result: delivery.result,
+    });
+  }
 });
 
 /**
@@ -230,7 +243,9 @@ export const followUpMessage = (drafts: readonly CadCheckDraft[]) =>
   [
     `Your review is not finished. Cadsense's checks proved ${drafts.length === 1 ? "a defect that still has" : `${drafts.length} defects that still have`} no CAD comment:`,
     ...drafts.map((draft) => `- ${draft.title} (cad_checks draft ${draft.publicationKey})`),
-    "Pin each one now with cad_comments_publish, using publishDrafts or your own wording, or decline it with declinedDrafts and a reason when the user said that part is a placeholder or not modeled yet. Then tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.",
+    "Pin each one now with cad_comments_publish, using publishDrafts or your own wording.",
+    CAD_DRAFT_DECLINE_RULE,
+    "Then tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.",
   ].join("\n");
 
 /** The note other CAD tool results carry while drafts are uncovered and undeclined. */

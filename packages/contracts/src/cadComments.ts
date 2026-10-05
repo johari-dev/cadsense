@@ -225,7 +225,7 @@ export const CadCommentsPublishToolInput = Schema.Struct({
   items: Schema.optionalKey(Schema.Array(CadCommentPublication).check(Schema.isMaxLength(20))),
   // cad_checks drafts to publish exactly as offered, by publicationKey. CadProviderTools expands them.
   publishDrafts: Schema.optionalKey(Schema.Array(Id).check(Schema.isMaxLength(20))),
-  // cad_checks drafts the agent leaves unpublished, with the user's reason. CadProviderTools reads
+  // cad_checks drafts the agent leaves unpublished, with its reason. CadProviderTools reads
   // and strips these; the comment service never sees them.
   declinedDrafts: Schema.optionalKey(
     Schema.Array(Schema.Struct({ publicationKey: Id, explanation: text(1000) })).check(

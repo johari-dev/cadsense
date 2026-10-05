@@ -340,7 +340,8 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
       createdAt: DateTime.formatIso(yield* DateTime.now),
     });
     const scope = yield* Scope.fork(owner);
-    const tools = yield* makeCadProviderTools(threadId).pipe(
+    // The MCP session is the review, so closing it publishes leftover drafts.
+    const tools = yield* makeCadProviderTools(threadId, { settleOnClose: true }).pipe(
       Effect.provide(context),
       Effect.provideService(Scope.Scope, scope),
     );

@@ -44,8 +44,12 @@ the loop viewed face-on.
 
 A finding is `problem: true` only when every part involved was recognized. A trace that runs into
 an unrecognized part says so and is never a problem, and the unpowered-roller finding is a problem
-only when every motor was traced. Power paths are facts, not problems: an arm's last gear drives
-the arm itself.
+only when every motor was traced and no roller is reached at all: a roller left out while others
+are driven may be an idler. Power paths are facts, not problems: an arm's last gear drives the arm
+itself. A belt or chain wrapping a sprocket or pulley at each end gets a `loop-length` finding:
+a belt that is too long or short, or a chain that is too short, is a problem; chain slack, and any
+loop wrapping more than two wheels (an idler or tensioner), is a lead. `cad_checks` drafts comments
+for problems but never for `loop-length`, whose fix depends on parts it cannot see.
 
 ## Limits
 
@@ -55,6 +59,8 @@ the arm itself.
 - Belt length uses pitch radius `T * p / 2π` for both belts and chains, which is close for chain
   sprockets above about 15 teeth.
 - It does not know whether a tensioner exists, so chain slack is a lead.
+- A shaft carried only by a custom-named bushing or a bearing block is reported unsupported. Bushings
+  with `bushing` in their name count as bearings; agents decline such a draft after inspecting it.
 - It does not check mates. A motor mated in the wrong place shows up only through interference.
 
 ## Results on stored models
@@ -85,6 +91,9 @@ the arm itself.
 - A gear on its shaft, a shaft in its bearing or spacer, a belt on its pulley, two meshing gears, a game piece, a fastener, or two parts inside one vendor subassembly is reported as a collision.
 - A pin or spacer bolted through a spinning part is reported as a collision.
 - A bare-belt marker lands on the end that has a pulley, or is viewed edge-on.
+- A standoff, a spline or hex adapter, or a shaft coupler is read as a shaft, so it is reported unsupported or stacked on a real shaft; a bushing is read as a shaft instead of a bearing.
+- A roller left out while others are driven, such as an idler, is reported as a proven problem.
+- Chain slack, or a loop around an idler or tensioner, is reported as a proven length problem.
 
 Collisions on stored models: the transfer reports exactly its three (the 40T gear into the 1x1
 tube, both jackshafts into the SPARK Flex). The arm reports the 16.5 in MAXSpline running into two

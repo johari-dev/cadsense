@@ -51,6 +51,7 @@ publishes the whole-part version, so no point reaches the student unless an agen
 - A collision draft is made for an intended fit: a gear on its shaft, a shaft in its bearing or spacer, a belt on its pulley, two meshing gears, a game piece, a fastener, or two parts inside one vendor subassembly.
 - A point that the inspection shows occluded is still offered as a point target.
 - Placement or its render fails, and `cad_checks` fails instead of keeping whole-part targets.
+- Each `cad_checks` call in a turn renders every marker again; agents such as Opus call it several times. A turn reuses its placements by draft key, which names the snapshot, so a newer model is placed again.
 - A struggling renderer makes every placement wait out its render, so `cad_checks` takes minutes. After the first render failure no more placements are tried; a failure about one draft, such as a missing part, does not stop the rest.
 - The backstop publishes a check-placed point.
 - A published check-placed point stops counting as covering its draft.

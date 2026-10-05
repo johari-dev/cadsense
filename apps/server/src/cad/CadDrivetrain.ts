@@ -50,7 +50,7 @@ const CHAIN_PITCH_MM: Readonly<Record<string, number>> = { "25": 6.35, "35": 9.5
 /** Role from an FRC vendor part name, or null when the name does not identify one. */
 export const cadDrivetrainRole = (rawName: string): CadDrivetrainRole | null => {
   const name = rawName.replace(/\s*<\d+>$/, "").replaceAll("_", " ");
-  if (/bearing/i.test(name) && !/hat|block|housing|plate|retainer/i.test(name))
+  if (/bearing|bushing/i.test(name) && !/hat|block|housing|plate|retainer/i.test(name))
     return { kind: "bearing" };
   if (/\bbelt\b/i.test(name)) {
     const teeth = teethIn(name);
@@ -92,7 +92,7 @@ export const cadDrivetrainRole = (rawName: string): CadDrivetrainRole | null => 
   }
   if (/spark\s*(flex|max)|talon|victor|motor controller/i.test(name)) return { kind: "controller" };
   // Tooth counts outrank hardware words ("Roller Endcap HTD 24 Tooth Square Nut" is a pulley).
-  if (/\b(screw|bolt|nut|washer|bhcs|shcs|fhcs|rivet|insert|spacer|collar)\b/i.test(name))
+  if (/\b(screw|bolt|nut|washer|bhcs|shcs|fhcs|rivet|insert|spacer|collar|standoff)\b/i.test(name))
     return null;
   if (
     /\b(motor|falcon|kraken|neo|vortex|cim|minion|775)\b/i.test(name) &&
@@ -105,7 +105,7 @@ export const cadDrivetrainRole = (rawName: string): CadDrivetrainRole | null => 
   const shaftWords = name.replace(/hex\s*(bore|id)\b|\(\s*1\/2"\s*thunderhex\s*id\s*\)/gi, "");
   if (
     /shaft|\bhex\b|\baxle\b|thunderhex|\bmaxspline\b/i.test(shaftWords) &&
-    !/tube|bore|hub/i.test(shaftWords)
+    !/tube|bore|hub|adapter|coupler|coupling/i.test(shaftWords)
   )
     return { kind: "shaft" };
   if (/\broller\b|round tube|deadaxle tube|dead axle tube|\bwheel\b/i.test(name))
@@ -691,6 +691,17 @@ export const analyzeCadDrivetrain = (
       });
       continue;
     }
+    // An idler or tensioner changes the path, so a loop around more than two wheels is not measured.
+    if (wrapped.length > 2) {
+      findings.push({
+        kind: "loop-length",
+        problem: false,
+        summary: `${loop.name} wraps ${names(wrapped)}, so its length was not checked.`,
+        occurrences: [ref(loop), ...wrapped.map(ref)],
+      });
+      connect(wrapped[0]!, wrapped[wrapped.length - 1]!, noun === "sprocket" ? "chain" : "belt");
+      continue;
+    }
     const [a, b] = [wrapped[0]!, wrapped[wrapped.length - 1]!];
     const centers = Math.abs(along(b.fit.center) - along(a.fit.center));
     const ra = (a.role.teeth * loop.role.pitchMm) / (2 * Math.PI) / 1000;
@@ -706,8 +717,9 @@ export const analyzeCadDrivetrain = (
         : `it has ${(-error / loop.role.pitchMm).toFixed(1)} links of slack, so it needs a tensioner or a ${inches(-error / 2000)} longer center distance`
       : `it is ${Math.abs(error).toFixed(1)} mm too ${error > 0 ? "short" : "long"}; move a pulley ${inches(Math.abs(error) / 2000)} or pick another belt`;
     findings.push({
-      kind: "loop",
-      problem: !fits,
+      kind: "loop-length",
+      // Chain slack is a lead: a tensioner the check cannot see may take it up.
+      problem: !fits && !(chain && error < 0),
       summary: fits
         ? `${loop.name} wraps ${a.name} and ${b.name} at ${inches(centers)} centers; its length matches.`
         : `${loop.name} is ${Number(length.toFixed(1))} mm, but ${a.name} and ${b.name} at ${inches(centers)} centers need about ${needed.toFixed(0)} mm: ${mismatch}.`,
@@ -854,7 +866,8 @@ export const analyzeCadDrivetrain = (
   if (motors.length > 0 && unpowered.length > 0)
     findings.push({
       kind: "unpowered",
-      problem: !untraced,
+      // A roller left out while others are driven may be an idler.
+      problem: !untraced && unpowered.length === rollers.length,
       summary: untraced
         ? `No traced motor reaches ${names(unpowered)}, but some drives could not be traced, so check whether one of those drives them.`
         : `No motor reaches ${names(unpowered)}: the gears, belts, and chains as modeled do not connect ${unpowered.length > 1 ? "them" : "it"} to a motor.`,

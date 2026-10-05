@@ -14,6 +14,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import { CAD_DRAFT_DECLINE_RULE } from "../cad/CadChecks.ts";
 import { CadViewing, type CadAgentTools } from "../cad/CadViewing.ts";
 import { placeCadDrafts } from "./CadCheckPlacement.ts";
 import {
@@ -43,7 +44,8 @@ const descriptions = {
     'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
     'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
     'When a newer model shows an open comment was addressed, propose resolution: {kind:"propose-resolve",publicationKey,inspectedSnapshotId,commentId,explanation}. The inspected snapshot must be newer than the comment\'s and the explanation must cite what you verified in the new geometry. The user confirms; the comment stays open until then. Comments listed with outdated set need this re-verification first.',
-    "To publish cad_checks drafts exactly as offered, pass publishDrafts:[publicationKey]; expectedCatalogVersion and items may then be left out. To skip a draft because the user said that part is a placeholder or not modeled yet, add declinedDrafts:[{publicationKey,explanation}]. Results list remainingDrafts: proven defects no comment covers yet.",
+    "To publish cad_checks drafts exactly as offered, pass publishDrafts:[publicationKey]; expectedCatalogVersion and items may then be left out. Results list remainingDrafts: proven defects no comment covers yet.",
+    CAD_DRAFT_DECLINE_RULE,
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
   cad_context:
@@ -52,8 +54,9 @@ const descriptions = {
     "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
   cad_checks: [
     'Run deterministic checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["drivetrain","mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: everything except overlapping-bounds.',
-    "drivetrain findings come first. They trace power from each motor through recognized gears, belts, chains, and shafts, check gear center distances and belt or chain lengths, and find shafts with no bearing. A drivetrain finding with problem: true is a verified defect in the model as drawn: comment on each one unless the user said that part is a placeholder or not modeled yet.",
-    "The first page also returns drafts: one ready cad_comments_publish item per proven defect (drivetrain problems, spinning parts running into other parts, and near-total duplicates). Where the checks prove the spot, the draft already has an inspected point target, and draftImages names the image attached to this result that shows its marker: look at it before publishing. Other drafts have whole-part targets as a fallback. Reword them for the student, replace a whole-part target with a located and inspected point when the problem sits at one spot, decline only those whose part the user said is a placeholder or not modeled yet, add expectedCatalogVersion from cad_comments_list, and publish them.",
+    "drivetrain findings come first. They trace power from each motor through recognized gears, belts, chains, and shafts, check gear center distances and belt or chain lengths, and find shafts with no bearing. A drivetrain finding with problem: true is a verified defect in the model as drawn: comment on each one.",
+    "The first page also returns drafts: one ready cad_comments_publish item per proven defect (drivetrain problems, spinning parts running into other parts, and near-total duplicates). Where the checks prove the spot, the draft already has an inspected point target, and draftImages names the image attached to this result that shows its marker: look at it before publishing. Other drafts have whole-part targets as a fallback. Reword them for the student, replace a whole-part target with a located and inspected point when the problem sits at one spot, add expectedCatalogVersion from cad_comments_list, and publish them.",
+    CAD_DRAFT_DECLINE_RULE,
     "mesh-interference lists part pairs whose solids actually intersect, with a plain-language reading of each, ordered so likely duplicates and real collisions come before overlaps inside one subassembly, squeezed game pieces, and fastener threads. Intended fits touch at zero volume. coincident-instances lists duplicate placements of one part; degenerate-geometry lists parts with unknown or near-zero bounds.",
     "Treat each duplicate or collision reading as a problem to explain, not a hint: capture the pair isolated and say what is wrong or ask why it is intended. summary.meshUnknown counts parts that are not closed solids; request overlapping-bounds for bounding-box leads on those. Read summary.budgetExhausted to know whether every pair was evaluated. Each page states every selected check's explanation once in explanations; a page may hold fewer findings than limit to stay small, so follow nextCursor.",
   ].join(" "),
@@ -179,21 +182,36 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
 });
 
 const decodeChecksResult = Schema.decodeUnknownOption(CadChecksResult);
-const REMINDER =
-  "These cad_checks drafts describe proven defects that no comment in this chat covers yet. Publish each one, reworded for the student, or decline it with declinedDrafts:[{publicationKey,explanation}] when the user said that part is a placeholder or not modeled yet. A plan to change it later is not a reason to decline. Drafts still uncovered when the turn ends are published as drafted.";
+const REMINDER = `These cad_checks drafts describe proven defects that no comment in this chat covers yet. Publish each one, reworded for the student. ${CAD_DRAFT_DECLINE_RULE} Drafts still uncovered when the turn ends are published as drafted.`;
 
-/** One native session owns these activations. Only trusted adapter callbacks supply child keys and turn IDs. */
+/** How a turn ended: only a `completed` main-agent turn publishes its leftover drafts. */
+export type CadTurnOutcome = "completed" | "stopped";
+
+/**
+ * One native session owns these activations. Only trusted adapter callbacks supply child keys and
+ * turn IDs. `settleOnClose` makes closing the session publish leftover drafts too, for `cadsense mcp`,
+ * where the session is the review; an app session that closes publishes nothing.
+ */
 export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* (
   threadId: ThreadId,
+  options: { readonly settleOnClose?: boolean } = {},
 ) {
   const viewing = yield* CadViewing;
   const owner = yield* Scope.Scope;
   const gate = yield* Semaphore.make(1);
   const entries = new Map<
     string | null,
-    { turnId: TurnId; scope: Scope.Closeable; tools: CadAgentTools; ledger: CadDraftLedger }
+    {
+      turnId: TurnId;
+      scope: Scope.Closeable;
+      tools: CadAgentTools;
+      ledger: CadDraftLedger;
+      settle: boolean;
+    }
   >();
   const ended = new Map<string | null, Set<TurnId>>();
+  // The main agent's declines last the session: a later turn on the same snapshot drafts the same keys.
+  const declined = new Map<string, string>();
   // Shared by the session's child agents so IDs one shows, another can use.
   const ids = makeCadShortIds();
   let open = true;
@@ -230,12 +248,19 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
     const tools = yield* Deferred.await(ready).pipe(
       Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(scope, Exit.void) : Effect.void)),
     );
-    const entry = { turnId, scope, tools, ledger: makeCadDraftLedger() };
+    const entry = {
+      turnId,
+      scope,
+      tools,
+      ledger: makeCadDraftLedger(childKey === null ? declined : undefined),
+      settle: childKey === null && options.settleOnClose === true,
+    };
     // Scope finalizers run newest first, so this backstop runs before the activation above stops,
-    // however the scope closes: end, close, a new turn, or the owner's scope at shutdown.
+    // however the scope closes. It publishes only once armed: by `end` for a completed main-agent
+    // turn, or from the start over MCP. See "Drafts, reminders, and the backstop" in CadChecks.md.
     yield* Scope.addFinalizer(
       scope,
-      settleDrafts(tools, entry.ledger).pipe(
+      Effect.suspend(() => (entry.settle ? settleDrafts(tools, entry.ledger) : Effect.void)).pipe(
         Effect.catchCause((cause) => Effect.logWarning("CAD check backstop failed", cause)),
       ),
     );
@@ -307,7 +332,11 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
       const checks = decodeChecksResult(delivery.result);
       if (Option.isSome(checks)) {
         // Check-proven spots become inspected point targets before the agent sees the drafts.
-        const placed = yield* placeCadDrafts(entry.tools.comments, checks.value);
+        const placed = yield* placeCadDrafts(
+          entry.tools.comments,
+          checks.value,
+          entry.ledger.placements,
+        );
         recordCadChecks(entry.ledger, checks.value, placed.result);
         yield* refreshRemaining;
         return { ...delivery, result: ids.shorten(placed.result), pngs: placed.pngs };
@@ -352,7 +381,8 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         return followUpMessage(remaining);
       }),
     );
-  const end = (childKey: string | null, turnId: TurnId) =>
+  /** Ends a turn's activation; a `completed` main-agent turn publishes its leftover drafts. */
+  const end = (childKey: string | null, turnId: TurnId, outcome: CadTurnOutcome) =>
     gate.withPermits(1)(
       Effect.gen(function* () {
         const turns = ended.get(childKey) ?? new Set<TurnId>();
@@ -360,6 +390,7 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         ended.set(childKey, turns);
         const entry = entries.get(childKey);
         if (entry?.turnId !== turnId) return;
+        if (outcome === "completed" && childKey === null) entry.settle = true;
         entries.delete(childKey);
         yield* Scope.close(entry.scope, Exit.void);
       }),

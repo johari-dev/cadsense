@@ -25,8 +25,19 @@ const MESSAGE = "Your review is not finished.";
 const scriptPath = NodePath.join(import.meta.dirname, "../testFixtures/.follow-up-script.json");
 const peerPath = NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.sh");
 
-/** CAD tools that offer one follow-up for `turn-1` and record what the runtime asks of them. */
-const fakeCad = (options: { readonly followUp?: boolean } = {}) => {
+/**
+ * CAD tools that offer one follow-up for `turn-1` and record what the runtime asks of them. With
+ * `hold`, deciding the follow-up signals `asked` and waits for `release`, like a slow ledger read.
+ */
+const fakeCad = (
+  options: {
+    readonly followUp?: boolean;
+    readonly hold?: {
+      readonly asked: Deferred.Deferred<void>;
+      readonly release: Deferred.Deferred<void>;
+    };
+  } = {},
+) => {
   const calls: string[] = [];
   let offered = false;
   const tools: CadProviderTools = {
@@ -36,15 +47,19 @@ const fakeCad = (options: { readonly followUp?: boolean } = {}) => {
         return { result: { ok: true } };
       }),
     followUp: (childKey, turnId) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         calls.push(`followUp ${childKey} ${turnId}`);
+        if (options.hold && turnId === "turn-1") {
+          yield* Deferred.succeed(options.hold.asked, undefined);
+          yield* Deferred.await(options.hold.release);
+        }
         if (options.followUp === false || offered || turnId !== "turn-1") return null;
         offered = true;
         return MESSAGE;
       }),
-    end: (childKey, turnId) =>
+    end: (childKey, turnId, outcome) =>
       Effect.sync(() => {
-        calls.push(`end ${childKey} ${turnId}`);
+        calls.push(`end ${childKey} ${turnId} ${outcome}`);
       }),
     close: Effect.void,
   };
@@ -166,7 +181,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
         "followUp null turn-1",
         "invoke null turn-1 cad_comments_publish",
         "followUp null turn-1",
-        "end null turn-1",
+        "end null turn-1 completed",
       ]);
       // The follow-up keeps the turn's settings and sends only the message.
       const [first, second] = readLines(".requests").map((request) => request.params);
@@ -205,7 +220,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       );
       const completed = events.find((event) => event.method === "turn/completed");
       assert.nestedPropertyVal(completed?.payload, "turn.status", "interrupted");
-      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1"]);
+      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 stopped"]);
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -227,7 +242,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       const events = yield* Fiber.join(collected);
 
       assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
-      assert.deepEqual(cad.calls, ["end null turn-1"]);
+      assert.deepEqual(cad.calls, ["end null turn-1 stopped"]);
       assert.equal(readLines(".requests").length, 1);
 
       yield* runtime.close;
@@ -256,8 +271,74 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       const events = yield* Fiber.join(collected);
 
       assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
-      assert.deepEqual(cad.calls, ["end null turn-1"]);
+      // Codex finished the turn, but the user pressed Stop, so its drafts are not published either.
+      assert.deepEqual(cad.calls, ["end null turn-1 stopped"]);
       assert.equal(readLines(".requests").length, 1);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("stops a follow-up that is still being decided when Stop names no turn", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        recordTurnRequests: true,
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+      });
+      const hold = { asked: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() };
+      const cad = fakeCad({ hold });
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Deferred.await(hold.asked);
+      // The app stops a thread by session, with no turn id, and no native turn is active now.
+      yield* runtime.interruptTurn();
+      yield* Deferred.succeed(hold.release, undefined);
+      const events = yield* Fiber.join(collected);
+
+      assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
+      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 stopped"]);
+      assert.equal(readLines(".requests").length, 1);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("leaves the follow-up out when the user sends a turn while it is decided", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        recordTurnRequests: true,
+        turnIds: ["turn-1", "turn-3"],
+        notifications: [],
+      });
+      const hold = { asked: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() };
+      const cad = fakeCad({ hold });
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-3");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Deferred.await(hold.asked);
+      const user = yield* runtime
+        .sendTurn({ input: "also check the intake" })
+        .pipe(Effect.forkScoped);
+      yield* Effect.sleep("200 millis");
+      yield* Deferred.succeed(hold.release, undefined);
+      yield* Fiber.join(user);
+      const events = yield* Fiber.join(collected);
+
+      assert.deepEqual(lifecycle(events), [
+        "turn/started turn-1",
+        "turn/completed turn-1",
+        "turn/started turn-3",
+        "turn/completed turn-3",
+      ]);
+      assert.deepEqual(
+        readLines(".requests").map((request) => request.params.input[0].text),
+        ["review my transfer", "also check the intake"],
+      );
+      assert.include(cad.calls, "end null turn-1 completed");
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -274,7 +355,30 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       const events = yield* Fiber.join(collected);
 
       assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
-      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1"]);
+      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 completed"]);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("completes the app's turn when the follow-up itself fails", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnStatuses: ["completed", "failed"],
+      });
+      const cad = fakeCad();
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      const events = yield* Fiber.join(collected);
+
+      const completed = events.find((event) => event.method === "turn/completed");
+      assert.nestedPropertyVal(completed?.payload, "turn.status", "completed");
+      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 completed"]);
+      assert.notEqual((yield* runtime.getSession).status, "error");
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -303,7 +407,11 @@ describe("CodexSessionRuntime CAD follow-up", () => {
         "turn/started turn-3",
         "turn/completed turn-3",
       ]);
-      assert.deepEqual(cad.calls, ["end null turn-1", "followUp null turn-3", "end null turn-3"]);
+      assert.deepEqual(cad.calls, [
+        "end null turn-1 completed",
+        "followUp null turn-3",
+        "end null turn-3 completed",
+      ]);
       assert.equal(readLines(".requests").length, 2);
 
       yield* runtime.close;

@@ -78,6 +78,7 @@ export const CadCheckFinding = Schema.Union([
       "unpowered",
       "gear-mesh",
       "loop",
+      "loop-length",
       "shaft-support",
       "stacked-shafts",
       "motor-mount",

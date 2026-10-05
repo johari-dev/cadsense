@@ -3,7 +3,7 @@
 import * as NodeCrypto from "node:crypto";
 import {
   CAD_CHECK_NAMES,
-  type CadCheckDraft,
+  CadCheckDraft,
   CadCheckFinding,
   CadChecksInput,
   CadChecksResult,
@@ -437,10 +437,17 @@ const byPair = (a: CadCheckFinding, b: CadCheckFinding) =>
   compare(a.occurrences[0]!.occurrenceId, b.occurrences[0]!.occurrenceId) ||
   compare(a.occurrences[1]?.occurrenceId ?? "", b.occurrences[1]?.occurrenceId ?? "");
 const pair = (a: PartOccurrence, b: PartOccurrence) => [a, b].sort(byId).map(ref);
+/**
+ * When an agent may decline a cad_checks draft, in the words every agent-facing text uses. A plan
+ * to change a part later does not excuse a defect drawn now; see "Drafts, reminders, and the
+ * backstop" in CadChecks.md.
+ */
+export const CAD_DRAFT_DECLINE_RULE =
+  "Decline a draft (declinedDrafts:[{publicationKey,explanation}]) only when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, one of your published comments already covers it, or you inspected the parts and the draft is wrong for this model; say which in the explanation. A plan to rework, move, or merge parts later is not a reason, and neither is calling the design a work in progress.";
 /** What each check does and does not prove. Pages state these once instead of on every finding. */
 export const CAD_CHECK_EXPLANATIONS = {
   drivetrain:
-    "Reads gears, pulleys, belts, chains, shafts, bearings, gearboxes, motors, and rollers from vendor part names, fits each part's rotation axis from its mesh, and traces power from every motor. problem: true means the drive will not work as modeled (gears at the wrong center distance, a belt or chain with no pulley or sprocket at an end, a shaft with no bearing, rollers no motor reaches). Each one is a finding for a CAD comment unless the user said that part is a placeholder or not modeled yet. problem: false findings are traced facts such as ratios and power paths. Parts without vendor names are not recognized, so a part missing from a trace is unrecognized, not absent.",
+    "Reads gears, pulleys, belts, chains, shafts, bearings, gearboxes, motors, and rollers from vendor part names, fits each part's rotation axis from its mesh, and traces power from every motor. problem: true means the drive will not work as modeled (gears at the wrong center distance, a belt or chain with no pulley or sprocket at an end, a shaft with no bearing, rollers no motor reaches). Each one is a finding for a CAD comment. problem: false findings are traced facts such as ratios and power paths. Parts without vendor names are not recognized, so a part missing from a trace is unrecognized, not absent.",
   "mesh-interference":
     "The two solids share this volume in their original placements. Intended fits touch at zero volume, so this is usually a modeling error or a real collision: a duplicate part, a gear or shaft in the wrong spot, a plate through a tube. Parts modeled undeformed on purpose (a compressed game piece, press fits, threads) also appear. Pairs inside one subassembly are listed last because they are usually the kit author's modeling choice.",
   "overlapping-bounds":
@@ -1107,6 +1114,7 @@ export const runCadChecks = (
 const invalid = (details: string) => new CadViewError({ reason: "invalid-operation", details });
 const encodeFindingJson = Schema.encodeSync(Schema.fromJsonString(CadCheckFinding));
 const encodeResultJson = Schema.encodeSync(Schema.fromJsonString(CadChecksResult));
+const encodeDraftJson = Schema.encodeSync(Schema.fromJsonString(CadCheckDraft));
 const significant = (value: number) => Number(value.toPrecision(4));
 const significant3 = ([x, y, z]: Vector3): Vector3 => [
   significant(x),
@@ -1146,7 +1154,10 @@ const presentFinding = (finding: CadCheckFinding): CadCheckFinding => {
       return finding;
   }
 };
-type DraftedKind = Exclude<Extract<CadCheckFinding, { check: "drivetrain" }>["kind"], "power-path">;
+type DraftedKind = Exclude<
+  Extract<CadCheckFinding, { check: "drivetrain" }>["kind"],
+  "power-path" | "loop-length"
+>;
 // Each draft ends with a next step: a backstop comment is published as drafted, and a defect
 // without one tells the student what is wrong but not what to do.
 const DRAFT_LABELS = {
@@ -1256,7 +1267,13 @@ export const draftCadComments = (
   >();
   const named = new Set<string>();
   for (const finding of findings) {
-    if (finding.check !== "drivetrain" || !finding.problem || finding.kind === "power-path")
+    // A length mismatch is a finding, not a draft: its fix depends on parts the check cannot see.
+    if (
+      finding.check !== "drivetrain" ||
+      !finding.problem ||
+      finding.kind === "power-path" ||
+      finding.kind === "loop-length"
+    )
       continue;
     for (const occurrence of finding.occurrences) named.add(occurrence.occurrenceId);
     // A bearing draft is about the shaft; the parts it carries are named in the text. Targeting
@@ -1402,11 +1419,21 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
     checks.map((check) => [check, CAD_CHECK_EXPLANATIONS[check]]),
   );
   const limit = input.limit ?? CAD_CHECK_LIMITS.pageSize;
-  const drafts = offset === 0 ? draftCadComments(findings, state.snapshotId, placements) : [];
-  const withDrafts = drafts.length > 0 ? { drafts } : {};
   const bytes = (value: CadCheckFinding | CadChecksResult) =>
     new TextEncoder().encode("check" in value ? encodeFindingJson(value) : encodeResultJson(value))
       .byteLength;
+  // Drafts get at most half the page, in the order they are drafted (drivetrain problems first),
+  // so a model with dozens of duplicates still fits; the findings list every problem regardless.
+  const drafts: CadCheckDraft[] = [];
+  let draftBytes = 0;
+  for (const draft of offset === 0
+    ? draftCadComments(findings, state.snapshotId, placements)
+    : []) {
+    draftBytes += new TextEncoder().encode(encodeDraftJson(draft)).byteLength + 1;
+    if (draftBytes > CAD_CHECK_LIMITS.pageBytes / 2) break;
+    drafts.push(draft);
+  }
+  const withDrafts = drafts.length > 0 ? { drafts } : {};
   // Reserve room for the longest cursor this page could carry, then add findings until the budget runs out.
   let used = bytes({
     revision: state.revision,

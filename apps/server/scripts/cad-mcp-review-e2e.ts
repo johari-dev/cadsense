@@ -32,6 +32,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
+import { CAD_DRAFT_DECLINE_RULE } from "../src/cad/CadChecks.ts";
+
 const { values } = NodeUtil.parseArgs({
   options: {
     agent: { type: "string" },
@@ -182,7 +184,7 @@ if (values["follow-up"]) {
     .map((event) => (agent === "claude" ? event.session_id : event.thread_id))
     .find((value) => typeof value === "string");
   if (pendingBefore.length > 0 && sessionId) {
-    const prompt = `Your review is not finished. Cadsense's checks proved ${pendingBefore.length} defects that still have no CAD comment (cad_checks draft keys: ${pendingBefore.join(", ")}). Pin each one now with cad_comments_publish, using publishDrafts or your own wording, or decline it with declinedDrafts and a reason when the user said that part is a placeholder or not modeled yet. Then tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.`;
+    const prompt = `Your review is not finished. Cadsense's checks proved ${pendingBefore.length} defects that still have no CAD comment (cad_checks draft keys: ${pendingBefore.join(", ")}). Pin each one now with cad_comments_publish, using publishDrafts or your own wording. ${CAD_DRAFT_DECLINE_RULE} Then tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.`;
     const resume =
       agent === "claude"
         ? [

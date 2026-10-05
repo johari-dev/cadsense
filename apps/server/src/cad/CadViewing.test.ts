@@ -105,7 +105,7 @@ it.effect("dispatches read-only measurements through an activation with revision
       typeof next.result === "object" && next.result !== null && "distanceMeters" in next.result,
     );
     assert.equal(next.result.distanceMeters, 5);
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal(h.pins(), 0);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
@@ -195,7 +195,7 @@ it.effect("shows agent CAD control while a comment tool renders", () =>
       agentControlling: false,
       agentActivityTurnId: turnId,
     });
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
@@ -214,7 +214,7 @@ it.effect("cancels a native in-flight capture before releasing its snapshot pin"
       .pipe(Effect.exit, Effect.forkChild);
     yield* Deferred.await(started);
     assert.equal(h.pins(), 1);
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal((yield* Fiber.join(capture))._tag, "Failure");
     assert.equal(h.pins(), 0);
     assert.isNull(yield* readLatestCadCapture(threadId, turnId));
@@ -415,9 +415,9 @@ it.effect(
       });
       assert.isDefined(untouched.png);
       assert.equal(h.renderRequests[0]?.state.explosion, 0);
-      yield* tools.end("child-a", TurnId.make("wrong-turn"));
+      yield* tools.end("child-a", TurnId.make("wrong-turn"), "completed");
       assert.equal(h.pins(), 3);
-      yield* tools.end("child-a", turnId);
+      yield* tools.end("child-a", turnId, "completed");
       assert.equal(h.pins(), 2);
       yield* tools.invoke(null, turnId, "cad_sync", {}).pipe(Effect.flip);
       yield* Scope.close(scope, Exit.void);
@@ -781,6 +781,7 @@ interface CubeBlock {
 const cubeBlockTools = Effect.fn(function* (
   blocks: readonly CubeBlock[],
   comments?: CadComments["Service"],
+  options?: Parameters<typeof makeCadProviderTools>[1],
 ) {
   const h = yield* harness();
   const partId = (value: number) => value.toString(16).padStart(64, "0");
@@ -842,7 +843,7 @@ const cubeBlockTools = Effect.fn(function* (
   });
   h.snapshots.set(snapshot.snapshotId, yield* decorated);
   const store = h.store;
-  const tools = yield* makeCadProviderTools(threadId).pipe(
+  const tools = yield* makeCadProviderTools(threadId, options).pipe(
     Effect.provideService(
       CadViewing,
       yield* make.pipe(
@@ -1042,7 +1043,7 @@ it.effect("tells the agent why a capture or view update failed", () =>
     });
     assert.equal(unknown.reason, "invalid-operation");
     assert.include(unknown.details, "operations[0]");
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
@@ -1060,7 +1061,7 @@ it.effect(
       const first = yield* tools.invoke(null, firstTurn, "cad_diff", {}).pipe(Effect.flip);
       assert.equal(first.reason, "invalid-operation");
       assert.include(first.details, "first review");
-      yield* tools.end(null, firstTurn);
+      yield* tools.end(null, firstTurn, "completed");
 
       yield* h.dispatch({
         type: "thread.cad.comments.commit",
@@ -1221,7 +1222,7 @@ it.effect(
         .pipe(Effect.flip);
       assert.equal(unknown.reason, "invalid-operation");
       assert.include(unknown.details, snapshot.snapshotId);
-      yield* tools.end(null, turnId);
+      yield* tools.end(null, turnId, "completed");
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
@@ -2065,7 +2066,10 @@ const fakeComments = (options: { readonly failList?: boolean } = {}) => {
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const blockId = (value: number) => value.toString(16).padStart(64, "0");
 /** Two coincident blocks (one duplicate draft) and a third block far from both. */
-const duplicateScene = (comments: CadComments["Service"]) =>
+const duplicateScene = (
+  comments: CadComments["Service"],
+  options?: Parameters<typeof makeCadProviderTools>[1],
+) =>
   cubeBlockTools(
     [
       { number: 5, name: "Block A", transform: IDENTITY },
@@ -2073,6 +2077,7 @@ const duplicateScene = (comments: CadComments["Service"]) =>
       { number: 7, name: "Block B", transform: [1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
     ],
     comments,
+    options,
   );
 const partComment = (publicationKey: string, occurrenceId: string, snapshotId: string) => ({
   kind: "new",
@@ -2112,7 +2117,7 @@ it.effect("publishes the drafts no comment covers when the turn ends, once", () 
     const turnId = TurnId.make("backstop-publishes");
     const [draft] = yield* checkDrafts(tools, turnId);
     assert.equal(draft?.title, "Duplicate part");
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     yield* tools.close;
     assert.equal(comments.publications.length, 1);
     const [item] = comments.publications[0]!;
@@ -2136,7 +2141,7 @@ it.effect("leaves a draft alone once the agent comments on one of its parts", ()
       items: [partComment("mine", blockId(6), snapshot.snapshotId)],
     });
     assert.notProperty(published.result, "remainingDrafts");
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal(comments.publications.length, 1);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
@@ -2162,22 +2167,86 @@ it.effect("reminds about uncovered drafts and honors a decline", () =>
       declinedDrafts: [{ publicationKey: draft!.publicationKey, explanation: "Placeholder copy." }],
     });
     assert.notProperty(declined.result, "remainingDrafts");
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal(comments.publications.length, 1);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
-it.effect("keeps each child agent's drafts to its own turn end", () =>
+it.effect("remembers a decline in the session's later turns", () =>
+  Effect.gen(function* () {
+    const comments = fakeComments();
+    const { tools } = yield* duplicateScene(comments.service);
+    const first = TurnId.make("decline-first");
+    const [draft] = yield* checkDrafts(tools, first);
+    yield* tools.invoke(null, first, "cad_comments_publish", {
+      declinedDrafts: [{ publicationKey: draft!.publicationKey, explanation: "Placeholder." }],
+    });
+    yield* tools.end(null, first, "completed");
+    // The same snapshot drafts the same key in the next turn.
+    const later = TurnId.make("decline-later");
+    yield* checkDrafts(tools, later);
+    assert.isNull(yield* tools.followUp(null, later));
+    yield* tools.end(null, later, "completed");
+    assert.equal(comments.publications.length, 0);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("publishes more than 20 leftover drafts in batches", () =>
+  Effect.gen(function* () {
+    const comments = fakeComments();
+    // Seven copies at one placement: 21 duplicate pairs, one draft each.
+    const { tools } = yield* cubeBlockTools(
+      Array.from({ length: 7 }, (_, i) => ({
+        number: i + 5,
+        name: "Block A",
+        transform: IDENTITY,
+      })),
+      comments.service,
+    );
+    const turnId = TurnId.make("backstop-batches");
+    const drafts = yield* checkDrafts(tools, turnId);
+    assert.equal(drafts.length, 21);
+    yield* tools.end(null, turnId, "completed");
+    assert.deepEqual(
+      comments.publications.map((items) => items.length),
+      [20, 1],
+    );
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("publishes nothing when a child agent's turn ends", () =>
   Effect.gen(function* () {
     const comments = fakeComments();
     const { tools } = yield* duplicateScene(comments.service);
     const turnId = TurnId.make("backstop-children");
     yield* checkDrafts(tools, turnId, "child-a");
     yield* tools.invoke("child-b", turnId, "cad_context", {});
-    yield* tools.end("child-b", turnId);
+    yield* tools.end("child-b", turnId, "completed");
+    yield* tools.end("child-a", turnId, "completed");
     assert.equal(comments.publications.length, 0);
-    yield* tools.end("child-a", turnId);
-    assert.equal(comments.publications.length, 1);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("publishes nothing when the turn is stopped or the app session closes", () =>
+  Effect.gen(function* () {
+    const comments = fakeComments();
+    const session = yield* Scope.make();
+    const { tools } = yield* duplicateScene(comments.service).pipe(
+      Effect.provideService(Scope.Scope, session),
+    );
+    const stopped = TurnId.make("backstop-stopped");
+    yield* checkDrafts(tools, stopped);
+    yield* tools.end(null, stopped, "stopped");
+    const closed = TurnId.make("backstop-closed");
+    yield* checkDrafts(tools, closed);
+    yield* tools.close;
+    const shutdown = TurnId.make("backstop-app-shutdown");
+    const { tools: more } = yield* duplicateScene(comments.service).pipe(
+      Effect.provideService(Scope.Scope, session),
+    );
+    yield* checkDrafts(more, shutdown);
+    yield* Scope.close(session, Exit.void);
+    assert.equal(comments.publications.length, 0);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
@@ -2187,17 +2256,17 @@ it.effect("logs instead of failing the turn end when the backstop cannot read co
     const { tools } = yield* duplicateScene(comments.service);
     const turnId = TurnId.make("backstop-fails");
     yield* checkDrafts(tools, turnId);
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal(comments.publications.length, 0);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
-it.effect("publishes the drafts when the session scope closes without an end or close", () =>
+it.effect("publishes the drafts when an MCP session closes without an end or close", () =>
   Effect.gen(function* () {
     const comments = fakeComments();
     // MCP shutdown closes the scope that owns the provider tools; nothing calls end or close.
     const session = yield* Scope.make();
-    const { tools } = yield* duplicateScene(comments.service).pipe(
+    const { tools } = yield* duplicateScene(comments.service, { settleOnClose: true }).pipe(
       Effect.provideService(Scope.Scope, session),
     );
     const turnId = TurnId.make("backstop-shutdown");
@@ -2223,7 +2292,7 @@ it.effect("asks the agent once to finish uncovered drafts, without ending the tu
       publishDrafts: [draft!.publicationKey],
     });
     assert.isNull(yield* tools.followUp(null, turnId));
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.deepEqual(
       comments.publications.map((items) => items.map((item) => item.publicationKey)),
       [[draft!.publicationKey]],
@@ -2239,7 +2308,7 @@ it.effect("asks only once even when the agent ignores the follow-up", () =>
     yield* checkDrafts(tools, turnId);
     assert.isNotNull(yield* tools.followUp(null, turnId));
     assert.isNull(yield* tools.followUp(null, turnId));
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal(comments.publications.length, 1);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
@@ -2255,7 +2324,7 @@ it.effect("sends no follow-up when every draft is covered or declined", () =>
       items: [partComment("mine", blockId(6), snapshot.snapshotId)],
     });
     assert.isNull(yield* tools.followUp(null, covered));
-    yield* tools.end(null, covered);
+    yield* tools.end(null, covered, "completed");
 
     const declined = TurnId.make("follow-up-declined");
     const [draft] = yield* checkDrafts(tools, declined, "child");
@@ -2271,15 +2340,14 @@ it.effect("sends no follow-up for another turn or agent, or after the turn ended
     const comments = fakeComments();
     const { tools } = yield* duplicateScene(comments.service);
     const turnId = TurnId.make("follow-up-scoped");
-    yield* checkDrafts(tools, turnId, "child");
-    assert.isNull(yield* tools.followUp(null, turnId));
-    assert.isNull(yield* tools.followUp("other-child", turnId));
-    assert.isNull(yield* tools.followUp("child", TurnId.make("follow-up-other-turn")));
-    // Asking about a turn with no CAD activity starts no activation that could settle drafts.
-    assert.equal(comments.publications.length, 0);
-    yield* tools.end("child", turnId);
-    assert.equal(comments.publications.length, 1);
+    yield* checkDrafts(tools, turnId);
     assert.isNull(yield* tools.followUp("child", turnId));
+    // Asking about another turn starts no activation, which would end this turn's activation.
+    assert.isNull(yield* tools.followUp(null, TurnId.make("follow-up-other-turn")));
+    assert.equal(comments.publications.length, 0);
+    yield* tools.end(null, turnId, "completed");
+    assert.equal(comments.publications.length, 1);
+    assert.isNull(yield* tools.followUp(null, turnId));
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
@@ -2394,7 +2462,7 @@ it.effect("never publishes a declined draft by key", () =>
     );
     assert.equal(comments.publications.length, 0);
     assert.equal(published.results[0]?.reason, "declined");
-    yield* tools.end(null, turnId);
+    yield* tools.end(null, turnId, "completed");
     assert.equal(comments.publications.length, 0);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );

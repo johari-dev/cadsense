@@ -129,4 +129,15 @@ describe("preparePublication", () => {
     });
     expect([...ledger.declined]).toEqual([["bare-belt", "The belt is a placeholder."]]);
   });
+
+  it("fills the catalog version only when the agent sends no items of its own", () => {
+    const ledger = makeCadDraftLedger();
+    expect(preparePublication(ledger, { publishDrafts: ["gear-spacing"] }).catalogMissing).toBe(
+      true,
+    );
+    // The version guards the agent's own items against a catalog that changed under it.
+    expect(preparePublication(ledger, { items: [{ publicationKey: "mine" }] }).catalogMissing).toBe(
+      false,
+    );
+  });
 });

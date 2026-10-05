@@ -2264,7 +2264,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     result?: SDKResultMessage,
   ) {
     if (context.cad && context.turnState)
-      yield* context.cad.tools.end(null, asCanonicalTurnId(context.turnState.turnId));
+      yield* context.cad.tools.end(
+        null,
+        asCanonicalTurnId(context.turnState.turnId),
+        status === "completed" ? "completed" : "stopped",
+      );
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
     if (resultContextWindow !== undefined) {
       context.lastKnownContextWindow = resultContextWindow;
@@ -3383,7 +3387,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             const turnId = context.cad.turnIds.get(message.task_id);
             context.cad.ended.add(message.task_id);
             context.cad.turnIds.delete(message.task_id);
-            if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId);
+            if (turnId)
+              yield* context.cad.tools.end(`claude:${message.task_id}`, turnId, "stopped");
           }
         }
         const endedAt =
@@ -3413,7 +3418,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           const turnId = context.cad.turnIds.get(message.task_id);
           context.cad.ended.add(message.task_id);
           context.cad.turnIds.delete(message.task_id);
-          if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId);
+          if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId, "stopped");
         }
         yield* emitThreadTokenUsage(
           context,
@@ -4469,14 +4474,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
       /**
        * When the main agent tries to end a turn with cad_checks drafts that no comment covers, blocks
-       * the stop once with a message naming them, so the same turn continues. See "The follow-up"
-       * in cad/CadChecks.md.
+       * the stop once with a message naming them, so the same turn continues. Background tasks
+       * still running may publish them, so it waits for a stop with none. See "The follow-up" in
+       * cad/CadChecks.md.
        */
-      const cadStopHook: HookCallback = () =>
+      const cadStopHook: HookCallback = (input) =>
         runPromise(
           Effect.gen(function* () {
             const turnId = cadContext?.turnState?.turnId;
             if (!cad || !turnId) return {};
+            if (input.hook_event_name === "Stop" && (input.background_tasks?.length ?? 0) > 0)
+              return {};
             const reason = yield* cad.tools.followUp(null, asCanonicalTurnId(turnId));
             return reason === null ? {} : { decision: "block" as const, reason };
           }).pipe(Effect.catchCause(() => Effect.succeed({}))),
