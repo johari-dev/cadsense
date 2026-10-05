@@ -4,8 +4,9 @@ import init from "replicad-opencascadejs";
  * OpenCascade (WASM) access. Geometry is kept in meters, the unit std passes to builtins, so builtins
  * never convert; OpenCascade's 1e-7 confusion tolerance is 0.1 µm at that scale.
  *
- * WASM objects are not freed: a preview worker is short-lived and recycled, and freeing shapes that
- * the topology registry still references would corrupt it.
+ * Shapes are not freed: freeing ones that the topology registry still references would corrupt it,
+ * so a long-lived process replaces its OpenCascade once {@link wasmMemoryBytes} grows too large.
+ * Short-lived objects (points, triangles) should be freed where they're read.
  */
 export type Oc = Awaited<ReturnType<typeof init>>;
 export type Shape = InstanceType<Oc["TopoDS_Shape"]>;
@@ -17,6 +18,18 @@ let loading: Promise<Oc> | undefined;
  * chatter (STEP transfer statistics) is dropped; failures surface as exceptions and status codes.
  */
 export const loadOcct = (): Promise<Oc> => (loading ??= init({ print: () => {} }));
+
+/** How much WASM memory OpenCascade holds. It only grows. */
+export function wasmMemoryBytes(oc: Oc): number {
+  // A WebAssembly.Memory; this package's types don't include the WebAssembly namespace.
+  const memory = "wasmMemory" in oc ? oc.wasmMemory : undefined;
+  return typeof memory === "object" &&
+    memory !== null &&
+    "buffer" in memory &&
+    memory.buffer instanceof ArrayBuffer
+    ? memory.buffer.byteLength
+    : 0;
+}
 
 export type ShapeKind = "SOLID" | "SHELL" | "FACE" | "WIRE" | "EDGE" | "VERTEX" | "COMPOUND";
 
