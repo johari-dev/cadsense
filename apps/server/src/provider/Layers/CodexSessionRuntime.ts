@@ -1472,7 +1472,10 @@ export const makeCodexSessionRuntime = (
         const nativeTurnId = yield* turnStartLock.withPermits(1)(
           Effect.gen(function* () {
             // sendTurn waits for the lock, so a turn the user sent is already in flight or not sent.
-            if (yield* blocked) return undefined;
+            if (yield* blocked) {
+              yield* Effect.logInfo("CAD follow-up dropped", { turnId });
+              return undefined;
+            }
             yield* Ref.update(
               cadFollowUpRef,
               (current) => current && { ...current, starting: true },

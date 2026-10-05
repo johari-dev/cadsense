@@ -2,7 +2,6 @@ import {
   CAD_CAPTURE_SIZE,
   CAD_TOOL_INPUTS,
   CadChecksResult,
-  type CadCheckDraft,
   CadViewError,
   type ThreadId,
   type TurnId,
@@ -218,7 +217,7 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
   const ended = new Map<string | null, Set<TurnId>>();
   // The main agent's declines and sent drafts last the session: a later turn on the same snapshot
   // drafts the same keys.
-  const session = { declined: new Map<string, string>(), sent: new Map<string, CadCheckDraft>() };
+  const session = { declined: new Map<string, string>(), sent: new Map<string, unknown>() };
   // Shared by the session's child agents so IDs one shows, another can use.
   const ids = makeCadShortIds();
   let open = true;

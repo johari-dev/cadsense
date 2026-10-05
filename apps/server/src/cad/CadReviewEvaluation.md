@@ -442,6 +442,14 @@ own comment on the missing link between the 1.75 in and 2.39 in shafts, which ta
 rather than the rollers; under the old rule the backstop would have published that draft as a
 second comment. No Luna or Sol run declined anything under the wider rule.
 
+Two more rounds of review followed (draft keys replay what was first accepted, a follow-up's
+`turn/start` holds a lock against user turns, only same-named copies stack, and background agents
+are judged the same way by the Stop hook and the turn end). On the final code, five more runs
+through the app path, graded blind, all scored 8: three Luna runs (9 comments, 4 point markers
+each), one Sol run (9 comments, 4 markers), and one Opus run (11 comments, 8 markers, with the
+missing link named as the 1.75 in and 2.39 in shafts 2.30 in apart). None needed a follow-up or
+published a backstop comment.
+
 ## Matched evaluation before the review-process update
 
 These results compare baseline `9479482ee` with `ef30dc417`, before the added
