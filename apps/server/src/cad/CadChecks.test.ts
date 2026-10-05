@@ -1057,6 +1057,49 @@ describe("draftCadComments", () => {
       copies.map((copy) => copy.occurrenceId),
     );
     assert.match(stack!.body, /\bKeep\b[^.]*\.$/);
+    // Pairs met in any order still give one stack for four copies that all overlap.
+    const four = [...copies, part(25, "Part 20 <4>")];
+    const allPairs = [
+      [2, 3],
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [1, 2],
+      [1, 3],
+    ].map(([a, b]) => overlap(four[a!]!, four[b!]!));
+    assert.deepEqual(
+      draftCadComments(allPairs, snapshotId).map((draft) => draft.targets.length),
+      [4],
+    );
+    // A stack too long for one comment still ends with its count and next step.
+    const long = Array.from({ length: 21 }, (_, i) =>
+      part(40 + i, `${"Bracket ".repeat(26)}<${i + 1}>`),
+    );
+    const longPairs = long.flatMap((a, i) => long.slice(i + 1).map((b) => overlap(a, b)));
+    const [longStack] = draftCadComments(longPairs, snapshotId);
+    assert.isAtMost(longStack!.body.length, 4000);
+    assert.match(longStack!.body, /and 1 more\. Keep one and remove the others\.$/);
+    // Two stacks that overlap each other keep the overlap between them as its own pair.
+    const spacers = [part(70, "Spacer <1>"), part(71, "Spacer <2>"), part(72, "Spacer <3>")];
+    const spacerPairs = [
+      [0, 1],
+      [0, 2],
+      [1, 2],
+    ].map(([a, b]) => overlap(spacers[a!]!, spacers[b!]!));
+    const across = draftCadComments(
+      [
+        overlap(four[0]!, four[1]!),
+        overlap(four[0]!, four[2]!),
+        overlap(four[1]!, four[2]!),
+        ...spacerPairs,
+        overlap(four[0]!, spacers[0]!),
+      ],
+      snapshotId,
+    );
+    assert.deepEqual(
+      across.map((draft) => draft.targets.length),
+      [3, 3, 2],
+    );
     // A spacer inside two copies is not a third copy: it stays out of their stack.
     const spacer = part(23, "Spacer <1>");
     const withSpacer = draftCadComments(

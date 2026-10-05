@@ -87,6 +87,7 @@ Ways this can fail, each covered by `CadCheckBackstop.test.ts` or `CadViewing.te
 - A draft's key depends on which checks ran, so one defect gets two keys, or a later review in the chat reuses a key already published for another comment and gets `idempotency-conflict`.
 - A failed backstop publication fails the turn or the shutdown instead of being logged.
 - More than 20 leftover drafts, the most one publication takes, and the rest are never published.
+- A long stack's comment loses its count and next step when names are cut to fit.
 - A stack of copies of one part is drafted once per overlapping pair, so seven copies become 21 comments; or parts that are not copies (a spacer inside two bearings, two parts inside one plate) are called one stack and the student is told to delete all but one. Only same-named parts that all overlap one another stack.
 - A merged draft lists one part name several times, so the student cannot tell its targets apart.
 - `remainingDrafts` lists a draft that is covered or declined.
@@ -106,8 +107,10 @@ adapters only deliver it:
 - Claude: a `Stop` hook answers `{decision: "block", reason}`, so the SDK continues the same turn with the message as hook feedback.
 - Codex: the app-server cannot reopen a finished turn, so `CodexSessionRuntime.ts` holds back the native turn's `turn/completed`, starts a second native turn with the message and the first turn's settings, and reports that turn's events and completion under the first turn's id. Its `turn/start` holds a lock `sendTurn` also takes, so no turn the user sends can interleave, and waits up to 30 seconds; a turn Codex starts while it waits is the follow-up. If Codex starts it only after the deadline, with no start before, it runs as a separate turn.
 
-Child agents get no follow-up and no backstop. While Claude background tasks or Codex child agents
-are still running, the main agent gets no follow-up either, since that work may publish the drafts.
+Child agents get no follow-up and no backstop. While Claude background agents or Codex child agents
+are still working, the main agent gets no follow-up either, and its turn's leftovers are not
+published, since that work may cover the drafts. Monitors, inert plan-mode tasks, housekeeping
+hidden from the transcript, and Codex memory upkeep do not count as such work.
 Over plain MCP the server cannot start a turn, so outside the app only the e2e harness
 (`--follow-up`) sends one.
 
@@ -128,6 +131,7 @@ Ways this can fail, each covered by `CadViewing.test.ts` or `CodexFollowUpRuntim
 - Codex: Stop with no turn id, or a turn the user sends, arrives while the follow-up is being decided, and the follow-up starts anyway.
 - The follow-up fails, and the review it continues loses its backstop. The failure is still reported on both adapters.
 - Codex: the deferred interrupt of a follow-up never answers and holds up every later notification.
+- Claude: a running monitor skips the follow-up but still lets the backstop publish, or the reverse.
 - Codex: `turn/start` for the follow-up answers late or never, and a turn the user sent meanwhile is taken for the follow-up, or the follow-up's turn shows up as a separate turn.
 - Codex: Stop lands between deciding the follow-up and naming its native turn, and is lost.
 

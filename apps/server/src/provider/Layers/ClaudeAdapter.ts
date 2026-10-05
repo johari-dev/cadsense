@@ -376,6 +376,21 @@ function workingTaskIds(context: {
   });
 }
 
+/**
+ * Whether background agents are still working on a CAD review: working tasks other than
+ * housekeeping hidden from the transcript. While they work, the main agent gets no CAD follow-up
+ * and its turn's leftover drafts are not published, since their work may cover them.
+ */
+function reviewWorkRunning(context: {
+  readonly liveTaskIds: ReadonlySet<string>;
+  readonly taskAgents: ReadonlyMap<
+    string,
+    { readonly taskType: string | undefined; readonly skipTranscript: boolean }
+  >;
+}): boolean {
+  return workingTaskIds(context).some((id) => context.taskAgents.get(id)?.skipTranscript !== true);
+}
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -2278,10 +2293,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* context.cad.tools.end(
         null,
         asCanonicalTurnId(context.turnState.turnId),
-        // A turn that ends while background agents still work is not finished: their work may
-        // cover the drafts, so its leftovers are not published. Monitors, inert plan-mode tasks,
-        // and housekeeping tasks hidden from the transcript do not count.
-        workingTaskIds(context).some((id) => context.taskAgents.get(id)?.skipTranscript !== true)
+        // A turn that ends while background agents still work is not finished.
+        reviewWorkRunning(context)
           ? "stopped"
           : status === "completed" || status === "failed"
             ? status
@@ -4492,17 +4505,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       };
       /**
        * When the main agent tries to end a turn with cad_checks drafts that no comment covers, blocks
-       * the stop once with a message naming them, so the same turn continues. Background tasks
-       * still running may publish them, so it waits for a stop with none. See "The follow-up" in
-       * cad/CadChecks.md.
+       * the stop once with a message naming them, so the same turn continues. Background agents
+       * still working may publish them, so it waits for a stop with none (reviewWorkRunning). See
+       * "The follow-up" in cad/CadChecks.md.
        */
-      const cadStopHook: HookCallback = (input) =>
+      const cadStopHook: HookCallback = () =>
         runPromise(
           Effect.gen(function* () {
             const turnId = cadContext?.turnState?.turnId;
             if (!cad || !turnId) return {};
-            if (input.hook_event_name === "Stop" && (input.background_tasks?.length ?? 0) > 0)
-              return {};
+            if (cadContext && reviewWorkRunning(cadContext)) return {};
             const reason = yield* cad.tools.followUp(null, asCanonicalTurnId(turnId));
             return reason === null ? {} : { decision: "block" as const, reason };
           }).pipe(Effect.catchCause(() => Effect.succeed({}))),

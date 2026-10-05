@@ -1349,9 +1349,10 @@ export const draftCadComments = (
       ),
     );
   }
-  // Copies of one part form stacks: one draft per stack, not one per pair. Only same-named parts
-  // stack, and a part joins only when it overlaps every part already in it: a spacer inside two
-  // bearings, or two parts inside one plate, are not copies of each other and stay pairs.
+  // Copies of one part form stacks: one draft per stack, not one per pair. Same-named parts that
+  // overlap are grouped, and a group becomes one stack only when every two of its parts overlap;
+  // otherwise, and for parts of different names (a spacer inside two bearings, two parts inside one
+  // plate), each overlapping pair is its own draft.
   const pairs: { a: ReturnType<typeof partOf>; b: ReturnType<typeof partOf>; reading: string }[] =
     [];
   const overlapping = new Set<string>();
@@ -1371,56 +1372,62 @@ export const draftCadComments = (
       .add(`${a.occurrenceId} ${b.occurrenceId}`)
       .add(`${b.occurrenceId} ${a.occurrenceId}`);
   }
-  const stacks: { parts: Map<string, ReturnType<typeof partOf>>; reading: string }[] = [];
   const baseName = (part: ReturnType<typeof partOf>) => part.name.replace(/\s*<\d+>$/, "");
-  const joins = (stack: (typeof stacks)[number], part: ReturnType<typeof partOf>) =>
-    [...stack.parts.values()].every(
-      (member) =>
-        baseName(member) === baseName(part) &&
-        overlapping.has(`${member.occurrenceId} ${part.occurrenceId}`),
-    );
-  for (const { a, b, reading } of pairs) {
-    if (stacks.some((stack) => stack.parts.has(a.occurrenceId) && stack.parts.has(b.occurrenceId)))
-      continue;
-    const grown =
-      baseName(a) !== baseName(b)
-        ? undefined
-        : stacks.find(
-            (stack) =>
-              (stack.parts.has(a.occurrenceId) && joins(stack, b)) ||
-              (stack.parts.has(b.occurrenceId) && joins(stack, a)),
-          );
-    if (grown) grown.parts.set(a.occurrenceId, a).set(b.occurrenceId, b);
-    else
-      stacks.push({
-        parts: new Map([
-          [a.occurrenceId, a],
-          [b.occurrenceId, b],
-        ]),
-        reading,
-      });
-  }
-  for (const stack of stacks) {
-    const occurrences = [...stack.parts.values()].slice(0, 20);
+  const groupOf = new Map<string, string>();
+  const root = (id: string): string => {
+    const up = groupOf.get(id) ?? id;
+    return up === id ? id : root(up);
+  };
+  for (const { a, b } of pairs)
+    if (baseName(a) === baseName(b)) groupOf.set(root(a.occurrenceId), root(b.occurrenceId));
+  const groups = new Map<string, Map<string, ReturnType<typeof partOf>>>();
+  for (const { a, b } of pairs)
+    if (baseName(a) === baseName(b)) {
+      const group = groups.get(root(a.occurrenceId)) ?? new Map();
+      groups.set(root(a.occurrenceId), group.set(a.occurrenceId, a).set(b.occurrenceId, b));
+    }
+  const isStack = (group: Map<string, ReturnType<typeof partOf>>) => {
+    const ids = [...group.keys()];
+    return ids.every((x, i) => ids.slice(i + 1).every((y) => overlapping.has(`${x} ${y}`)));
+  };
+  // Each stacked part's group, so only pairs inside one stack are left out below.
+  const stacked = new Map<string, string>();
+  const duplicateDraft = (parts: readonly ReturnType<typeof partOf>[], reading: string) => {
+    const occurrences = parts.slice(0, 20);
     const targets = occurrences.map(target);
+    const more =
+      parts.length > occurrences.length ? `, and ${parts.length - occurrences.length} more` : "";
+    const lead = `These ${parts.length} parts sit in the same place and overlap almost completely, so all but one are likely stale copies: `;
+    const close = `${more}. Keep one and remove the others.`;
     drafts.push({
       kind: "new",
       publicationKey: draftKey("duplicate", snapshotId, targets),
       inspectedSnapshotId: snapshotId,
       title: "Duplicate part",
-      // A pair keeps the overlap's own reading; a bigger stack names every copy.
+      // A pair keeps the overlap's own reading; a bigger stack names every copy it can fit.
       body:
-        stack.parts.size === 2
-          ? stack.reading
-          : `These ${stack.parts.size} parts sit in the same place and overlap almost completely, so all but one are likely stale copies: ${occurrences.map((occurrence) => occurrence.name).join(", ")}${stack.parts.size > occurrences.length ? `, and ${stack.parts.size - occurrences.length} more` : ""}. Keep one and remove the others.`.slice(
-              0,
-              4000,
-            ),
+        parts.length === 2
+          ? reading
+          : `${lead}${occurrences
+              .map((occurrence) => occurrence.name)
+              .join(", ")
+              .slice(0, 4000 - lead.length - close.length)}${close}`,
       severity: "concern",
       category: "assembly",
       targets,
     });
-  }
+  };
+  for (const group of groups.values())
+    if (group.size > 2 && isStack(group)) {
+      duplicateDraft([...group.values()], "");
+      for (const id of group.keys()) stacked.set(id, root(id));
+    }
+  for (const { a, b, reading } of pairs)
+    if (
+      stacked.get(a.occurrenceId) === undefined ||
+      stacked.get(a.occurrenceId) !== stacked.get(b.occurrenceId)
+    )
+      duplicateDraft([a, b], reading);
   // Where two targets of one draft read the same, as three copies of one rounded hex shaft do,
   // their labels keep the instance number (`<2>`).
   return drafts.map((draft) => {
