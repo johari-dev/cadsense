@@ -180,6 +180,23 @@ describe("placeCadDrafts", () => {
     }),
   );
 
+  it.effect("keeps a merged draft within the 20 targets one comment takes", () =>
+    Effect.gen(function* () {
+      const crowded: CadCheckDraft = {
+        ...draft("crowded", false),
+        placements: Array.from({ length: 21 }, (_, i) => ({
+          occurrenceId: id(i.toString(16)),
+          point: [0, 0, 0] as const,
+          normal: [1, 0, 0] as const,
+          isolate: [],
+          expected: `spot ${i}`,
+        })),
+      };
+      const placed = yield* run([crowded], () => "visible");
+      assert.isAtMost(placed.result.drafts![0]!.targets.length, 20);
+    }),
+  );
+
   it.effect("keeps placing after a failure that concerns only one draft", () =>
     Effect.gen(function* () {
       const placed = yield* run([draft("first", true), draft("second", true)], (key) =>

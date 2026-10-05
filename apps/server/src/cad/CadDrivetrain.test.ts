@@ -309,6 +309,33 @@ describe("belts", () => {
     expect(finding?.summary).toContain("too long");
   });
 
+  it("links every wheel a loop wraps, so a motor on a middle pulley drives the rest", () => {
+    const s = scene();
+    s.add(
+      "70T 5M 9mm Wide Belt <1>",
+      beltLoop(centers * INCH, pitchRadius, 0.009),
+      along("y", [0, 0, 0]),
+    );
+    // Added in this order, the motor's pulley is the middle wheel of the three.
+    s.add(
+      "HTD 24 Tooth Pulley <1>",
+      cylinder(pitchRadius, 0.012),
+      along("y", [-centers / 2, 0, 0]),
+    );
+    s.add("HTD 24 Tooth Pulley <2>", cylinder(pitchRadius, 0.012), along("y", [0, 0, 0]));
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, -2.4, 0]));
+    s.add("HTD 24 Tooth Pulley <3>", cylinder(pitchRadius, 0.012), along("y", [centers / 2, 0, 0]));
+    s.add("Driven Hex Shaft <1>", hexShaft(10), along("y", [centers / 2, 4, 0]));
+    s.add(
+      "Deadaxle Tube_9.75_in <1>",
+      cylinder(INCH, 9.75 * INCH),
+      along("y", [centers / 2, 4, 0]),
+    );
+    const findings = s.analyze();
+    expect(ofKind(findings, "loop-length")[0]?.problem).toBe(false);
+    expect(ofKind(findings, "unpowered")).toEqual([]);
+  });
+
   it("calls chain slack a lead, since a tensioner may take it up", () => {
     // 60L #35 on two 22T sprockets: 571.5 mm of chain at centers that need about 2 links less.
     const pitch = 9.525;

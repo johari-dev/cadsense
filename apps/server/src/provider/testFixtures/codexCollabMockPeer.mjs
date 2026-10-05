@@ -143,8 +143,27 @@ rl.on("line", (line) => {
       ? { ...fixture.responses.turnStart.turn, id: turnId }
       : fixture.responses.turnStart.turn;
     activeTurn = turn;
-    write({ id, result: { ...fixture.responses.turnStart, turn } });
     const rootThreadId = script.rootThreadId;
+    // turnStartDelayMs announces the turn at once and answers turn/start later, as a slow
+    // app-server can; the turn's notifications and completion follow the answer.
+    const delay = script.turnStartDelayMs?.[index];
+    if (delay) {
+      write({ jsonrpc: "2.0", method: "turn/started", params: { threadId: rootThreadId, turn } });
+      setTimeout(() => {
+        write({ id, result: { ...fixture.responses.turnStart, turn } });
+        if (script.holdTurns?.[index] === true) {
+          heldTurn = turn;
+          return;
+        }
+        write({
+          jsonrpc: "2.0",
+          method: "turn/completed",
+          params: { threadId: rootThreadId, turn: { ...turn, status: "completed" } },
+        });
+      }, delay);
+      return;
+    }
+    write({ id, result: { ...fixture.responses.turnStart, turn } });
     // A turn requested while another is held open queues behind it, as in Codex: the held turn
     // completes first.
     if (script.completeHeldTurnOnNextStart && heldTurn) {

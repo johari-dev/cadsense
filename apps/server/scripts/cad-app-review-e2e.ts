@@ -206,7 +206,8 @@ const run = Effect.gen(function* () {
     durationSeconds,
     assistantMessages: assistant.length,
     toolCalls: tools,
-    followUps: log.split("CAD follow-up sent").length - 1,
+    // Offered by the CAD tools, minus those Codex dropped for a Stop or a turn the user sent.
+    followUps: log.split("CAD follow-up sent").length - log.split("CAD follow-up dropped").length,
     comments: comments.length,
     backstopComments: comments.filter((comment) => comment.body.includes(BACKSTOP_NOTE)).length,
     pointTargets: targets.filter((target) => target.kind === "point").length,

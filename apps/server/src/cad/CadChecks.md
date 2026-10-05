@@ -62,8 +62,8 @@ follows the drafts through the turn:
 - A draft's `publicationKey` is a digest of its kind, parts, and snapshot, so every `cad_checks` call on a snapshot gives a defect the same key whichever other checks ran, and the turn's ledger merges later calls' drafts into earlier ones by key. A new snapshot gives new keys, so a later review in the chat never reuses a published key.
 - Drafts whose spot the checks prove (collisions, gears set too close, bare belt ends) arrive with an inspected point target and its image; see "Check-placed points" in [CadComments.md](CadComments.md).
 - After each publication it lists the drafts no comment in this chat covers yet as `remainingDrafts`, and other CAD tool results carry `pendingDrafts` until they are covered or declined. `publishDrafts` publishes drafts as offered.
-- An agent can decline a draft with `declinedDrafts: [{publicationKey, explanation}]` in `cad_comments_publish` when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, one of its published comments already covers it, or it inspected the parts and the draft is wrong for this model. A plan to rework, move, or merge parts later is not a reason, and neither is calling the design a work in progress: the defect is in the model as drawn. `CAD_DRAFT_DECLINE_RULE` in `CadChecks.ts` states the rule once for every agent-facing text.
-- When the main agent's turn completes, it publishes every draft that is neither covered nor declined, worded as drafted, with a note that Cadsense's checks found it, and always with whole-part targets: no agent looked at a check-placed point the backstop would publish. A turn the user stopped or that failed, a child agent's turn, and an app session that shuts down publish nothing, since nobody finished reviewing those drafts. Over `cadsense mcp` the session is the review, so closing it publishes the leftovers. The backstop is a finalizer on the turn's activation scope, added after the activation starts and armed by `end` with outcome `completed` (or from the start over MCP), so it runs while the activation is still alive.
+- An agent can decline a draft with `declinedDrafts: [{publicationKey, explanation}]` in `cad_comments_publish` when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, one of its published comments already covers it, it asked the user about that part in its reply, or it inspected the parts and the draft is wrong for this model. A plan to rework, move, or merge parts later is not a reason, and neither is calling the design a work in progress: the defect is in the model as drawn. `CAD_DRAFT_DECLINE_RULE` in `CadChecks.ts` states the rule once for every agent-facing text.
+- When the main agent's turn completes, it publishes every draft that is neither covered nor declined, worded as drafted, with a note that Cadsense's checks found it, and always with whole-part targets: no agent looked at a check-placed point the backstop would publish. A turn the user stopped, a turn that failed before any follow-up, a turn that ends while child agents or background tasks still run, a child agent's turn, and an app session that shuts down publish nothing, since nobody finished reviewing those drafts. A turn whose follow-up failed does publish them: the review had finished. Over `cadsense mcp` the session is the review, so closing it publishes the leftovers, even when the client quits mid-review: the server cannot tell a quit from a finished review. The backstop is a finalizer on the turn's activation scope, added after the activation starts and armed by `end` (see `CadTurnOutcome`) or, over MCP, from the start, so it runs while the activation is still alive.
 
 A comment covers a draft when it targets any part the draft targets. That errs toward skipping
 a draft: a comment about the 40T gear hitting a tube also covers the gear-spacing draft. A
@@ -74,6 +74,9 @@ Ways this can fail, each covered by `CadCheckBackstop.test.ts` or `CadViewing.te
 - A draft states a defect without a next step, so a backstop comment tells the student what is wrong but not what to do.
 - A draft whose parts already have a comment in this chat is published again.
 - A draft the agent declined is published anyway, including in a later turn that drafts it again.
+- A decline cannot be taken back, so when the user later asks for the comments, `publishDrafts` refuses them.
+- A draft published by key is offered again with different targets (a render that failed, then worked), so publishing it again conflicts instead of replaying.
+- The main agent's turn ends while its child agents or background tasks still run, and the backstop publishes before their work is in.
 - A draft nobody commented on is not published when the turn ends.
 - The turn end runs twice (end, then close at shutdown) and publishes twice.
 - The owner's scope closes without `end` or `close` (MCP shutdown), the activation stops first, and the backstop cannot read the chat's comments.
@@ -84,6 +87,8 @@ Ways this can fail, each covered by `CadCheckBackstop.test.ts` or `CadViewing.te
 - A draft's key depends on which checks ran, so one defect gets two keys, or a later review in the chat reuses a key already published for another comment and gets `idempotency-conflict`.
 - A failed backstop publication fails the turn or the shutdown instead of being logged.
 - More than 20 leftover drafts, the most one publication takes, and the rest are never published.
+- A stack of copies of one part is drafted once per overlapping pair, so seven copies become 21 comments.
+- A merged draft lists one part name several times, so the student cannot tell its targets apart.
 - `remainingDrafts` lists a draft that is covered or declined.
 - One child agent's turn end publishes drafts from another child's `cad_checks` call.
 - Stopping a turn, a failed turn, or closing the app publishes drafts no agent reviewed.
@@ -121,7 +126,9 @@ Ways this can fail, each covered by `CadViewing.test.ts` or `CodexFollowUpRuntim
 - Codex: a follow-up is sent after an interrupted or failed turn, or while another turn the user sent is already queued.
 - Codex: a follow-up that fails to start leaves the app's turn running forever.
 - Codex: Stop with no turn id, or a turn the user sends, arrives while the follow-up is being decided, and the follow-up starts anyway.
-- Codex: the follow-up turn fails, and the review it continues is reported failed and loses its backstop.
+- The follow-up fails, and the review it continues loses its backstop. The failure is still reported on both adapters.
+- Codex: the deferred interrupt of a follow-up never answers and holds up every later notification.
+- Codex: `turn/start` answers after its deadline although Codex already started the follow-up, which then shows up as a separate turn.
 
 ## Registration
 

@@ -94,6 +94,7 @@ for problems but never for `loop-length`, whose fix depends on parts it cannot s
 - A standoff, a spline or hex adapter, or a shaft coupler is read as a shaft, so it is reported unsupported or stacked on a real shaft; a bushing is read as a shaft instead of a bearing.
 - A roller left out while others are driven, such as an idler, is reported as a proven problem.
 - Chain slack, or a loop around an idler or tensioner, is reported as a proven length problem.
+- A loop around three wheels links only two of them, so a motor on the third reaches nothing.
 
 Collisions on stored models: the transfer reports exactly its three (the 40T gear into the 1x1
 tube, both jackshafts into the SPARK Flex). The arm reports the 16.5 in MAXSpline running into two

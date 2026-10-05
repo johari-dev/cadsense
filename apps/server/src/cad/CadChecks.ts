@@ -443,7 +443,7 @@ const pair = (a: PartOccurrence, b: PartOccurrence) => [a, b].sort(byId).map(ref
  * backstop" in CadChecks.md.
  */
 export const CAD_DRAFT_DECLINE_RULE =
-  "Decline a draft (declinedDrafts:[{publicationKey,explanation}]) only when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, one of your published comments already covers it, or you inspected the parts and the draft is wrong for this model; say which in the explanation. A plan to rework, move, or merge parts later is not a reason, and neither is calling the design a work in progress.";
+  "Decline a draft (declinedDrafts:[{publicationKey,explanation}]) only when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, one of your published comments already covers it, you asked the user about that part in this reply, or you inspected the parts and the draft is wrong for this model; say which in the explanation. A plan to rework, move, or merge parts later is not a reason, and neither is calling the design a work in progress.";
 /** What each check does and does not prove. Pages state these once instead of on every finding. */
 export const CAD_CHECK_EXPLANATIONS = {
   drivetrain:
@@ -1254,11 +1254,19 @@ export const draftCadComments = (
   snapshotId: CadCheckDraft["inspectedSnapshotId"],
   placements: ReadonlyMap<CadCheckFinding, CadCheckPlacement> = new Map(),
 ): CadCheckDraft[] => {
-  const target = (occurrence: { occurrenceId: string; name: string }) => ({
-    kind: "part" as const,
-    label: occurrence.name.replace(/\s*<\d+>$/, "").slice(0, 120),
+  const names = new Map<string, string>();
+  const target = (occurrence: { occurrenceId: string; name: string }) => {
+    names.set(occurrence.occurrenceId, occurrence.name);
+    return {
+      kind: "part" as const,
+      label: occurrence.name.replace(/\s*<\d+>$/, "").slice(0, 120),
+      occurrenceId: occurrence.occurrenceId,
+      preciseLocationLimitation: WHOLE_PART,
+    };
+  };
+  const partOf = (occurrence: { occurrenceId: string; name: string }) => ({
     occurrenceId: occurrence.occurrenceId,
-    preciseLocationLimitation: WHOLE_PART,
+    name: occurrence.name,
   });
   const drafts: CadCheckDraft[] = [];
   const merged = new Map<
@@ -1297,7 +1305,12 @@ export const draftCadComments = (
           ...targets.filter((t) => !known.has(t.occurrenceId)),
         ].slice(0, 20),
         ...(placement || prior.draft.placements
-          ? { placements: [...(prior.draft.placements ?? []), ...(placement ? [placement] : [])] }
+          ? {
+              placements: [
+                ...(prior.draft.placements ?? []),
+                ...(placement ? [placement] : []),
+              ].slice(0, 20),
+            }
           : {}),
       };
       continue;
@@ -1336,6 +1349,16 @@ export const draftCadComments = (
       ),
     );
   }
+  // Near-total overlaps of the same part form stacks: one draft per stack, not one per pair.
+  const stackOf = new Map<string, string>();
+  const root = (id: string): string => {
+    const up = stackOf.get(id) ?? id;
+    return up === id ? id : root(up);
+  };
+  const stacked: { occurrences: ReturnType<typeof partOf>[]; reading: string }[] = [];
+  const members = new Map<string, Map<string, ReturnType<typeof partOf>>>();
+  const pairs: { a: ReturnType<typeof partOf>; b: ReturnType<typeof partOf>; reading: string }[] =
+    [];
   for (const finding of findings) {
     if (
       finding.check !== "mesh-interference" ||
@@ -1346,19 +1369,55 @@ export const draftCadComments = (
         .rank !== 0
     )
       continue;
-    const targets = finding.occurrences.map(target);
+    const [a, b] = [partOf(finding.occurrences[0]!), partOf(finding.occurrences[1]!)];
+    pairs.push({ a, b, reading: finding.reading });
+    const [ra, rb] = [root(a.occurrenceId), root(b.occurrenceId)];
+    if (ra !== rb) stackOf.set(rb, ra);
+  }
+  for (const { a, b, reading } of pairs) {
+    const key = root(a.occurrenceId);
+    if (!members.has(key)) stacked.push({ occurrences: [], reading });
+    const stack = members.get(key) ?? new Map<string, ReturnType<typeof partOf>>();
+    members.set(key, stack);
+    stack.set(a.occurrenceId, a);
+    stack.set(b.occurrenceId, b);
+  }
+  [...members.values()].forEach((stack, index) => {
+    const occurrences = [...stack.values()].slice(0, 20);
+    const targets = occurrences.map(target);
     drafts.push({
       kind: "new",
       publicationKey: draftKey("duplicate", snapshotId, targets),
       inspectedSnapshotId: snapshotId,
       title: "Duplicate part",
-      body: finding.reading,
+      // A pair keeps the overlap's own reading; a bigger stack names every copy.
+      body:
+        stack.size === 2
+          ? stacked[index]!.reading
+          : `These ${stack.size} parts sit in the same place and overlap almost completely, so all but one are likely stale copies: ${occurrences.map((occurrence) => occurrence.name).join(", ")}. Keep one and remove the others.`.slice(
+              0,
+              4000,
+            ),
       severity: "concern",
       category: "assembly",
       targets,
     });
-  }
-  return drafts;
+  });
+  // Where two targets of one draft read the same, as three copies of one rounded hex shaft do,
+  // their labels keep the instance number (`<2>`).
+  return drafts.map((draft) => {
+    const labels = draft.targets.map((target) => target.label);
+    return labels.every((label, index) => labels.indexOf(label) === index)
+      ? draft
+      : {
+          ...draft,
+          targets: draft.targets.map((target) =>
+            target.kind === "part" && labels.filter((label) => label === target.label).length > 1
+              ? { ...target, label: (names.get(target.occurrenceId) ?? target.label).slice(0, 120) }
+              : target,
+          ),
+        };
+  });
 };
 
 /** Exact interference replaces bounding-box leads unless the agent asks for them. */

@@ -66,7 +66,8 @@ export const placeCadDrafts = Effect.fn("placeCadDrafts")(function* (
         }
         // One point target per visible marker; a part whose marker is hidden keeps its part target.
         const targets: CadCheckDraft["targets"][number][] = [];
-        for (const placement of placements) {
+        // One comment takes at most 20 targets.
+        for (const placement of placements.slice(0, 20)) {
           const part = plain.targets.find(
             (target) => target.kind === "part" && target.occurrenceId === placement.occurrenceId,
           );

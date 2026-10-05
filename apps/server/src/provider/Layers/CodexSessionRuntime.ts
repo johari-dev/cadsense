@@ -22,6 +22,7 @@ import { normalizeModelSlug } from "@cadsense/shared/model";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Result from "effect/Result";
@@ -174,6 +175,8 @@ export interface CodexSessionRuntimeOptions {
   readonly cadReviewLearnings?: Effect.Effect<ReadonlyArray<{ readonly text: string }>>;
   /** Reads the workspace design brief; run before each CAD turn so edits apply without a restart. */
   readonly designBrief?: Effect.Effect<CadDesignBrief | null>;
+  /** How long a CAD follow-up's turn/start may take (30 seconds); tests shorten it. */
+  readonly cadFollowUpStartTimeout?: Duration.Input;
   readonly onProcessSpawned?: (receipt: CodexProcessReceipt) => void;
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
@@ -1247,6 +1250,14 @@ export const makeCodexSessionRuntime = (
     const collabChildMetadataRef = yield* Ref.make(new Map<string, CollabChildMetadataState>());
     /** Child provider-thread id → its currently running provider turn id. */
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
+    /**
+     * Whether a registered child agent is mid-turn. The live-turn map also tracks other threads,
+     * such as memory upkeep, so Stop reaches them; those do not hold a review open.
+     */
+    const liveChildAgents = Effect.gen(function* () {
+      const agents = yield* Ref.get(collabChildAgentsRef);
+      return [...(yield* Ref.get(collabChildLiveTurnsRef)).keys()].some((id) => agents.has(id));
+    });
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
     const quiescingRef = yield* Ref.make(false);
@@ -1416,7 +1427,7 @@ export const makeCodexSessionRuntime = (
      * is on its way: that turn would run first. See "The follow-up" in cad/CadChecks.md.
      */
     const continueWithCadFollowUp = Effect.fn("CodexSessionRuntime.continueWithCadFollowUp")(
-      function* (cad: CadProviderTools, turnId: TurnId) {
+      function* (cad: CadProviderTools, turnId: TurnId, finishedNativeTurnId: TurnId) {
         // Read again after every wait: Stop and sendTurn run on other fibers.
         const blocked = Effect.gen(function* () {
           const requests = yield* Ref.get(turnRequestsRef);
@@ -1424,7 +1435,7 @@ export const makeCodexSessionRuntime = (
             requests.inFlight > 0 ||
             requests.latest?.turnId !== turnId ||
             // Child agents still running may publish the drafts themselves.
-            (yield* Ref.get(collabChildLiveTurnsRef)).size > 0 ||
+            (yield* liveChildAgents) ||
             (yield* Ref.get(stoppedTurnsRef)).has(turnId) ||
             (yield* Ref.get(cadFollowUpRef))?.interrupted === true
           );
@@ -1439,19 +1450,29 @@ export const makeCodexSessionRuntime = (
         const message = yield* cad.followUp(null, turnId);
         const params = (yield* Ref.get(turnRequestsRef)).latest?.params;
         if (message === null || params === undefined || (yield* blocked)) {
+          if (message !== null) yield* Effect.logInfo("CAD follow-up dropped", { turnId });
           yield* Ref.set(cadFollowUpRef, undefined);
           return false;
         }
         const started = yield* requestTurnStart({
           ...params,
           input: [{ type: "text", text: message }],
-        }).pipe(Effect.timeout("30 seconds"), Effect.result);
-        if (Result.isFailure(started)) {
+        }).pipe(Effect.timeout(options.cadFollowUpStartTimeout ?? "30 seconds"), Effect.result);
+        // Codex may have started the turn although its answer is late or lost: nothing else was
+        // in flight, so a new active native turn is the follow-up.
+        const session = yield* Ref.get(sessionRef);
+        const accepted =
+          session.activeTurnId !== undefined &&
+          session.activeTurnId !== finishedNativeTurnId &&
+          !(yield* Ref.get(appTurnIdsRef)).has(session.activeTurnId)
+            ? session.activeTurnId
+            : undefined;
+        if (Result.isFailure(started) && accepted === undefined) {
           yield* Effect.logWarning("CAD follow-up did not start", { cause: started.failure });
           yield* Ref.set(cadFollowUpRef, undefined);
           return false;
         }
-        const nativeTurnId = started.success;
+        const nativeTurnId = Result.isSuccess(started) ? started.success : accepted!;
         yield* Ref.update(appTurnIdsRef, (aliases) => new Map(aliases).set(nativeTurnId, turnId));
         // Codex's turn/started for it sets the session's active turn; closeIdleConfirmed and Stop
         // read cadFollowUpRef until then.
@@ -1464,6 +1485,8 @@ export const makeCodexSessionRuntime = (
           yield* client
             .request("turn/interrupt", { threadId: params.threadId, turnId: nativeTurnId })
             .pipe(
+              // Bounded: this runs on the notification fiber, which nothing else can pass.
+              Effect.timeout("5 seconds"),
               Effect.catch((cause) =>
                 Effect.logWarning("Could not stop the CAD follow-up", { cause }),
               ),
@@ -1945,7 +1968,7 @@ export const makeCodexSessionRuntime = (
         const isMemoryConsolidationNotification =
           suppressMemoryConsolidationNotification(notification);
 
-        let payload =
+        const payload =
           notification.method === "item/completed" || notification.method === "item/started"
             ? { ...notification.params, item: compactCodexCadItem(notification.params.item) }
             : notification.method === "turn/completed" || notification.method === "turn/started"
@@ -1980,36 +2003,28 @@ export const makeCodexSessionRuntime = (
             : (childParentTurnId ??
               (yield* Ref.get(collabChildAgentsRef)).get(nativeThreadId)?.spawnTurnId);
           const status = notification.params.turn.status;
-          // The follow-up continues a turn the agent finished, so its failure does not fail the
-          // review: the app's turn completes and its leftover drafts are published.
-          const followUpFailed = primary && parentTurnId !== nativeTurnId && status === "failed";
-          if (followUpFailed && notification.method === "turn/completed") {
-            yield* Effect.logWarning("CAD follow-up failed", { turn: notification.params.turn });
-            payload = {
-              ...notification.params,
-              turn: { ...notification.params.turn, status: "completed", error: null, items: [] },
-            };
-          }
           if (
             primary &&
             parentTurnId &&
             status === "completed" &&
-            (yield* continueWithCadFollowUp(options.cad, parentTurnId))
+            (yield* continueWithCadFollowUp(options.cad, parentTurnId, nativeTurnId))
           ) {
             // The app's turn goes on as the follow-up, so this native turn's end stays hidden.
             yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
             return;
           }
           if (primary) yield* Ref.set(cadFollowUpRef, undefined);
-          const completed =
-            (status === "completed" || followUpFailed) &&
-            parentTurnId !== undefined &&
-            !(yield* Ref.get(stoppedTurnsRef)).has(parentTurnId);
+          // A turn the user stopped, or that ends while child agents still run, is not finished:
+          // their work may cover the drafts, so its leftovers are not published.
+          const stopped =
+            parentTurnId === undefined ||
+            (yield* Ref.get(stoppedTurnsRef)).has(parentTurnId) ||
+            (primary && (yield* liveChildAgents));
           if (parentTurnId)
             yield* options.cad.end(
               primary ? null : `codex:${nativeThreadId}`,
               parentTurnId,
-              completed ? "completed" : "stopped",
+              !stopped && (status === "completed" || status === "failed") ? status : "stopped",
             );
         }
         // Interception FIRST: a registered v2 child is usually also in the
@@ -2166,22 +2181,15 @@ export const makeCodexSessionRuntime = (
           if (providerThreadId && payload.threadId !== providerThreadId) {
             return Effect.void;
           }
-          return Ref.get(appTurnIdsRef).pipe(
-            Effect.flatMap((aliases) => {
-              // A failed CAD follow-up does not fail the review it continues.
-              const failed =
-                payload.turn.status === "failed" && !aliases.has(TurnId.make(payload.turn.id));
-              const lastError =
-                failed && "error" in payload.turn && payload.turn.error
-                  ? payload.turn.error.message
-                  : undefined;
-              return updateSession(sessionRef, {
-                status: failed ? "error" : "ready",
-                activeTurnId: undefined,
-                ...(lastError ? { lastError } : {}),
-              });
-            }),
-          );
+          const lastError =
+            payload.turn.status === "failed" && "error" in payload.turn && payload.turn.error
+              ? payload.turn.error.message
+              : undefined;
+          return updateSession(sessionRef, {
+            status: payload.turn.status === "failed" ? "error" : "ready",
+            activeTurnId: undefined,
+            ...(lastError ? { lastError } : {}),
+          });
         }),
       ),
     );
@@ -2788,6 +2796,7 @@ export const makeCodexSessionRuntime = (
           // is the latest one, which may be about to continue as a CAD follow-up.
           const stopped =
             turnId ??
+            (yield* Ref.get(cadFollowUpRef))?.appTurnId ??
             (yield* appTurnId(session.activeTurnId)) ??
             (yield* Ref.get(turnRequestsRef)).latest?.turnId;
           if (stopped !== undefined)

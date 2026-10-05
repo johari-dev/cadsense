@@ -420,6 +420,28 @@ was checked directly: a `Stop` hook answering `{decision: "block", reason}` made
 the same query with the reason as feedback, one result came back, and the hook fired again with
 `stop_hook_active` set, where the ledger allows the stop.
 
+### After adversarial review
+
+Two rounds of adversarial review (Opus 5.5 and GPT-6.1-Sol) changed what gets published: the
+backstop now publishes only after a main-agent turn completes (or after a failed follow-up), never
+on Stop, app shutdown, a child agent's turn end, or while child agents still run; agents may
+decline a draft their own comment covers, one the user asked not to have, one they asked the user
+about, or one they inspected and found wrong; standoffs, adapters, and couplers are no longer
+shafts and bushings count as bearings; length mismatches are not drafted; a stack of copies is one
+draft. The same transfer through the app path afterwards, graded blind:
+
+| Model                 | Runs | Score per run | Comments | Point markers | Follow-ups | Backstop comments | Declines |
+| --------------------- | ---- | ------------- | -------- | ------------- | ---------- | ----------------- | -------- |
+| GPT-6-Luna, medium    | 4    | 8, 8, 8, 8    | 9.0      | 4.0           | 0 of 4     | 0                 | 0        |
+| GPT-6-Sol, medium     | 2    | 8, 8          | 9.5      | 4.0           | 0 of 2     | 0                 | 0        |
+| Opus 5.5, high effort | 2    | 8, 8          | 10.5     | 4.5           | 0 of 2     | 0                 | 1 each   |
+
+The machine was lightly loaded for these runs, so Luna finished in 45 to 101 seconds and published
+every draft in its first turn. Each Opus run declined only the unpowered-rollers draft, citing its
+own comment on the missing link between the 1.75 in and 2.39 in shafts, which targets the shafts
+rather than the rollers; under the old rule the backstop would have published that draft as a
+second comment. No Luna or Sol run declined anything under the wider rule.
+
 ## Matched evaluation before the review-process update
 
 These results compare baseline `9479482ee` with `ef30dc417`, before the added

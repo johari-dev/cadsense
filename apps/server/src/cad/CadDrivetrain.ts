@@ -699,7 +699,9 @@ export const analyzeCadDrivetrain = (
         summary: `${loop.name} wraps ${names(wrapped)}, so its length was not checked.`,
         occurrences: [ref(loop), ...wrapped.map(ref)],
       });
-      connect(wrapped[0]!, wrapped[wrapped.length - 1]!, noun === "sprocket" ? "chain" : "belt");
+      // Every wheel on the loop turns with it, whichever drives.
+      for (const wheel of wrapped.slice(1))
+        connect(wrapped[0]!, wheel, noun === "sprocket" ? "chain" : "belt");
       continue;
     }
     const [a, b] = [wrapped[0]!, wrapped[wrapped.length - 1]!];

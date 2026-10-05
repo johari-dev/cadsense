@@ -1,10 +1,14 @@
 import { CadSnapshotId, type CadCheckDraft, type CadChecksResult } from "@cadsense/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import * as Effect from "effect/Effect";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
+import type { CadAgentTools } from "../cad/CadViewing.ts";
 import {
   type CadDraftLedger,
   makeCadDraftLedger,
   recordCadChecks,
   preparePublication,
+  settleDrafts,
   uncoveredDrafts,
 } from "./CadCheckBackstop.ts";
 
@@ -130,6 +134,34 @@ describe("preparePublication", () => {
     expect([...ledger.declined]).toEqual([["bare-belt", "The belt is a placeholder."]]);
   });
 
+  it("lets a later publication by key take back an earlier decline", () => {
+    const ledger = makeCadDraftLedger();
+    ledger.offered = new Map([["gear-spacing", gears]]);
+    preparePublication(ledger, {
+      declinedDrafts: [{ publicationKey: "gear-spacing", explanation: "No comments yet." }],
+    });
+    const later = preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
+    expect(later.rejected).toEqual([]);
+    expect(later.itemCount).toBe(1);
+    expect(ledger.declined.size).toBe(0);
+    // Declining and publishing a key in one call still declines it.
+    const both = preparePublication(ledger, {
+      publishDrafts: ["gear-spacing"],
+      declinedDrafts: [{ publicationKey: "gear-spacing", explanation: "Placeholder." }],
+    });
+    expect(both.rejected).toEqual([{ publicationKey: "gear-spacing", reason: "declined" }]);
+  });
+
+  it("publishes a key again with the content it was first sent with", () => {
+    const ledger = makeCadDraftLedger();
+    ledger.offered = new Map([["gear-spacing", gears]]);
+    preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
+    // A later cad_checks call offers the draft with other targets.
+    ledger.offered = new Map([["gear-spacing", { ...gears, title: "re-placed" }]]);
+    const again = preparePublication(ledger, { publishDrafts: ["gear-spacing"] });
+    expect(again.input).toMatchObject({ items: [gears] });
+  });
+
   it("fills the catalog version only when the agent sends no items of its own", () => {
     const ledger = makeCadDraftLedger();
     expect(preparePublication(ledger, { publishDrafts: ["gear-spacing"] }).catalogMissing).toBe(
@@ -140,4 +172,23 @@ describe("preparePublication", () => {
       false,
     );
   });
+});
+
+describe("settleDrafts", () => {
+  it.effect("publishes more than 20 leftover drafts in batches", () =>
+    Effect.gen(function* () {
+      const ledger = makeCadDraftLedger();
+      ledger.drafts = Array.from({ length: 21 }, (_, i) => draft(`draft-${i}`, id(i.toString(16))));
+      const batches: number[] = [];
+      const comments: NonNullable<CadAgentTools["comments"]> = (name, input) =>
+        Effect.sync(() => {
+          if (name === "cad_comments_publish")
+            batches.push((input as { items: unknown[] }).items.length);
+          return { result: { comments: [], catalogVersion: batches.length, nextCursor: null } };
+        });
+      // Only the comment tool is read; the rest of the activation is unused here.
+      yield* settleDrafts({ comments } as CadAgentTools, ledger);
+      expect(batches).toEqual([20, 1]);
+    }),
+  );
 });

@@ -2191,10 +2191,10 @@ it.effect("remembers a decline in the session's later turns", () =>
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
-it.effect("publishes more than 20 leftover drafts in batches", () =>
+it.effect("drafts a stack of copies as one comment", () =>
   Effect.gen(function* () {
     const comments = fakeComments();
-    // Seven copies at one placement: 21 duplicate pairs, one draft each.
+    // Seven copies at one placement: 21 duplicate pairs, one stack.
     const { tools } = yield* cubeBlockTools(
       Array.from({ length: 7 }, (_, i) => ({
         number: i + 5,
@@ -2203,14 +2203,32 @@ it.effect("publishes more than 20 leftover drafts in batches", () =>
       })),
       comments.service,
     );
-    const turnId = TurnId.make("backstop-batches");
+    const turnId = TurnId.make("backstop-stack");
     const drafts = yield* checkDrafts(tools, turnId);
-    assert.equal(drafts.length, 21);
+    assert.equal(drafts.length, 1);
+    assert.equal(drafts[0]!.targets.length, 7);
     yield* tools.end(null, turnId, "completed");
     assert.deepEqual(
       comments.publications.map((items) => items.length),
-      [20, 1],
+      [1],
     );
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.effect("publishes the leftovers of a failed turn only when its follow-up failed", () =>
+  Effect.gen(function* () {
+    const comments = fakeComments();
+    const { tools } = yield* duplicateScene(comments.service);
+    const failed = TurnId.make("failed-before-follow-up");
+    yield* checkDrafts(tools, failed);
+    yield* tools.end(null, failed, "failed");
+    assert.equal(comments.publications.length, 0);
+    // The review finished and only the follow-up failed, so its leftovers are published.
+    const followed = TurnId.make("failed-follow-up");
+    yield* checkDrafts(tools, followed);
+    assert.isNotNull(yield* tools.followUp(null, followed));
+    yield* tools.end(null, followed, "failed");
+    assert.equal(comments.publications.length, 1);
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 

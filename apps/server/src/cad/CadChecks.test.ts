@@ -1015,6 +1015,46 @@ describe("draftCadComments", () => {
     for (const draft of drafts) assert.match(draft.body, /\b(Add|Move|Keep|Remove)\b[^.]*\.$/);
   });
 
+  it("keeps instance numbers where a merged draft names one part twice", () => {
+    const [hexA, hexB] = [part(8, "13 in. Hex Shaft <1>"), part(9, "13 in. Hex Shaft <2>")];
+    const [roundA, roundB] = [part(10, "Rounded Hex <1>"), part(11, "Rounded Hex <2>")];
+    const [merged] = draftCadComments(
+      [
+        drivetrain("stacked-shafts", true, [hexA, roundA]),
+        drivetrain("stacked-shafts", true, [hexB, roundB]),
+      ],
+      snapshotId,
+    );
+    assert.deepEqual(
+      merged!.targets.map((target) => target.label),
+      ["13 in. Hex Shaft <1>", "Rounded Hex <1>", "13 in. Hex Shaft <2>", "Rounded Hex <2>"],
+    );
+  });
+
+  it("drafts one comment for a stack of copies, not one per pair", () => {
+    const plateC = part(7, "Part 20 <4>");
+    const overlap = (a: ReturnType<typeof part>, b: ReturnType<typeof part>): CadCheckFinding => ({
+      check: "mesh-interference",
+      occurrences: [a, b],
+      intersectionVolume: 1e-4,
+      intersectionFraction: 1,
+      withinSubassembly: false,
+      reading: readOverlap(a.name, b.name, 1e-4, 1, false).reading,
+    });
+    const stacked = draftCadComments(
+      [overlap(plateA, plateB), overlap(plateA, plateC), overlap(plateB, plateC)],
+      snapshotId,
+    );
+    assert.equal(stacked.length, 1);
+    assert.deepEqual(
+      stacked[0]!.targets.flatMap((target) =>
+        target.kind === "part" ? [target.occurrenceId] : [],
+      ),
+      [plateA.occurrenceId, plateB.occurrenceId, plateC.occurrenceId],
+    );
+    assert.match(stacked[0]!.body, /\bKeep\b[^.]*\.$/);
+  });
+
   it("merges collisions into one part into one draft that keeps every marker", () => {
     const controller = part(6, "SPARK Flex Brushless Motor Controller <1>");
     const collision = (shaft: ReturnType<typeof part>): CadCheckFinding => ({

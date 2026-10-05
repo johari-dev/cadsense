@@ -58,6 +58,7 @@ publishes the whole-part version, so no point reaches the student unless an agen
 - An image is attached to the wrong draft.
 - Two spinning parts running into the same part become two comments, which read as one problem twice.
 - A merged draft keeps only one of its markers.
+- A merged draft with more than 20 markers cannot be published.
 
 **Short publishing.** `cad_comments_publish` accepts `publishDrafts: [publicationKey]` to publish
 drafts as offered, and fills `expectedCatalogVersion` when only drafts are published. While drafts

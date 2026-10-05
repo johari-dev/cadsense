@@ -51,24 +51,35 @@ export const BACKSTOP_NOTE = "(Found by Cadsense's automatic checks.)";
 /**
  * One activation's drafts: as cad_checks proved them (`drafts`, with whole-part targets, for coverage
  * and the backstop), as offered to the agent (`offered`, with any inspected point targets, for
- * publishing by key), the markers placed for them (`placements`), the ones its agent declined, the
- * keys still uncovered (`pending`), and whether the follow-up was sent.
+ * publishing by key), the markers placed for them (`placements`), the ones its agent declined, what
+ * each key was first published with (`sent`), the keys still uncovered (`pending`), and whether the
+ * follow-up was sent.
  */
 export interface CadDraftLedger {
   drafts: readonly CadCheckDraft[];
   offered: ReadonlyMap<string, CadCheckDraft>;
   readonly placements: CadPlacementCache;
   readonly declined: Map<string, string>;
+  readonly sent: Map<string, CadCheckDraft>;
   pending: readonly string[];
   followedUp: boolean;
   settled: boolean;
 }
-/** `declined` is shared by the main agent's turns in a session: draft keys repeat on one snapshot. */
-export const makeCadDraftLedger = (declined = new Map<string, string>()): CadDraftLedger => ({
+/**
+ * `declined` and `sent` are shared by the main agent's turns in a session: draft keys repeat on one
+ * snapshot, and a key published again must carry what it was first published with.
+ */
+export const makeCadDraftLedger = (
+  session: {
+    readonly declined: Map<string, string>;
+    readonly sent: Map<string, CadCheckDraft>;
+  } = { declined: new Map(), sent: new Map() },
+): CadDraftLedger => ({
   drafts: [],
   offered: new Map(),
   placements: makeCadPlacementCache(),
-  declined,
+  declined: session.declined,
+  sent: session.sent,
   pending: [],
   followedUp: false,
   settled: false,
@@ -112,8 +123,10 @@ const keyOf = (item: unknown) =>
 /**
  * Turns a cad_comments_publish input into what the comment service takes, which knows nothing of
  * drafts: records `declinedDrafts`, expands `publishDrafts` into the drafts as offered, and drops
- * both fields. A key that is unknown or declined is reported in `rejected` and not published; a key
- * the agent also sent as an item publishes once, as the agent's item. `catalogMissing` asks the
+ * both fields. A key published before goes out with what it was first published with, so it replays.
+ * Publishing a key declined in an earlier call takes the decline back; a key that is unknown or
+ * declined in the same call is reported in `rejected` and not published; a key the agent also sent
+ * as an item publishes once, as the agent's item. `catalogMissing` asks the
  * caller to fill `expectedCatalogVersion`, only for a publication with no items of the agent's own.
  * `itemCount` is null when the input is malformed, so the
  * comment service reports the error.
@@ -122,18 +135,25 @@ export const preparePublication = (ledger: CadDraftLedger, input: unknown) => {
   const parsed = decodeExtras(input);
   if (Option.isNone(parsed) || typeof input !== "object" || input === null)
     return { input, itemCount: null, rejected: [], catalogMissing: false };
-  for (const decline of parsed.value.declinedDrafts ?? [])
+  const declinedNow = new Set<string>();
+  for (const decline of parsed.value.declinedDrafts ?? []) {
     ledger.declined.set(decline.publicationKey, decline.explanation);
+    declinedNow.add(decline.publicationKey);
+  }
   const items = parsed.value.items ?? [];
   const sent = new Set(items.map(keyOf));
   const rejected: { publicationKey: string; reason: string }[] = [];
   const fromDrafts: CadCheckDraft[] = [];
   for (const key of new Set(parsed.value.publishDrafts ?? [])) {
     if (sent.has(key)) continue;
-    const draft = ledger.offered.get(key);
-    if (ledger.declined.has(key)) rejected.push({ publicationKey: key, reason: "declined" });
+    const draft = ledger.sent.get(key) ?? ledger.offered.get(key);
+    if (declinedNow.has(key)) rejected.push({ publicationKey: key, reason: "declined" });
     else if (!draft) rejected.push({ publicationKey: key, reason: "unknown-draft" });
-    else fromDrafts.push(draft);
+    else {
+      ledger.declined.delete(key);
+      ledger.sent.set(key, draft);
+      fromDrafts.push(draft);
+    }
   }
   const rest = Object.fromEntries(
     Object.entries(input).filter(([key]) => key !== "declinedDrafts" && key !== "publishDrafts"),
@@ -224,9 +244,11 @@ export const settleDrafts = Effect.fn("CadCheckBackstop.settleDrafts")(function*
   let catalogVersion = chat.catalogVersion;
   for (let start = 0; start < uncovered.length; start += 20) {
     if (start > 0) catalogVersion = yield* currentCatalogVersion(tools);
+    const items = uncovered.slice(start, start + 20).map(backstopItem);
+    for (const item of items) ledger.sent.set(item.publicationKey, item);
     const delivery = yield* tools.comments("cad_comments_publish", {
       expectedCatalogVersion: catalogVersion,
-      items: uncovered.slice(start, start + 20).map(backstopItem),
+      items,
     });
     yield* Effect.logInfo("CAD check backstop published drafts", {
       drafts: uncovered.slice(start, start + 20).map((draft) => draft.publicationKey),

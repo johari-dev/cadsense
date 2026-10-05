@@ -2,6 +2,7 @@ import {
   CAD_CAPTURE_SIZE,
   CAD_TOOL_INPUTS,
   CadChecksResult,
+  type CadCheckDraft,
   CadViewError,
   type ThreadId,
   type TurnId,
@@ -184,8 +185,12 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
 const decodeChecksResult = Schema.decodeUnknownOption(CadChecksResult);
 const REMINDER = `These cad_checks drafts describe proven defects that no comment in this chat covers yet. Publish each one, reworded for the student. ${CAD_DRAFT_DECLINE_RULE} Drafts still uncovered when the turn ends are published as drafted.`;
 
-/** How a turn ended: only a `completed` main-agent turn publishes its leftover drafts. */
-export type CadTurnOutcome = "completed" | "stopped";
+/**
+ * How a turn ended. A `completed` main-agent turn publishes its leftover drafts, and so does a
+ * `failed` one after its follow-up was sent: the review had finished and only the follow-up failed.
+ * A `stopped` turn (the user pressed Stop, or child agents were still running) publishes nothing.
+ */
+export type CadTurnOutcome = "completed" | "failed" | "stopped";
 
 /**
  * One native session owns these activations. Only trusted adapter callbacks supply child keys and
@@ -210,8 +215,9 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
     }
   >();
   const ended = new Map<string | null, Set<TurnId>>();
-  // The main agent's declines last the session: a later turn on the same snapshot drafts the same keys.
-  const declined = new Map<string, string>();
+  // The main agent's declines and sent drafts last the session: a later turn on the same snapshot
+  // drafts the same keys.
+  const session = { declined: new Map<string, string>(), sent: new Map<string, CadCheckDraft>() };
   // Shared by the session's child agents so IDs one shows, another can use.
   const ids = makeCadShortIds();
   let open = true;
@@ -252,7 +258,7 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
       turnId,
       scope,
       tools,
-      ledger: makeCadDraftLedger(childKey === null ? declined : undefined),
+      ledger: makeCadDraftLedger(childKey === null ? session : undefined),
       settle: childKey === null && options.settleOnClose === true,
     };
     // Scope finalizers run newest first, so this backstop runs before the activation above stops,
@@ -381,7 +387,7 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         return followUpMessage(remaining);
       }),
     );
-  /** Ends a turn's activation; a `completed` main-agent turn publishes its leftover drafts. */
+  /** Ends a turn's activation; see CadTurnOutcome for which turns publish their leftover drafts. */
   const end = (childKey: string | null, turnId: TurnId, outcome: CadTurnOutcome) =>
     gate.withPermits(1)(
       Effect.gen(function* () {
@@ -390,7 +396,11 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         ended.set(childKey, turns);
         const entry = entries.get(childKey);
         if (entry?.turnId !== turnId) return;
-        if (outcome === "completed" && childKey === null) entry.settle = true;
+        if (
+          childKey === null &&
+          (outcome === "completed" || (outcome === "failed" && entry.ledger.followedUp))
+        )
+          entry.settle = true;
         entries.delete(childKey);
         yield* Scope.close(entry.scope, Exit.void);
       }),

@@ -2267,7 +2267,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* context.cad.tools.end(
         null,
         asCanonicalTurnId(context.turnState.turnId),
-        status === "completed" ? "completed" : "stopped",
+        // A turn that ends while background tasks still run is not finished: their work may cover
+        // the drafts, so its leftovers are not published.
+        context.liveTaskIds.size > 0
+          ? "stopped"
+          : status === "completed" || status === "failed"
+            ? status
+            : "stopped",
       );
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
     if (resultContextWindow !== undefined) {

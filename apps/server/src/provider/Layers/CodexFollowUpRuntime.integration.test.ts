@@ -11,6 +11,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { type ProviderEvent, ThreadId, TurnId } from "@cadsense/contracts";
 import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
@@ -21,6 +22,7 @@ import type { CadProviderTools } from "../CadProviderTools.ts";
 import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
 
 const ROOT = wireFixture.rootThreadId;
+const CHILD = wireFixture.childThreadIds[0]!;
 const MESSAGE = "Your review is not finished.";
 const scriptPath = NodePath.join(import.meta.dirname, "../testFixtures/.follow-up-script.json");
 const peerPath = NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.sh");
@@ -76,6 +78,37 @@ const agentMessage = (turnId: string, text: string) => ({
   },
 });
 
+/** A captured thread/started that registers CHILD as a spawned child agent of ROOT. */
+const spawnedChild = () => {
+  const captured = wireFixture.notifications.find((entry) => entry.method === "thread/started")!;
+  return {
+    ...captured,
+    params: {
+      thread: {
+        ...captured.params.thread,
+        id: CHILD,
+        sessionId: CHILD,
+        parentThreadId: ROOT,
+        source: {
+          subAgent: {
+            thread_spawn: {
+              agent_nickname: "checker",
+              agent_path: "/root/checker",
+              agent_role: "verifier",
+              depth: 1,
+              parent_thread_id: ROOT,
+            },
+          },
+        },
+      },
+    },
+  };
+};
+const foreignTurnStarted = (threadId: string) => ({
+  method: "turn/started",
+  params: { threadId, turn: { id: `${threadId}-turn`, status: "inProgress", items: [] } },
+});
+
 const writeScript = (script: Record<string, unknown>) =>
   Effect.gen(function* () {
     // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -100,7 +133,7 @@ const readLines = (suffix: string) =>
         .map((line) => JSON.parse(line) as Record<string, any>)
     : [];
 
-const startRuntime = (cad: CadProviderTools) =>
+const startRuntime = (cad: CadProviderTools, cadFollowUpStartTimeout?: Duration.Input) =>
   makeCodexSessionRuntime({
     threadId: ThreadId.make("thread-codex-follow-up"),
     binaryPath: peerPath,
@@ -108,6 +141,7 @@ const startRuntime = (cad: CadProviderTools) =>
     runtimeMode: "full-access",
     environment: { ...process.env, CADSENSE_CODEX_COLLAB_SCRIPT: scriptPath },
     cad,
+    ...(cadFollowUpStartTimeout ? { cadFollowUpStartTimeout } : {}),
   });
 
 /**
@@ -344,6 +378,106 @@ describe("CodexSessionRuntime CAD follow-up", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.live("still stops a follow-up whose turn/start answers late and whose interrupt hangs", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnStartDelayMs: [0, 1500],
+        hangInterruptFor: ROOT,
+      });
+      const hold = { asked: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() };
+      const cad = fakeCad({ hold });
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Deferred.await(hold.asked);
+      yield* Deferred.succeed(hold.release, undefined);
+      // turn/start is now waiting on its late answer, and Codex has announced turn-2.
+      yield* Effect.sleep("500 millis");
+      yield* runtime.interruptTurn();
+      const events = yield* Fiber.join(collected);
+
+      assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
+      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 stopped"]);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("keeps a follow-up Codex started although turn/start answered after its deadline", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnStartDelayMs: [0, 1500],
+      });
+      const cad = fakeCad();
+      const runtime = yield* startRuntime(cad.tools, "300 millis");
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      const events = yield* Fiber.join(collected);
+
+      assert.deepEqual(lifecycle(events), ["turn/started turn-1", "turn/completed turn-1"]);
+      assert.deepEqual(cad.calls, [
+        "followUp null turn-1",
+        "followUp null turn-1",
+        "end null turn-1 completed",
+      ]);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("neither follows up nor publishes while a child agent is still running", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        recordTurnRequests: true,
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnNotifications: [[spawnedChild(), foreignTurnStarted(CHILD)]],
+      });
+      const cad = fakeCad();
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Fiber.join(collected);
+
+      assert.deepEqual(cad.calls, ["end null turn-1 stopped"]);
+      assert.equal(readLines(".requests").length, 1);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("is not held back by a thread that is not a child agent, such as memory upkeep", () =>
+    Effect.gen(function* () {
+      yield* writeScript({
+        recordTurnRequests: true,
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnNotifications: [[foreignTurnStarted("unregistered-thread")]],
+      });
+      const cad = fakeCad();
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Fiber.join(collected);
+
+      assert.deepEqual(cad.calls, [
+        "followUp null turn-1",
+        "followUp null turn-1",
+        "end null turn-1 completed",
+      ]);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.live("completes the app's turn when the follow-up cannot start", () =>
     Effect.gen(function* () {
       yield* writeScript({ turnIds: ["turn-1", "turn-2"], notifications: [], failTurnStartAt: 1 });
@@ -361,7 +495,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.live("completes the app's turn when the follow-up itself fails", () =>
+  it.live("reports a failed follow-up as failed and still settles the review", () =>
     Effect.gen(function* () {
       yield* writeScript({
         turnIds: ["turn-1", "turn-2"],
@@ -376,9 +510,9 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       const events = yield* Fiber.join(collected);
 
       const completed = events.find((event) => event.method === "turn/completed");
-      assert.nestedPropertyVal(completed?.payload, "turn.status", "completed");
-      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 completed"]);
-      assert.notEqual((yield* runtime.getSession).status, "error");
+      assert.nestedPropertyVal(completed?.payload, "turn.status", "failed");
+      // The provider tools publish the leftovers of a failed turn only after a follow-up.
+      assert.deepEqual(cad.calls, ["followUp null turn-1", "end null turn-1 failed"]);
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
