@@ -172,6 +172,53 @@ describe("FeatureScriptPreviews", () => {
     ),
   );
 
+  it.live("reads a script's imports from the workspace, and only from there", () =>
+    run(
+      Effect.gen(function* () {
+        // Failure modes: imports read from the server's cwd or not at all; the panel and the agent
+        // resolving them differently; a link to a file outside the workspace being followed.
+        const library = (size: number) => `FeatureScript 3083;
+import(path : "onshape/std/geometry.fs", version : "3083.0");
+export function block(context is Context, id is Id)
+{
+    fCuboid(context, id + "c", { "corner1" : vector(0, 0, 0) * millimeter, "corner2" : vector(${size}, ${size}, ${size}) * millimeter });
+}
+`;
+        const user = (path: string) =>
+          feature("block(context, id);").replace(
+            'version : "3083.0");',
+            `version : "3083.0");\nimport(path : "${path}", version : "");`,
+          );
+        const h = yield* harness({
+          "wiring/block.fs": library(10),
+          "wiring/robot.fs": user("block.fs"),
+          "wiring/escape.fs": user("link.fs"),
+        });
+        const { result } = yield* h.preview({ path: "wiring/robot.fs" });
+        assert.equal(result.status, "OK");
+        assert.closeTo(result.solids[0]!.volumeMm3, 1000, 1e-6);
+        const panel = yield* h.panel({ path: "wiring/robot.fs", source: user("block.fs") });
+        assert.equal(panel.status, "OK");
+        assert.closeTo(panel.solids[0]!.volumeMm3, 1000, 1e-6);
+
+        const outside = `${h.root}-outside.fs`;
+        NodeFS.writeFileSync(outside, library(20));
+        NodeFS.symlinkSync(outside, NodePath.join(h.root, "wiring/link.fs"));
+        try {
+          const escaped = yield* h.preview({ path: "wiring/escape.fs" });
+          assert.equal(escaped.result.status, "INVALID");
+          assert.include(escaped.result.failure!.message, "Cannot import link.fs");
+          assert.deepInclude(escaped.result.failure!.location, {
+            path: "wiring/escape.fs",
+            line: 3,
+          });
+        } finally {
+          NodeFS.rmSync(outside);
+        }
+      }),
+    ),
+  );
+
   it.live("stops a preview that runs too long and serves the next one from a fresh worker", () =>
     run(
       Effect.gen(function* () {

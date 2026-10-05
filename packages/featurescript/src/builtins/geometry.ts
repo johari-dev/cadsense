@@ -4,7 +4,7 @@ import {
   ordered,
   removeBodies,
   replaceBodies,
-  withAttributes,
+  updateEntities,
   type Entity,
   type EntityAttribute,
 } from "../geometry/Model.ts";
@@ -64,7 +64,15 @@ const sketchEntity =
     return undefined;
   };
 
-// ------------------------------------------------------------------ attributes
+// ------------------------------------------------------------------ attributes and properties
+
+/** Where `setProperty` keeps a property on a body: its `PropertyType` member, or `CUSTOM:<id>`. */
+function propertyKey(call: BuiltinCall, definition: FsMap): string {
+  const type = untag(definition.getField("propertyType"));
+  if (typeof type !== "string") return call.fail("propertyType must be a PropertyType.");
+  if (type !== "CUSTOM") return type;
+  return `CUSTOM:${String(untag(definition.getField("customPropertyId"))).toLowerCase()}`;
+}
 
 /** `attributePattern` matching: every key in the pattern is present with an equal value. */
 const matchesPattern = (value: FsValue, pattern: FsValue): boolean => {
@@ -282,21 +290,24 @@ export const GEOMETRY_BUILTINS = {
     if (entities.length === 0) return call.fail("setAttribute: entities resolve to nothing.");
     const name = untag(definition.getField("name"));
     const attribute = definition.getField("attribute");
-    model.geometry = withAttributes(
+    model.geometry = updateEntities(
       model.geometry,
       entities.map((entity) => entity.id),
-      (attributes) =>
-        typeof name === "string"
-          ? [
-              ...attributes.filter((existing) => existing.name !== name),
-              ...(attribute === undefined ? [] : [{ name, value: attribute }]),
-            ]
-          : [
-              ...attributes.filter(
-                (existing) => existing.name !== null || !sameTag(existing.value, attribute),
-              ),
-              { name: null, value: attribute },
-            ],
+      (entity) => ({
+        ...entity,
+        attributes:
+          typeof name === "string"
+            ? [
+                ...entity.attributes.filter((existing) => existing.name !== name),
+                ...(attribute === undefined ? [] : [{ name, value: attribute }]),
+              ]
+            : [
+                ...entity.attributes.filter(
+                  (existing) => existing.name !== null || !sameTag(existing.value, attribute),
+                ),
+                { name: null, value: attribute },
+              ],
+      }),
     );
     return undefined;
   },
@@ -331,12 +342,38 @@ export const GEOMETRY_BUILTINS = {
     const entities = resolve(call, model, oc, definition.getField("entities"));
     for (const entity of entities) {
       const remove = new Set(selectAttributes([entity], definition));
-      model.geometry = withAttributes(model.geometry, [entity.id], (attributes) =>
-        attributes.filter((attribute) => !remove.has(attribute)),
-      );
+      model.geometry = updateEntities(model.geometry, [entity.id], (kept) => ({
+        ...kept,
+        attributes: kept.attributes.filter((attribute) => !remove.has(attribute)),
+      }));
     }
     return undefined;
   },
+
+  setProperty: ([ctx, value], call) => {
+    const { model, oc } = kernel(call, ctx);
+    const definition = map(call, value, "definition");
+    const key = propertyKey(call, definition);
+    const setTo = definition.getField("value");
+    if (setTo === undefined) return call.fail("setProperty needs a value.");
+    // Std: "Bodies only for now".
+    const bodies = resolve(call, model, oc, definition.getField("entities")).filter(
+      (entity) => entity.type === "BODY",
+    );
+    model.geometry = updateEntities(
+      model.geometry,
+      bodies.map((body) => body.id),
+      (body) => ({ ...body, properties: new Map([...body.properties, [key, setTo]]) }),
+    );
+    return undefined;
+  },
+  // Std: getProperty "cannot be called on the current context inside custom features", and a
+  // preview only ever has that context. Reading what setProperty stored would pass here and fail
+  // in Onshape.
+  getProperty: (_args, call) =>
+    call.fail(
+      "getProperty can't read the Part Studio a custom feature runs in. Onshape allows it only in table functions, editing logic and manipulator change functions.",
+    ),
 
   // Sheet metal doesn't exist locally, so no query contains flattened sheet metal.
   queryContainsFlattenedSheetMetal: ([ctx], call) => {

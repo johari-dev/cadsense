@@ -289,7 +289,14 @@ export const CadFeatureScriptPreviewResult = Schema.Struct({
     Schema.Struct({
       id: Schema.String,
       createdBy: Schema.String,
+      /** The name the script gave it with setProperty. */
+      name: Schema.NullOr(Schema.String),
       volumeMm3: Schema.Number,
+      /** Axis-aligned bounding box. */
+      boundsMm: Schema.Struct({
+        min: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+        max: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+      }),
       faces: Schema.Int,
       edges: Schema.Int,
       vertices: Schema.Int,
