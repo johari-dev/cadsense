@@ -2024,6 +2024,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
   const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
+  // One synced model shows its Onshape name, named the same way as the CAD panel's scene
+  // picker; several show a count.
+  const onlyCadRoot = currentCadRoots.length === 1 ? currentCadRoots[0] : undefined;
+  const cadSummary = onlyCadRoot
+    ? (project.cad?.catalog?.roots.find((entry) => entry.elementId === onlyCadRoot.elementId)
+        ?.name ?? (onlyCadRoot.kind === "assembly" ? "Assembly" : "Part Studio"))
+    : currentCadRoots.length > 1
+      ? `${currentCadRoots.length} models`
+      : null;
 
   return (
     <>
@@ -2081,11 +2090,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 {project.displayName}
               </span>
               <span className="block truncate text-[10px] text-sidebar-muted-foreground">
-                {currentCadRoots.length > 0
-                  ? `${currentCadRoots.length} CAD ${currentCadRoots.length === 1 ? "scene" : "scenes"}`
-                  : project.onshapeSource
-                    ? "Onshape project"
-                    : "Local project"}
+                {cadSummary ?? (project.onshapeSource ? "Onshape project" : "Local project")}
               </span>
             </span>
             {project.groupedProjectCount > 1 ? (
