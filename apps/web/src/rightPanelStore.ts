@@ -5,79 +5,60 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-export const RIGHT_PANEL_KINDS = ["files", "file", "preview", "agents", "cad"] as const;
-export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
+/**
+ * The right panel's fixed sections, in switcher order. CAD comes first so it is
+ * the default on CAD projects. Agents and Browser only show while they have
+ * something to show (see `resolveRightPanelSection`).
+ */
+export const RIGHT_PANEL_SECTIONS = ["cad", "files", "agents", "browser"] as const;
+export type RightPanelSection = (typeof RIGHT_PANEL_SECTIONS)[number];
 
-export type RightPanelSurface =
-  | { id: `browser:${string}`; kind: "preview"; resourceId: string }
-  | { id: "browser:new"; kind: "preview"; resourceId: null }
-  | { id: "files"; kind: "files" }
-  | {
-      id: `file:${string}`;
-      kind: "file";
-      relativePath: string;
-      revealLine: number | null;
-      revealRequestId: number;
-    }
-  | { id: "agents"; kind: "agents" }
-  | { id: "cad"; kind: "cad" };
+/** The file shown inside the Files section. */
+export interface RightPanelFile {
+  relativePath: string;
+  revealLine: number | null;
+  /** Bumped on every open so re-opening the same line scrolls to it again. */
+  revealRequestId: number;
+}
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
-  activeSurfaceId: string | null;
-  surfaces: RightPanelSurface[];
+  /** Section the user last picked, or null to fall back to the first available one. */
+  section: RightPanelSection | null;
+  /** File open in Files; null shows the file tree on its own. */
+  file: RightPanelFile | null;
+  /** Browser session to show in Browser; null shows the thread's active session. */
+  browserTabId: string | null;
 }
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
-  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file">) => void;
-  openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
+  open: (ref: ScopedThreadRef, section: Exclude<RightPanelSection, "browser">) => void;
+  openBrowser: (ref: ScopedThreadRef, tabId: string) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
-  activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
-  closeSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
-  closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
-  closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
-  closeAllSurfaces: (ref: ScopedThreadRef) => void;
-  reconcileBrowserSurfaces: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
-  reconcileFileSurfaces: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
-  show: (ref: ScopedThreadRef) => void;
+  closeFile: (ref: ScopedThreadRef) => void;
+  /** Drops browser state for sessions that no longer exist. */
+  reconcileBrowser: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
+  /** Drops Files state once the thread has no workspace to browse. */
+  reconcileFiles: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
   close: (ref: ScopedThreadRef) => void;
   toggleVisibility: (ref: ScopedThreadRef) => void;
-  toggle: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file">) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
 
 const EMPTY_THREAD_STATE: ThreadRightPanelState = {
   isOpen: false,
-  activeSurfaceId: null,
-  surfaces: [],
+  section: null,
+  file: null,
+  browserTabId: null,
 };
-
-const browserSurface = (tabId: string | null): RightPanelSurface =>
-  tabId
-    ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
-    : { id: "browser:new", kind: "preview", resourceId: null };
-
-const singletonSurface = (kind: "files" | "agents" | "cad"): RightPanelSurface =>
-  kind === "files"
-    ? { id: "files", kind }
-    : kind === "cad"
-      ? { id: "cad", kind }
-      : { id: "agents", kind };
 
 const normalizeRevealLine = (line: number | undefined): number | null =>
   line === undefined || !Number.isFinite(line) ? null : Math.max(1, Math.trunc(line));
 
-const upsertSurface = (
-  current: ThreadRightPanelState,
-  surface: RightPanelSurface,
-): ThreadRightPanelState => ({
-  isOpen: true,
-  activeSurfaceId: surface.id,
-  surfaces: current.surfaces.some((entry) => entry.id === surface.id)
-    ? current.surfaces
-    : [...current.surfaces, surface],
-});
+function isEmpty(state: ThreadRightPanelState): boolean {
+  return !state.isOpen && state.section === null && state.file === null && !state.browserTabId;
+}
 
 function updateThread(
   byThreadKey: Record<string, ThreadRightPanelState>,
@@ -87,209 +68,83 @@ function updateThread(
   const key = scopedThreadKey(ref);
   const current = byThreadKey[key] ?? EMPTY_THREAD_STATE;
   const next = update(current);
-  if (!next.isOpen && next.activeSurfaceId === null && next.surfaces.length === 0) {
+  if (next === current) return byThreadKey;
+  if (isEmpty(next)) {
     if (!(key in byThreadKey)) return byThreadKey;
     const { [key]: _removed, ...rest } = byThreadKey;
     return rest;
   }
-  return next === current ? byThreadKey : { ...byThreadKey, [key]: next };
-}
-
-function closeSurface(current: ThreadRightPanelState, surfaceId: string): ThreadRightPanelState {
-  const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
-  if (index < 0) return current;
-  const surfaces = current.surfaces.filter((surface) => surface.id !== surfaceId);
-  const fallback = surfaces[Math.min(index, surfaces.length - 1)] ?? null;
-  return {
-    isOpen: surfaces.length > 0 && current.isOpen,
-    surfaces,
-    activeSurfaceId:
-      current.activeSurfaceId === surfaceId ? (fallback?.id ?? null) : current.activeSurfaceId,
-  };
+  return { ...byThreadKey, [key]: next };
 }
 
 export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
-    (set) => ({
-      byThreadKey: {},
-      open: (ref, kind) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            if (kind === "preview") {
-              const existing = current.surfaces.find((surface) => surface.kind === "preview");
-              return upsertSurface(current, existing ?? browserSurface(null));
-            }
-            return upsertSurface(current, singletonSurface(kind));
-          }),
-        })),
-      openBrowser: (ref, tabId) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            const withoutPlaceholder = tabId
-              ? current.surfaces.filter((surface) => surface.id !== "browser:new")
-              : current.surfaces;
-            return upsertSurface(
-              { ...current, surfaces: withoutPlaceholder },
-              browserSurface(tabId),
-            );
-          }),
-        })),
-      openFile: (ref, relativePath, line) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            const surfaces = current.surfaces.filter((surface) => surface.kind !== "files");
-            const id = `file:${relativePath}` as const;
-            const existing = surfaces.find(
-              (surface): surface is Extract<RightPanelSurface, { kind: "file" }> =>
-                surface.kind === "file" && surface.id === id,
-            );
-            const next: RightPanelSurface = {
-              id,
-              kind: "file",
+    (set) => {
+      const update = (
+        ref: ScopedThreadRef,
+        fn: (current: ThreadRightPanelState) => ThreadRightPanelState,
+      ) => set((state) => ({ byThreadKey: updateThread(state.byThreadKey, ref, fn) }));
+      return {
+        byThreadKey: {},
+        open: (ref, section) => update(ref, (current) => ({ ...current, isOpen: true, section })),
+        openBrowser: (ref, tabId) =>
+          update(ref, (current) => ({
+            ...current,
+            isOpen: true,
+            section: "browser",
+            browserTabId: tabId,
+          })),
+        openFile: (ref, relativePath, line) =>
+          update(ref, (current) => ({
+            ...current,
+            isOpen: true,
+            section: "files",
+            file: {
               relativePath,
               revealLine: normalizeRevealLine(line),
-              revealRequestId: (existing?.revealRequestId ?? 0) + 1,
-            };
-            return {
-              isOpen: true,
-              activeSurfaceId: id,
-              surfaces: existing
-                ? surfaces.map((surface) => (surface.id === id ? next : surface))
-                : [...surfaces, next],
-            };
-          }),
-        })),
-      activateSurface: (ref, surfaceId) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) =>
-            current.surfaces.some((surface) => surface.id === surfaceId)
-              ? { ...current, isOpen: true, activeSurfaceId: surfaceId }
-              : current,
-          ),
-        })),
-      closeSurface: (ref, surfaceId) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) =>
-            closeSurface(current, surfaceId),
-          ),
-        })),
-      closeOtherSurfaces: (ref, surfaceId) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            const surface = current.surfaces.find((entry) => entry.id === surfaceId);
-            return surface
-              ? { ...current, isOpen: true, activeSurfaceId: surfaceId, surfaces: [surface] }
-              : current;
-          }),
-        })),
-      closeSurfacesToRight: (ref, surfaceId) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
-            if (index < 0 || index === current.surfaces.length - 1) return current;
-            return {
-              ...current,
-              activeSurfaceId: surfaceId,
-              surfaces: current.surfaces.slice(0, index + 1),
-            };
-          }),
-        })),
-      closeAllSurfaces: (ref) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, () => EMPTY_THREAD_STATE),
-        })),
-      reconcileBrowserSurfaces: (ref, tabIds) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            const validIds = new Set(tabIds.map((id) => `browser:${id}`));
-            const retained = current.surfaces.filter(
-              (surface) =>
-                surface.kind !== "preview" ||
-                (surface.id !== "browser:new" && validIds.has(surface.id)),
-            );
-            const known = new Set(retained.map((surface) => surface.id));
-            const surfaces = [
-              ...retained,
-              ...tabIds.filter((id) => !known.has(`browser:${id}`)).map((id) => browserSurface(id)),
-            ];
-            const activeSurfaceId = surfaces.some(
-              (surface) => surface.id === current.activeSurfaceId,
-            )
-              ? current.activeSurfaceId
-              : (surfaces[0]?.id ?? null);
-            return {
-              ...current,
-              isOpen: activeSurfaceId !== null && current.isOpen,
-              activeSurfaceId,
-              surfaces,
-            };
-          }),
-        })),
-      reconcileFileSurfaces: (ref, workspaceAvailable) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            if (workspaceAvailable) return current;
-            const surfaces = current.surfaces.filter(
-              (surface) => surface.kind !== "files" && surface.kind !== "file",
-            );
-            if (surfaces.length === current.surfaces.length) return current;
-            const activeSurfaceId = surfaces.some(
-              (surface) => surface.id === current.activeSurfaceId,
-            )
-              ? current.activeSurfaceId
-              : (surfaces[0]?.id ?? null);
-            return {
-              ...current,
-              isOpen: activeSurfaceId !== null && current.isOpen,
-              activeSurfaceId,
-              surfaces,
-            };
-          }),
-        })),
-      show: (ref) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) =>
-            current.activeSurfaceId ? { ...current, isOpen: true } : current,
-          ),
-        })),
-      close: (ref) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => ({
-            ...current,
-            isOpen: false,
+              revealRequestId: (current.file?.revealRequestId ?? 0) + 1,
+            },
           })),
-        })),
-      toggleVisibility: (ref) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => ({
-            ...current,
-            isOpen: !current.isOpen,
-          })),
-        })),
-      toggle: (ref, kind) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, ref, (current) => {
-            const active = current.surfaces.find(
-              (surface) => surface.id === current.activeSurfaceId,
-            );
-            if (current.isOpen && active?.kind === kind) return { ...current, isOpen: false };
-            if (kind === "preview") {
-              const existing = current.surfaces.find((surface) => surface.kind === "preview");
-              return upsertSurface(current, existing ?? browserSurface(null));
-            }
-            return upsertSurface(current, singletonSurface(kind));
+        closeFile: (ref) =>
+          update(ref, (current) => (current.file ? { ...current, file: null } : current)),
+        reconcileBrowser: (ref, tabIds) =>
+          update(ref, (current) => {
+            const staleTab =
+              current.browserTabId !== null && !tabIds.includes(current.browserTabId);
+            const staleSection = current.section === "browser" && tabIds.length === 0;
+            if (!staleTab && !staleSection) return current;
+            return {
+              ...current,
+              browserTabId: staleTab ? null : current.browserTabId,
+              section: staleSection ? null : current.section,
+            };
           }),
-        })),
-      removeThread: (ref) =>
-        set((state) => {
-          const key = scopedThreadKey(ref);
-          if (!(key in state.byThreadKey)) return state;
-          const { [key]: _removed, ...rest } = state.byThreadKey;
-          return { byThreadKey: rest };
-        }),
-    }),
+        reconcileFiles: (ref, workspaceAvailable) =>
+          update(ref, (current) =>
+            workspaceAvailable || (current.file === null && current.section !== "files")
+              ? current
+              : {
+                  ...current,
+                  file: null,
+                  section: current.section === "files" ? null : current.section,
+                },
+          ),
+        close: (ref) =>
+          update(ref, (current) => (current.isOpen ? { ...current, isOpen: false } : current)),
+        toggleVisibility: (ref) =>
+          update(ref, (current) => ({ ...current, isOpen: !current.isOpen })),
+        removeThread: (ref) =>
+          set((state) => {
+            const key = scopedThreadKey(ref);
+            if (!(key in state.byThreadKey)) return state;
+            const { [key]: _removed, ...rest } = state.byThreadKey;
+            return { byThreadKey: rest };
+          }),
+      };
+    },
     {
-      name: "cadsense:right-panel-state:v4",
+      // v5 replaced the per-thread tab list with a single section.
+      name: "cadsense:right-panel-state:v5",
       version: 1,
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
@@ -305,30 +160,14 @@ export function selectThreadRightPanelState(
   return ref ? (byThreadKey[scopedThreadKey(ref)] ?? EMPTY_THREAD_STATE) : EMPTY_THREAD_STATE;
 }
 
-export function selectActiveRightPanel(
-  byThreadKey: Record<string, ThreadRightPanelState>,
-  ref: ScopedThreadRef | null | undefined,
-): RightPanelKind | null {
-  const state = selectThreadRightPanelState(byThreadKey, ref);
-  return state.isOpen
-    ? (state.surfaces.find((surface) => surface.id === state.activeSurfaceId)?.kind ?? null)
-    : null;
-}
-
-export function selectActiveRightPanelSurface(
-  byThreadKey: Record<string, ThreadRightPanelState>,
-  ref: ScopedThreadRef | null | undefined,
-): RightPanelSurface | null {
-  const state = selectThreadRightPanelState(byThreadKey, ref);
-  return state.isOpen
-    ? (state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ?? null)
-    : null;
-}
-
-export function selectSelectedRightPanelSurface(
-  byThreadKey: Record<string, ThreadRightPanelState>,
-  ref: ScopedThreadRef | null | undefined,
-): RightPanelSurface | null {
-  const state = selectThreadRightPanelState(byThreadKey, ref);
-  return state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ?? null;
+/**
+ * The section to show: the picked one while it still has content, otherwise
+ * the first available one in switcher order. Null when nothing is available.
+ */
+export function resolveRightPanelSection(
+  picked: RightPanelSection | null,
+  available: Readonly<Record<RightPanelSection, boolean>>,
+): RightPanelSection | null {
+  if (picked && available[picked]) return picked;
+  return RIGHT_PANEL_SECTIONS.find((section) => available[section]) ?? null;
 }
