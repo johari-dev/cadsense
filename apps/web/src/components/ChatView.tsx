@@ -157,7 +157,11 @@ import {
   deriveProviderInstanceEntries,
   NO_PROVIDER_MODEL_SELECTION,
 } from "../providerInstances";
-import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useClientSettingsHydrated,
+  useEnvironmentSettings,
+} from "../hooks/useSettings";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
@@ -248,6 +252,7 @@ import {
   readFileAsDataUrl,
   loadVideoPreviewUrl,
   isVideoPreviewRequestCurrent,
+  resolveComposerRuntimeMode,
   resolveDraftHeroState,
   resolveThreadMetadataUpdateForNextTurn,
   revokeBlobPreviewUrl,
@@ -830,7 +835,15 @@ function ChatViewContent(props: ChatViewProps) {
   // local shadow is already empty and the banner is driven purely by
   // session.lastError. Bump a tick so the banner hides immediately.
   const [, setThreadErrorBannerDismissTick] = useState(0);
-  const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const clientSettingsHydrated = useClientSettingsHydrated();
+  const showPermissionSettings = useClientSettings((settings) => settings.showPermissionSettings);
+  const runtimeMode = resolveComposerRuntimeMode({
+    clientSettingsHydrated,
+    showPermissionSettings,
+    composerRuntimeMode,
+    threadRuntimeMode: activeThread?.runtimeMode ?? null,
+    sessionPhase: derivePhase(activeThread?.session ?? null),
+  });
   // The app always dispatches in the normal interaction mode. Persisting this
   // on the next turn also releases threads stored in the removed plan mode.
   const interactionMode = DEFAULT_INTERACTION_MODE;

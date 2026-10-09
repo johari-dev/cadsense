@@ -7,6 +7,7 @@ import {
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
+  DEFAULT_RUNTIME_MODE,
   EnvironmentId,
   ProjectId,
   ProviderDriverKind,
@@ -962,7 +963,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       environmentId: TEST_ENVIRONMENT_ID,
       projectId,
       logicalProjectKey: scopedProjectKey(projectRef),
-      runtimeMode: "auto-accept-edits",
+      runtimeMode: DEFAULT_RUNTIME_MODE,
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -970,7 +971,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       environmentId: TEST_ENVIRONMENT_ID,
       projectId,
       logicalProjectKey: scopedProjectKey(projectRef),
-      runtimeMode: "auto-accept-edits",
+      runtimeMode: DEFAULT_RUNTIME_MODE,
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_RUNTIME_MODE,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -22,6 +23,7 @@ import {
   hasEnvironmentReconnectWarningGraceElapsed,
   hasServerAcknowledgedLocalDispatch,
   reconcileRetainedMountedThreadIds,
+  resolveComposerRuntimeMode,
   resolveDraftPromotionNavigationTarget,
   resolveThreadMetadataUpdateForNextTurn,
   resolveDraftHeroState,
@@ -759,5 +761,50 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: "failed" })).toBe(true);
+  });
+});
+
+describe("resolveComposerRuntimeMode", () => {
+  const hidden = {
+    clientSettingsHydrated: true,
+    showPermissionSettings: false,
+    composerRuntimeMode: "full-access",
+    threadRuntimeMode: "approval-required",
+  } as const;
+
+  it("moves hidden-control threads to the app default once settings load and the session is idle", () => {
+    expect(DEFAULT_RUNTIME_MODE).toBe("auto");
+    for (const sessionPhase of ["ready", "disconnected"] as const)
+      expect(resolveComposerRuntimeMode({ ...hidden, sessionPhase })).toBe(DEFAULT_RUNTIME_MODE);
+  });
+
+  it("keeps the persisted thread mode while the session is busy, ignoring a stale draft", () => {
+    for (const sessionPhase of ["running", "connecting"] as const)
+      expect(resolveComposerRuntimeMode({ ...hidden, sessionPhase })).toBe("approval-required");
+  });
+
+  it("keeps the stored mode before settings load", () => {
+    expect(
+      resolveComposerRuntimeMode({
+        ...hidden,
+        clientSettingsHydrated: false,
+        sessionPhase: "ready",
+      }),
+    ).toBe("full-access");
+  });
+
+  it("uses the draft, then the thread, then the default when controls are visible", () => {
+    const visible = { ...hidden, showPermissionSettings: true, sessionPhase: "ready" } as const;
+    expect(resolveComposerRuntimeMode(visible)).toBe("full-access");
+    expect(resolveComposerRuntimeMode({ ...visible, composerRuntimeMode: null })).toBe(
+      "approval-required",
+    );
+    expect(
+      resolveComposerRuntimeMode({
+        ...visible,
+        composerRuntimeMode: null,
+        threadRuntimeMode: null,
+      }),
+    ).toBe(DEFAULT_RUNTIME_MODE);
   });
 });

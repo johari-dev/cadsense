@@ -4754,10 +4754,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
     } else if (input.interactionMode === "default") {
-      yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode(context.basePermissionMode ?? "default"),
-        catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
-      });
+      const setPermissionMode = (mode: PermissionMode) =>
+        Effect.tryPromise({
+          try: () => context.query.setPermissionMode(mode),
+          catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
+        });
+      const baseMode = context.basePermissionMode ?? "default";
+      // Auto mode depends on the model and account, and the CLI rejects it for models such as
+      // Haiku 4.5. Those turns run with edits auto-approved instead of failing to start.
+      yield* baseMode === "auto"
+        ? setPermissionMode("auto").pipe(Effect.catch(() => setPermissionMode("acceptEdits")))
+        : setPermissionMode(baseMode);
     }
 
     const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);
