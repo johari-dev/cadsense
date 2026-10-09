@@ -1237,7 +1237,9 @@ const withStep = (problem: string, step: string) =>
   `${problem.slice(0, DRAFT_BODY_LIMIT - step.length - 1)} ${step}`;
 /**
  * The body of a merged draft, worded once for all its findings in the names a student would use.
- * A merged kind's findings only name parts, so the wording needs nothing else from them.
+ * A merged kind's findings only name parts, so the wording needs nothing else from them. Lists are
+ * bounded so the longest names (120-character labels) and the longest lists still fit
+ * DRAFT_BODY_LIMIT whole: a list inside a list names two parts, and a place names three shafts.
  */
 const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) => {
   const several = findings.length > 1;
@@ -1247,7 +1249,10 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
       const shafts = countedList(
         findings.map(({ occurrences: [shaft, ...carried] }) =>
           carried.length > 0
-            ? `${partPhrase(shaft!.name)} (which carries ${partList(carried.map((part) => part.name))})`
+            ? `${partPhrase(shaft!.name)} (which carries ${partList(
+                carried.map((part) => part.name),
+                2,
+              )})`
             : partPhrase(shaft!.name),
         ),
       );
@@ -1299,7 +1304,7 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
           set.length === 2 ? "one modeled inside the other" : "modeled inside one another";
         const sentence = set.every((name) => partName(name) === partName(set[0]!))
           ? `${set.length === 2 ? "Two" : set.length} copies of ${partPhrase(set[0]!)} sit on the same axis, ${inside}`
-          : `${upperFirst(joinAnd(distinctPhrases(set)))} sit on the same axis, ${inside}`;
+          : `${upperFirst(joinAnd(distinctPhrases(set), 3))} sit on the same axis, ${inside}`;
         places.set(sentence, (places.get(sentence) ?? 0) + 1);
       }
       const most = Math.max(...sets.map((set) => set.length));

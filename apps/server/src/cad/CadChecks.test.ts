@@ -1303,6 +1303,55 @@ describe("draftCadComments", () => {
     assert.match(merged!.body, /Add a bearing where each shaft passes through a plate\.$/);
   });
 
+  it("never cuts a merged draft's sentence, even with the longest names and lists", () => {
+    // Every name is past the 120 characters a label keeps, and every list is past six parts.
+    const long = (n: number, word: string) => part(1000 + n, `${word} ${n} ${"x".repeat(130)} <1>`);
+    const shafts = Array.from({ length: 8 }, (_, i) => long(i, "Shaft"));
+    const [bearings] = draftCadComments(
+      shafts.map((shaft, i) =>
+        drivetrain("shaft-support", true, [
+          shaft,
+          ...Array.from({ length: 8 }, (_, j) => long(100 + 10 * i + j, "Roller")),
+        ]),
+      ),
+      snapshotId,
+    );
+    assert.isAtMost(bearings!.body.length, 3950);
+    assert.match(
+      bearings!.body,
+      /, and 2 more have no bearings, so nothing holds them in line\. Add a bearing where each shaft passes through a plate\.$/,
+    );
+    // Eight places, each four differently named shafts that all overlap one another.
+    const cliques = Array.from({ length: 8 }, (_, i) =>
+      Array.from({ length: 4 }, (_, j) => long(300 + 10 * i + j, `Shaft${j}`)),
+    );
+    const [stacked] = draftCadComments(
+      cliques.flatMap((clique) =>
+        clique.flatMap((a, i) =>
+          clique.slice(i + 1).map((b) => drivetrain("stacked-shafts", true, [a, b])),
+        ),
+      ),
+      snapshotId,
+    );
+    assert.isAtMost(stacked!.body.length, 3950);
+    assert.match(
+      stacked!.body,
+      /modeled inside one another\. 2 more places have the same problem\. In each place, keep the shaft the parts are designed for and remove the others\.$/,
+    );
+    const target = long(500, "Frame");
+    const [collision] = draftCadComments(
+      Array.from({ length: 8 }, (_, i) =>
+        drivetrain("collision", true, [long(400 + i, "Gear"), target]),
+      ),
+      snapshotId,
+    );
+    assert.isAtMost(collision!.body.length, 3950);
+    assert.match(
+      collision!.body,
+      /, so they can't turn as drawn\. Move a part or cut clearance, then check the gap through a full turn\.$/,
+    );
+  });
+
   it("never shows the student a raw CAD name or a lowercase start", () => {
     for (const draft of drafts) {
       assert.notMatch(draft.body, /<\d+>/);

@@ -348,15 +348,17 @@ export const joinAnd = (items: readonly string[], limit = 6) => {
     : `${shown.slice(0, -1).join(", ")}, and ${shown.at(-1)}`;
 };
 /** Phrases in a sentence, with repeats counted: "the 13 in. Hex Shaft (2 of them) and Part 4". */
-export const countedList = (phrases: readonly string[]) => {
+export const countedList = (phrases: readonly string[], limit?: number) => {
   const counts = new Map<string, number>();
   for (const phrase of phrases) counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
   return joinAnd(
     [...counts].map(([phrase, count]) => (count > 1 ? `${phrase} (${count} of them)` : phrase)),
+    limit,
   );
 };
 /** Parts in a sentence by name, with repeats counted. */
-export const partList = (names: readonly string[]) => countedList(names.map(partPhrase));
+export const partList = (names: readonly string[], limit?: number) =>
+  countedList(names.map(partPhrase), limit);
 export const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** Parts whose names identify a drivetrain role, with their fitted axes. */
