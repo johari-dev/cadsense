@@ -24,6 +24,7 @@ import {
   distinctPhrases,
   FASTENER,
   fitCadAxis,
+  fullName,
   GAME_PIECE,
   partLabel,
   partList,
@@ -969,7 +970,6 @@ const seamPoint = (
 
 /** How far a seam marker sits off the surfaces it joins, in meters. */
 const SEAM_OFFSET = 0.0003;
-const plainName = (name: string) => name.replace(/\s*<\d+>$/, "");
 
 /**
  * Placements for the drivetrain findings whose spot the geometry proves: a spinning part running
@@ -1016,7 +1016,7 @@ const drivetrainPlacements = (
           occurrenceId: first.occurrenceId,
           ...seam,
           isolate: [first.occurrenceId, second.occurrenceId],
-          expected: `where ${plainName(first.name)} meets ${plainName(second.name)}`,
+          expected: `where ${fullName(first.name)} meets ${fullName(second.name)}`,
         });
     }
     if (finding.kind === "loop" && first) {
@@ -1032,7 +1032,7 @@ const drivetrainPlacements = (
           occurrenceId: first.occurrenceId,
           ...end,
           isolate: finding.occurrences.map((occurrence) => occurrence.occurrenceId),
-          expected: `at the end of ${plainName(first.name)} that has no pulley`,
+          expected: `at the end of ${fullName(first.name)} that has no pulley`,
         });
     }
   }
@@ -1367,8 +1367,7 @@ export const draftCadComments = (
     names.set(occurrence.occurrenceId, occurrence.name);
     return {
       kind: "part" as const,
-      // A target label keeps the full name; a name that is only an instance tag would leave none.
-      label: (partName(occurrence.name) || partLabel(occurrence.name)).slice(0, 120),
+      label: fullName(occurrence.name),
       occurrenceId: occurrence.occurrenceId,
       preciseLocationLimitation: WHOLE_PART,
     };
@@ -1534,7 +1533,10 @@ export const draftCadComments = (
           ...draft,
           targets: draft.targets.map((target) =>
             target.kind === "part" && labels.filter((label) => label === target.label).length > 1
-              ? { ...target, label: (names.get(target.occurrenceId) || target.label).slice(0, 120) }
+              ? {
+                  ...target,
+                  label: (names.get(target.occurrenceId)?.trim() || target.label).slice(0, 120),
+                }
               : target,
           ),
         };

@@ -135,13 +135,16 @@ describe("backstopItem", () => {
         duplicate(part(10, ""), part(11, "<1>")),
         duplicate(part(12, ""), part(13, "")),
         duplicate(part(14, ""), part(15, "unnamed part <1>")),
+        duplicate(part(16, "   "), part(17, "   ")),
+        duplicate(part(18, "   "), part(19, "Part 4 <1>")),
       ],
       CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
     );
     expect(drafts).toHaveLength(4);
-    expect(blanks).toHaveLength(3);
+    expect(blanks).toHaveLength(5);
     for (const draft of [...drafts, ...blanks]) {
       expect(isPublication(backstopItem(draft)), draft.title).toBe(true);
+      for (const target of draft.targets) expect(target.label.trim(), draft.title).not.toBe("");
       expect(draft.body, "no article without a name").not.toMatch(/\bthe (?=[ ,.)]|and\b)/i);
     }
   });

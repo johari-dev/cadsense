@@ -321,6 +321,11 @@ export const partLabel = (name: string): string => {
 };
 /** A part's name without its instance tag: every occurrence of one part has the same one. */
 export const partName = (name: string) => name.replace(/\s*<\d+>$/, "");
+/**
+ * A part's full name for a target label or a marker's description: no instance tag, at most 120
+ * characters, and never blank (an empty or whitespace name falls back to its label).
+ */
+export const fullName = (name: string) => partName(name).trim().slice(0, 120) || partLabel(name);
 const withArticle = (label: string) => (/^part\s*\d+$/i.test(label) ? label : `the ${label}`);
 /** A part in a sentence: "the 40T gear", but "Part 20" for a part that kept its Onshape name. */
 export const partPhrase = (name: string) => withArticle(partLabel(name));

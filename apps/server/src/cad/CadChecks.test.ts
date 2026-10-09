@@ -1468,6 +1468,42 @@ describe("check-placed points", () => {
       assert.closeTo(Math.hypot(...placement!.normal), 1, 1e-6);
     }),
   );
+  it.effect("names the parts a marker sits between within bounds, whatever they are called", () =>
+    Effect.gen(function* () {
+      const radius = 1.05 * INCH;
+      const tubeMin: Point = [radius - 0.1 * INCH, -2 * INCH, -0.5 * INCH];
+      const tubeMax: Point = [tubeMin[0] + INCH, 2 * INCH, 0.5 * INCH];
+      const assets = [solidCylinder(radius, 0.5 * INCH), solidBox(tubeMin, tubeMax)];
+      const bounds = new Map(
+        [10, 11].map((part, i) => [id(part), readCadGeometryBounds(assets[i]!)]),
+      );
+      const meshes = new Map(
+        [10, 11].map((part, i) => [id(part), readCadTriangleMesh(assets[i]!)]),
+      );
+      const kernel = yield* loadCadSolidKernel;
+      const expected = (tube: string) => {
+        const snapshot = manifest(
+          [
+            { number: 1, part: 10, name: "40t Spur Gear (20 DP) <1>", transform: onY(0, 0, 0) },
+            { number: 2, part: 11, name: tube },
+          ],
+          [10, 11],
+        );
+        const result = runCadChecks(snapshot, bounds, checks, undefined, { meshes, kernel });
+        const collision = result.findings.find(
+          (finding) => finding.check === "drivetrain" && finding.kind === "collision",
+        );
+        return result.placements.get(collision!)?.expected;
+      };
+      assert.equal(
+        expected('Tube 1"x1"x11" <1>'),
+        'where 40t Spur Gear (20 DP) meets Tube 1"x1"x11"',
+      );
+      assert.equal(expected("   "), "where 40t Spur Gear (20 DP) meets unnamed part");
+      // The published marker reason holds 1000 characters, with this text inside it.
+      assert.isAtMost(expected(`${"x".repeat(4000)} <1>`)!.length, 300);
+    }),
+  );
   it.effect("offers no placement when the parts do not overlap", () =>
     Effect.gen(function* () {
       const snapshot = manifest(
