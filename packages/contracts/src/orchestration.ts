@@ -155,8 +155,9 @@ export const RuntimeMode = Schema.Literals([
   "full-access",
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
-// Edits inside the thread's workspace run unprompted; anything else (commands, writes
-// outside the workspace) goes to the provider's own auto reviewer instead of the user.
+// Edits inside the thread's workspace run unprompted. Actions that need more access go to the
+// provider's automatic reviewer instead of the user: Claude's auto mode classifier, or Codex's
+// auto_review for sandbox escalations. Claude models without auto mode fall back to acceptEdits.
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
