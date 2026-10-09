@@ -148,18 +148,22 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (disposed || lost || renderer.getContext().isContextLost())
       throw new CadRendererError("renderer-unavailable");
   };
-  const render = () => {
-    assertAvailable();
-    const start = options.onFrame ? performance.now() : 0;
+  /** Draws the model and its outline from `eye`, without comment markers or frame callbacks. */
+  const drawScene = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
     renderer.clippingPlanes = model?.clippingPlanes() ?? [];
-    renderer.render(scene, camera);
+    renderer.render(scene, eye);
     if (
       model &&
       outlineSupported &&
       !view?.sectionPlanes?.length &&
       !view?.ghost?.occurrenceIds.length
     )
-      outline.render(scene, camera, model.bounds.getSize(outlineBounds).length());
+      outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
+  };
+  const render = () => {
+    assertAvailable();
+    const start = options.onFrame ? performance.now() : 0;
+    drawScene(camera);
     if (commentMarkers.children.length) {
       const autoClear = renderer.autoClear;
       const clippingPlanes = renderer.clippingPlanes;
@@ -225,7 +229,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     options.onUnavailable?.(new CadRendererError("renderer-unavailable"));
   };
   canvas.addEventListener("webglcontextlost", contextLost);
-  const configureCamera = (resolved: ResolvedCadCamera, synchronizeControls = true) => {
+  /** Builds a camera for `resolved` with clip planes sized to the loaded model. */
+  const createCamera = (resolved: ResolvedCadCamera) => {
     const distance = new THREE.Vector3(...resolved.position).distanceTo(
       new THREE.Vector3(...resolved.target),
     );
@@ -238,12 +243,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         : distance;
     const far = Math.max(centerDistance + size * 3, distance * 2, 1);
     const near = Math.max(Math.min(distance * 0.001, 0.01), 1e-7);
+    let created: THREE.PerspectiveCamera | THREE.OrthographicCamera;
     if (resolved.projection === "orthographic") {
       const halfHeight = Math.max(
         distance * Math.tan(THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2)),
         1e-7,
       );
-      camera = new THREE.OrthographicCamera(
+      created = new THREE.OrthographicCamera(
         (-halfHeight * width) / height,
         (halfHeight * width) / height,
         halfHeight,
@@ -251,14 +257,18 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         near,
         far,
       );
-    } else camera = new THREE.PerspectiveCamera(CAD_CAMERA_FOV, width / height, near, far);
-    camera.position.fromArray(resolved.position);
-    camera.up.fromArray(resolved.up);
-    camera.zoom = resolved.zoom;
-    camera.lookAt(new THREE.Vector3(...resolved.target));
+    } else created = new THREE.PerspectiveCamera(CAD_CAMERA_FOV, width / height, near, far);
+    created.position.fromArray(resolved.position);
+    created.up.fromArray(resolved.up);
+    created.zoom = resolved.zoom;
+    created.lookAt(new THREE.Vector3(...resolved.target));
+    created.updateProjectionMatrix();
+    return created;
+  };
+  const configureCamera = (resolved: ResolvedCadCamera, synchronizeControls = true) => {
+    camera = createCamera(resolved);
     if (focusOffset.x || focusOffset.y)
       camera.setViewOffset(width, height, focusOffset.x, focusOffset.y, width, height);
-    camera.updateProjectionMatrix();
     target.fromArray(resolved.target);
     if (controls && synchronizeControls) {
       // Display up determines image roll; navigation always uses the same world-Z limits.
@@ -505,6 +515,36 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     assertAvailable();
     if (token !== generation || revision !== frameRevision)
       throw new CadRendererError("superseded");
+    if (!blob) throw new CadRendererError("capture-failed");
+    return blob;
+  };
+  /**
+   * Snapshots every shown part from a fitted isometric camera, for project thumbnails that must
+   * not depend on where the user left the camera. Encoding copies the drawing buffer before this
+   * returns to the event loop, so the live frame is redrawn before the browser can present the
+   * overview.
+   */
+  const captureOverview = async (): Promise<Blob> => {
+    assertAvailable();
+    if (!model || !view) throw new CadRendererError("invalid-view");
+    const overview = createCamera(
+      resolveCadCamera(
+        { kind: "preset", preset: "isometric", fit: [] },
+        model.visibleBounds(),
+        width / height,
+      ),
+    );
+    drawScene(overview);
+    let encoded: Promise<Blob | null>;
+    try {
+      encoded =
+        "convertToBlob" in canvas
+          ? canvas.convertToBlob({ type: "image/png" })
+          : new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    } finally {
+      render();
+    }
+    const blob = await encoded.catch(() => null);
     if (!blob) throw new CadRendererError("capture-failed");
     return blob;
   };
@@ -898,6 +938,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     apply,
     transition,
     capture,
+    captureOverview,
     setAppearance: (next: CadAppearance) => {
       assertAvailable();
       if (next.background === appearance.background && next.dark === appearance.dark) return;
