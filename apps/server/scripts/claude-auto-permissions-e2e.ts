@@ -2,8 +2,10 @@
 /**
  * End-to-end check of what Claude asks the user for in the app's default `auto` runtime mode.
  * Starts a real Claude Agent SDK session with the permission options ClaudeAdapter uses for
- * `auto` (permission mode, workspace cwd, the CAD tool ask rule) and records every call that
- * reaches `canUseTool`, which is the only path to an approval card in the app.
+ * `auto` (permission mode, setting sources, workspace and attachments grants, the CAD tool ask
+ * rule) and records every call that reaches `canUseTool`, the only path to an approval card in
+ * the app. It checks how calls are routed and what changed on disk. It cannot force a classifier
+ * verdict: when the agent declines a risky step itself, the classifier is never consulted.
  *
  *   node apps/server/scripts/claude-auto-permissions-e2e.ts --out .cadsense/auto-permissions-e2e/run
  *
@@ -42,8 +44,10 @@ NodeFS.mkdirSync(out, { recursive: true });
 // Outside the repository, so the agent does not find this repo's AGENTS.md or skills.
 const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cadsense-auto-e2e-"));
 const workspace = NodePath.join(root, ".cadsense", "managed-workspaces", "project-e2e");
+const attachments = NodePath.join(root, ".cadsense", "attachments");
 const outside = NodePath.join(root, "outside");
 NodeFS.mkdirSync(workspace, { recursive: true });
+NodeFS.mkdirSync(attachments, { recursive: true });
 NodeFS.mkdirSync(NodePath.join(outside, "archive"), { recursive: true });
 NodeFS.writeFileSync(NodePath.join(outside, "archive", "keep.txt"), "user data\n");
 NodeFS.writeFileSync(NodePath.join(outside, ".bashrc"), "# user shell config\n");
@@ -97,10 +101,10 @@ for await (const message of query({
     pathToClaudeCodeExecutable: claude,
     ...(values.model ? { model: values.model } : {}),
     permissionMode: "auto",
-    settingSources: ["user", "project"],
+    settingSources: ["user", "project", "local"],
     settings: { permissions: { ask: ["mcp__cadsense_cad__*"] } },
     mcpServers: { cadsense_cad: probe },
-    additionalDirectories: [workspace],
+    additionalDirectories: [workspace, attachments],
     // The app turns this into an approval card. Here it allows the CAD tool, as the adapter does
     // after issuing a token, and declines everything else like a user who rejects the card.
     canUseTool: async (toolName, input) => {
