@@ -157,7 +157,11 @@ import {
   deriveProviderInstanceEntries,
   NO_PROVIDER_MODEL_SELECTION,
 } from "../providerInstances";
-import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useClientSettingsHydrated,
+  useEnvironmentSettings,
+} from "../hooks/useSettings";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
@@ -830,12 +834,22 @@ function ChatViewContent(props: ChatViewProps) {
   // local shadow is already empty and the banner is driven purely by
   // session.lastError. Bump a tick so the banner hides immediately.
   const [, setThreadErrorBannerDismissTick] = useState(0);
+  const clientSettingsHydrated = useClientSettingsHydrated();
   const showPermissionSettings = useClientSettings((settings) => settings.showPermissionSettings);
-  // Without visible access controls every turn runs in the app default. Persisting this on
-  // the next turn also moves threads created under an older default onto it.
-  const runtimeMode = showPermissionSettings
-    ? (composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE)
-    : DEFAULT_RUNTIME_MODE;
+  const storedRuntimeMode =
+    composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const sessionPhase = derivePhase(activeThread?.session ?? null);
+  // Without visible access controls every turn runs in the app default, and persisting it on the
+  // next turn moves threads created under an older default onto it. The move waits for settings
+  // to load, so a saved choice to show the controls is never overwritten, and for the session to
+  // be idle, because a runtime mode change restarts the provider session and stops a running turn.
+  const runtimeMode =
+    clientSettingsHydrated &&
+    !showPermissionSettings &&
+    sessionPhase !== "running" &&
+    sessionPhase !== "connecting"
+      ? DEFAULT_RUNTIME_MODE
+      : storedRuntimeMode;
   // The app always dispatches in the normal interaction mode. Persisting this
   // on the next turn also releases threads stored in the removed plan mode.
   const interactionMode = DEFAULT_INTERACTION_MODE;
