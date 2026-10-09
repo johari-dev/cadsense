@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
-import { shouldRenderTraitsControls, TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
+import { shouldRenderTraitsControls, TraitsMenuRows } from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
   provider: ProviderDriverKind;
@@ -81,10 +81,8 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   };
 }
 
-function renderTraitsControl(
-  Component: typeof TraitsMenuContent | typeof TraitsPicker,
-  input: TraitsRenderInput,
-): ReactNode {
+/** The selected model's trait rows for the composer model picker panel, or null when it has none. */
+export function renderProviderTraitsRows(input: TraitsRenderInput): ReactNode {
   const {
     provider,
     instanceId,
@@ -110,7 +108,7 @@ function renderTraitsControl(
     return null;
   }
   return (
-    <Component
+    <TraitsMenuRows
       provider={provider}
       {...(instanceId ? { instanceId } : {})}
       models={models}
@@ -122,12 +120,4 @@ function renderTraitsControl(
       onPromptChange={onPromptChange}
     />
   );
-}
-
-export function renderProviderTraitsMenuContent(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsMenuContent, input);
-}
-
-export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsPicker, input);
 }

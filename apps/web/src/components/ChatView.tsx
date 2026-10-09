@@ -4171,7 +4171,7 @@ function ChatViewContent(props: ChatViewProps) {
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >
-                      <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+                      <div className="chat-composer-glass-host relative z-10 w-full rounded-(--chat-composer-radius)">
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
                             composerRef={composerRef}

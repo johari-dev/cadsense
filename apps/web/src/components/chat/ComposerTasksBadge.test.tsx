@@ -30,7 +30,7 @@ describe("ComposerTasksBadge", () => {
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain("chat-composer-shoulder-tab");
     expect(markup).toContain("chat-composer-tasks-tab");
-    expect(markup).toContain("rounded-t-xl");
+    expect(markup).toContain("rounded-t-(--chat-composer-radius)");
     expect(markup).toContain("border-b-0");
     expect(markup).toContain("left-5.5");
     expect(markup).toContain("right-5.5");
@@ -63,7 +63,7 @@ describe("ComposerTasksBadge", () => {
     expect(markup).toContain("rounded-sm");
     expect(markup).toContain("1/3");
     expect(markup).not.toContain("chat-composer-shoulder-tab");
-    expect(markup).not.toContain("rounded-t-xl");
+    expect(markup).not.toContain("rounded-t-(--chat-composer-radius)");
   });
 
   it("expands into a read-only attached task list", () => {

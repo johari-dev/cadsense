@@ -101,7 +101,8 @@ import {
   shouldUseCompactComposerFooter,
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
-import { ProviderModelPicker } from "./ProviderModelPicker";
+import { ComposerModelPicker } from "./ComposerModelPicker";
+import { getTraitsTriggerDisplay } from "./TraitsPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
@@ -119,8 +120,7 @@ import {
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
-  renderProviderTraitsMenuContent,
-  renderProviderTraitsPicker,
+  renderProviderTraitsRows,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
@@ -428,6 +428,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
+  /** The composer model picker, placed between the context meter and send. */
+  modelPicker: ReactNode;
 }) {
   const showContextWindowIndicator = useClientSettings(
     (settings) => settings.showContextWindowIndicator,
@@ -443,6 +445,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           compactDisabledReason={props.compactDisabledReason}
         />
       ) : null}
+      {props.modelPicker}
       <ComposerPrimaryActions
         compact={props.compact}
         pendingAction={props.pendingAction}
@@ -1270,7 +1273,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
   );
 
-  const providerTraitsMenuContent = renderProviderTraitsMenuContent({
+  const providerTraitRows = renderProviderTraitsRows({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
     ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
@@ -1281,16 +1284,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     prompt,
     onPromptChange: setPromptFromTraits,
   });
-  const providerTraitsPicker = renderProviderTraitsPicker({
+  const providerTraitsDisplay = getTraitsTriggerDisplay({
     provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
     models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
+    model: selectedModel,
     prompt,
-    onPromptChange: setPromptFromTraits,
+    modelOptions: composerModelOptions?.[selectedInstanceId],
   });
   const pendingPrimaryAction = useMemo(
     () =>
@@ -2655,7 +2654,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         <div
           data-chat-composer-main-surface="true"
           className={cn(
-            "group relative z-10 rounded-[22px] p-px transition-colors duration-200",
+            "group relative z-10 rounded-[calc(var(--chat-composer-radius)+1px)] p-px transition-colors duration-200",
             composerProviderState.composerFrameClassName,
           )}
         >
@@ -2664,7 +2663,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             data-chat-composer-surface="true"
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
-              "rounded-[20px] transition-[background-color] duration-200",
+              "rounded-(--chat-composer-radius) transition-[background-color] duration-200",
               isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
               projectSelectionRequired ? "opacity-75" : null,
               composerProviderState.composerSurfaceClassName,
@@ -2718,8 +2717,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             <div
               ref={setComposerMenuAnchor}
               className={cn(
-                "relative px-3 pb-2 sm:px-4",
-                "pt-3.5 sm:pt-4",
+                // Text lines up with the footer's attach glyph: 14px inset plus the
+                // glyph's 6.5px inside a 28px button, at the default interface size.
+                "relative px-5.5 pt-4.25 pb-2",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
               )}
@@ -3139,84 +3139,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
-                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4",
+                  // 14px from the sides and 12px from the bottom at the default interface size.
+                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3.75 pb-3.25",
                   pendingUserInputs.length > 0 && "pt-2",
-                  isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                   showMobilePendingAnswerActions && "hidden sm:flex",
                 )}
               >
-                <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {noProviderAvailable ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled
-                      data-chat-provider-unavailable="true"
-                      className="shrink-0 gap-2 px-2 text-secondary-label sm:px-3"
-                    >
-                      <CircleAlertIcon className="size-4" />
-                      No provider available
-                    </Button>
-                  ) : (
-                    <ProviderModelPicker
-                      compact={isComposerFooterCompact}
-                      activeInstanceId={selectedInstanceId}
-                      model={selectedModelForPickerWithCustomFallback}
-                      lockedProvider={lockedProvider}
-                      lockedContinuationGroupKey={lockedContinuationGroupKey}
-                      instanceEntries={providerInstanceEntries}
-                      keybindings={keybindings}
-                      modelOptionsByInstance={modelOptionsByInstance}
-                      triggerClassName="-ms-[calc(--spacing(2.5)-1px)]"
-                      open={isComposerModelPickerOpen}
-                      {...(composerProviderState.modelPickerIconClassName
-                        ? {
-                            activeProviderIconClassName:
-                              composerProviderState.modelPickerIconClassName,
-                          }
-                        : {})}
-                      onOpenChange={(open) => {
-                        setIsComposerModelPickerOpen(open);
-                      }}
-                      getModelDisabledReason={getModelDisabledReason}
-                      onInstanceModelChange={onProviderModelSelect}
-                    />
-                  )}
-
-                  {isComposerFooterCompact ? (
-                    <CompactComposerControlsMenu
-                      runtimeMode={runtimeMode}
-                      traitsMenuContent={providerTraitsMenuContent}
-                      onRuntimeModeChange={handleRuntimeModeChange}
-                    />
-                  ) : (
-                    <>
-                      {providerTraitsPicker ? (
-                        <>
-                          <Separator
-                            orientation="vertical"
-                            className="mx-0.5 hidden h-4 sm:block"
-                          />
-                          {providerTraitsPicker}
-                        </>
-                      ) : null}
-                      <ComposerFooterModeControls
-                        runtimeMode={runtimeMode}
-                        onRuntimeModeChange={handleRuntimeModeChange}
-                      />
-                    </>
-                  )}
-                </div>
-
-                {/* Right side: send / stop button */}
-                <div
-                  data-chat-composer-actions="right"
-                  data-chat-composer-primary-actions-compact={
-                    isComposerPrimaryActionsCompact ? "true" : "false"
-                  }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
-                >
+                {/* Left side keeps its width; the model picker pill truncates instead. */}
+                <div className="flex shrink-0 items-center gap-1">
                   {fileStagingLimit !== null && pendingUserInputs.length === 0 ? (
                     <>
                       <input
@@ -3238,7 +3168,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              className="size-7 [&_svg]:size-4"
+                              className="size-7.5 sm:size-7.5 [&_svg]:size-4"
                               onPointerDown={(event) => event.preventDefault()}
                               onClick={() => attachmentInputRef.current?.click()}
                               aria-label="Attach files"
@@ -3251,6 +3181,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </Tooltip>
                     </>
                   ) : null}
+                  {isComposerFooterCompact ? (
+                    <CompactComposerControlsMenu
+                      runtimeMode={runtimeMode}
+                      onRuntimeModeChange={handleRuntimeModeChange}
+                    />
+                  ) : (
+                    <ComposerFooterModeControls
+                      runtimeMode={runtimeMode}
+                      onRuntimeModeChange={handleRuntimeModeChange}
+                    />
+                  )}
+                </div>
+
+                {/* Right side: model picker, then send / stop */}
+                <div
+                  data-chat-composer-actions="right"
+                  data-chat-composer-primary-actions-compact={
+                    isComposerPrimaryActionsCompact ? "true" : "false"
+                  }
+                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5"
+                >
                   {showMobilePendingAnswerActions ? null : inlineTasksBadge}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
@@ -3283,6 +3234,44 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     {...(selectedProvider === "claudeAgent"
                       ? { onCompactContext: compactThreadContext }
                       : {})}
+                    modelPicker={
+                      noProviderAvailable ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled
+                          data-chat-provider-unavailable="true"
+                          className="shrink-0 gap-2 px-2 text-secondary-label sm:px-3"
+                        >
+                          <CircleAlertIcon className="size-4" />
+                          No provider available
+                        </Button>
+                      ) : (
+                        <ComposerModelPicker
+                          compact={isComposerFooterCompact}
+                          activeInstanceId={selectedInstanceId}
+                          model={selectedModelForPickerWithCustomFallback}
+                          lockedProvider={lockedProvider}
+                          lockedContinuationGroupKey={lockedContinuationGroupKey}
+                          instanceEntries={providerInstanceEntries}
+                          keybindings={keybindings}
+                          modelOptionsByInstance={modelOptionsByInstance}
+                          traits={providerTraitsDisplay}
+                          traitRows={providerTraitRows}
+                          open={isComposerModelPickerOpen}
+                          {...(composerProviderState.modelPickerIconClassName
+                            ? {
+                                activeProviderIconClassName:
+                                  composerProviderState.modelPickerIconClassName,
+                              }
+                            : {})}
+                          onOpenChange={setIsComposerModelPickerOpen}
+                          getModelDisabledReason={getModelDisabledReason}
+                          onInstanceModelChange={onProviderModelSelect}
+                        />
+                      )
+                    }
                   />
                 </div>
               </div>
