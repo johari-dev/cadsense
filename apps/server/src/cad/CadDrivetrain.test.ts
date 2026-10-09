@@ -594,12 +594,13 @@ describe("rotating collisions", () => {
 // fail" in CadDrivetrain.md.
 describe("draft wording", () => {
   const readable = (finding: CadDrivetrainFinding | undefined) => {
-    const comment = finding?.comment ?? "";
+    const comment = finding?.comment?.body ?? "";
     expect(comment, "a problem finding has a comment").not.toBe("");
     expect(comment, "no instance tags or underscores").not.toMatch(/<\d+>|_/);
     expect(comment.charAt(0), "starts like a sentence").toMatch(/[A-Z0-9]/);
     return comment;
   };
+  const title = (finding: CadDrivetrainFinding | undefined) => finding?.comment?.title;
 
   it("names parts the way a student would", () => {
     expect(partLabel('40t Pocketed Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>')).toBe("40T gear");
@@ -609,6 +610,10 @@ describe("draft wording", () => {
     expect(partLabel('1/2" Rounded Hex (11.5" L, 13.75mm OD) <1>')).toBe('1/2" Rounded Hex');
     expect(partLabel("Deadaxle Tube_9.75_in <3>")).toBe("Deadaxle Tube 9.75 in");
     expect(partLabel("(Copy) <1>")).toBe("(Copy)");
+    // Motors and controllers go by the name a team uses for them.
+    expect(partLabel("SPARK Flex Brushless Motor Controller <1>")).toBe("SPARK Flex");
+    expect(partLabel("NEO Vortex Brushless Motor <1>")).toBe("NEO Vortex");
+    expect(partLabel("Kraken X60 <1>")).toBe("Kraken X60");
     expect(partPhrase("<1>")).toBe("the unnamed part");
     expect(partLabel(`${"Bracket ".repeat(40)}<1>`).length).toBeLessThanOrEqual(120);
     // An Onshape default name takes no article.
@@ -631,6 +636,7 @@ describe("draft wording", () => {
     expect(readable(finding)).toBe(
       "The 7T gear and the 40T gear are 1.152 in apart, but these 20 DP gears need 1.175 in. They are 0.023 in too close and will bind. The stage is 5.71:1. Move one shaft so the centers are 1.175 in apart.",
     );
+    expect(title(finding)).toBe("7T and 40T gears are too close");
     expect(finding?.summary).toContain("7T Vortex Shaft (20DP Gear - 7T) <1>");
   });
 
@@ -638,9 +644,11 @@ describe("draft wording", () => {
     const s = scene();
     s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [0, 0, 0]));
     s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <2>', gear(40), along("y", [2.2, 0, 0]));
-    expect(readable(ofKind(s.analyze(), "gear-mesh")[0])).toMatch(
+    const [twin] = ofKind(s.analyze(), "gear-mesh");
+    expect(readable(twin)).toMatch(
       /^The two 40T gears are 2\.200 in apart, .* too far apart and will skip\./,
     );
+    expect(title(twin)).toBe("Two 40T gears are too far apart");
     const offset = scene();
     offset.add('20t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(20), along("y", [0, 0, 0]));
     offset.add(
@@ -648,9 +656,11 @@ describe("draft wording", () => {
       gear(40),
       along("y", [1.5, 0.55, 0]),
     );
-    expect(readable(ofKind(offset.analyze(), "gear-mesh")[0])).toBe(
+    const [missed] = ofKind(offset.analyze(), "gear-mesh");
+    expect(readable(missed)).toBe(
       "The 20T gear and the 40T gear are at mesh distance, but their faces miss each other by 0.050 in along the shaft, so they don't mesh. Move one gear along its shaft so the faces line up.",
     );
+    expect(title(missed)).toBe("20T and 40T gears miss each other");
   });
 
   it("states both errors when gears are set at the wrong spacing and their faces miss", () => {
@@ -663,6 +673,7 @@ describe("draft wording", () => {
     expect(readable(finding)).toBe(
       "The 20T gear and the 40T gear are 1.300 in apart, but these 20 DP gears need 1.500 in, and their faces miss each other by 0.050 in along the shaft, so they don't mesh. Move one gear along its shaft so the faces line up, and move one shaft so the centers are 1.500 in apart.",
     );
+    expect(title(finding)).toBe("20T and 40T gears do not mesh");
   });
 
   it("words a belt with no pulleys and a belt with one bare end", () => {
@@ -681,11 +692,13 @@ describe("draft wording", () => {
       return ofKind(s.analyze(), "loop")[0];
     };
     expect(readable(belt([]))).toBe(
-      "The 70T belt (350 mm) wraps no pulley, so nothing turns it and it drives nothing. Add a pulley at each end, or remove the belt if it is left over, then check its length against the centers.",
+      "The 70T belt (350 mm) has no pulleys, so nothing turns it and it drives nothing. Add a pulley at each end, or remove the belt if it is left over, then check its length against the centers.",
     );
+    expect(title(belt([]))).toBe("70T belt has no pulleys");
     expect(readable(belt([-centers / 2]))).toBe(
       "The 70T belt has no pulley at one end; it wraps only the 24T pulley. Add a pulley at the bare end, then check the belt's length against the centers.",
     );
+    expect(title(belt([-centers / 2]))).toBe("70T belt has no pulley at one end");
   });
 
   it("words a controller docked in front of its motor", () => {
@@ -698,7 +711,7 @@ describe("draft wording", () => {
       along("y", [0, -2.1, 0]),
     );
     expect(readable(ofKind(s.analyze(), "motor-mount")[0])).toBe(
-      "The SPARK Flex Brushless Motor Controller sits in front of the NEO Vortex Brushless Motor, on the side its shaft comes out of. That puts it between the motor face and whatever the motor bolts to, so the motor is not held. Controllers that dock to a motor go on the back. Move the controller to the back of the motor so the motor face bolts to its plate.",
+      "The SPARK Flex sits in front of the NEO Vortex, on the side its shaft comes out of. That puts it between the motor face and the plate the motor bolts to, so the motor is not held. Controllers that dock to a motor go on the back. Move the controller to the back of the motor so the motor face bolts to its plate.",
     );
   });
 
@@ -723,15 +736,18 @@ describe("draft wording", () => {
       expect(finding?.problem).toBe(true);
       return finding;
     };
+    // The draft says where power stops, the way a mentor would point at it.
     expect(readable(unpowered(2))).toBe(
-      "None of the 2 rollers (Deadaxle Tube 9.75 in) is driven: no gear, belt, or chain in the model connects them to a motor. Add a gear, belt, or chain stage from the last driven shaft to the rollers.",
+      "None of the 2 rollers is driven: power from the motor stops at the Driven Hex Shaft, and no gear, belt, or chain carries it on to the rollers. Add a gear or belt stage from the Driven Hex Shaft to the rollers.",
     );
+    expect(title(unpowered(2))).toBe("Motor does not reach the rollers");
     expect(readable(unpowered(1))).toBe(
-      "The Deadaxle Tube 9.75 in is not driven: no gear, belt, or chain in the model connects it to a motor. Add a gear, belt, or chain stage from the last driven shaft to the roller.",
+      "The roller is not driven: power from the motor stops at the Driven Hex Shaft, and no gear, belt, or chain carries it on to the roller. Add a gear or belt stage from the Driven Hex Shaft to the roller.",
     );
+    expect(title(unpowered(1))).toBe("Motor does not reach the roller");
   });
 
-  it("bounds a long list of parts, so the comment keeps its whole sentence and next step", () => {
+  it("keeps a long list of parts out of the comment, so it keeps its whole sentence and next step", () => {
     const s = scene();
     s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
     s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
@@ -745,8 +761,9 @@ describe("draft wording", () => {
       );
     const comment = readable(ofKind(s.analyze(), "unpowered")[0]);
     expect(comment.length).toBeLessThan(3950);
-    expect(comment).toContain(", and 34 more) is driven:");
-    expect(comment.endsWith("from the last driven shaft to the rollers.")).toBe(true);
+    expect(comment).toMatch(/^None of the 40 rollers is driven: /);
+    expect(comment).not.toContain("xxxx");
+    expect(comment.endsWith("from the Driven Hex Shaft to the rollers.")).toBe(true);
   });
 
   it("leaves facts and merged kinds to the agent's summary and the draft", () => {

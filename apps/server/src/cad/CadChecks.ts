@@ -18,6 +18,7 @@ import Module from "manifold-3d";
 import {
   analyzeCadDrivetrain,
   beltEndPlacement,
+  type CadDrivetrainComment,
   type CadDrivetrainPart,
   type CadOverlap,
   countedList,
@@ -1088,7 +1089,7 @@ export const runCadChecks = (
   });
   // Each drivetrain finding's student wording stays beside it, like its placement: the agent sees
   // the summary, and only a draft publishes the comment.
-  const comments = new Map<CadCheckFinding, string>();
+  const comments = new Map<CadCheckFinding, CadDrivetrainComment>();
   const drivetrain =
     checks.has("drivetrain") && solids
       ? [...analyzeCadDrivetrain(parts), ...rotatingCollisions(parts, overlaps)]
@@ -1324,7 +1325,9 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
       const other = findings[0]!.occurrences[1]!.name;
       return withStep(
         `${upperFirst(partList(subjects))} ${several ? "run" : "runs"} into ${partPhrase(other)}, so ${several ? "they" : "it"} can't turn as drawn.`,
-        "Move a part or cut clearance, then check the gap through a full turn.",
+        several
+          ? `Move them or ${partPhrase(other)}, or cut clearance, then check each gap through a full turn.`
+          : `Move ${partPhrase(subjects[0]!)} or ${partPhrase(other)}, or cut clearance, then check the gap through a full turn.`,
       );
     }
   }
@@ -1360,7 +1363,7 @@ export const draftCadComments = (
   findings: readonly CadCheckFinding[],
   snapshotId: CadCheckDraft["inspectedSnapshotId"],
   placements: ReadonlyMap<CadCheckFinding, CadCheckPlacement> = new Map(),
-  comments: ReadonlyMap<CadCheckFinding, string> = new Map(),
+  comments: ReadonlyMap<CadCheckFinding, CadDrivetrainComment> = new Map(),
 ): CadCheckDraft[] => {
   const names = new Map<string, string>();
   const target = (occurrence: DraftPart) => {
@@ -1428,7 +1431,8 @@ export const draftCadComments = (
       publicationKey: draftKey(finding.kind, snapshotId, targets),
       inspectedSnapshotId: snapshotId,
       ...DRAFT_LABELS[finding.kind],
-      body: (comments.get(finding) ?? finding.summary).slice(0, DRAFT_BODY_LIMIT),
+      ...(comments.get(finding)?.title ? { title: comments.get(finding)!.title! } : {}),
+      body: (comments.get(finding)?.body ?? finding.summary).slice(0, DRAFT_BODY_LIMIT),
       targets,
       ...(placement ? { placements: [placement] } : {}),
     };

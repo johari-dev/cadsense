@@ -1155,13 +1155,10 @@ describe("draftCadComments", () => {
       ]),
     );
     assert.equal(merged.length, 1);
-    assert.equal(
-      merged[0]!.title,
-      "1.75 in. Hex Shaft and 2.39 in. Hex Shaft run into SPARK Flex Brushless Motor Controller",
-    );
+    assert.equal(merged[0]!.title, "1.75 in. Hex Shaft and 2.39 in. Hex Shaft run into SPARK Flex");
     assert.equal(
       merged[0]!.body,
-      "The 1.75 in. Hex Shaft and the 2.39 in. Hex Shaft run into the SPARK Flex Brushless Motor Controller, so they can't turn as drawn. Move a part or cut clearance, then check the gap through a full turn.",
+      "The 1.75 in. Hex Shaft and the 2.39 in. Hex Shaft run into the SPARK Flex, so they can't turn as drawn. Move them or the SPARK Flex, or cut clearance, then check each gap through a full turn.",
     );
     assert.deepEqual(
       merged[0]!.placements?.map((placement) => placement.occurrenceId),
@@ -1300,9 +1297,10 @@ describe("draftCadComments", () => {
       [finding],
       snapshotId,
       new Map(),
-      new Map([[finding, comment]]),
+      new Map([[finding, { title: "7T and 40T gears are too close", body: comment }]]),
     );
     assert.equal(draft!.body, comment);
+    assert.equal(draft!.title, "7T and 40T gears are too close");
   });
 
   it("keeps the next step when a merged draft names too many parts to fit", () => {
@@ -1362,7 +1360,7 @@ describe("draftCadComments", () => {
     assert.isAtMost(collision!.body.length, 3950);
     assert.match(
       collision!.body,
-      /, so they can't turn as drawn\. Move a part or cut clearance, then check the gap through a full turn\.$/,
+      /, so they can't turn as drawn\. Move them or the Frame 500 x+, or cut clearance, then check each gap through a full turn\.$/,
     );
   });
 
