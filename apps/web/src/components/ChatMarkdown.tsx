@@ -404,7 +404,9 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
         ? serializeTableElementToMarkdown(table)
         : serializeTableElementToCsv(table);
     void writeTextToClipboard(text, "table")
-      .then(() => {
+      .then((didCopy) => {
+        // An empty table or code block copies nothing, so it shouldn't show "Copied".
+        if (!didCopy) return;
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
         }
@@ -572,7 +574,9 @@ function MarkdownCodeBlock({
 
   const handleCopy = useCallback(() => {
     void writeTextToClipboard(code, "code")
-      .then(() => {
+      .then((didCopy) => {
+        // An empty table or code block copies nothing, so it shouldn't show "Copied".
+        if (!didCopy) return;
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
         }

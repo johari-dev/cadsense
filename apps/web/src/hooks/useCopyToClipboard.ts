@@ -90,6 +90,14 @@ function copyWithSelection(value: string) {
   const ranges = selection
     ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
     : [];
+  // A Range is always ordered start to end, so a backward selection is restored from its
+  // anchor and focus instead. Otherwise Shift+Arrow afterwards would move the wrong edge.
+  const anchor = selection?.anchorNode
+    ? { node: selection.anchorNode, offset: selection.anchorOffset }
+    : null;
+  const focus = selection?.focusNode
+    ? { node: selection.focusNode, offset: selection.focusOffset }
+    : null;
   const textarea = document.createElement("textarea");
   textarea.value = value;
   // Read-only keeps mobile keyboards closed; 12pt keeps iOS from zooming on focus.
@@ -110,8 +118,13 @@ function copyWithSelection(value: string) {
     // the document selection would collapse it, so only restore it for everything else.
     const isTextField = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
     if (selection && !isTextField) {
-      selection.removeAllRanges();
-      for (const range of ranges) selection.addRange(range);
+      if (ranges.length === 1 && anchor && focus) {
+        selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+      } else {
+        // Firefox can hold several ranges (table cells), which have no single direction.
+        selection.removeAllRanges();
+        for (const range of ranges) selection.addRange(range);
+      }
     }
   }
 }
