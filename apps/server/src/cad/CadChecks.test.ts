@@ -1263,6 +1263,20 @@ describe("draftCadComments", () => {
       )[0]!.body,
       "Two copies of the Hex Shaft sit on the same axis, one modeled inside the other, in 2 places. In each place, keep the shaft the parts are designed for and remove the other.",
     );
+    // Two copies of one shaft inside a third part are counted, not named twice.
+    const [hexOne, hexTwo] = [part(140, "13 in. Hex Shaft <1>"), part(141, "13 in. Hex Shaft <2>")];
+    const round = part(142, '1/2" Rounded Hex (11.5" L, 13.75mm OD) <1>');
+    assert.equal(
+      draftCadComments(
+        [
+          drivetrain("stacked-shafts", true, [hexOne, hexTwo]),
+          drivetrain("stacked-shafts", true, [hexOne, round]),
+          drivetrain("stacked-shafts", true, [hexTwo, round]),
+        ],
+        snapshotId,
+      )[0]!.body,
+      'The 13 in. Hex Shaft (2 of them) and the 1/2" Rounded Hex sit on the same axis, modeled inside one another. Keep the shaft the parts are designed for and remove the others.',
+    );
     // Three copies of one shaft in one spot are one place, though they make three pairs.
     const copies = [1, 2, 3].map((n) => part(120 + n, `13 in. Hex Shaft <${n}>`));
     assert.equal(

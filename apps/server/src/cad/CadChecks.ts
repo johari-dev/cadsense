@@ -25,7 +25,6 @@ import {
   FASTENER,
   fitCadAxis,
   GAME_PIECE,
-  joinAnd,
   partLabel,
   partList,
   partName,
@@ -1304,7 +1303,7 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
           set.length === 2 ? "one modeled inside the other" : "modeled inside one another";
         const sentence = set.every((name) => partName(name) === partName(set[0]!))
           ? `${set.length === 2 ? "Two" : set.length} copies of ${partPhrase(set[0]!)} sit on the same axis, ${inside}`
-          : `${upperFirst(joinAnd(distinctPhrases(set), 3))} sit on the same axis, ${inside}`;
+          : `${upperFirst(countedList(distinctPhrases(set), 3))} sit on the same axis, ${inside}`;
         places.set(sentence, (places.get(sentence) ?? 0) + 1);
       }
       const most = Math.max(...sets.map((set) => set.length));

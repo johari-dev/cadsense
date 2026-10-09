@@ -66,6 +66,12 @@ follows the drafts through the turn:
 - An agent can decline a draft with `declinedDrafts: [{publicationKey, explanation}]` in `cad_comments_publish` when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, one of its published comments already covers it, it asked the user about that part in its reply, or it inspected the parts and the draft is wrong for this model. A plan to rework, move, or merge parts later is not a reason, and neither is calling the design a work in progress: the defect is in the model as drawn. `CAD_DRAFT_DECLINE_RULE` in `CadChecks.ts` states the rule once for every agent-facing text.
 - When the main agent's turn completes, it publishes every draft that is neither covered nor declined, worded as drafted, with a note that Cadsense's checks found it, and always with whole-part targets: no agent looked at a check-placed point the backstop would publish. A turn the user stopped, a turn that failed before any follow-up, a turn that ends while child agents or background agents are still working, a child agent's turn, and an app session that shuts down publish nothing, since nobody finished reviewing those drafts. A turn whose follow-up failed does publish them: the review had finished. Over `cadsense mcp` the session is the review, so closing it publishes the leftovers, even when the client quits mid-review: the server cannot tell a quit from a finished review. The backstop is a finalizer on the turn's activation scope, added after the activation starts and armed by `end` (see `CadTurnOutcome`) or, over MCP, from the start, so it runs while the activation is still alive.
 
+Draft wording has known limits, none of which the stored models hit. Copies are decided by part
+name, so two different parts that share an Onshape default name ("Part 1 <1>" from one Part Studio
+and "Part 1 <2>" from another) are called copies. A group of doubled shafts that mixes a stack
+with a shaft overlapping only one of its members counts each of its pairs as a place. A repeated
+part reads "the 40T gear (2 of them) run into", not "two 40T gears run into".
+
 A comment covers a draft when it targets any part the draft targets. That errs toward skipping
 a draft: a comment about the 40T gear hitting a tube also covers the gear-spacing draft. A
 model that comments on everything, as Opus does, gets no backstop comments.

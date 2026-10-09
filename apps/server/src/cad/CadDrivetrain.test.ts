@@ -609,6 +609,7 @@ describe("draft wording", () => {
     expect(partLabel('1/2" Rounded Hex (11.5" L, 13.75mm OD) <1>')).toBe('1/2" Rounded Hex');
     expect(partLabel("Deadaxle Tube_9.75_in <3>")).toBe("Deadaxle Tube 9.75 in");
     expect(partLabel("(Copy) <1>")).toBe("(Copy)");
+    expect(partPhrase("<1>")).toBe("the unnamed part");
     expect(partLabel(`${"Bracket ".repeat(40)}<1>`).length).toBeLessThanOrEqual(120);
     // An Onshape default name takes no article.
     expect(partPhrase("Part 20 <3>")).toBe("Part 20");

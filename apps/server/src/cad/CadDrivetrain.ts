@@ -317,7 +317,7 @@ export const partLabel = (name: string): string => {
     .replace(/\s*<\d+>$/, "")
     .replaceAll("_", " ")
     .trim();
-  return (plain.replace(/\s*\([^()]*\)$/, "") || plain).slice(0, 120);
+  return (plain.replace(/\s*\([^()]*\)$/, "") || plain || "unnamed part").slice(0, 120);
 };
 /** A part's name without its instance tag: every occurrence of one part has the same one. */
 export const partName = (name: string) => name.replace(/\s*<\d+>$/, "");
