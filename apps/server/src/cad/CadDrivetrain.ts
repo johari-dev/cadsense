@@ -336,9 +336,17 @@ export const distinctPhrases = (names: readonly string[]) =>
       ? withArticle(partName(name).replaceAll("_", " ").trim().slice(0, 120))
       : partPhrase(name),
   );
-/** "a", "a and b", "a, b, and c". */
-export const joinAnd = (items: readonly string[]) =>
-  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+/**
+ * "a", "a and b", "a, b, and c". Past `limit` items the rest are counted ("and 34 more"), so a long
+ * list cannot push the end of its sentence and the next step out of a comment.
+ */
+export const joinAnd = (items: readonly string[], limit = 6) => {
+  const shown =
+    items.length > limit ? [...items.slice(0, limit), `${items.length - limit} more`] : items;
+  return shown.length <= 2
+    ? shown.join(" and ")
+    : `${shown.slice(0, -1).join(", ")}, and ${shown.at(-1)}`;
+};
 /** Phrases in a sentence, with repeats counted: "the 13 in. Hex Shaft (2 of them) and Part 4". */
 export const countedList = (phrases: readonly string[]) => {
   const counts = new Map<string, number>();
@@ -960,7 +968,7 @@ export const analyzeCadDrivetrain = (
             comment:
               unpowered.length === 1
                 ? `${upperFirst(partPhrase(unpowered[0]!.name))} is not driven: no gear, belt, or chain in the model connects it to a motor. Add a gear, belt, or chain stage from the last driven shaft to the ${rollerWord}.`
-                : `None of the ${unpowered.length} ${rollerWord}s (${[...new Set(unpowered.map((roller) => partLabel(roller.name)))].join(", ")}) is driven: no gear, belt, or chain in the model connects them to a motor. Add a gear, belt, or chain stage from the last driven shaft to the ${rollerWord}s.`,
+                : `None of the ${unpowered.length} ${rollerWord}s (${joinAnd([...new Set(unpowered.map((roller) => partLabel(roller.name)))])}) is driven: no gear, belt, or chain in the model connects them to a motor. Add a gear, belt, or chain stage from the last driven shaft to the ${rollerWord}s.`,
           }
         : {}),
       summary: untraced

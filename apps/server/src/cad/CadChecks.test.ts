@@ -1251,6 +1251,18 @@ describe("draftCadComments", () => {
       draftCadComments([drivetrain("stacked-shafts", true, [hexA, hexB])], snapshotId)[0]!.body,
       "The Hex Shaft (6 in) and the Hex Shaft (8 in) sit on the same axis, one modeled inside the other. Keep the shaft the parts are designed for and remove the other.",
     );
+    // Three shafts in a row that overlap only their neighbors are two places, not one stack.
+    const row = [1, 2, 3].map((n) => part(130 + n, `Hex Shaft <${n}>`));
+    assert.equal(
+      draftCadComments(
+        [
+          drivetrain("stacked-shafts", true, [row[0]!, row[1]!]),
+          drivetrain("stacked-shafts", true, [row[1]!, row[2]!]),
+        ],
+        snapshotId,
+      )[0]!.body,
+      "Two copies of the Hex Shaft sit on the same axis, one modeled inside the other, in 2 places. In each place, keep the shaft the parts are designed for and remove the other.",
+    );
     // Three copies of one shaft in one spot are one place, though they make three pairs.
     const copies = [1, 2, 3].map((n) => part(120 + n, `13 in. Hex Shaft <${n}>`));
     assert.equal(

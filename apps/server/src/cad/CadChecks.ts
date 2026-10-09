@@ -1262,38 +1262,57 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
           );
     }
     case "stacked-shafts": {
-      // Shafts modeled inside one another are one place: three copies of one shaft make three
-      // pairs but one place. Places that read the same are counted (one on each roller).
+      // Shafts modeled inside one another are one place when every two of them overlap: three
+      // copies of one shaft make three pairs but one place. Otherwise, as for three shafts in a row
+      // that overlap only their neighbors, each overlapping pair is a place. Places that read the
+      // same are counted (one on each roller).
+      const overlapping = new Set<string>();
       const parent = new Map<string, string>();
       const find = (id: string): string => {
         const up = parent.get(id) ?? id;
         return up === id ? id : find(up);
       };
-      const names = new Map<string, string>();
+      const named = new Map<string, string>();
       for (const { occurrences } of findings) {
         const [a, b] = occurrences;
-        names.set(a!.occurrenceId, a!.name).set(b!.occurrenceId, b!.name);
+        named.set(a!.occurrenceId, a!.name).set(b!.occurrenceId, b!.name);
+        overlapping
+          .add(`${a!.occurrenceId} ${b!.occurrenceId}`)
+          .add(`${b!.occurrenceId} ${a!.occurrenceId}`);
         const [rootA, rootB] = [find(a!.occurrenceId), find(b!.occurrenceId)];
         if (rootA !== rootB) parent.set(rootA, rootB);
       }
-      const groups = new Map<string, string[]>();
-      for (const [id, name] of names) groups.set(find(id), [...(groups.get(find(id)) ?? []), name]);
+      const groups = new Map<string, Map<string, string>>();
+      for (const [id, name] of named)
+        groups.set(find(id), (groups.get(find(id)) ?? new Map<string, string>()).set(id, name));
+      const sets = [...groups.values()].flatMap((group): string[][] => {
+        const ids = [...group.keys()];
+        return ids.every((x, i) => ids.slice(i + 1).every((y) => overlapping.has(`${x} ${y}`)))
+          ? [[...group.values()]]
+          : findings
+              .filter(({ occurrences }) => group.has(occurrences[0]!.occurrenceId))
+              .map(({ occurrences }) => occurrences.map((part) => part.name));
+      });
       const places = new Map<string, number>();
-      for (const group of groups.values()) {
+      for (const set of sets) {
         const inside =
-          group.length === 2 ? "one modeled inside the other" : "modeled inside one another";
-        const sentence = group.every((name) => partName(name) === partName(group[0]!))
-          ? `${group.length === 2 ? "Two" : group.length} copies of ${partPhrase(group[0]!)} sit on the same axis, ${inside}`
-          : `${upperFirst(joinAnd(distinctPhrases(group)))} sit on the same axis, ${inside}`;
+          set.length === 2 ? "one modeled inside the other" : "modeled inside one another";
+        const sentence = set.every((name) => partName(name) === partName(set[0]!))
+          ? `${set.length === 2 ? "Two" : set.length} copies of ${partPhrase(set[0]!)} sit on the same axis, ${inside}`
+          : `${upperFirst(joinAnd(distinctPhrases(set)))} sit on the same axis, ${inside}`;
         places.set(sentence, (places.get(sentence) ?? 0) + 1);
       }
-      const most = Math.max(...[...groups.values()].map((group) => group.length));
+      const most = Math.max(...sets.map((set) => set.length));
       const step = `keep the shaft the parts are designed for and remove the ${most > 2 ? "others" : "other"}.`;
       return withStep(
         [...places]
+          .slice(0, 6)
           .map(([sentence, count]) => `${sentence}${count > 1 ? `, in ${count} places` : ""}.`)
-          .join(" "),
-        groups.size > 1 ? `In each place, ${step}` : upperFirst(step),
+          .join(" ") +
+          (places.size > 6
+            ? ` ${[...places.values()].slice(6).reduce((sum, count) => sum + count, 0)} more places have the same problem.`
+            : ""),
+        sets.length > 1 ? `In each place, ${step}` : upperFirst(step),
       );
     }
     case "collision": {

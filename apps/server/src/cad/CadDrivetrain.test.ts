@@ -730,6 +730,24 @@ describe("draft wording", () => {
     );
   });
 
+  it("bounds a long list of parts, so the comment keeps its whole sentence and next step", () => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [1.178, -2.4, 0]));
+    s.add("Driven Hex Shaft <1>", hexShaft(10), along("y", [1.178, -6, 0]));
+    for (let i = 0; i < 40; i++)
+      s.add(
+        `Roller ${i} ${"x".repeat(110)} <1>`,
+        cylinder(INCH, 9.75 * INCH),
+        along("y", [6 + 3 * i, -6, 0]),
+      );
+    const comment = readable(ofKind(s.analyze(), "unpowered")[0]);
+    expect(comment.length).toBeLessThan(3950);
+    expect(comment).toContain(", and 34 more) is driven:");
+    expect(comment.endsWith("from the last driven shaft to the rollers.")).toBe(true);
+  });
+
   it("leaves facts and merged kinds to the agent's summary and the draft", () => {
     // A traced power path is not a problem, and a bearing draft is worded once for every shaft.
     const s = scene();

@@ -90,7 +90,8 @@ Ways this can fail, each covered by `CadCheckBackstop.test.ts`, `CadViewing.test
 - More than 20 leftover drafts, the most one publication takes, and the rest are never published.
 - A draft reads like tool output: raw CAD names with instance tags (`<1>`) or specs in parentheses, a lowercase first word, or one sentence repeated for each part it covers. GPT-6-Sol published such drafts word for word in four of five reviews.
 - A merged draft leaves out one of its parts or the gear a bare shaft carries, or cuts its next step to fit 4000 characters.
-- A draft calls two different parts copies because their short names match ("Side Plate (0.25 in)" and "Side Plate (0.50 in)"), or counts three copies of one shaft in one spot as three places.
+- A draft calls two different parts copies because their short names match ("Side Plate (0.25 in)" and "Side Plate (0.50 in)"), or counts three copies of one shaft in one spot as three places, or calls three shafts in a row that overlap only their neighbors one place and says to remove two.
+- A long list of parts (forty rollers no motor reaches) cuts a comment off mid-name, before its next step; lists name six parts and count the rest.
 - A body near 4000 characters pushes the backstop's note off the end, so an automatic comment reads as the agent's own.
 - A stack of copies of one part is drafted once per overlapping pair, so seven copies become 21 comments; or parts that are not copies (a spacer inside two bearings, two parts inside one plate) are called one stack and the student is told to delete all but one. Only same-named parts that all overlap one another stack.
 - A merged draft lists one part name several times, so the student cannot tell its targets apart.
