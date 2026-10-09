@@ -47,11 +47,17 @@ export class ClipboardReadError extends Schema.TaggedErrorClass<ClipboardReadErr
   }
 }
 
+/**
+ * Copies `value` as plain text. Call it straight from the click (or key press) that asked
+ * for the copy: browsers only expose `navigator.clipboard` in secure contexts (https or
+ * localhost), so over plain http on another address, such as a LAN or Tailscale IP, this
+ * falls back to the legacy copy command, which only works during a user gesture.
+ */
 export async function writeTextToClipboard(value: string, target = "text") {
   if (
     typeof window === "undefined" ||
     typeof navigator === "undefined" ||
-    !navigator.clipboard?.writeText
+    (!navigator.clipboard?.writeText && typeof document === "undefined")
   ) {
     throw new ClipboardApiUnavailableError({
       target,
@@ -61,13 +67,65 @@ export async function writeTextToClipboard(value: string, target = "text") {
   if (!value) return false;
 
   try {
-    await navigator.clipboard.writeText(value);
+    // The fallback runs before any await, so it stays inside the caller's user gesture.
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+    else copyWithSelection(value);
     return true;
   } catch (cause) {
     throw new ClipboardWriteError({
       target,
       cause,
     });
+  }
+}
+
+/**
+ * Copies through a hidden textarea and `document.execCommand("copy")`, then gives focus
+ * and the selection back to whatever had them, so a copy button doesn't pull focus out of
+ * the composer. Throws when the browser refuses the command.
+ */
+function copyWithSelection(value: string) {
+  const active = document.activeElement;
+  const selection = document.getSelection();
+  const ranges = selection
+    ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
+    : [];
+  // A Range is always ordered start to end, so a backward selection is restored from its
+  // anchor and focus instead. Otherwise Shift+Arrow afterwards would move the wrong edge.
+  const anchor = selection?.anchorNode
+    ? { node: selection.anchorNode, offset: selection.anchorOffset }
+    : null;
+  const focus = selection?.focusNode
+    ? { node: selection.focusNode, offset: selection.focusOffset }
+    : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  // Read-only keeps mobile keyboards closed; 12pt keeps iOS from zooming on focus.
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.cssText =
+    "position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;font-size:12pt;pointer-events:none";
+  document.body.append(textarea);
+  try {
+    textarea.focus({ preventScroll: true });
+    textarea.select();
+    textarea.setSelectionRange(0, value.length);
+    if (!document.execCommand("copy")) throw new Error("The browser refused the copy command.");
+  } finally {
+    textarea.remove();
+    if (active instanceof HTMLElement) active.focus({ preventScroll: true });
+    // Inputs and textareas keep their own selection, which focus() brings back. Resetting
+    // the document selection would collapse it, so only restore it for everything else.
+    const isTextField = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+    if (selection && !isTextField) {
+      if (ranges.length === 1 && anchor && focus) {
+        selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+      } else {
+        // Firefox can hold several ranges (table cells), which have no single direction.
+        selection.removeAllRanges();
+        for (const range of ranges) selection.addRange(range);
+      }
+    }
   }
 }
 
