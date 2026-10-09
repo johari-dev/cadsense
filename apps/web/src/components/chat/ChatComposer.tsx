@@ -2687,7 +2687,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     ? activePendingProgress.customAnswer ||
                       "Type your own answer, or leave this blank to use the selected option"
                     : prompt.trim() ||
-                      (noProviderAvailable ? "Enable a provider in Settings" : "Ask anything...")}
+                      (noProviderAvailable
+                        ? "Enable a provider in Settings"
+                        : "Describe a design change...")}
                 </button>
                 {inlineTasksBadge}
                 <button
@@ -3094,7 +3096,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               ? "Enable a provider in Settings to send a message"
                               : phase === "disconnected"
                                 ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                : "Ask anything, @tag files/folders, or / for commands and skills"
+                                : "Describe a change or ask about your model. @ for files, / for tools."
                   }
                   disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
                 />

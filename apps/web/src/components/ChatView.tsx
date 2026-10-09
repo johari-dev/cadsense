@@ -4154,6 +4154,10 @@ function ChatViewContent(props: ChatViewProps) {
                         <DraftHeroHeadline
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          onChooseTask={(prompt) => {
+                            setComposerDraftPrompt(composerDraftTarget, prompt);
+                            scheduleComposerFocus();
+                          }}
                         />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
