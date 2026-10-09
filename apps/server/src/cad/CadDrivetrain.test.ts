@@ -6,6 +6,9 @@ import {
   cadDrivetrainRole,
   rotatingCollisions,
   fitCadAxis,
+  partLabel,
+  partList,
+  partPhrase,
   recognizeDrivetrainParts,
   type CadDrivetrainFinding,
 } from "./CadDrivetrain.ts";
@@ -583,5 +586,147 @@ describe("rotating collisions", () => {
     );
     const frame = s.add('Tube 1"x1"x11" <1>', tube(), along("z", [1.2, 0, 0]));
     expect(s.collisions([[gear, frame]], true)).toEqual([]);
+  });
+});
+
+// What a draft tells the student. The agent's summary keeps exact CAD names so it can find the
+// parts; a comment published from a draft must read as if a mentor wrote it. See "Ways this can
+// fail" in CadDrivetrain.md.
+describe("draft wording", () => {
+  const readable = (finding: CadDrivetrainFinding | undefined) => {
+    const comment = finding?.comment ?? "";
+    expect(comment, "a problem finding has a comment").not.toBe("");
+    expect(comment, "no instance tags or underscores").not.toMatch(/<\d+>|_/);
+    expect(comment.charAt(0), "starts like a sentence").toMatch(/[A-Z0-9]/);
+    return comment;
+  };
+
+  it("names parts the way a student would", () => {
+    expect(partLabel('40t Pocketed Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>')).toBe("40T gear");
+    expect(partLabel("7T Vortex Shaft (20DP Gear - 7T) <1>")).toBe("7T gear");
+    expect(partLabel("84T 5M 9mm Wide Belt <1>")).toBe("84T belt");
+    expect(partLabel("HTD 24 Tooth Pulley <2>")).toBe("24T pulley");
+    expect(partLabel('1/2" Rounded Hex (11.5" L, 13.75mm OD) <1>')).toBe('1/2" Rounded Hex');
+    expect(partLabel("Deadaxle Tube_9.75_in <3>")).toBe("Deadaxle Tube 9.75 in");
+    expect(partLabel("(Copy) <1>")).toBe("(Copy)");
+    expect(partLabel(`${"Bracket ".repeat(40)}<1>`).length).toBeLessThanOrEqual(120);
+    // An Onshape default name takes no article.
+    expect(partPhrase("Part 20 <3>")).toBe("Part 20");
+    expect(partPhrase("13 in. Hex Shaft <1>")).toBe("the 13 in. Hex Shaft");
+    expect(partList(["13 in. Hex Shaft <1>", "13 in. Hex Shaft <2>", "Part 4 <1>"])).toBe(
+      "the 13 in. Hex Shaft (2 of them) and Part 4",
+    );
+  });
+
+  it("gives a gear spacing problem its numbers and a next step, and keeps the agent's names", () => {
+    const s = scene();
+    s.add("7T Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, 0, 0]));
+    s.add(
+      '40t Pocketed Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+      gear(40),
+      along("y", [1.152, 0, 0]),
+    );
+    const [finding] = ofKind(s.analyze(), "gear-mesh");
+    expect(readable(finding)).toBe(
+      "The 7T gear and the 40T gear are 1.152 in apart, but these 20 DP gears need 1.175 in. They are 0.023 in too close and will bind. The stage is 5.71:1. Move one shaft so the centers are 1.175 in apart.",
+    );
+    expect(finding?.summary).toContain("7T Vortex Shaft (20DP Gear - 7T) <1>");
+  });
+
+  it("tells two gears with one tooth count apart, and words gears whose faces miss", () => {
+    const s = scene();
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [0, 0, 0]));
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <2>', gear(40), along("y", [2.2, 0, 0]));
+    expect(readable(ofKind(s.analyze(), "gear-mesh")[0])).toMatch(
+      /^The two 40T gears are 2\.200 in apart, .* too far apart and will skip\./,
+    );
+    const offset = scene();
+    offset.add('20t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(20), along("y", [0, 0, 0]));
+    offset.add(
+      '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+      gear(40),
+      along("y", [1.5, 0.55, 0]),
+    );
+    expect(readable(ofKind(offset.analyze(), "gear-mesh")[0])).toBe(
+      "The 20T gear and the 40T gear are at mesh distance, but their faces miss each other by 0.050 in along the shaft, so they don't mesh. Move one gear along its shaft so the faces line up.",
+    );
+  });
+
+  it("words a belt with no pulleys and a belt with one bare end", () => {
+    // 70T HTD 5 mm on two 24T pulleys needs 115.1 mm centers.
+    const centers = 115.1 / 1000 / INCH;
+    const pitchRadius = (24 * 5) / (2 * Math.PI) / 1000;
+    const belt = (pulleys: readonly number[]) => {
+      const s = scene();
+      s.add(
+        "70T 5M 9mm Wide Belt <1>",
+        beltLoop(centers * INCH, pitchRadius, 0.009),
+        along("y", [0, 0, 0]),
+      );
+      for (const x of pulleys)
+        s.add("HTD 24 Tooth Pulley <1>", cylinder(pitchRadius, 0.012), along("y", [x, 0, 0]));
+      return ofKind(s.analyze(), "loop")[0];
+    };
+    expect(readable(belt([]))).toBe(
+      "The 70T belt (350 mm) wraps no pulley, so nothing turns it and it drives nothing. Add a pulley at each end, or remove the belt if it is left over, then check its length against the centers.",
+    );
+    expect(readable(belt([-centers / 2]))).toBe(
+      "The 70T belt has no pulley at one end; it wraps only the 24T pulley. Add a pulley at the bare end, then check the belt's length against the centers.",
+    );
+  });
+
+  it("words a controller docked in front of its motor", () => {
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    s.add(
+      "SPARK Flex Brushless Motor Controller <1>",
+      cylinder(1.45 * INCH, 1.17 * INCH),
+      along("y", [0, -2.1, 0]),
+    );
+    expect(readable(ofKind(s.analyze(), "motor-mount")[0])).toBe(
+      "The SPARK Flex Brushless Motor Controller sits in front of the NEO Vortex Brushless Motor, on the side its shaft comes out of. That puts it between the motor face and whatever the motor bolts to, so the motor is not held. Controllers that dock to a motor go on the back. Move the controller to the back of the motor so the motor face bolts to its plate.",
+    );
+  });
+
+  it("words rollers no motor reaches, one or several", () => {
+    const unpowered = (rollers: number) => {
+      const s = scene();
+      s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+      s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+      s.add(
+        '40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>',
+        gear(40),
+        along("y", [1.178, -2.4, 0]),
+      );
+      s.add("Driven Hex Shaft <1>", hexShaft(10), along("y", [1.178, -6, 0]));
+      for (let i = 0; i < rollers; i++)
+        s.add(
+          `Deadaxle Tube_9.75_in <${i + 1}>`,
+          cylinder(INCH, 9.75 * INCH),
+          along("y", [6 + 3 * i, -6, 0]),
+        );
+      const [finding] = ofKind(s.analyze(), "unpowered");
+      expect(finding?.problem).toBe(true);
+      return finding;
+    };
+    expect(readable(unpowered(2))).toBe(
+      "None of the 2 rollers (Deadaxle Tube 9.75 in) is driven: no gear, belt, or chain in the model connects them to a motor. Add a gear, belt, or chain stage from the last driven shaft to the rollers.",
+    );
+    expect(readable(unpowered(1))).toBe(
+      "The Deadaxle Tube 9.75 in is not driven: no gear, belt, or chain in the model connects it to a motor. Add a gear, belt, or chain stage from the last driven shaft to the roller.",
+    );
+  });
+
+  it("leaves facts and merged kinds to the agent's summary and the draft", () => {
+    // A traced power path is not a problem, and a bearing draft is worded once for every shaft.
+    const s = scene();
+    s.add("NEO Vortex Brushless Motor <1>", vortex(), along("y", [0, 0, 0]));
+    s.add("Vortex Shaft (20DP Gear - 7T) <1>", pinionShaft(), along("y", [0, -2.4, 0]));
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [1.178, -2.4, 0]));
+    s.add("Driven Hex Shaft <1>", hexShaft(10), along("y", [1.178, -6, 0]));
+    const findings = s.analyze();
+    expect(ofKind(findings, "power-path")[0]?.comment).toBeUndefined();
+    expect(ofKind(findings, "shaft-support")[0]?.comment).toBeUndefined();
   });
 });

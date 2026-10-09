@@ -921,14 +921,17 @@ describe("draftCadComments", () => {
   // Ways drafts can go wrong: a draft from a finding that is not a problem, a duplicate drafted
   // when a drivetrain draft already names its parts, a repeated issue left as separate comments,
   // or a target on a part that is only incidental to the issue (the gear a bare shaft carries),
-  // which lets an unrelated comment on that gear count as covering the draft.
+  // which lets an unrelated comment on that gear count as covering the draft. Wording goes wrong
+  // when a body reads like tool output: raw CAD names with instance tags or specs, a lowercase
+  // start, one sentence repeated for each part, a merged draft that leaves out a part or the gear
+  // a shaft carries, or a next step cut off by the length limit.
   const part = (n: number, name: string) => ({
     occurrenceId: n.toString(16).padStart(64, "0"),
     name,
   });
   const shaftA = part(1, "1.75 in. Hex Shaft <1>");
   const shaftB = part(2, "2.39 in. Hex Shaft <1>");
-  const gear = part(3, "40t Spur Gear <1>");
+  const gear = part(3, '40t Pocketed Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>');
   const plateA = part(4, "Part 17 <2>");
   const plateB = part(5, "Part 20 <3>");
   const drivetrain = (
@@ -1071,14 +1074,17 @@ describe("draftCadComments", () => {
       draftCadComments(allPairs, snapshotId).map((draft) => draft.targets.length),
       [4],
     );
-    // A stack too long for one comment still ends with its count and next step.
+    // A stack with more copies than a comment has targets still counts every copy.
     const long = Array.from({ length: 21 }, (_, i) =>
       part(40 + i, `${"Bracket ".repeat(26)}<${i + 1}>`),
     );
     const longPairs = long.flatMap((a, i) => long.slice(i + 1).map((b) => overlap(a, b)));
     const [longStack] = draftCadComments(longPairs, snapshotId);
     assert.isAtMost(longStack!.body.length, 4000);
-    assert.match(longStack!.body, /and 1 more\. Keep one and remove the others\.$/);
+    assert.match(
+      longStack!.body,
+      /^21 copies of the Bracket .*\. Keep one and remove the others\.$/,
+    );
     // Two stacks that overlap each other keep the overlap between them as its own pair.
     const spacers = [part(70, "Spacer <1>"), part(71, "Spacer <2>"), part(72, "Spacer <3>")];
     const spacerPairs = [
@@ -1153,10 +1159,104 @@ describe("draftCadComments", () => {
       merged[0]!.title,
       "1.75 in. Hex Shaft and 2.39 in. Hex Shaft run into SPARK Flex Brushless Motor Controller",
     );
+    assert.equal(
+      merged[0]!.body,
+      "The 1.75 in. Hex Shaft and the 2.39 in. Hex Shaft run into the SPARK Flex Brushless Motor Controller, so they can't turn as drawn. Move a part or cut clearance, then check the gap through a full turn.",
+    );
     assert.deepEqual(
       merged[0]!.placements?.map((placement) => placement.occurrenceId),
       [shaftA.occurrenceId, shaftB.occurrenceId],
     );
+  });
+
+  it("words each merged draft once, in the names a student would use", () => {
+    assert.deepEqual(
+      drafts.map((draft) => draft.body),
+      [
+        "The 1.75 in. Hex Shaft (which carries the 40T gear) and the 2.39 in. Hex Shaft have no bearings, so nothing holds them in line. Add a bearing where each shaft passes through a plate.",
+        "The 1.75 in. Hex Shaft and the 2.39 in. Hex Shaft sit on the same axis, one modeled inside the other. Keep the shaft the parts are designed for and remove the other.",
+        "Part 17 and Part 20 sit in the same place, one almost entirely inside the other. One is likely a duplicate or stale copy, or a part in the wrong place. Remove or move one.",
+      ],
+    );
+    const hexes = [1, 2, 3].map((n) => part(80 + n, `13 in. Hex Shaft <${n}>`));
+    const rounds = [1, 2, 3].map((n) => part(90 + n, '1/2" Rounded Hex (11.5" L, 13.75mm OD) <1>'));
+    const [stacked] = draftCadComments(
+      hexes.map((hex, i) => drivetrain("stacked-shafts", true, [hex, rounds[i]!])),
+      snapshotId,
+    );
+    assert.equal(
+      stacked!.body,
+      'The 13 in. Hex Shaft and the 1/2" Rounded Hex sit on the same axis, one modeled inside the other, in 3 places. In each place, keep the shaft the parts are designed for and remove the other.',
+    );
+    const [lone] = draftCadComments([drivetrain("shaft-support", true, [shaftB])], snapshotId);
+    assert.equal(
+      lone!.body,
+      "The 2.39 in. Hex Shaft has no bearing, so nothing holds it in line. Add a bearing where it passes through a plate.",
+    );
+  });
+
+  it("words copies of one part as copies", () => {
+    const overlap = (a: ReturnType<typeof part>, b: ReturnType<typeof part>): CadCheckFinding => ({
+      check: "mesh-interference",
+      occurrences: [a, b],
+      intersectionVolume: 1e-4,
+      intersectionFraction: 1,
+      withinSubassembly: false,
+      reading: readOverlap(a.name, b.name, 1e-4, 1, false).reading,
+    });
+    const plates = [1, 2, 3].map((n) => part(100 + n, `Side Plate <${n}>`));
+    assert.deepEqual(
+      draftCadComments([overlap(plates[0]!, plates[1]!)], snapshotId).map((draft) => draft.body),
+      [
+        "Two copies of the Side Plate sit in the same place, one almost entirely inside the other, so one is likely a stale copy. Keep one and remove the other.",
+      ],
+    );
+    assert.deepEqual(
+      draftCadComments(
+        [
+          overlap(plates[0]!, plates[1]!),
+          overlap(plates[0]!, plates[2]!),
+          overlap(plates[1]!, plates[2]!),
+        ],
+        snapshotId,
+      ).map((draft) => draft.body),
+      [
+        "3 copies of the Side Plate sit in the same place and overlap almost completely, so all but one are likely stale copies. Keep one and remove the others.",
+      ],
+    );
+  });
+
+  it("publishes a drivetrain finding's own student wording, not the agent's summary", () => {
+    const finding = drivetrain("gear-mesh", true, [gear, shaftA]);
+    const comment =
+      "The 7T gear and the 40T gear are 1.152 in apart, but these 20 DP gears need 1.175 in. Move one shaft so the centers are 1.175 in apart.";
+    const [draft] = draftCadComments(
+      [finding],
+      snapshotId,
+      new Map(),
+      new Map([[finding, comment]]),
+    );
+    assert.equal(draft!.body, comment);
+  });
+
+  it("keeps the next step when a merged draft names too many parts to fit", () => {
+    const shafts = Array.from({ length: 60 }, (_, i) =>
+      part(200 + i, `${"Very Long Jackshaft Name ".repeat(4)}${i} <1>`),
+    );
+    const [merged] = draftCadComments(
+      shafts.map((shaft) => drivetrain("shaft-support", true, [shaft])),
+      snapshotId,
+    );
+    assert.isAtMost(merged!.body.length, 4000);
+    assert.match(merged!.body, /Add a bearing where each shaft passes through a plate\.$/);
+  });
+
+  it("never shows the student a raw CAD name or a lowercase start", () => {
+    for (const draft of drafts) {
+      assert.notMatch(draft.body, /<\d+>/);
+      assert.match(draft.body.charAt(0), /[A-Z0-9]/);
+      assert.match(draft.title.charAt(0), /[A-Z0-9]/);
+    }
   });
 
   it("skips a duplicate whose parts a drivetrain draft already names", () => {

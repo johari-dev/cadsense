@@ -59,6 +59,7 @@ prove outright (drivetrain problems and near-total duplicates). Smaller models f
 defects but published one or two of six, citing "WIP" for the rest, so `CadProviderTools.ts`
 follows the drafts through the turn:
 
+- A draft is written for the student, since agents publish many as offered and the backstop publishes the rest as drafted. Its body names parts the way a student would ("the 40T gear", "the 13 in. Hex Shaft", "Part 20"), states the problem once even when it covers several parts ("in 3 places"), and ends with a next step. The finding's `summary` keeps exact CAD names for the agent. Drivetrain problems drafted one per finding carry their wording from `CadDrivetrain.ts` (`comment`), where the numbers are; `draftCadComments` words merged drafts (shafts without bearings, doubled shafts, collisions into one part) and duplicates from part names.
 - A draft's `publicationKey` is a digest of its kind, parts, and snapshot, so every `cad_checks` call on a snapshot gives a defect the same key whichever other checks ran, and the turn's ledger merges later calls' drafts into earlier ones by key. A new snapshot gives new keys, so a later review in the chat never reuses a published key.
 - Drafts whose spot the checks prove (collisions, gears set too close, bare belt ends) arrive with an inspected point target and its image; see "Check-placed points" in [CadComments.md](CadComments.md).
 - After each publication it lists the drafts no comment in this chat covers yet as `remainingDrafts`, and other CAD tool results carry `pendingDrafts` until they are covered or declined. `publishDrafts` publishes drafts as offered.
@@ -87,7 +88,8 @@ Ways this can fail, each covered by `CadCheckBackstop.test.ts`, `CadViewing.test
 - A draft's key depends on which checks ran, so one defect gets two keys, or a later review in the chat reuses a key already published for another comment and gets `idempotency-conflict`.
 - A failed backstop publication fails the turn or the shutdown instead of being logged.
 - More than 20 leftover drafts, the most one publication takes, and the rest are never published.
-- A long stack's comment loses its count and next step when names are cut to fit.
+- A draft reads like tool output: raw CAD names with instance tags (`<1>`) or specs in parentheses, a lowercase first word, or one sentence repeated for each part it covers. GPT-6-Sol published such drafts word for word in four of five reviews.
+- A merged draft leaves out one of its parts or the gear a bare shaft carries, or cuts its next step to fit 4000 characters.
 - A stack of copies of one part is drafted once per overlapping pair, so seven copies become 21 comments; or parts that are not copies (a spacer inside two bearings, two parts inside one plate) are called one stack and the student is told to delete all but one. Only same-named parts that all overlap one another stack.
 - A merged draft lists one part name several times, so the student cannot tell its targets apart.
 - `remainingDrafts` lists a draft that is covered or declined.

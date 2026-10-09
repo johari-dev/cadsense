@@ -1,12 +1,15 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off preferSchemaOverJson:off
 // Prints the drivetrain findings cad_checks reports for a stored snapshot, including spinning-part
-// collisions, and where each check-placed marker would go. Either a directory holding manifest.json
-// and assets/, or a CAD data directory (userdata/cad) plus a snapshot ID:
-//   node apps/server/scripts/cad-drivetrain-probe.ts <dir> [snapshot-id] [--parts]
+// collisions, and where each check-placed marker would go. --drafts also prints the cad_checks
+// drafts as the student would read them. Either a directory holding manifest.json and assets/, or a
+// CAD data directory (userdata/cad) plus a snapshot ID:
+//   node apps/server/scripts/cad-drivetrain-probe.ts <dir> [snapshot-id] [--parts] [--drafts]
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import { CadSnapshotId } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import {
+  draftCadComments,
   loadCadSolidKernel,
   partOccurrences,
   readCadGeometryBounds,
@@ -69,3 +72,11 @@ for (const f of result.findings) {
       `  marker ${placement.expected}: local ${placement.point.map((v) => v.toFixed(4)).join(",")} on ${placement.occurrenceId.slice(0, 8)}`,
     );
 }
+if (process.argv.includes("--drafts"))
+  for (const draft of draftCadComments(
+    result.findings,
+    CadSnapshotId.make("00000000-0000-4000-8000-000000000000"),
+    result.placements,
+    result.comments,
+  ))
+    console.log(`\n<draft> ${draft.title}\n${draft.body}`);

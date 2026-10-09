@@ -292,9 +292,52 @@ export interface CadDrivetrainFinding {
   readonly kind: Extract<CadCheckFinding, { check: "drivetrain" }>["kind"];
   /** True when this describes something that will not work as modeled. */
   readonly problem: boolean;
+  /** For the agent: exact CAD names, so it can find the parts. */
   readonly summary: string;
+  /**
+   * For the student: what a cad_checks draft publishes, in plain part names, ending with a next
+   * step. Set on the problems drafted one per finding (gear meshes, loops, motor mounts, unpowered
+   * rollers); `draftCadComments` words the kinds it merges across findings itself.
+   */
+  readonly comment?: string;
   readonly occurrences: ReadonlyArray<{ readonly occurrenceId: string; readonly name: string }>;
 }
+
+/**
+ * A part as a draft names it for the student: "40T gear" or "84T belt" for a part with teeth,
+ * otherwise its name without the instance tag, trailing specs in parentheses, or underscores
+ * ("13 in. Hex Shaft"). At most 120 characters, so a long name cannot crowd out the next step.
+ */
+export const partLabel = (name: string): string => {
+  const role = cadDrivetrainRole(name);
+  if (role?.kind === "gear" || role?.kind === "pulley" || role?.kind === "sprocket")
+    return `${role.teeth}T ${role.kind}`;
+  if (role?.kind === "loop" && role.wraps === "pulley") return `${role.teeth}T belt`;
+  const plain = name
+    .replace(/\s*<\d+>$/, "")
+    .replaceAll("_", " ")
+    .trim();
+  return (plain.replace(/\s*\([^()]*\)$/, "") || plain).slice(0, 120);
+};
+/** A part in a sentence: "the 40T gear", but "Part 20" for a part that kept its Onshape name. */
+export const partPhrase = (name: string) => {
+  const label = partLabel(name);
+  return /^part\s*\d+$/i.test(label) ? label : `the ${label}`;
+};
+/** "a", "a and b", "a, b, and c". */
+export const joinAnd = (items: readonly string[]) =>
+  items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+/** Phrases in a sentence, with repeats counted: "the 13 in. Hex Shaft (2 of them) and Part 4". */
+export const countedList = (phrases: readonly string[]) => {
+  const counts = new Map<string, number>();
+  for (const phrase of phrases) counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+  return joinAnd(
+    [...counts].map(([phrase, count]) => (count > 1 ? `${phrase} (${count} of them)` : phrase)),
+  );
+};
+/** Parts in a sentence by name, with repeats counted. */
+export const partList = (names: readonly string[]) => countedList(names.map(partPhrase));
+export const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** Parts whose names identify a drivetrain role, with their fitted axes. */
 export const recognizeDrivetrainParts = (
@@ -640,9 +683,22 @@ export const analyzeCadDrivetrain = (
         Math.max(a.role.teeth, b.role.teeth) / Math.min(a.role.teeth, b.role.teeth),
       );
       const spacing = error >= -MESH_TOO_CLOSE && error <= MESH_TOO_FAR;
+      const both =
+        partLabel(a.name) === partLabel(b.name)
+          ? `the two ${partLabel(a.name)}s`
+          : `${partPhrase(a.name)} and ${partPhrase(b.name)}`;
       findings.push({
         kind: "gear-mesh",
         problem: !spacing || faceGap > 0,
+        ...(faceGap > 0
+          ? {
+              comment: `${upperFirst(both)} are at mesh distance, but their faces miss each other by ${inches(faceGap)} along the shaft, so they don't mesh. Move one gear along its shaft so the faces line up.`,
+            }
+          : spacing
+            ? {}
+            : {
+                comment: `${upperFirst(both)} are ${inches(actual)} apart, but these ${pitch} DP gears need ${inches(ideal)}. They are ${inches(Math.abs(error))} too ${error < 0 ? "close and will bind" : "far apart and will skip"}. The stage is ${stage}. Move one shaft so the centers are ${inches(ideal)} apart.`,
+              }),
         summary:
           faceGap > 0
             ? `${pair} are at mesh distance but their faces miss each other by ${inches(faceGap)} along the shaft, so they do not mesh.`
@@ -680,9 +736,14 @@ export const analyzeCadDrivetrain = (
         ),
     ).length;
     if (wrapped.length < 2 || bare > 0) {
+      const loopWord = noun === "sprocket" ? "chain" : "belt";
       findings.push({
         kind: "loop",
         problem: true,
+        comment:
+          wrapped.length === 0
+            ? `${upperFirst(partPhrase(loop.name))} (${Number(length.toFixed(1))} mm) wraps no ${noun}, so nothing turns it and it drives nothing. Add a ${noun} at each end, or remove the ${loopWord} if it is left over, then check its length against the centers.`
+            : `${upperFirst(partPhrase(loop.name))} has no ${noun} at ${bare === 2 ? "either end" : "one end"}; it wraps only ${partList(wrapped.map((wheel) => wheel.name))}. Add a ${noun} at the bare end${bare === 2 ? "s" : ""}, then check the ${loopWord}'s length against the centers.`,
         summary:
           wrapped.length === 0
             ? `${loop.name} (${Number(length.toFixed(1))} mm) wraps no recognized ${noun}: nothing turns it and it drives nothing.`
@@ -753,9 +814,11 @@ export const analyzeCadDrivetrain = (
       return offset > 0 && offset <= motor.fit.halfLength + controller.fit.halfLength + 0.01;
     });
     if (inFront.length === 0) continue;
+    const several = inFront.length > 1;
     findings.push({
       kind: "motor-mount",
       problem: true,
+      comment: `${upperFirst(partList(inFront.map((controller) => controller.name)))} ${several ? "sit" : "sits"} in front of ${partPhrase(motor.name)}, on the side its shaft comes out of. That puts ${several ? "them" : "it"} between the motor face and whatever the motor bolts to, so the motor is not held. Controllers that dock to a motor go on the back. Move the controller to the back of the motor so the motor face bolts to its plate.`,
       summary: `${names(inFront)} sits in front of ${motor.name}, on the side its shaft comes out of. That puts it between the motor face and whatever the motor bolts to, so the motor is not held. Controllers that dock to a motor go on the back.`,
       occurrences: [ref(motor), ...inFront.map(ref)],
     });
@@ -865,11 +928,21 @@ export const analyzeCadDrivetrain = (
       occurrences: [...trace.motors.map(ref), ...trace.occurrences],
     });
   const unpowered = rollers.filter((roller) => !reached.has(groupOf(roller)));
+  // A roller left out while others are driven may be an idler.
+  const unpoweredProblem = !untraced && unpowered.length === rollers.length;
+  const rollerWord = unpowered.every((roller) => /wheel/i.test(roller.name)) ? "wheel" : "roller";
   if (motors.length > 0 && unpowered.length > 0)
     findings.push({
       kind: "unpowered",
-      // A roller left out while others are driven may be an idler.
-      problem: !untraced && unpowered.length === rollers.length,
+      problem: unpoweredProblem,
+      ...(unpoweredProblem
+        ? {
+            comment:
+              unpowered.length === 1
+                ? `${upperFirst(partPhrase(unpowered[0]!.name))} is not driven: no gear, belt, or chain in the model connects it to a motor. Add a gear, belt, or chain stage from the last driven shaft to the ${rollerWord}.`
+                : `None of the ${unpowered.length} ${rollerWord}s (${[...new Set(unpowered.map((roller) => partLabel(roller.name)))].join(", ")}) is driven: no gear, belt, or chain in the model connects them to a motor. Add a gear, belt, or chain stage from the last driven shaft to the ${rollerWord}s.`,
+          }
+        : {}),
       summary: untraced
         ? `No traced motor reaches ${names(unpowered)}, but some drives could not be traced, so check whether one of those drives them.`
         : `No motor reaches ${names(unpowered)}: the gears, belts, and chains as modeled do not connect ${unpowered.length > 1 ? "them" : "it"} to a motor.`,
