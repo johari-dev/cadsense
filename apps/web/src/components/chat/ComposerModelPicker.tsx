@@ -8,13 +8,7 @@ import type {
   ResolvedKeybindingsConfig,
 } from "@cadsense/contracts";
 import { resolveSelectableModel } from "@cadsense/shared/model";
-import {
-  CaretDownIcon,
-  LightningIcon,
-  MagnifyingGlassIcon,
-  PlusIcon,
-  StarIcon,
-} from "@phosphor-icons/react";
+import { LightningIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -211,8 +205,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   data-chat-provider-model-picker="true"
                   disabled={props.disabled}
                   className={cn(
-                    // 28px pill with 10px side padding at the default 15px interface size.
-                    "flex h-7.5 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-full bg-foreground/[0.07] px-2.75 text-[0.8333rem] text-foreground/90 outline-none transition-colors duration-150 hover:bg-foreground/[0.11] focus-visible:ring-1 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-60 data-popup-open:bg-foreground/[0.13] data-popup-open:text-foreground motion-reduce:transition-none",
+                    // A ghost control like the rest of the footer: no fill until hovered or
+                    // open. 28px tall with 10px side padding at the default interface size.
+                    "flex h-7.5 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-[var(--control-radius)] px-2.75 text-[0.8333rem] text-foreground/90 outline-none transition-colors duration-150 hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-60 data-popup-open:bg-accent data-popup-open:text-foreground motion-reduce:transition-none",
                     props.compact ? "max-w-40" : "max-w-64",
                   )}
                 />
@@ -241,7 +236,6 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               {props.traits.label}
             </span>
           ) : null}
-          <CaretDownIcon aria-hidden="true" weight="bold" className="size-3 shrink-0 opacity-60" />
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
