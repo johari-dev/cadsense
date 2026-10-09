@@ -117,8 +117,33 @@ describe("backstopItem", () => {
       ],
       CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
     );
+    // Empty names pass the snapshot schema; next to a name that is only a tag, or each other,
+    // their targets read the same and get their raw names back.
+    const duplicate = (
+      a: ReturnType<typeof part>,
+      b: ReturnType<typeof part>,
+    ): CadCheckFinding => ({
+      check: "mesh-interference",
+      occurrences: [a, b],
+      intersectionVolume: 1e-4,
+      intersectionFraction: 1,
+      withinSubassembly: false,
+      reading: "r",
+    });
+    const blanks = draftCadComments(
+      [
+        duplicate(part(10, ""), part(11, "<1>")),
+        duplicate(part(12, ""), part(13, "")),
+        duplicate(part(14, ""), part(15, "unnamed part <1>")),
+      ],
+      CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+    );
     expect(drafts).toHaveLength(4);
-    for (const draft of drafts) expect(isPublication(backstopItem(draft)), draft.title).toBe(true);
+    expect(blanks).toHaveLength(3);
+    for (const draft of [...drafts, ...blanks]) {
+      expect(isPublication(backstopItem(draft)), draft.title).toBe(true);
+      expect(draft.body, "no article without a name").not.toMatch(/\bthe (?=[ ,.)]|and\b)/i);
+    }
   });
 
   it("keeps the note and the next step when a draft names too many parts to fit", () => {

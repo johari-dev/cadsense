@@ -1534,7 +1534,7 @@ export const draftCadComments = (
           ...draft,
           targets: draft.targets.map((target) =>
             target.kind === "part" && labels.filter((label) => label === target.label).length > 1
-              ? { ...target, label: (names.get(target.occurrenceId) ?? target.label).slice(0, 120) }
+              ? { ...target, label: (names.get(target.occurrenceId) || target.label).slice(0, 120) }
               : target,
           ),
         };

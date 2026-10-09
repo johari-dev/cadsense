@@ -333,7 +333,7 @@ export const distinctPhrases = (names: readonly string[]) =>
     names.some(
       (other) => partName(other) !== partName(name) && partLabel(other) === partLabel(name),
     )
-      ? withArticle(partName(name).replaceAll("_", " ").trim().slice(0, 120))
+      ? withArticle(partName(name).replaceAll("_", " ").trim().slice(0, 120) || partLabel(name))
       : partPhrase(name),
   );
 /**
