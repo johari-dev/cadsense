@@ -301,11 +301,12 @@ export const settleDrafts = Effect.fn("CadCheckBackstop.settleDrafts")(function*
  */
 export const followUpMessage = (drafts: readonly CadCheckDraft[]) =>
   [
-    `Your review is not finished. Cadsense's checks proved ${drafts.length === 1 ? "a defect that still has" : `${drafts.length} defects that still have`} no CAD comment:`,
+    `Before you finish: Cadsense's checks proved ${drafts.length === 1 ? "a defect that has" : `${drafts.length} defects that have`} no CAD comment and that you have not declined:`,
     ...drafts.map((draft) => `- ${draft.title} (cad_checks draft ${draft.publicationKey})`),
-    "Pin each one now with cad_comments_publish, using publishDrafts or your own wording.",
+    "Publish each one with cad_comments_publish, using publishDrafts or your own wording, or decline it in the same call.",
     CAD_DRAFT_DECLINE_RULE,
-    "Then tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.",
+    "Drafts you neither publish nor decline are published as drafted when this turn ends.",
+    "If you added comments, tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.",
   ].join("\n");
 
 /** The note other CAD tool results carry while drafts are uncovered and undeclined. */
