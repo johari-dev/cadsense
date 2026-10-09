@@ -1367,7 +1367,8 @@ export const draftCadComments = (
     names.set(occurrence.occurrenceId, occurrence.name);
     return {
       kind: "part" as const,
-      label: occurrence.name.replace(/\s*<\d+>$/, "").slice(0, 120),
+      // A target label keeps the full name; a name that is only an instance tag would leave none.
+      label: (partName(occurrence.name) || partLabel(occurrence.name)).slice(0, 120),
       occurrenceId: occurrence.occurrenceId,
       preciseLocationLimitation: WHOLE_PART,
     };

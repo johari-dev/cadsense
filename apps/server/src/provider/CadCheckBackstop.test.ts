@@ -1,5 +1,12 @@
-import { CadSnapshotId, type CadCheckDraft, type CadChecksResult } from "@cadsense/contracts";
+import {
+  CadCommentPublication,
+  CadSnapshotId,
+  type CadCheckDraft,
+  type CadCheckFinding,
+  type CadChecksResult,
+} from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import { draftCadComments } from "../cad/CadChecks.ts";
@@ -81,7 +88,39 @@ const checksResult = (snapshotId: string, drafts?: CadCheckDraft[]): CadChecksRe
   },
 });
 
+const isPublication = Schema.is(CadCommentPublication);
+
 describe("backstopItem", () => {
+  it("publishes every kind of draft as a valid comment, even for a part named only <1>", () => {
+    const part = (n: number, name: string) => ({ occurrenceId: id(n.toString(16)), name });
+    const drivetrain = (
+      kind: Extract<CadCheckFinding, { check: "drivetrain" }>["kind"],
+      occurrences: ReturnType<typeof part>[],
+    ): CadCheckFinding => ({ check: "drivetrain", kind, problem: true, summary: "s", occurrences });
+    const unnamed = part(9, "<1>");
+    const drafts = draftCadComments(
+      [
+        drivetrain("collision", [part(1, "40t Spur Gear <1>"), unnamed]),
+        drivetrain("shaft-support", [
+          part(2, "1.75 in. Hex Shaft <1>"),
+          part(3, "40t Spur Gear <1>"),
+        ]),
+        drivetrain("stacked-shafts", [part(4, "13 in. Hex Shaft <1>"), part(5, "Rounded Hex <1>")]),
+        {
+          check: "mesh-interference",
+          occurrences: [part(6, "Part 17 <2>"), part(7, "<2>")],
+          intersectionVolume: 1e-4,
+          intersectionFraction: 1,
+          withinSubassembly: false,
+          reading: "r",
+        },
+      ],
+      CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+    );
+    expect(drafts).toHaveLength(4);
+    for (const draft of drafts) expect(isPublication(backstopItem(draft)), draft.title).toBe(true);
+  });
+
   it("keeps the note and the next step when a draft names too many parts to fit", () => {
     const shafts = Array.from({ length: 60 }, (_, i) => ({
       occurrenceId: id(i.toString(16).padStart(2, "0")),
