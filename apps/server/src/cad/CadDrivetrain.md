@@ -95,7 +95,7 @@ for problems but never for `loop-length`, whose fix depends on parts it cannot s
 - A roller left out while others are driven, such as an idler, is reported as a proven problem.
 - Chain slack, or a loop around an idler or tensioner, is reported as a proven length problem.
 - A loop around three wheels links only two of them, so a motor on the third reaches nothing.
-- A problem's draft wording uses raw CAD names, starts lowercase, calls two gears with one tooth count "the 40T gear and the 40T gear", drops the spacing, needed spacing, ratio, or belt length the student acts on, or has no next step; or the agent's `summary` loses the exact names it uses to find parts.
+- A problem's draft wording uses raw CAD names, starts lowercase, calls two gears with one tooth count "the 40T gear and the 40T gear", drops the spacing, needed spacing, ratio, or belt length the student acts on, states only one error for gears set at the wrong spacing whose faces also miss, or has no next step; or the agent's `summary` loses the exact names it uses to find parts.
 
 Collisions on stored models: the transfer reports exactly its three (the 40T gear into the 1x1
 tube, both jackshafts into the SPARK Flex). The arm reports the 16.5 in MAXSpline running into two

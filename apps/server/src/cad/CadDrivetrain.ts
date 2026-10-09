@@ -319,11 +319,23 @@ export const partLabel = (name: string): string => {
     .trim();
   return (plain.replace(/\s*\([^()]*\)$/, "") || plain).slice(0, 120);
 };
+/** A part's name without its instance tag: every occurrence of one part has the same one. */
+export const partName = (name: string) => name.replace(/\s*<\d+>$/, "");
+const withArticle = (label: string) => (/^part\s*\d+$/i.test(label) ? label : `the ${label}`);
 /** A part in a sentence: "the 40T gear", but "Part 20" for a part that kept its Onshape name. */
-export const partPhrase = (name: string) => {
-  const label = partLabel(name);
-  return /^part\s*\d+$/i.test(label) ? label : `the ${label}`;
-};
+export const partPhrase = (name: string) => withArticle(partLabel(name));
+/**
+ * Parts named in one sentence. Two different parts whose labels match keep the specs their names
+ * add ("the Side Plate (0.25 in)" and "the Side Plate (0.50 in)"), so the student can tell them apart.
+ */
+export const distinctPhrases = (names: readonly string[]) =>
+  names.map((name) =>
+    names.some(
+      (other) => partName(other) !== partName(name) && partLabel(other) === partLabel(name),
+    )
+      ? withArticle(partName(name).replaceAll("_", " ").trim().slice(0, 120))
+      : partPhrase(name),
+  );
 /** "a", "a and b", "a, b, and c". */
 export const joinAnd = (items: readonly string[]) =>
   items.length <= 2 ? items.join(" and ") : `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
@@ -687,24 +699,32 @@ export const analyzeCadDrivetrain = (
         partLabel(a.name) === partLabel(b.name)
           ? `the two ${partLabel(a.name)}s`
           : `${partPhrase(a.name)} and ${partPhrase(b.name)}`;
+      const miss = `their faces miss each other by ${inches(faceGap)} along the shaft`;
+      const off = `${inches(Math.abs(error))} too ${error < 0 ? "close and will bind" : "far apart and will skip"}`;
+      const center = `move one shaft so the centers are ${inches(ideal)} apart`;
       findings.push({
         kind: "gear-mesh",
         problem: !spacing || faceGap > 0,
+        // A pair can be off in both directions at once; each error gets its own fix.
         ...(faceGap > 0
           ? {
-              comment: `${upperFirst(both)} are at mesh distance, but their faces miss each other by ${inches(faceGap)} along the shaft, so they don't mesh. Move one gear along its shaft so the faces line up.`,
+              comment: spacing
+                ? `${upperFirst(both)} are at mesh distance, but ${miss}, so they don't mesh. Move one gear along its shaft so the faces line up.`
+                : `${upperFirst(both)} are ${inches(actual)} apart, but these ${pitch} DP gears need ${inches(ideal)}, and ${miss}, so they don't mesh. Move one gear along its shaft so the faces line up, and ${center}.`,
             }
           : spacing
             ? {}
             : {
-                comment: `${upperFirst(both)} are ${inches(actual)} apart, but these ${pitch} DP gears need ${inches(ideal)}. They are ${inches(Math.abs(error))} too ${error < 0 ? "close and will bind" : "far apart and will skip"}. The stage is ${stage}. Move one shaft so the centers are ${inches(ideal)} apart.`,
+                comment: `${upperFirst(both)} are ${inches(actual)} apart, but these ${pitch} DP gears need ${inches(ideal)}. They are ${off}. The stage is ${stage}. ${upperFirst(center)}.`,
               }),
         summary:
           faceGap > 0
-            ? `${pair} are at mesh distance but their faces miss each other by ${inches(faceGap)} along the shaft, so they do not mesh.`
+            ? spacing
+              ? `${pair} are at mesh distance but ${miss}, so they do not mesh.`
+              : `${pair} are ${inches(actual)} apart, where ${pitch} DP needs ${inches(ideal)}, and ${miss}, so they do not mesh.`
             : spacing
               ? `${pair} mesh at ${inches(actual)} center distance (${inches(ideal)} exact for ${pitch} DP), a ${stage} stage.`
-              : `${pair} are ${inches(actual)} apart; ${pitch} DP needs ${inches(ideal)}. They are ${inches(Math.abs(error))} too ${error < 0 ? "close and will bind" : "far apart and will skip"}. The stage would be ${stage}.`,
+              : `${pair} are ${inches(actual)} apart; ${pitch} DP needs ${inches(ideal)}. They are ${off}. The stage would be ${stage}.`,
         occurrences: [ref(a), ref(b)],
       });
       if (faceGap <= 0) connect(a, b, "gears");

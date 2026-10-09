@@ -652,6 +652,18 @@ describe("draft wording", () => {
     );
   });
 
+  it("states both errors when gears are set at the wrong spacing and their faces miss", () => {
+    const s = scene();
+    s.add('20t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(20), along("y", [0, 0, 0]));
+    s.add('40t Steel Spur Gear (20 DP, 1/2" Hex Bore) <1>', gear(40), along("y", [1.3, 0.55, 0]));
+    const [finding] = ofKind(s.analyze(), "gear-mesh");
+    expect(finding?.summary).toContain("1.300 in apart");
+    expect(finding?.summary).toContain("miss each other by 0.050 in");
+    expect(readable(finding)).toBe(
+      "The 20T gear and the 40T gear are 1.300 in apart, but these 20 DP gears need 1.500 in, and their faces miss each other by 0.050 in along the shaft, so they don't mesh. Move one gear along its shaft so the faces line up, and move one shaft so the centers are 1.500 in apart.",
+    );
+  });
+
   it("words a belt with no pulleys and a belt with one bare end", () => {
     // 70T HTD 5 mm on two 24T pulleys needs 115.1 mm centers.
     const centers = 115.1 / 1000 / INCH;

@@ -1226,6 +1226,46 @@ describe("draftCadComments", () => {
     );
   });
 
+  it("calls parts copies only when they are one part, and counts places, not pairs", () => {
+    const overlap = (a: ReturnType<typeof part>, b: ReturnType<typeof part>): CadCheckFinding => ({
+      check: "mesh-interference",
+      occurrences: [a, b],
+      intersectionVolume: 1e-4,
+      intersectionFraction: 1,
+      withinSubassembly: false,
+      reading: readOverlap(a.name, b.name, 1e-4, 1, false).reading,
+    });
+    // Two different plates whose names differ only in their specs are not copies of one part.
+    const [thin, thick] = [
+      part(110, "Side Plate (0.25 in) <1>"),
+      part(111, "Side Plate (0.50 in) <1>"),
+    ];
+    assert.deepEqual(
+      draftCadComments([overlap(thin, thick)], snapshotId).map((draft) => draft.body),
+      [
+        "The Side Plate (0.25 in) and the Side Plate (0.50 in) sit in the same place, one almost entirely inside the other. One is likely a duplicate or stale copy, or a part in the wrong place. Remove or move one.",
+      ],
+    );
+    const [hexA, hexB] = [part(112, "Hex Shaft (6 in) <1>"), part(113, "Hex Shaft (8 in) <1>")];
+    assert.equal(
+      draftCadComments([drivetrain("stacked-shafts", true, [hexA, hexB])], snapshotId)[0]!.body,
+      "The Hex Shaft (6 in) and the Hex Shaft (8 in) sit on the same axis, one modeled inside the other. Keep the shaft the parts are designed for and remove the other.",
+    );
+    // Three copies of one shaft in one spot are one place, though they make three pairs.
+    const copies = [1, 2, 3].map((n) => part(120 + n, `13 in. Hex Shaft <${n}>`));
+    assert.equal(
+      draftCadComments(
+        [
+          drivetrain("stacked-shafts", true, [copies[0]!, copies[1]!]),
+          drivetrain("stacked-shafts", true, [copies[0]!, copies[2]!]),
+          drivetrain("stacked-shafts", true, [copies[1]!, copies[2]!]),
+        ],
+        snapshotId,
+      )[0]!.body,
+      "3 copies of the 13 in. Hex Shaft sit on the same axis, modeled inside one another. Keep the shaft the parts are designed for and remove the others.",
+    );
+  });
+
   it("publishes a drivetrain finding's own student wording, not the agent's summary", () => {
     const finding = drivetrain("gear-mesh", true, [gear, shaftA]);
     const comment =

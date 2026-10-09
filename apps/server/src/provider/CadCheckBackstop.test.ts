@@ -2,8 +2,11 @@ import { CadSnapshotId, type CadCheckDraft, type CadChecksResult } from "@cadsen
 import * as Effect from "effect/Effect";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
+import { draftCadComments } from "../cad/CadChecks.ts";
 import type { CadAgentTools } from "../cad/CadViewing.ts";
 import {
+  backstopItem,
+  BACKSTOP_NOTE,
   type CadDraftLedger,
   makeCadDraftLedger,
   recordCadChecks,
@@ -76,6 +79,29 @@ const checksResult = (snapshotId: string, drafts?: CadCheckDraft[]): CadChecksRe
     pairBudget: 0,
     budgetExhausted: false,
   },
+});
+
+describe("backstopItem", () => {
+  it("keeps the note and the next step when a draft names too many parts to fit", () => {
+    const shafts = Array.from({ length: 60 }, (_, i) => ({
+      occurrenceId: id(i.toString(16).padStart(2, "0")),
+      name: `${"Very Long Jackshaft Name ".repeat(4)}${i} <1>`,
+    }));
+    const [longest] = draftCadComments(
+      shafts.map((shaft) => ({
+        check: "drivetrain" as const,
+        kind: "shaft-support" as const,
+        problem: true,
+        summary: "No recognized bearing.",
+        occurrences: [shaft],
+      })),
+      CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+    );
+    const body = backstopItem(longest!).body;
+    expect(body.length).toBeLessThanOrEqual(4000);
+    expect(body).toContain("Add a bearing where each shaft passes through a plate.");
+    expect(body.endsWith(BACKSTOP_NOTE)).toBe(true);
+  });
 });
 
 describe("recordCadChecks", () => {

@@ -41,7 +41,8 @@ export const backstopItem = (draft: CadCheckDraft) => {
   return {
     ...item,
     targets: item.targets.filter((target) => target.kind === "part"),
-    body: `${item.body} ${BACKSTOP_NOTE}`.slice(0, 4000),
+    // Drafts leave room for the note; a body that does not still keeps the whole note.
+    body: `${item.body.slice(0, 4000 - BACKSTOP_NOTE.length - 1)} ${BACKSTOP_NOTE}`,
   };
 };
 

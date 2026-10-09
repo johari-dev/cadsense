@@ -21,11 +21,14 @@ import {
   type CadDrivetrainPart,
   type CadOverlap,
   countedList,
+  distinctPhrases,
   FASTENER,
   fitCadAxis,
   GAME_PIECE,
+  joinAnd,
   partLabel,
   partList,
+  partName,
   partPhrase,
   recognizeDrivetrainParts,
   rotatingCollisions,
@@ -1224,9 +1227,14 @@ const draftKey = (kind: string, snapshotId: string, targets: CadCheckDraft["targ
   return `check-${kind}-${digest.slice(0, 6)}`;
 };
 const WHOLE_PART = "The problem is where this part sits, not one spot on it.";
+/**
+ * Draft bodies stop short of the 4000 characters a comment allows, so the note the backstop
+ * appends (`BACKSTOP_NOTE`) always fits.
+ */
+const DRAFT_BODY_LIMIT = 3950;
 /** A draft body: the problem, trimmed if it must be, then its whole next step. */
 const withStep = (problem: string, step: string) =>
-  `${problem.slice(0, 4000 - step.length - 1)} ${step}`;
+  `${problem.slice(0, DRAFT_BODY_LIMIT - step.length - 1)} ${step}`;
 /**
  * The body of a merged draft, worded once for all its findings in the names a student would use.
  * A merged kind's findings only name parts, so the wording needs nothing else from them.
@@ -1254,23 +1262,38 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
           );
     }
     case "stacked-shafts": {
-      // One sentence per pair of shaft names, counting the places it repeats (each roller).
-      const places = new Map<string, number>();
+      // Shafts modeled inside one another are one place: three copies of one shaft make three
+      // pairs but one place. Places that read the same are counted (one on each roller).
+      const parent = new Map<string, string>();
+      const find = (id: string): string => {
+        const up = parent.get(id) ?? id;
+        return up === id ? id : find(up);
+      };
+      const names = new Map<string, string>();
       for (const { occurrences } of findings) {
-        const [a, b] = occurrences.map((part) => part.name);
-        const sentence =
-          partLabel(a!) === partLabel(b!)
-            ? `Two copies of ${partPhrase(a!)} sit on the same axis, one modeled inside the other`
-            : `${upperFirst(partPhrase(a!))} and ${partPhrase(b!)} sit on the same axis, one modeled inside the other`;
+        const [a, b] = occurrences;
+        names.set(a!.occurrenceId, a!.name).set(b!.occurrenceId, b!.name);
+        const [rootA, rootB] = [find(a!.occurrenceId), find(b!.occurrenceId)];
+        if (rootA !== rootB) parent.set(rootA, rootB);
+      }
+      const groups = new Map<string, string[]>();
+      for (const [id, name] of names) groups.set(find(id), [...(groups.get(find(id)) ?? []), name]);
+      const places = new Map<string, number>();
+      for (const group of groups.values()) {
+        const inside =
+          group.length === 2 ? "one modeled inside the other" : "modeled inside one another";
+        const sentence = group.every((name) => partName(name) === partName(group[0]!))
+          ? `${group.length === 2 ? "Two" : group.length} copies of ${partPhrase(group[0]!)} sit on the same axis, ${inside}`
+          : `${upperFirst(joinAnd(distinctPhrases(group)))} sit on the same axis, ${inside}`;
         places.set(sentence, (places.get(sentence) ?? 0) + 1);
       }
+      const most = Math.max(...[...groups.values()].map((group) => group.length));
+      const step = `keep the shaft the parts are designed for and remove the ${most > 2 ? "others" : "other"}.`;
       return withStep(
         [...places]
           .map(([sentence, count]) => `${sentence}${count > 1 ? `, in ${count} places` : ""}.`)
           .join(" "),
-        several
-          ? "In each place, keep the shaft the parts are designed for and remove the other."
-          : "Keep the shaft the parts are designed for and remove the other.",
+        groups.size > 1 ? `In each place, ${step}` : upperFirst(step),
       );
     }
     case "collision": {
@@ -1284,17 +1307,21 @@ const mergedBody = (kind: MergedKind, findings: readonly DrivetrainFinding[]) =>
   }
 };
 type DraftPart = { readonly occurrenceId: string; readonly name: string };
-/** The body of a duplicate draft: a pair of parts in one place, or a stack of copies of one part. */
+/**
+ * The body of a duplicate draft: a pair of parts in one place, or a stack of copies of one part.
+ * Only occurrences of one part are called copies; the overlap alone proves where they sit.
+ */
 const duplicateBody = (parts: readonly DraftPart[]) => {
-  const [a, b] = parts.map((part) => part.name);
+  const names = parts.map((part) => part.name);
   if (parts.length > 2)
-    return `${parts.length} copies of ${partPhrase(a!)} sit in the same place and overlap almost completely, so all but one are likely stale copies. Keep one and remove the others.`;
-  return partLabel(a!) === partLabel(b!)
-    ? `Two copies of ${partPhrase(a!)} sit in the same place, one almost entirely inside the other, so one is likely a stale copy. Keep one and remove the other.`
-    : withStep(
-        `${upperFirst(partPhrase(a!))} and ${partPhrase(b!)} sit in the same place, one almost entirely inside the other. One is likely a duplicate or stale copy, or a part in the wrong place.`,
-        "Remove or move one.",
-      );
+    return `${parts.length} copies of ${partPhrase(names[0]!)} sit in the same place and overlap almost completely, so all but one are likely stale copies. Keep one and remove the others.`;
+  if (partName(names[0]!) === partName(names[1]!))
+    return `Two copies of ${partPhrase(names[0]!)} sit in the same place, one almost entirely inside the other, so one is likely a stale copy. Keep one and remove the other.`;
+  const [a, b] = distinctPhrases(names);
+  return withStep(
+    `${upperFirst(a!)} and ${b!} sit in the same place, one almost entirely inside the other. One is likely a duplicate or stale copy, or a part in the wrong place.`,
+    "Remove or move one.",
+  );
 };
 
 /**
@@ -1378,7 +1405,7 @@ export const draftCadComments = (
       publicationKey: draftKey(finding.kind, snapshotId, targets),
       inspectedSnapshotId: snapshotId,
       ...DRAFT_LABELS[finding.kind],
-      body: (comments.get(finding) ?? finding.summary).slice(0, 4000),
+      body: (comments.get(finding) ?? finding.summary).slice(0, DRAFT_BODY_LIMIT),
       targets,
       ...(placement ? { placements: [placement] } : {}),
     };
@@ -1429,7 +1456,7 @@ export const draftCadComments = (
       .add(`${a.occurrenceId} ${b.occurrenceId}`)
       .add(`${b.occurrenceId} ${a.occurrenceId}`);
   }
-  const baseName = (part: DraftPart) => part.name.replace(/\s*<\d+>$/, "");
+  const baseName = (part: DraftPart) => partName(part.name);
   const groupOf = new Map<string, string>();
   const root = (id: string): string => {
     const up = groupOf.get(id) ?? id;
