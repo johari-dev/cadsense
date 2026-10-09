@@ -2,6 +2,7 @@ import {
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
   type ModelSelection,
   ProjectId,
   ProviderInstanceId,
@@ -224,7 +225,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
           title: "New thread",
           modelSelection: nextProjectDefaultModelSelection,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
+          runtimeMode: DEFAULT_RUNTIME_MODE,
           createdAt,
         });
         bootstrapProjectId = nextProjectId;

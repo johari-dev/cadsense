@@ -155,7 +155,9 @@ export const RuntimeMode = Schema.Literals([
   "full-access",
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
-export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto-accept-edits";
+// Edits inside the thread's workspace run unprompted; anything else (commands, writes
+// outside the workspace) goes to the provider's own auto reviewer instead of the user.
+export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";

@@ -830,7 +830,12 @@ function ChatViewContent(props: ChatViewProps) {
   // local shadow is already empty and the banner is driven purely by
   // session.lastError. Bump a tick so the banner hides immediately.
   const [, setThreadErrorBannerDismissTick] = useState(0);
-  const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const showPermissionSettings = useClientSettings((settings) => settings.showPermissionSettings);
+  // Without visible access controls every turn runs in the app default. Persisting this on
+  // the next turn also moves threads created under an older default onto it.
+  const runtimeMode = showPermissionSettings
+    ? (composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE)
+    : DEFAULT_RUNTIME_MODE;
   // The app always dispatches in the normal interaction mode. Persisting this
   // on the next turn also releases threads stored in the removed plan mode.
   const interactionMode = DEFAULT_INTERACTION_MODE;

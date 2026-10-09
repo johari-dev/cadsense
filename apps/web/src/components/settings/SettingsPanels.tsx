@@ -428,7 +428,7 @@ export function AppearanceSettingsPanel() {
       <SettingsSection title="Visibility">
         <SettingsRow
           {...searchableSetting("show-permission-settings")}
-          description="Show access controls in the composer. New threads automatically accept edits."
+          description="Show access controls in the composer. When hidden, agents edit the project freely and an automatic reviewer checks everything else."
           control={
             <Switch
               checked={settings.showPermissionSettings}
