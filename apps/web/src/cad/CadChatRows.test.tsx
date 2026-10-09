@@ -67,7 +67,7 @@ it("opens a published comment at its location in the CAD panel", () => {
   });
   expect(useRightPanelStore.getState().byThreadKey[scopedThreadKey(threadRef)]).toMatchObject({
     isOpen: true,
-    activeSurfaceId: "cad",
+    section: "cad",
   });
 });
 

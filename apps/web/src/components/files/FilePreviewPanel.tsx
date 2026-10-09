@@ -4,7 +4,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
+import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle, X } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -16,6 +16,7 @@ import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/path-links";
+import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -48,6 +49,8 @@ interface FilePreviewPanelProps {
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
+  /** Leaves the open file and goes back to the file tree. */
+  onCloseFile: () => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
@@ -438,6 +441,22 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
             <TooltipPopup>
               {explorerOpen ? "Hide file explorer" : "Show file explorer"}
             </TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label="Close file"
+                  className="text-muted-foreground hover:text-foreground"
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={props.onCloseFile}
+                />
+              }
+            >
+              <X className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup>Close file</TooltipPopup>
           </Tooltip>
         </div>
       ) : null}
