@@ -450,6 +450,58 @@ each), one Sol run (9 comments, 4 markers), and one Opus run (11 comments, 8 mar
 missing link named as the 1.75 in and 2.39 in shafts 2.30 in apart). None needed a follow-up or
 published a backstop comment.
 
+## Recorded check: October 9, 2026, paired against main
+
+The question was whether the branch costs the strong models anything. Each model ran the
+transfer prompt three times through the app (`cad-app-review-e2e.ts`) on `origin/main` and on the
+branch, with main and branch runs started side by side so they shared the machine's load. Blind
+graders scored every run with the same eight items plus a writing check added for this round:
+how many comments read like tool output, a 1 to 5 score for how the comments read to a student,
+and every finding outside the answer key, judged credible or not.
+
+The first paired round found a regression the eight items had missed. GPT-6-Sol published most
+cad_checks drafts word for word, and the drafts reused the agent-facing summaries: raw CAD names
+with instance tags, a lowercase first word, one sentence repeated for each roller. Old branch
+runs graded writing 1 of 5 against 3.67 on main. Sol also stopped looking once the drafts were
+handled. Drafts are now written for the student (see "Drafts, reminders, and the backstop" in
+[CadChecks.md](CadChecks.md)), and step 2 of the review procedure asks the agent to look for what
+the checks cannot prove. The final code, graded blind:
+
+| Arm                | Runs | Score | Writing | Comments | Credible findings outside the key | Point markers | Median time |
+| ------------------ | ---- | ----- | ------- | -------- | --------------------------------- | ------------- | ----------- |
+| Opus 5.5, main     | 3    | 7.50  | 4.67    | 9.0      | 2.3                               | 6.0           | 466 s       |
+| Opus 5.5, branch   | 3    | 8.00  | 5.00    | 10.7     | 3.7                               | 6.3           | 343 s       |
+| GPT-6-Sol, main    | 3    | 2.83  | 2.67    | 3.7      | 1.0                               | 1.0           | 191 s       |
+| GPT-6-Sol, branch  | 3    | 8.00  | 3.33    | 10.3     | 1.3                               | 4.3           | 171 s       |
+| GPT-6-Luna, branch | 3    | 7.67  | 3.67    | 8.3      | 0                                 | 3.0           | 57 s        |
+
+No branch run contradicted the key; one Sol main run did. One Luna run needed the follow-up; no
+run published a backstop comment. Across both grading rounds Sol's writing averaged 3.33 on the
+branch and 3.17 on main. The comments still flagged on the branch were draft target labels with
+raw CAD names, and volumes Sol quotes in its own comments (on main too). Target labels now use
+the body's names and number copies of one part ("Deadaxle Tube 9.75 in (2 of 3)"); one more run
+each on that code published 13 (Sol), 9 (Luna), and 10 (Opus) comments, every draft accepted
+with its new labels, with no follow-up or backstop.
+
+Adversarial review in this round (Opus 5.5 throughout, GPT-6.1-Sol until its quota ran out) also
+found that a user who asked only a question, or asked to skip part of the model, had no decline
+reason that fit, so the drafts were published against their wishes or left for the backstop.
+Both are decline reasons now, and the excuses Sol and Luna once used on this prompt (the plates
+will be consolidated, the motor mount is unsolved, the design is a work in progress) are named as
+never enough. Checked in the app on the final rule:
+
+| Prompt                                                  | Model | Branch                                                      | Main              |
+| ------------------------------------------------------- | ----- | ----------------------------------------------------------- | ----------------- |
+| "What's the gear ratio from the Vortex to the rollers?" | Opus  | Correct answer, every draft declined, nothing published (3) | Nothing published |
+|                                                         | Sol   | Correct answer, every draft declined, nothing published     | Nothing published |
+| "Check the roller spacing ... skip the drivetrain"      | Opus  | 4 roller-area comments, drivetrain drafts declined (3)      | 5 comments        |
+|                                                         | Sol   | 3 roller-area comments, drivetrain drafts declined          | 2 comments        |
+| The transfer prompt ("It's still WIP ...")              | Sol   | No declines in 3 runs                                       |                   |
+|                                                         | Luna  | No declines in 3 runs                                       |                   |
+
+Two machine restarts and a Codex usage limit interrupted the runs; every interrupted run was
+set aside and rerun rather than graded.
+
 ## Matched evaluation before the review-process update
 
 These results compare baseline `9479482ee` with `ef30dc417`, before the added
