@@ -310,6 +310,20 @@ export interface CadDrivetrainFinding {
 }
 
 /**
+ * At most `max` UTF-16 units of `text`, never half of an emoji, and well formed: a lone surrogate
+ * would make the follow-up's turn/start JSON unparsable for Codex.
+ */
+export const clip = (text: string, max: number) => {
+  const cut = text.slice(0, max);
+  return (/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut).toWellFormed();
+};
+/** A name without its instance tag, underscores, or invisible characters, trimmed. */
+const visible = (name: string) =>
+  name
+    .replace(/\s*<\d+>$/, "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .trim();
+/**
  * A part as a draft names it for the student: "40T gear" or "84T belt" for a part with teeth,
  * otherwise its name without the instance tag, trailing specs in parentheses, or underscores
  * ("13 in. Hex Shaft"). At most 120 characters, so a long name cannot crowd out the next step.
@@ -319,10 +333,7 @@ export const partLabel = (name: string): string => {
   if (role?.kind === "gear" || role?.kind === "pulley" || role?.kind === "sprocket")
     return `${role.teeth}T ${role.kind}`;
   if (role?.kind === "loop" && role.wraps === "pulley") return `${role.teeth}T belt`;
-  const plain = name
-    .replace(/\s*<\d+>$/, "")
-    .replaceAll("_", " ")
-    .trim();
+  const plain = visible(name).replaceAll("_", " ").trim();
   const short = plain.replace(/\s*\([^()]*\)$/, "") || plain;
   // Motors and controllers go by the name a team uses: "NEO Vortex", "SPARK Flex".
   const spoken =
@@ -331,7 +342,7 @@ export const partLabel = (name: string): string => {
       : role?.kind === "controller"
         ? short.replace(/\s+(brushless\s+)?(motor\s+)?controller$/i, "")
         : short;
-  return (spoken || short || "unnamed part").slice(0, 120);
+  return clip(spoken || short || "unnamed part", 120);
 };
 /** A part's name without its instance tag: every occurrence of one part has the same one. */
 export const partName = (name: string) => name.replace(/\s*<\d+>$/, "");
@@ -339,7 +350,7 @@ export const partName = (name: string) => name.replace(/\s*<\d+>$/, "");
  * A part's full name for a target label or a marker's description: no instance tag, at most 120
  * characters, and never blank (an empty or whitespace name falls back to its label).
  */
-export const fullName = (name: string) => partName(name).trim().slice(0, 120) || partLabel(name);
+export const fullName = (name: string) => clip(visible(name), 120) || partLabel(name);
 const withArticle = (label: string) => (/^part\s*\d+$/i.test(label) ? label : `the ${label}`);
 /** A part in a sentence: "the 40T gear", but "Part 20" for a part that kept its Onshape name. */
 export const partPhrase = (name: string) => withArticle(partLabel(name));
@@ -352,7 +363,7 @@ export const distinctPhrases = (names: readonly string[]) =>
     names.some(
       (other) => partName(other) !== partName(name) && partLabel(other) === partLabel(name),
     )
-      ? withArticle(partName(name).replaceAll("_", " ").trim().slice(0, 120) || partLabel(name))
+      ? withArticle(clip(visible(name).replaceAll("_", " ").trim(), 120) || partLabel(name))
       : partPhrase(name),
   );
 /**

@@ -6,6 +6,7 @@ import {
   cadDrivetrainRole,
   rotatingCollisions,
   fitCadAxis,
+  fullName,
   partLabel,
   partList,
   partPhrase,
@@ -616,6 +617,12 @@ describe("draft wording", () => {
     expect(partLabel("Kraken X60 <1>")).toBe("Kraken X60");
     expect(partPhrase("<1>")).toBe("the unnamed part");
     expect(partLabel(`${"Bracket ".repeat(40)}<1>`).length).toBeLessThanOrEqual(120);
+    // A cut never splits an emoji, and invisible characters do not make a name.
+    const emoji = `${"x".repeat(119)}\u{1F534} Red <1>`;
+    for (const text of [partLabel(emoji), fullName(emoji), partPhrase(emoji)])
+      expect(text.isWellFormed(), text).toBe(true);
+    expect(partLabel("\u200B\u200B <1>")).toBe("unnamed part");
+    expect(fullName("\u200B <1>")).toBe("unnamed part");
     // An Onshape default name takes no article.
     expect(partPhrase("Part 20 <3>")).toBe("Part 20");
     expect(partPhrase("13 in. Hex Shaft <1>")).toBe("the 13 in. Hex Shaft");

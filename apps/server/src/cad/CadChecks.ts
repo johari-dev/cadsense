@@ -21,6 +21,7 @@ import {
   type CadDrivetrainComment,
   type CadDrivetrainPart,
   type CadOverlap,
+  clip,
   countedList,
   distinctPhrases,
   FASTENER,
@@ -1234,7 +1235,7 @@ const WHOLE_PART = "The problem is where this part sits, not one spot on it.";
 const DRAFT_BODY_LIMIT = 3950;
 /** A draft body: the problem, trimmed if it must be, then its whole next step. */
 const withStep = (problem: string, step: string) =>
-  `${problem.slice(0, DRAFT_BODY_LIMIT - step.length - 1)} ${step}`;
+  `${clip(problem, DRAFT_BODY_LIMIT - step.length - 1)} ${step}`;
 /**
  * The body of a merged draft, worded once for all its findings in the names a student would use.
  * A merged kind's findings only name parts, so the wording needs nothing else from them. Lists are
@@ -1432,7 +1433,7 @@ export const draftCadComments = (
       inspectedSnapshotId: snapshotId,
       ...DRAFT_LABELS[finding.kind],
       ...(comments.get(finding)?.title ? { title: comments.get(finding)!.title! } : {}),
-      body: (comments.get(finding)?.body ?? finding.summary).slice(0, DRAFT_BODY_LIMIT),
+      body: clip(comments.get(finding)?.body ?? finding.summary, DRAFT_BODY_LIMIT),
       targets,
       ...(placement ? { placements: [placement] } : {}),
     };
@@ -1450,9 +1451,12 @@ export const draftCadComments = (
     const other = group[0]!.occurrences[1]?.name;
     const title =
       kind === "collision" && other
-        ? upperFirst(
-            `${countedList(subjects)} ${subjects.length > 1 ? "run" : "runs"} into ${partLabel(other)}`,
-          ).slice(0, 160)
+        ? clip(
+            upperFirst(
+              `${countedList(subjects)} ${subjects.length > 1 ? "run" : "runs"} into ${partLabel(other)}`,
+            ),
+            160,
+          )
         : draft.title;
     drafts.push({
       ...draft,
@@ -1539,7 +1543,7 @@ export const draftCadComments = (
             target.kind === "part" && labels.filter((label) => label === target.label).length > 1
               ? {
                   ...target,
-                  label: (names.get(target.occurrenceId)?.trim() || target.label).slice(0, 120),
+                  label: clip(names.get(target.occurrenceId)?.trim() || target.label, 120),
                 }
               : target,
           ),

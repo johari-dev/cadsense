@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { CAD_DRAFT_DECLINE_RULE } from "../cad/CadChecks.ts";
+import { clip } from "../cad/CadDrivetrain.ts";
 import type { CadAgentTools } from "../cad/CadViewing.ts";
 import { type CadPlacementCache, makeCadPlacementCache } from "./CadCheckPlacement.ts";
 
@@ -42,7 +43,7 @@ export const backstopItem = (draft: CadCheckDraft) => {
     ...item,
     targets: item.targets.filter((target) => target.kind === "part"),
     // Drafts leave room for the note; a body that does not still keeps the whole note.
-    body: `${item.body.slice(0, 4000 - BACKSTOP_NOTE.length - 1)} ${BACKSTOP_NOTE}`,
+    body: `${clip(item.body, 4000 - BACKSTOP_NOTE.length - 1)} ${BACKSTOP_NOTE}`,
   };
 };
 
@@ -307,7 +308,10 @@ export const followUpMessage = (drafts: readonly CadCheckDraft[]) =>
     CAD_DRAFT_DECLINE_RULE,
     "Drafts you neither publish nor decline are published as drafted when this turn ends.",
     "If you added comments, tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.",
-  ].join("\n");
+  ]
+    .join("\n")
+    // Sent as a turn's input, where a lone surrogate from a part name would break the JSON.
+    .toWellFormed();
 
 /** The note other CAD tool results carry while drafts are uncovered and undeclined. */
 export const presentPending = (pending: readonly string[]) =>

@@ -14,6 +14,7 @@ import type { CadAgentTools } from "../cad/CadViewing.ts";
 import {
   backstopItem,
   BACKSTOP_NOTE,
+  followUpMessage,
   type CadDraftLedger,
   makeCadDraftLedger,
   recordCadChecks,
@@ -91,6 +92,57 @@ const checksResult = (snapshotId: string, drafts?: CadCheckDraft[]): CadChecksRe
 const isPublication = Schema.is(CadCommentPublication);
 
 describe("backstopItem", () => {
+  it("never sends half an emoji in a title, label, body, or follow-up", () => {
+    const part = (n: number, name: string) => ({ occurrenceId: id(n.toString(16)), name });
+    // Three rollers into one bracket: the collision title passes 160 characters, and the
+    // bracket's emoji sits on the cut.
+    const rollers = [
+      part(1, `Top Intake Roller ${"y".repeat(60)} <1>`),
+      part(2, "Middle Intake Roller Compliant Wheels <1>"),
+      part(3, "Bottom Intake Roller Compliant Wheels <1>"),
+    ];
+    const bracket = part(4, `${"z".repeat(119)}\u{1F534} Red Alliance <1>`);
+    const drafts = draftCadComments(
+      rollers.map(
+        (roller): CadCheckFinding => ({
+          check: "drivetrain",
+          kind: "collision",
+          problem: true,
+          summary: "s",
+          occurrences: [roller, bracket],
+        }),
+      ),
+      CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+    );
+    const prefix = "Top Intake Roller yyyy";
+    for (let pad = 0; pad < 40; pad++) {
+      const [draft] = draftCadComments(
+        [rollers[0]!, ...rollers.slice(1)].map(
+          (roller, i): CadCheckFinding => ({
+            check: "drivetrain",
+            kind: "collision",
+            problem: true,
+            summary: "s",
+            occurrences: [
+              i === 0 ? { ...roller, name: `${prefix}${"y".repeat(pad)} <1>` } : roller,
+              { ...bracket, name: "Bracket \u{1F534}\u{1F534}\u{1F534}\u{1F534} <1>" },
+            ],
+          }),
+        ),
+        CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+      );
+      expect(draft!.title.isWellFormed(), draft!.title).toBe(true);
+    }
+    for (const draft of drafts) {
+      const item = backstopItem(draft);
+      for (const text of [item.title, item.body, ...item.targets.map((target) => target.label)])
+        expect(text.isWellFormed(), text).toBe(true);
+    }
+    // A name that already carries half a pair still makes a follow-up Codex can parse.
+    const broken = { ...drafts[0]!, title: "Bracket \ud83d" };
+    expect(followUpMessage([broken]).isWellFormed()).toBe(true);
+  });
+
   it("publishes every kind of draft as a valid comment, even for a part named only <1>", () => {
     const part = (n: number, name: string) => ({ occurrenceId: id(n.toString(16)), name });
     const drivetrain = (
