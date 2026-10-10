@@ -615,6 +615,13 @@ describe("draft wording", () => {
     expect(partLabel("SPARK Flex Brushless Motor Controller <1>")).toBe("SPARK Flex");
     expect(partLabel("NEO Vortex Brushless Motor <1>")).toBe("NEO Vortex");
     expect(partLabel("Kraken X60 <1>")).toBe("Kraken X60");
+    // Only a product name is short enough: a generic name keeps the word that says what it is.
+    expect(partLabel("NEO 550 Brushless Motor <1>")).toBe("NEO 550");
+    expect(partLabel("Talon FX Motor Controller <1>")).toBe("Talon FX");
+    expect(partLabel("Motor Controller <1>")).toBe("Motor Controller");
+    expect(partLabel("Intake Motor <1>")).toBe("Intake Motor");
+    expect(partLabel("Shooter Motor Controller <1>")).toBe("Shooter Motor Controller");
+    expect(partLabel("Brushless Motor <1>")).toBe("Brushless Motor");
     expect(partPhrase("<1>")).toBe("the unnamed part");
     expect(partLabel(`${"Bracket ".repeat(40)}<1>`).length).toBeLessThanOrEqual(120);
     // A cut never splits an emoji, and invisible characters do not make a name.

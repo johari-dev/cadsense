@@ -453,7 +453,7 @@ const pair = (a: PartOccurrence, b: PartOccurrence) => [a, b].sort(byId).map(ref
  * backstop" in CadChecks.md.
  */
 export const CAD_DRAFT_DECLINE_RULE =
-  "Decline a draft (declinedDrafts:[{publicationKey,explanation}]) only when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, the user asked only a question rather than for a review, the user asked you to leave that part out of this request, one of your published comments already covers it, you asked the user about that part in this reply, or you inspected the parts and the draft is wrong for this model; say which in the explanation. A plan to rework, move, or merge parts later is not a reason unless the user asked you to leave those parts out, and neither is calling the design a work in progress.";
+  'Decline a draft (declinedDrafts:[{publicationKey,explanation}]) only when the user said that part is a placeholder or not modeled yet, the user asked for no CAD comments, the user asked only a question rather than for a review, the user explicitly asked you to skip that part in this request ("skip the drivetrain"), one of your published comments already covers it, you asked the user about that part in this reply, or you inspected the parts and the draft is wrong for this model; say which in the explanation. A plan to rework, move, or merge parts later is not by itself a reason, and neither is calling the design a work in progress or saying a part is unfinished or hard to place.';
 /** What each check does and does not prove. Pages state these once instead of on every finding. */
 export const CAD_CHECK_EXPLANATIONS = {
   drivetrain:

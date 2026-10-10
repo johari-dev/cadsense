@@ -309,6 +309,8 @@ export interface CadDrivetrainFinding {
   readonly occurrences: ReadonlyArray<{ readonly occurrenceId: string; readonly name: string }>;
 }
 
+const MOTOR_PRODUCT = /\b(neo|vortex|falcon|kraken|cim|minion|775|bag|redline)\b/i;
+const CONTROLLER_PRODUCT = /spark\s*(flex|max)|talon|victor/i;
 /**
  * At most `max` UTF-16 units of `text`, never half of an emoji, and well formed: a lone surrogate
  * would make the follow-up's turn/start JSON unparsable for Codex.
@@ -335,13 +337,17 @@ export const partLabel = (name: string): string => {
   if (role?.kind === "loop" && role.wraps === "pulley") return `${role.teeth}T belt`;
   const plain = visible(name).replaceAll("_", " ").trim();
   const short = plain.replace(/\s*\([^()]*\)$/, "") || plain;
-  // Motors and controllers go by the name a team uses: "NEO Vortex", "SPARK Flex".
-  const spoken =
+  // Motors and controllers go by the product name a team uses ("NEO Vortex", "SPARK Flex"), but
+  // only when one is left: "Intake Motor" and "Motor Controller" keep the word that says what they are.
+  const product =
     role?.kind === "motor"
       ? short.replace(/\s+(brushless\s+)?motor$/i, "")
       : role?.kind === "controller"
         ? short.replace(/\s+(brushless\s+)?(motor\s+)?controller$/i, "")
-        : short;
+        : "";
+  const spoken = (role?.kind === "motor" ? MOTOR_PRODUCT : CONTROLLER_PRODUCT).test(product)
+    ? product
+    : short;
   return clip(spoken || short || "unnamed part", 120);
 };
 /** A part's name without its instance tag: every occurrence of one part has the same one. */

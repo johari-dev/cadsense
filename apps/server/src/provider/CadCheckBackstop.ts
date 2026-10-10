@@ -304,7 +304,7 @@ export const followUpMessage = (drafts: readonly CadCheckDraft[]) =>
   [
     `Before you finish: Cadsense's checks proved ${drafts.length === 1 ? "a defect that has" : `${drafts.length} defects that have`} no CAD comment and that you have not declined:`,
     ...drafts.map((draft) => `- ${draft.title} (cad_checks draft ${draft.publicationKey})`),
-    "Publish each one with cad_comments_publish, using publishDrafts or your own wording, or decline it in the same call.",
+    "Publish each one now with cad_comments_publish, using publishDrafts or your own wording. Decline one in the same call only if a reason below applies.",
     CAD_DRAFT_DECLINE_RULE,
     "Drafts you neither publish nor decline are published as drafted when this turn ends.",
     "If you added comments, tell the student in one short sentence what you added, in their terms, without mentioning drafts or tools.",
