@@ -82,6 +82,7 @@ it.effect.each([
             cad: {
               close: Effect.void,
               invoke: () => Effect.succeed({ result: {} }),
+              followUp: () => Effect.succeed(null),
               end: () => Effect.void,
             },
             cadReviewLearnings: Effect.succeed([{ text: "Vent holes are intentional." }]),
@@ -186,6 +187,7 @@ it.effect(
             calls.push({ childKey, turnId });
             return { result: { revision: 0 }, png: new Uint8Array([1, 2, 3]) };
           }),
+        followUp: () => Effect.succeed(null),
         end: () => Effect.void,
       };
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

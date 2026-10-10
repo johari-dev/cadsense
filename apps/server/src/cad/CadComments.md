@@ -7,7 +7,7 @@ Agent findings belong to the originating chat and the exact downloaded CAD they 
 `CadReviewInstructions.ts` supplies shared review guidance to Codex and Claude sessions with CAD tools. `cadReviewInstructions({ learnings, designBrief })` appends the [project design brief](CadDesignBrief.md) when the workspace has one, then the project's review learnings under one heading, one line per learning; empty sections are omitted, so with neither the shared text is delivered alone. Codex reads the brief and learnings at every turn start; Claude reads them when its session starts because the SDK system prompt is fixed per session. `CadProviderTools.ts` reinforces the guidance with a publication check in `cad_comments_publish`. When changing that guidance, use [the review evaluation](CadReviewEvaluation.md) to assess comment wording, evidence, and placement with ordinary user prompts.
 
 1. `cad_comments_list` reads existing findings, including reviewed findings, and returns the creation catalog version. Walk `nextCursor` before deciding an issue is new. A changed creation catalog invalidates a cursor; review changes do not advance that catalog.
-2. Capture the private view with the existing `cad_capture` tool. `cad_comment_locate` takes that capture ID and explicit intended occurrence IDs with original 1280 ? 960 image coordinates (top-left origin, continuous pixels). The nearest visible surface wins. An intervening part returns `occurrence-mismatch`; the ray never searches through it for the intended part.
+2. Capture the private view with the existing `cad_capture` tool. `cad_comment_locate` takes that capture ID and explicit intended occurrence IDs with original 1280 ? 960 image coordinates (top-left origin, continuous pixels). The nearest visible surface wins. An intervening part returns `occurrence-mismatch`; the ray never searches through it for the intended part. When the exact pixel misses, locate tries nearby pixels (see below).
 3. `cad_comment_inspect` returns numbered candidate markers from a different camera angle. Yellow candidates are visible; red candidates cannot be confirmed. The agent must verify the actual surface/depth, then cite the inspection and explain its confirmation when publishing. A same-part inner wall can still be the wrong location. If the exact location is uncertain, publish a whole-part target with `preciseLocationLimitation`.
 4. `cad_comments_publish` takes `expectedCatalogVersion` and up to 20 complete items. New items contain `publicationKey`, `inspectedSnapshotId`, title, body, `severity`, `category`, and 1?20 targets. Severity (`blocker`, `concern`, `question`, `nit`) rates the consequence to the mechanism; category (`interference`, `access`, `assembly`, `wiring`, `structure`, `manufacturing`, `other`) names the lifecycle stage. Both are required; a missing or misspelled value rejects that item with `invalid-input` details naming the field. Point targets cite candidate/inspection IDs; whole-part targets cite explicit occurrence IDs. Every target must pass before its comment appears. Valid items and their receipts commit together; invalid items return individual errors.
 5. Reuse a prior finding with `kind: "reuse"`, a new publication key, the inspected snapshot, and `reuseCommentId`. Reuse preserves review state, severity, and category. Material new evidence can be a new finding linked with `correction` or `follow-up`, an existing same-chat/root comment ID, and an explanation. Neither link closes the original.
@@ -18,6 +18,59 @@ Each publish call that creates comments, proposes resolutions, or rejects items 
 Retry identical publications with the same keys. Receipts are checked before transient candidate handles, so a lost response can be retried after activation ends. Changing a successful key's payload conflicts. Responses include the current review state, placement, original event sequence, and current creation catalog version.
 
 Malformed input returns `invalid-input` with `details` identifying invalid or missing fields. Publication items and location picks also include a compact expected shape so resumed provider sessions can recover without guessing field names. A successful tool transport response can contain rejected items: agents must check each result, correct rejected inputs, and retry. Rejected items create no comments or receipts.
+
+## Helping smaller models place points
+
+Smaller models rarely place point targets. GPT-6-Luna called `cad_comment_locate` in 5 of 64
+evaluated reviews; its pixel picks missed (`transparent-hit` on a translucent game piece,
+`no-hit` beside a thin belt, `occurrence-mismatch` on the neighboring gear) and it gave up after
+one to three tries. Three mechanisms lower that cost. Each can fail in the ways listed under it.
+
+**Nearby snapping.** When a pick misses, `locateCadCommentPoints` looks outward up to 64 pixels
+for the nearest pixel whose first visible surface is the intended part and is opaque, and returns
+that candidate with the `pixel` it used. It never searches through a nearer part.
+
+- A miss with the intended part visible nearby is not recovered.
+- It snaps to a pixel where the intended part is behind another part or a translucent surface.
+- It snaps beyond the radius, or onto a part other than the intended one.
+- It moves a pick that already hit the intended part.
+- It does not report the pixel it used, so the agent cannot tell its pick moved.
+- It raycasts the whole assembly at every pixel in the search and stalls a large model.
+
+**Check-placed points.** For defects whose position the checks prove (a rotating part running into
+another part, gears set too close, the bare end of a belt), `cad_checks` computes a surface point:
+for overlapping parts, a point on the seam where one surface enters the other, nearest the
+overlap's middle. `CadProviderTools` registers it as a candidate through the comment activation's
+internal `cad_comment_place` operation (agents cannot call it), inspects it in a view that shows only
+the parts involved, and offers the draft with a point target and the inspection image attached to
+the `cad_checks` result. The agent still looks at the image before publishing; the turn-end backstop
+publishes the whole-part version, so no point reaches the student unless an agent saw it.
+
+- The seam point lies inside one of the solids, so the inspection reports it hidden.
+- The point is stored in world coordinates instead of the part's own, so the marker lands elsewhere.
+- A collision draft is made for an intended fit: a gear on its shaft, a shaft in its bearing or spacer, a belt on its pulley, two meshing gears, a game piece, a fastener, or two parts inside one vendor subassembly.
+- A point that the inspection shows occluded is still offered as a point target.
+- Placement or its render fails, and `cad_checks` fails instead of keeping whole-part targets.
+- Each `cad_checks` call in a turn renders every marker again; agents such as Opus call it several times. A turn reuses its placements by draft key, which names the snapshot, so a newer model is placed again.
+- A struggling renderer makes every placement wait out its render, so `cad_checks` takes minutes. After the first render failure no more placements are tried; a failure about one draft, such as a missing part, does not stop the rest.
+- The backstop publishes a check-placed point.
+- A published check-placed point stops counting as covering its draft.
+- An image is attached to the wrong draft.
+- Two spinning parts running into the same part become two comments, which read as one problem twice.
+- A merged draft keeps only one of its markers.
+- A merged draft with more than 20 markers cannot be published.
+
+**Short publishing.** `cad_comments_publish` accepts `publishDrafts: [publicationKey]` to publish
+drafts as offered, and fills `expectedCatalogVersion` when only drafts are published. While drafts
+remain unpublished and undeclined, every other CAD tool result carries `pendingDrafts`.
+
+- An unknown key is ignored instead of reported.
+- A declined draft is published by key.
+- A draft named in `publishDrafts` and also sent as an item is published twice.
+- Reading a later page of `cad_checks` findings, which carries no drafts, forgets the offered drafts, so
+  every key comes back `unknown-draft`.
+- `pendingDrafts` still appears after every draft is covered or declined.
+- `pendingDrafts` appears for a child agent that never ran `cad_checks`.
 
 ## Persistence and ownership
 
