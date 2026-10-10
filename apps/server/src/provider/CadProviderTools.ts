@@ -52,7 +52,7 @@ const descriptions = {
   cad_context:
     "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
   cad_hierarchy:
-    "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
+    "Read a bounded page of the selected CAD component tree with occurrence visibility. Input: {parentOccurrenceId?, cursor?, limit?}; omit parentOccurrenceId for the top level. Every entry on a page is a direct child of the page's parentOccurrenceId. A page may hold fewer entries than limit to stay small, so follow nextCursor. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
   cad_checks: [
     'Run deterministic checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["drivetrain","mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: everything except overlapping-bounds.',
     "drivetrain findings come first. They trace power from each motor through recognized gears, belts, chains, and shafts, check gear center distances and belt or chain lengths, and find shafts with no bearing. A drivetrain finding with problem: true is a verified defect in the model as drawn: comment on each one.",
