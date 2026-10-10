@@ -23,6 +23,7 @@ import {
   type CadOverlap,
   clip,
   countedList,
+  distinctLabels,
   distinctPhrases,
   FASTENER,
   fitCadAxis,
@@ -1371,6 +1372,7 @@ export const draftCadComments = (
     names.set(occurrence.occurrenceId, occurrence.name);
     return {
       kind: "part" as const,
+      // Replaced below with the name the student reads; see the end of this function.
       label: fullName(occurrence.name),
       occurrenceId: occurrence.occurrenceId,
       preciseLocationLimitation: WHOLE_PART,
@@ -1531,23 +1533,30 @@ export const draftCadComments = (
       stacked.get(a.occurrenceId) !== stacked.get(b.occurrenceId)
     )
       duplicateDraft([a, b]);
-  // Where two targets of one draft read the same, as three copies of one rounded hex shaft do,
-  // their labels keep the instance number (`<2>`).
+  // Target labels use the names the body uses ("40T gear"). Different parts whose labels match
+  // keep their specs, and copies of one part are numbered ("(2 of 3)"): each roller's rounded hex
+  // is instance <1> of its own roller kit, so instance tags would not tell them apart.
   return drafts.map((draft) => {
-    const labels = draft.targets.map((target) => target.label);
-    return labels.every((label, index) => labels.indexOf(label) === index)
-      ? draft
-      : {
-          ...draft,
-          targets: draft.targets.map((target) =>
-            target.kind === "part" && labels.filter((label) => label === target.label).length > 1
-              ? {
-                  ...target,
-                  label: clip(names.get(target.occurrenceId)?.trim() || target.label, 120),
-                }
-              : target,
-          ),
-        };
+    const labels = distinctLabels(
+      draft.targets.map((target) =>
+        target.kind === "part" ? (names.get(target.occurrenceId) ?? target.label) : target.label,
+      ),
+    );
+    const total = new Map<string, number>();
+    for (const label of labels) total.set(label, (total.get(label) ?? 0) + 1);
+    const seen = new Map<string, number>();
+    return {
+      ...draft,
+      targets: draft.targets.map((target, index) => {
+        const label = labels[index]!;
+        const count = total.get(label)!;
+        if (count === 1) return { ...target, label };
+        const nth = (seen.get(label) ?? 0) + 1;
+        seen.set(label, nth);
+        const suffix = ` (${nth} of ${count})`;
+        return { ...target, label: `${clip(label, 120 - suffix.length)}${suffix}` };
+      }),
+    };
   });
 };
 

@@ -79,4 +79,6 @@ if (process.argv.includes("--drafts"))
     result.placements,
     result.comments,
   ))
-    console.log(`\n<draft> ${draft.title}\n${draft.body}`);
+    console.log(
+      `\n<draft> ${draft.title}\n${draft.body}\ntargets: ${draft.targets.map((target) => target.label).join(" | ")}`,
+    );

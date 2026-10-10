@@ -1018,19 +1018,56 @@ describe("draftCadComments", () => {
     for (const draft of drafts) assert.match(draft.body, /\b(Add|Move|Keep|Remove)\b[^.]*\.$/);
   });
 
-  it("keeps instance numbers where a merged draft names one part twice", () => {
-    const [hexA, hexB] = [part(8, "13 in. Hex Shaft <1>"), part(9, "13 in. Hex Shaft <2>")];
-    const [roundA, roundB] = [part(10, "Rounded Hex <1>"), part(11, "Rounded Hex <2>")];
-    const [merged] = draftCadComments(
+  it("labels targets the way a student would, numbering copies of one part", () => {
+    // Each roller's rounded hex is instance <1> of its own roller kit, so instance tags would
+    // not tell the three apart; numbering does.
+    const hexes = [1, 2, 3].map((n) => part(150 + n, `13 in. Hex Shaft <${n}>`));
+    const rounds = [1, 2, 3].map((n) =>
+      part(160 + n, '1/2" Rounded Hex (11.5" L, 13.75mm OD) <1>'),
+    );
+    const [stacked] = draftCadComments(
+      hexes.map((hex, i) => drivetrain("stacked-shafts", true, [hex, rounds[i]!])),
+      snapshotId,
+    );
+    assert.deepEqual(
+      stacked!.targets.map((target) => target.label),
       [
-        drivetrain("stacked-shafts", true, [hexA, roundA]),
-        drivetrain("stacked-shafts", true, [hexB, roundB]),
+        "13 in. Hex Shaft (1 of 3)",
+        '1/2" Rounded Hex (1 of 3)',
+        "13 in. Hex Shaft (2 of 3)",
+        '1/2" Rounded Hex (2 of 3)',
+        "13 in. Hex Shaft (3 of 3)",
+        '1/2" Rounded Hex (3 of 3)',
+      ],
+    );
+    // A gear goes by its tooth count; a part with no shorter name keeps its own.
+    const tube = part(170, 'Tube 1"x1"x11" <1>');
+    const [collision] = draftCadComments([drivetrain("collision", true, [gear, tube])], snapshotId);
+    assert.deepEqual(
+      collision!.targets.map((target) => target.label),
+      ["40T gear", 'Tube 1"x1"x11"'],
+    );
+    // Different parts whose short names match keep the specs that tell them apart.
+    const [thin, thick] = [
+      part(171, "Side Plate (0.25 in) <1>"),
+      part(172, "Side Plate (0.50 in) <1>"),
+    ];
+    const [pair] = draftCadComments(
+      [
+        {
+          check: "mesh-interference",
+          occurrences: [thin, thick],
+          intersectionVolume: 1e-4,
+          intersectionFraction: 1,
+          withinSubassembly: false,
+          reading: "r",
+        },
       ],
       snapshotId,
     );
     assert.deepEqual(
-      merged!.targets.map((target) => target.label),
-      ["13 in. Hex Shaft <1>", "Rounded Hex <1>", "13 in. Hex Shaft <2>", "Rounded Hex <2>"],
+      pair!.targets.map((target) => target.label),
+      ["Side Plate (0.25 in)", "Side Plate (0.50 in)"],
     );
   });
 

@@ -361,17 +361,19 @@ const withArticle = (label: string) => (/^part\s*\d+$/i.test(label) ? label : `t
 /** A part in a sentence: "the 40T gear", but "Part 20" for a part that kept its Onshape name. */
 export const partPhrase = (name: string) => withArticle(partLabel(name));
 /**
- * Parts named in one sentence. Two different parts whose labels match keep the specs their names
- * add ("the Side Plate (0.25 in)" and "the Side Plate (0.50 in)"), so the student can tell them apart.
+ * Labels for parts named together. Two different parts whose labels match keep the specs their
+ * names add ("Side Plate (0.25 in)" and "Side Plate (0.50 in)"), so the student can tell them apart.
  */
-export const distinctPhrases = (names: readonly string[]) =>
+export const distinctLabels = (names: readonly string[]) =>
   names.map((name) =>
     names.some(
       (other) => partName(other) !== partName(name) && partLabel(other) === partLabel(name),
     )
-      ? withArticle(clip(visible(name).replaceAll("_", " ").trim(), 120) || partLabel(name))
-      : partPhrase(name),
+      ? clip(visible(name).replaceAll("_", " ").trim(), 120) || partLabel(name)
+      : partLabel(name),
   );
+/** Parts named in one sentence, told apart like `distinctLabels`: "the Side Plate (0.25 in)". */
+export const distinctPhrases = (names: readonly string[]) => distinctLabels(names).map(withArticle);
 /**
  * "a", "a and b", "a, b, and c". Past `limit` items the rest are counted ("and 34 more"), so a long
  * list cannot push the end of its sentence and the next step out of a comment.

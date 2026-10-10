@@ -105,7 +105,7 @@ Ways this can fail, each covered by `CadCheckBackstop.test.ts`, `CadViewing.test
 - A body near 4000 characters pushes the backstop's note off the end, so an automatic comment reads as the agent's own.
 - A cut splits an emoji in a long part name or title, and the half character reaches the follow-up, whose turn/start JSON Codex cannot parse, so the follow-up is dropped 30 seconds late. Every cut goes through `clip`, and the follow-up is made well formed.
 - A stack of copies of one part is drafted once per overlapping pair, so seven copies become 21 comments; or parts that are not copies (a spacer inside two bearings, two parts inside one plate) are called one stack and the student is told to delete all but one. Only same-named parts that all overlap one another stack.
-- A merged draft lists one part name several times, so the student cannot tell its targets apart.
+- A merged draft lists one part name several times, so the student cannot tell its targets apart. Target labels use the body's names ("40T gear"), different parts with one short name keep their specs, and copies of one part are numbered ("Deadaxle Tube 9.75 in (2 of 3)"), since each roller kit's part can be instance <1> of its own kit.
 - `remainingDrafts` lists a draft that is covered or declined.
 - One child agent's turn end publishes drafts from another child's `cad_checks` call.
 - Stopping a turn, a failed turn, or closing the app publishes drafts no agent reviewed.
