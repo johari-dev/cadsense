@@ -1,4 +1,11 @@
-import { Bot, Box, Files, Globe2, type LucideIcon, X } from "lucide-react";
+import {
+  RobotIcon as Bot,
+  CubeIcon as Box,
+  FilesIcon as Files,
+  GlobeIcon as Globe2,
+  type Icon,
+  XIcon as X,
+} from "~/lib/icons";
 import type { ReactNode } from "react";
 
 import { isElectron } from "~/env";
@@ -36,7 +43,7 @@ const SECTION_META = {
   files: { label: "Files", icon: Files },
   agents: { label: "Agents", icon: Bot },
   browser: { label: "Browser", icon: Globe2 },
-} as const satisfies Record<RightPanelSection, { label: string; icon: LucideIcon }>;
+} as const satisfies Record<RightPanelSection, { label: string; icon: Icon }>;
 
 const isRightPanelSection = (value: unknown): value is RightPanelSection =>
   RIGHT_PANEL_SECTIONS.some((section) => section === value);

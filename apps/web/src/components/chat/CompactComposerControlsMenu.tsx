@@ -1,6 +1,6 @@
 import { RuntimeMode } from "@cadsense/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon } from "lucide-react";
+import { DotsThreeIcon as EllipsisIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
 import { useClientSettings } from "../../hooks/useSettings";
 import {

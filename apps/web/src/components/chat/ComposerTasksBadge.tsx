@@ -1,4 +1,8 @@
-import { ChevronDownIcon, ListTodoIcon, XIcon } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDownIcon,
+  ListChecksIcon as ListTodoIcon,
+  XIcon,
+} from "~/lib/icons";
 import { memo } from "react";
 
 import { formatDuration } from "../../session-logic";

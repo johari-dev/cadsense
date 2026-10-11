@@ -4,7 +4,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle, X } from "lucide-react";
+import {
+  CaretRightIcon as ChevronRight,
+  CodeIcon as Code2,
+  EyeIcon as Eye,
+  TreeStructureIcon as FolderTree,
+  GlobeIcon as Globe2,
+  CircleNotchIcon as LoaderCircle,
+  XIcon as X,
+} from "~/lib/icons";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 

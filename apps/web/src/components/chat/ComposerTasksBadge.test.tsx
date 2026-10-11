@@ -42,10 +42,7 @@ describe("ComposerTasksBadge", () => {
     expect(markup).not.toContain("·");
     expect(markup).toContain("1/3");
     expect(markup).toContain("Current task: Attach task progress");
-    expect(markup).toContain("lucide-list-todo");
     expect(markup).toContain('aria-label="Dismiss tasks for this turn"');
-    expect(markup).toContain("lucide-x");
-    expect(markup).not.toContain("lucide-chevron");
     expect(markup).toContain("bg-success");
     expect(markup).toContain("bg-primary");
     expect(markup).toContain("bg-muted-foreground/25");
@@ -100,8 +97,6 @@ describe("ComposerTasksBadge", () => {
     expect(markup).toContain("now");
     expect(markup).toContain("Attach task progress");
     expect(markup).toContain("Verify the result");
-    expect(markup).toContain("lucide-list-todo");
-    expect(markup).toContain("lucide-chevron-down");
     expect(markup).toContain('aria-label="Dismiss tasks for this turn"');
     expect(markup).not.toContain("bg-success");
     expect(markup).not.toContain("bg-primary");
