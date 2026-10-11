@@ -1685,6 +1685,54 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
+it.effect("locks only the running chat's view while another chat in the project pans", () =>
+  Effect.gen(function* () {
+    const h = yield* harness();
+    const contextId = yield* h.service.resolveContext(threadId);
+    const liveness = yield* ThreadBackgroundLiveness.ThreadBackgroundLivenessService;
+    liveness.recordTaskLiveness({
+      threadId,
+      taskId: "child",
+      taskType: "agent",
+      status: "running",
+      kind: "started",
+    });
+    yield* h.service.withActivation(
+      contextId,
+      (tools) =>
+        Effect.gen(function* () {
+          yield* tools.context();
+          yield* tools.capture({ expectedRevision: 0 });
+        }),
+      TurnId.make("other-chat-pans"),
+    );
+    const pan = (id: ThreadId, expectedRevision: number | null, explosion: number) =>
+      h.service.saveUserView(id, expectedRevision, {
+        ...initialCadView(snapshot, expectedRevision === null ? 0 : expectedRevision + 1),
+        explosion,
+      });
+    // The running chat stays locked, both by its run and by its pending presentation.
+    assert.equal(
+      (yield* pan(threadId, null, 0.1).pipe(Effect.flip)).reason,
+      "capability-unavailable",
+    );
+    yield* pan(otherThreadId, null, 0.3);
+    yield* pan(otherThreadId, 0, 0.5);
+    const other = yield* h.panel.watch(otherThreadId).pipe(Stream.runHead);
+    assert.equal(other._tag === "Some" ? other.value.view?.explosion : null, 0.5);
+    assert.isNull(yield* h.service.getUserView(threadId));
+    liveness.clearThreadLiveness(threadId);
+    assert.equal(
+      (yield* pan(threadId, null, 0.1).pipe(Effect.flip)).reason,
+      "capability-unavailable",
+    );
+    assert.isTrue(yield* h.presentation.settle(threadId));
+    const settled = yield* h.service.getUserView(threadId);
+    yield* pan(threadId, settled!.revision, 0.2);
+    assert.equal((yield* h.service.getUserView(threadId))?.explosion, 0.2);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
 it.effect("removes an uncommitted image when the durable capture is rejected", () =>
   Effect.gen(function* () {
     const h = yield* harness(false, true);

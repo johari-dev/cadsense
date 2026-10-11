@@ -8,42 +8,38 @@ import {
 
 type CadProjectRef = Pick<Project, "id" | "environmentId" | "cad">;
 
-/** A thread whose run, or pending capture presentation, keeps project CAD locked. */
-export interface CadProjectRunBlocker {
-  readonly threadId: ThreadId;
+const isProjectThread = (project: CadProjectRef, thread: ThreadShell) =>
+  thread.environmentId === project.environmentId && thread.projectId === project.id;
+
+/** This chat's own run, or its pending capture presentation, which keeps its CAD panel locked. */
+export interface CadThreadRunBlocker {
   /** Undefined when the thread shell is not loaded on this client. */
   readonly thread: ThreadShell | undefined;
 }
 
 /**
- * Returns the thread that keeps project CAD locked, or null when nothing does.
- * Prefers `preferredThreadId` so a panel can tell its own run apart from another chat's.
+ * Returns what keeps the CAD panel for `threadId` locked, or null when nothing in this chat does.
+ * Another chat's run never locks it: each chat saves only its own view, as the server enforces.
  */
-export function findCadProjectRunBlocker(
+export function findCadThreadRunBlocker(
   project: CadProjectRef,
   threads: readonly ThreadShell[],
-  preferredThreadId?: ThreadId,
-): CadProjectRunBlocker | null {
-  const projectThreads = threads.filter(
-    (thread) => thread.environmentId === project.environmentId && thread.projectId === project.id,
-  );
-  const blockers: CadProjectRunBlocker[] = [
-    ...(project.cad?.pendingPresentations ?? []).map(({ threadId }) => ({
-      threadId,
-      thread: projectThreads.find((thread) => thread.id === threadId),
-    })),
-    ...projectThreads
-      .filter((thread) => isCadThreadRunActive(thread))
-      .map((thread) => ({ threadId: thread.id, thread })),
-  ];
-  return blockers.find((blocker) => blocker.threadId === preferredThreadId) ?? blockers[0] ?? null;
+  threadId: ThreadId,
+): CadThreadRunBlocker | null {
+  const thread = threads.find((item) => item.id === threadId && isProjectThread(project, item));
+  const pending = project.cad?.pendingPresentations?.some((item) => item.threadId === threadId);
+  return pending || (thread && isCadThreadRunActive(thread)) ? { thread } : null;
 }
 
+/** Whether any chat's run, or pending capture presentation, fences project-wide CAD changes. */
 export function isCadProjectRunActive(
   project: CadProjectRef,
   threads: readonly ThreadShell[],
 ): boolean {
-  return findCadProjectRunBlocker(project, threads) !== null;
+  return (
+    (project.cad?.pendingPresentations?.length ?? 0) > 0 ||
+    threads.some((thread) => isProjectThread(project, thread) && isCadThreadRunActive(thread))
+  );
 }
 
 /** Visible explanation for a locked CAD panel. */
@@ -54,24 +50,21 @@ export interface CadPanelLockStatus {
 }
 
 /**
- * Explains why the CAD panel for `threadId` is locked, or returns null when no run, agent, or
- * operation locks it. Once this chat's agent has used CAD in the current run, the status stays
- * `agent` until the run ends, including the gaps between CAD tool calls.
+ * Explains why this chat's CAD panel is locked, or returns null when no run, agent, or operation
+ * locks it. Once this chat's agent has used CAD in the current run, the status stays `agent` until
+ * the run ends, including the gaps between CAD tool calls.
  */
 export function cadPanelLockStatus({
-  threadId,
   blocker,
   panel,
   operation,
 }: {
-  threadId: ThreadId;
-  blocker: CadProjectRunBlocker | null;
+  blocker: CadThreadRunBlocker | null;
   panel: Pick<CadPanelState, "agentControlling" | "agentActivityTurnId" | "captureId"> | null;
   operation: NonNullable<CadProjectState["operation"]>["kind"] | null;
 }): CadPanelLockStatus | null {
-  const ownRun = blocker?.threadId === threadId ? blocker : null;
-  if (ownRun || panel?.agentControlling) {
-    const thread = ownRun?.thread;
+  if (blocker || panel?.agentControlling) {
+    const thread = blocker?.thread;
     const running = thread !== undefined && isCadThreadRunActive(thread);
     // After the run, a pending presentation holds the lock until it settles; no run is left to end.
     if (panel?.captureId)
@@ -95,13 +88,6 @@ export function cadPanelLockStatus({
       };
     return { message: "Locked while this chat runs.", agent: false };
   }
-  if (blocker)
-    return {
-      message: blocker.thread
-        ? `Locked while "${blocker.thread.title}" runs.`
-        : "Locked while another chat runs.",
-      agent: false,
-    };
   if (operation)
     return {
       message: operation === "cleanup" ? "Cleaning up CAD files." : "Updating CAD from Onshape.",
