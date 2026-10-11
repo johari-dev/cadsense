@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { RotateCwIcon } from "lucide-react";
+import { ArrowClockwiseIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -43,7 +43,7 @@ export function RedoWithFeedbackButton({
           />
         }
       >
-        <RotateCwIcon className="size-3" />
+        <ArrowClockwiseIcon className="size-3" />
       </TooltipTrigger>
       <TooltipPopup>
         <p>Redo with feedback</p>

@@ -50,28 +50,28 @@ import ChatMarkdown from "../ChatMarkdown";
 import { CadFilmstrip, CadPublishedComments } from "../../cad/CadChatRows";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
-  BotIcon,
-  BoxIcon,
+  RobotIcon as BotIcon,
+  CubeIcon as BoxIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CircleAlertIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon as ChevronRightIcon,
+  WarningCircleIcon as CircleAlertIcon,
   DownloadIcon,
   EyeIcon,
   FileIcon,
   GlobeIcon,
   HammerIcon,
-  MessageCircleIcon,
-  MousePointerClickIcon,
-  PaintbrushIcon,
+  ChatCircleIcon as MessageCircleIcon,
+  CursorClickIcon as MousePointerClickIcon,
+  PaintBrushIcon as PaintbrushIcon,
   PlayIcon,
-  SearchIcon,
-  SquarePenIcon,
-  TerminalIcon,
+  MagnifyingGlassIcon as SearchIcon,
+  NotePencilIcon as SquarePenIcon,
+  TerminalWindowIcon as TerminalIcon,
   WrenchIcon,
   XIcon,
-  ZapIcon,
-} from "lucide-react";
+  LightningIcon as ZapIcon,
+} from "~/lib/icons";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -1069,7 +1069,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                     {isOpening ? (
                       <span className="text-[11px]">Loading…</span>
                     ) : (
-                      <PlayIcon className="size-8 fill-current" />
+                      <PlayIcon className="size-8" weight="fill" />
                     )}
                     <span className="max-w-full truncate text-[11px]">{file.name}</span>
                   </button>

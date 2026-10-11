@@ -1,6 +1,6 @@
 import type { CadViewState } from "@cadsense/contracts";
 import { useState } from "react";
-import { Boxes } from "lucide-react";
+import { StackIcon as Boxes } from "~/lib/icons";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 

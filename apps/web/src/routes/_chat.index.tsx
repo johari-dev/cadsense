@@ -1,6 +1,6 @@
 import { scopeProjectRef } from "@cadsense/client-runtime/environment";
 import { createFileRoute } from "@tanstack/react-router";
-import { PlusIcon, RotateCcwIcon } from "lucide-react";
+import { PlusIcon, ArrowCounterClockwiseIcon as RotateCcwIcon } from "~/lib/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
