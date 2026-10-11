@@ -98,7 +98,7 @@ export function CadHierarchyTree({
   const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, rows.length);
   return (
     <div
-      className={`flex min-h-0 flex-col border-t ${fullHeight ? "flex-1" : ""}`}
+      className={`flex min-h-0 flex-col ${fullHeight ? "flex-1" : "border-t"}`}
       aria-label="CAD components"
     >
       <div className="flex shrink-0 items-center gap-2 p-2">
@@ -132,7 +132,7 @@ export function CadHierarchyTree({
                 role="treeitem"
                 aria-level={row.depth + 1}
                 aria-expanded={branch ? expanded : undefined}
-                className={`absolute left-0 flex h-7 w-full items-center gap-1 pr-2 text-xs ${disabled ? "" : "hover:bg-muted/50"}`}
+                className={`group absolute left-0 flex h-7 w-full items-center gap-1 pr-2 text-xs ${disabled ? "" : "hover:bg-muted/50"}`}
                 style={{ top: (start + offset) * 28, paddingLeft: 8 + row.depth * 14 }}
               >
                 <button
@@ -177,7 +177,7 @@ export function CadHierarchyTree({
                   size="icon-xs"
                   aria-label={`Highlight ${node.name}`}
                   aria-pressed={highlighted.has(row.id)}
-                  className="aria-pressed:bg-accent"
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-pressed:bg-accent aria-pressed:opacity-100"
                   disabled={disabled || node.suppressed}
                   onClick={() =>
                     onChange({
@@ -193,7 +193,7 @@ export function CadHierarchyTree({
                   size="icon-xs"
                   aria-label={`Ghost ${node.name}`}
                   aria-pressed={ghosted.has(row.id)}
-                  className="aria-pressed:bg-accent"
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-pressed:bg-accent aria-pressed:opacity-100"
                   disabled={disabled || node.suppressed}
                   onClick={() =>
                     onChange({
@@ -208,6 +208,7 @@ export function CadHierarchyTree({
                   variant="ghost"
                   size="icon-xs"
                   aria-label={`Isolate ${node.name}`}
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                   disabled={disabled || node.suppressed}
                   onClick={() =>
                     onChange({

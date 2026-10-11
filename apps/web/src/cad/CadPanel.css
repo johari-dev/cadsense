@@ -67,6 +67,32 @@
   }
 }
 
+/* The view changes card grows out of its chip in the top-left corner (see CadViewChanges). */
+.cad-view-changes-card {
+  transform-origin: top left;
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@starting-style {
+  .cad-view-changes-card {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+.cad-view-changes-card[data-closing="true"] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cad-view-changes-card {
+    transition: none;
+  }
+}
+
 /* Static outline above both the header and content while the agent controls CAD. No animation. */
 :is(.cad-floating-preview, [data-preview-panel-mode]):has(
   [data-cad-agent-controlling="true"]
