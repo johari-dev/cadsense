@@ -4,7 +4,7 @@ import {
   type MessageRating,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
-import { ThumbsDownIcon, ThumbsUpIcon, type LucideIcon } from "lucide-react";
+import { ThumbsDownIcon, ThumbsUpIcon, type Icon as AppIcon } from "~/lib/icons";
 import { memo, useRef, useState, type Ref } from "react";
 
 import { cn } from "~/lib/utils";
@@ -95,7 +95,7 @@ function RatingButton({
   onClick,
 }: {
   ref?: Ref<HTMLButtonElement>;
-  icon: LucideIcon;
+  icon: AppIcon;
   label: string;
   active: boolean;
   popupOpen?: boolean;
@@ -118,7 +118,10 @@ function RatingButton({
           />
         }
       >
-        <Icon className={cn("size-3", active && "fill-current text-primary")} />
+        <Icon
+          weight={active ? "fill" : "regular"}
+          className={cn("size-3", active && "text-primary")}
+        />
       </TooltipTrigger>
       <TooltipPopup>
         <p>{active ? "Remove rating" : label}</p>

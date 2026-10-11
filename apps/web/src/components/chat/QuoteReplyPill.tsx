@@ -1,4 +1,4 @@
-import { TextQuoteIcon } from "lucide-react";
+import { QuotesIcon } from "~/lib/icons";
 import { useEffect, useMemo, useState } from "react";
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { chatMarkdownClipboardPayload } from "~/markdown-clipboard";
@@ -160,7 +160,7 @@ export function QuoteReplyPill() {
           onMouseDown={(event) => event.preventDefault()}
           onClick={quoteIntoComposer}
         >
-          <TextQuoteIcon />
+          <QuotesIcon />
           Reply
         </Button>
       </PopoverPopup>

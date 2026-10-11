@@ -1,4 +1,9 @@
-import { ArchiveIcon, ArchiveX, ChevronRightIcon, LoaderIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveIcon as ArchiveX,
+  CaretRightIcon as ChevronRightIcon,
+  SpinnerIcon as LoaderIcon,
+} from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
