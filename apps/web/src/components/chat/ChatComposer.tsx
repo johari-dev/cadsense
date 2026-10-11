@@ -472,7 +472,13 @@ export interface ChatComposerHandle {
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
   addDroppedFiles: (files: File[]) => void;
-  insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
+  /**
+   * Appends text to the prompt and focuses the caret after it; false when the
+   * composer is busy. `leadingBoundary` separates it from existing text:
+   * "space" for inline tokens like mentions, "paragraph" (a blank line) for
+   * blocks like quotes.
+   */
+  insertTextAtEnd: (text: string, options?: { leadingBoundary?: ComposerTextBoundary }) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
@@ -505,6 +511,16 @@ export interface ChatComposerHandle {
   };
   /** Validate the fully composed text immediately before a provider turn starts. */
   validateProviderInput: (providerInput: string) => boolean;
+}
+
+type ComposerTextBoundary = "space" | "paragraph";
+
+/** Separator that keeps text appended after `prompt` apart from it. */
+function composerTextBoundary(prompt: string, boundary: ComposerTextBoundary | undefined): string {
+  if (boundary === undefined || prompt.trim().length === 0) return "";
+  if (boundary === "space") return /\s$/.test(prompt) ? "" : " ";
+  const trailingNewlines = /\n*$/.exec(prompt)?.[0].length ?? 0;
+  return "\n".repeat(Math.max(0, 2 - trailingNewlines));
 }
 
 // --------------------------------------------------------------------------
@@ -2280,10 +2296,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     void addComposerAttachments(files);
   };
 
-  const insertComposerTextAtEnd = (
-    text: string,
-    options?: { ensureLeadingBoundary?: boolean },
-  ): boolean => {
+  const insertComposerTextAtEnd: ChatComposerHandle["insertTextAtEnd"] = (text, options) => {
     if (
       text.length === 0 ||
       isConnecting ||
@@ -2294,12 +2307,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return false;
     }
     const prompt = promptRef.current;
-    const needsLeadingSpace =
-      (options?.ensureLeadingBoundary ?? false) && prompt.length > 0 && !/\s$/.test(prompt);
     return applyPromptReplacement(
       prompt.length,
       prompt.length,
-      needsLeadingSpace ? ` ${text}` : text,
+      `${composerTextBoundary(prompt, options?.leadingBoundary)}${text}`,
     );
   };
 
@@ -2307,7 +2318,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // editor never sees the drop; the load-bearing rules (native stop, "move"
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
   const composerMentionDragHandlers = makeComposerMentionDragHandlers({
-    insertMentionAtEnd: (text) => insertComposerTextAtEnd(text, { ensureLeadingBoundary: true }),
+    insertMentionAtEnd: (text) => insertComposerTextAtEnd(text, { leadingBoundary: "space" }),
     setDragActive: setIsDragOverComposer,
     onInsertRejected: () => {
       toastManager.add({

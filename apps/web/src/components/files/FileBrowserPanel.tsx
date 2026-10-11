@@ -184,7 +184,7 @@ export default function FileBrowserPanel({
           });
           return;
         }
-        const inserted = composer.insertTextAtEnd(`${mention} `, { ensureLeadingBoundary: true });
+        const inserted = composer.insertTextAtEnd(`${mention} `, { leadingBoundary: "space" });
         if (!inserted) {
           toastManager.add({
             type: "error",
