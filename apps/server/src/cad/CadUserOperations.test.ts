@@ -99,6 +99,7 @@ const harness = Effect.fn(function* (options?: {
       getActiveProjectByWorkspaceRoot: unused,
       getFirstActiveThreadIdByProjectId: unused,
       getThreadShellById: unused,
+      getThreadMessage: unused,
       getThreadDetailById: unused,
       getThreadDetailSnapshot: unused,
     }),

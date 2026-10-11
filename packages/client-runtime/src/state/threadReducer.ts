@@ -303,6 +303,25 @@ export function applyThreadDetailEvent(
       };
     }
 
+    case "thread.message-rating-set": {
+      const { messageId, rating } = event.payload;
+      if (!thread.messages.some((message) => message.id === messageId)) {
+        return { kind: "unchanged" };
+      }
+      // A rating is not thread activity, so it leaves both updatedAt stamps alone.
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: Arr.map(thread.messages, (message) => {
+            if (message.id !== messageId) return message;
+            const { rating: _previous, ...unrated } = message;
+            return rating === null ? unrated : { ...unrated, rating };
+          }),
+        },
+      };
+    }
+
     // ── Session ─────────────────────────────────────────────────────
     case "thread.session-set": {
       // Leaving the "running" session status is the turn-end signal: settle a

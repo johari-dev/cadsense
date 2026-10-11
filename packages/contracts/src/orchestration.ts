@@ -297,6 +297,29 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+/** Why a user rated an agent response down. Clients choose the label for each value. */
+export const MessageRatingReason = Schema.Literals([
+  "incorrect",
+  "ignored-instructions",
+  "too-long",
+  "other",
+]);
+export type MessageRatingReason = typeof MessageRatingReason.Type;
+
+/**
+ * A user's thumbs up or down on a completed assistant response. Only a thumbs
+ * down carries the optional reason and short note.
+ */
+export const MessageRating = Schema.Union([
+  Schema.Struct({ value: Schema.Literal("up") }),
+  Schema.Struct({
+    value: Schema.Literal("down"),
+    reason: Schema.optionalKey(MessageRatingReason),
+    note: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  }),
+]);
+export type MessageRating = typeof MessageRating.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
@@ -304,6 +327,8 @@ export const OrchestrationMessage = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
+  // Absent until the user rates the response; clearing a rating removes it.
+  rating: Schema.optionalKey(MessageRating),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -856,6 +881,15 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Sets the user's rating on an assistant response, or clears it with null. */
+const ThreadMessageRatingSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.rating.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  rating: Schema.NullOr(MessageRating),
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -875,6 +909,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadSessionStopCommand,
+  ThreadMessageRatingSetCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -898,6 +933,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadSessionStopCommand,
+  ThreadMessageRatingSetCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -1114,6 +1150,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
+  "thread.message-rating-set",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -1262,6 +1299,12 @@ export const ThreadMessageSentPayload = Schema.Struct({
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+});
+
+export const ThreadMessageRatingSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  rating: Schema.NullOr(MessageRating),
 });
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
@@ -1493,6 +1536,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.message-sent"),
     payload: ThreadMessageSentPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.message-rating-set"),
+    payload: ThreadMessageRatingSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

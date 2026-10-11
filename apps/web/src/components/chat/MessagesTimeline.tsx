@@ -77,6 +77,7 @@ import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImage
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { keepTimelineEndVisibleAfterOverlayGrowth } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessageRatingButtons } from "./MessageRatingButtons";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -1190,8 +1191,16 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onImageExpand={ctx.onImageExpand}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          // Each child fades in on hover, so a `data-persistent` child (a rated thumb) stays shown.
+          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums *:opacity-0 *:transition-opacity *:duration-200 *:data-persistent:opacity-100 focus-within:*:opacity-100 group-hover/assistant:*:opacity-100">
             <AssistantCopyButton row={row} />
+            {ctx.threadRef && !row.assistantCopyStreaming ? (
+              <MessageRatingButtons
+                threadRef={ctx.threadRef}
+                messageId={row.message.id}
+                rating={row.message.rating}
+              />
+            ) : null}
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger

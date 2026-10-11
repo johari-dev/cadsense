@@ -120,6 +120,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       return nextReadModel;
     });
 
+  /**
+   * The command read model boots without message history, so a rating for a
+   * message from before this process started reads that message from the
+   * projection. The decider then validates it like any in-memory message.
+   * Other commands get the read model unchanged.
+   */
+  const withRatedMessage = (readModel: OrchestrationReadModel, command: OrchestrationCommand) =>
+    Effect.gen(function* () {
+      if (command.type !== "thread.message.rating.set") {
+        return readModel;
+      }
+      const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+      if (!thread || thread.messages.some((message) => message.id === command.messageId)) {
+        return readModel;
+      }
+      const message = yield* projectionSnapshotQuery.getThreadMessage(
+        command.threadId,
+        command.messageId,
+      );
+      if (Option.isNone(message)) {
+        return readModel;
+      }
+      return {
+        ...readModel,
+        threads: readModel.threads.map((entry) =>
+          entry.id === thread.id
+            ? { ...entry, messages: [...entry.messages, message.value] }
+            : entry,
+        ),
+      };
+    });
+
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
@@ -225,7 +257,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                     ),
                   })),
                 }
-              : commandReadModel,
+              : yield* withRatedMessage(commandReadModel, envelope.command),
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>
