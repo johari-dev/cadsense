@@ -1,3 +1,4 @@
+import { singleCadModelName } from "../cad/cadModelName";
 import { useRemoveCadProject } from "../cad/useRemoveCadProject";
 import {
   ArchiveIcon,
@@ -2024,15 +2025,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
   const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
-  // One synced model shows its Onshape name, named the same way as the CAD panel's scene
-  // picker; several show a count.
-  const onlyCadRoot = currentCadRoots.length === 1 ? currentCadRoots[0] : undefined;
-  const cadSummary = onlyCadRoot
-    ? (project.cad?.catalog?.roots.find((entry) => entry.elementId === onlyCadRoot.elementId)
-        ?.name ?? (onlyCadRoot.kind === "assembly" ? "Assembly" : "Part Studio"))
-    : currentCadRoots.length > 1
-      ? `${currentCadRoots.length} models`
-      : null;
+  // One synced model shows its Onshape name; several show a count.
+  const cadSummary =
+    singleCadModelName(project.cad) ??
+    (currentCadRoots.length > 1 ? `${currentCadRoots.length} models` : null);
 
   return (
     <>

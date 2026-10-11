@@ -6,9 +6,10 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 
 /**
- * The right panel's fixed sections, in switcher order. CAD comes first so it is
- * the default on CAD projects. Agents and Browser only show while they have
- * something to show (see `resolveRightPanelSection`).
+ * The right panel's sections, in fallback order. The first available one of CAD
+ * and Files is the panel's home: CAD on CAD projects, Files elsewhere. The others
+ * take over the panel when something opens them, and Agents and Browser only show
+ * while they have something to show (see `resolveRightPanelSection`).
  */
 export const RIGHT_PANEL_SECTIONS = ["cad", "files", "agents", "browser"] as const;
 export type RightPanelSection = (typeof RIGHT_PANEL_SECTIONS)[number];
@@ -162,7 +163,7 @@ export function selectThreadRightPanelState(
 
 /**
  * The section to show: the picked one while it still has content, otherwise
- * the first available one in switcher order. Null when nothing is available.
+ * the first available one in section order. Null when nothing is available.
  */
 export function resolveRightPanelSection(
   picked: RightPanelSection | null,

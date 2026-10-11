@@ -16,7 +16,9 @@ export function readCadAppearance(): CadAppearance {
     .trim();
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
-  const context = canvas.getContext("2d");
+  // CPU-backed: reading a GPU canvas waits for all queued GPU work, and the viewer reads
+  // this right after queueing a full draw of the model, which stalled the panel's opening.
+  const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return DEFAULT_CAD_APPEARANCE;
   context.fillStyle = "#171717";
   context.fillRect(0, 0, 1, 1);
