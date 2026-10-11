@@ -111,7 +111,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
         {showCollapsedStackCap && firstStackedItem ? (
           <div
             className={cn(
-              "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-2xl",
+              "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-(--chat-composer-radius)",
               "chat-composer-banner-stack-cap border border-b-0 shadow-[0_6px_18px_rgba(0,0,0,0.06)]",
               stackCapBorderClass[firstStackedItem.variant],
               "transition-opacity duration-150 ease-out",
@@ -200,7 +200,7 @@ function ComposerBannerStackAlert({
       className={cn(
         attached
           ? "chat-composer-drawer-surface chat-composer-drawer-attached px-3 pt-2 pb-[calc(var(--chat-composer-attachment-overlap)_+_0.375rem)] text-xs sm:px-4"
-          : "alert-glass rounded-[22px]",
+          : "alert-glass rounded-(--chat-composer-radius)",
         item.className,
       )}
       data-variant={item.variant}
