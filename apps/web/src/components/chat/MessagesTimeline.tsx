@@ -77,6 +77,7 @@ import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImage
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { keepTimelineEndVisibleAfterOverlayGrowth } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { QuoteReplyPill } from "./QuoteReplyPill";
 import { RedoFeedbackForm, RedoWithFeedbackButton } from "./RedoWithFeedback";
 import {
   computeStableMessagesTimelineRows,
@@ -613,6 +614,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               });
             }}
           />
+          <QuoteReplyPill />
         </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
