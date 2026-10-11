@@ -137,6 +137,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import { RightPanel } from "./RightPanel";
+import { singleCadModelName } from "../cad/cadModelName";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
@@ -1107,6 +1108,8 @@ function ChatViewContent(props: ChatViewProps) {
     browser: browserTabId !== null && isPreviewSupportedInRuntime(),
   };
   const rightPanelSection = resolveRightPanelSection(rightPanelState.section, rightPanelAvailable);
+  // The right panel's title row, where the CAD panel puts its scene picker.
+  const [cadTitleSlot, setCadTitleSlot] = useState<HTMLElement | null>(null);
   const rightPanelFile = rightPanelSection === "files" ? rightPanelState.file : null;
   const browserInPanel = rightPanelOpen && rightPanelSection === "browser";
 
@@ -3874,6 +3877,7 @@ function ChatViewContent(props: ChatViewProps) {
             project={activeProject}
             threadRef={activeThreadRef}
             fullscreen={rightPanelMaximized}
+            titleSlot={cadTitleSlot}
           />
         ) : (
           <div className="p-4 text-sm text-muted-foreground">
@@ -3925,13 +3929,20 @@ function ChatViewContent(props: ChatViewProps) {
     ) : null
   ) : null;
 
-  const rightPanelSwitcherProps = {
+  // Back from Files, Agents, or Browser returns to the model on CAD projects and to the
+  // file tree elsewhere.
+  const rightPanelHome =
+    (["cad", "files"] as const).find((section) => rightPanelAvailable[section]) ?? null;
+  const rightPanelHeaderProps = {
     section: rightPanelSection,
-    available: rightPanelAvailable,
-    onSelect: selectRightPanelSection,
-    liveAgentCount: agentPanelModel.liveCount,
-    filesPending: pendingFilePaths.size > 0,
+    home: rightPanelHome,
+    homeLabel:
+      rightPanelHome === "cad" ? (singleCadModelName(activeProject?.cad) ?? "CAD") : "Files",
+    onBack: () => {
+      if (rightPanelHome) selectRightPanelSection(rightPanelHome);
+    },
     onCloseBrowser: closeBrowserPage,
+    titleSlotRef: setCadTitleSlot,
   };
 
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
@@ -4233,11 +4244,20 @@ function ChatViewContent(props: ChatViewProps) {
 
       {!shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
         <RightPanel
+          // CAD threads get a wider panel with its own remembered width. The width is
+          // read on mount, so remount only when a thread with CAD swaps in for one without.
+          key={cadAvailable ? "design" : "tools"}
           open={rightPanelOpen}
           onExited={rightPanelPresence.onExited}
           mode="inline"
+          {...(cadAvailable
+            ? {
+                widthStorageKey: "cadsense:design-viewport-width",
+                defaultWidth: Math.round(window.innerWidth * 0.6),
+              }
+            : {})}
           maximized={rightPanelMaximized}
-          {...rightPanelSwitcherProps}
+          {...rightPanelHeaderProps}
         >
           {rightPanelContent}
         </RightPanel>
@@ -4251,11 +4271,11 @@ function ChatViewContent(props: ChatViewProps) {
           <RightPanel
             mode="sheet"
             // Same effective inset as the closed-state titlebar controls
-            // (pr-3 in the switcher row plus this pixel equals the absolute
+            // (pr-3 in the title row plus this pixel equals the absolute
             // right inset plus mr-px), so the cluster does not creep when
             // the sheet opens.
             layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
-            {...rightPanelSwitcherProps}
+            {...rightPanelHeaderProps}
           >
             {rightPanelContent}
           </RightPanel>

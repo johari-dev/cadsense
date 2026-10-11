@@ -16,6 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { createPortal } from "react-dom";
 import { CadLoadingProgress, type CadLoadProgress } from "./CadLoadingProgress";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
@@ -395,12 +396,15 @@ export function CadPanel({
   threadRef,
   fullscreen = false,
   compact = false,
+  titleSlot = null,
   onOpenComments,
 }: {
   project: Project;
   threadRef: ScopedThreadRef;
   fullscreen?: boolean;
   compact?: boolean;
+  /** The right panel's title row. The scene picker renders there when given, else in its own row. */
+  titleSlot?: HTMLElement | null;
   onOpenComments?: (target?: { id: string; target: CadCommentLocation }) => void;
 }) {
   const state = useAtomValue(
@@ -597,49 +601,51 @@ export function CadPanel({
     }));
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
+  const scenePicker = !compact && (
+    <CadScenePicker
+      documentUrl={project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined}
+      scenes={roots.map((root) => {
+        const name =
+          project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
+          (root.kind === "assembly" ? "Assembly" : "Part Studio");
+        return {
+          id: root.rootId,
+          label: roots.some(
+            (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
+          )
+            ? `${name} · ${root.configuration}`
+            : name,
+        };
+      })}
+      selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
+      disabled={locked || !!historicalView}
+      onSelect={(id) => {
+        const root = roots.find((root) => root.rootId === id);
+        if (root?.current)
+          void change({
+            rootId: root.rootId,
+            snapshotId: root.current.snapshotId,
+            revision: 0,
+            camera: { kind: "preset", preset: "isometric", fit: [] },
+            visibility: {},
+            isolatedOccurrenceIds: [],
+            explosion: 0,
+          });
+      }}
+    />
+  );
   return (
     <section
       aria-label="CAD panel"
       data-cad-agent-controlling={agentControl}
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      {!compact && (
-        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-          <CadScenePicker
-            documentUrl={
-              project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined
-            }
-            scenes={roots.map((root) => {
-              const name =
-                project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
-                  ?.name ?? (root.kind === "assembly" ? "Assembly" : "Part Studio");
-              return {
-                id: root.rootId,
-                label: roots.some(
-                  (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
-                )
-                  ? `${name} · ${root.configuration}`
-                  : name,
-              };
-            })}
-            selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
-            disabled={locked || !!historicalView}
-            onSelect={(id) => {
-              const root = roots.find((root) => root.rootId === id);
-              if (root?.current)
-                void change({
-                  rootId: root.rootId,
-                  snapshotId: root.current.snapshotId,
-                  revision: 0,
-                  camera: { kind: "preset", preset: "isometric", fit: [] },
-                  visibility: {},
-                  isolatedOccurrenceIds: [],
-                  explosion: 0,
-                });
-            }}
-          />
-        </div>
-      )}
+      {scenePicker &&
+        (titleSlot ? (
+          createPortal(scenePicker, titleSlot)
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">{scenePicker}</div>
+        ))}
       {error && (
         <p role="alert" className="border-b px-3 py-2 text-xs text-destructive">
           {error}
