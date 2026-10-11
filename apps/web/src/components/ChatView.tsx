@@ -2572,12 +2572,19 @@ function ChatViewContent(props: ChatViewProps) {
   const onSend = async (
     e?: { preventDefault: () => void },
     submissionIntent: ComposerSubmissionIntent = "foreground",
-    directAnnotation?: {
-      annotation: PreviewAnnotationPayload;
-      image: ComposerImageAttachment | null;
-    },
+    // Content from outside the composer. An annotation rides along with the
+    // composer draft; a prompt is sent on its own and leaves the draft alone.
+    direct?:
+      | {
+          kind: "annotation";
+          annotation: PreviewAnnotationPayload;
+          image: ComposerImageAttachment | null;
+        }
+      | { kind: "prompt"; text: string },
   ) => {
     e?.preventDefault();
+    const directAnnotation = direct?.kind === "annotation" ? direct : undefined;
+    const directPrompt = direct?.kind === "prompt" ? direct.text : undefined;
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -2611,7 +2618,8 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (activePendingProgress) {
-      if (directAnnotation) {
+      // Only the composer answers a pending question.
+      if (direct) {
         notifyDirectAnnotationAttached();
         return;
       }
@@ -2628,6 +2636,10 @@ function ChatViewContent(props: ChatViewProps) {
       files: composerFiles,
       elementContexts: composerElementContexts,
       previewAnnotations: sendContextPreviewAnnotations,
+    } = directPrompt === undefined
+      ? sendCtx
+      : { images: [], files: [], elementContexts: [], previewAnnotations: [] };
+    const {
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
@@ -2666,7 +2678,14 @@ function ChatViewContent(props: ChatViewProps) {
             },
           ]
         : sendContextPreviewAnnotations;
-    const promptForSend = promptRef.current;
+    const promptForSend = directPrompt ?? promptRef.current;
+    // The composer only empties when its own draft is what went out.
+    const clearSentComposerDraft = () => {
+      if (directPrompt !== undefined) return;
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+    };
     const { trimmedPrompt: trimmed, hasSendableContent } = deriveComposerSendState({
       prompt: promptForSend,
       imageCount: composerImages.length + composerFiles.length,
@@ -2787,9 +2806,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (composerRef.current?.validateProviderInput(outgoingFollowUpText) === false) {
         return;
       }
-      promptRef.current = "";
-      clearComposerDraftContent(composerDraftTarget);
-      composerRef.current?.resetCursorState();
+      clearSentComposerDraft();
       await onSubmitPlanFollowUp({
         text: followUp.text,
         interactionMode: followUp.interactionMode,
@@ -2995,9 +3012,7 @@ function ChatViewContent(props: ChatViewProps) {
       },
     ]);
     setThreadError(threadIdForSend, null);
-    promptRef.current = "";
-    clearComposerDraftContent(composerDraftTarget);
-    composerRef.current?.resetCursorState();
+    clearSentComposerDraft();
 
     let firstComposerImageName: string | null = null;
     if (composerImagesSnapshot.length > 0) {
@@ -3222,6 +3237,13 @@ function ChatViewContent(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+  // The memoized timeline needs a stable callback; the ref always reaches the
+  // latest onSend, so redo feedback follows every composer send rule.
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  const onRedoWithFeedback = useCallback((prompt: string) => {
+    void onSendRef.current(undefined, "foreground", { kind: "prompt", text: prompt });
+  }, []);
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -3866,7 +3888,7 @@ function ChatViewContent(props: ChatViewProps) {
           configuredUrls={configuredPreviewUrls}
           visible
           onSendAnnotation={(annotation, image) => {
-            void onSend(undefined, "foreground", { annotation, image });
+            void onSend(undefined, "foreground", { kind: "annotation", annotation, image });
           }}
         />
       </Suspense>
@@ -4017,6 +4039,7 @@ function ChatViewContent(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                onRedoWithFeedback={onRedoWithFeedback}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
