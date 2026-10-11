@@ -68,7 +68,6 @@ vi.mock("../state/cadPanel", () => ({
 vi.mock("../state/environments", () => ({ useEnvironmentHttpBaseUrl: () => "http://localhost/" }));
 vi.mock("../state/entities", () => ({ useThreadShells: () => boundary.threads }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
-vi.mock("../hooks/useResizableWidth", () => ({ useResizableWidth: () => ({ cancelResize() {} }) }));
 vi.mock("./CadVisibleViewer", () => ({ cadVisibleViewer: boundary }));
 vi.mock("./CadAppearance", () => ({ observeCadAppearance: () => () => {} }));
 vi.mock("./CadCommentsCard", () => ({

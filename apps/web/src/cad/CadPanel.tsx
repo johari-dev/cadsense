@@ -7,7 +7,6 @@ import {
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
-import { CaretDownIcon as ChevronDown, CaretRightIcon as ChevronRight } from "~/lib/icons";
 import {
   useCallback,
   useContext,
@@ -17,9 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Button } from "../components/ui/button";
 import { CadLoadingProgress, type CadLoadProgress } from "./CadLoadingProgress";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
 import { cadPanelEnvironment } from "../state/cadPanel";
@@ -28,7 +25,7 @@ import type { Project } from "../types";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { loadCadAssetDelivery } from "./CadAssetDelivery";
 import { cadVisibleViewer } from "./CadVisibleViewer";
-import { CadHierarchyTree } from "./CadHierarchyTree";
+import { CadViewChanges } from "./CadViewChanges";
 import {
   cadPanelLockStatus,
   findCadThreadRunBlocker,
@@ -42,7 +39,6 @@ import { CadScenePicker } from "./CadScenePicker";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
-import { useResizableWidth } from "../hooks/useResizableWidth";
 import "./CadPanel.css";
 import {
   EMPTY_CAD_PANEL_REVIEW,
@@ -137,31 +133,6 @@ export function CadScene({
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
-  const [treeOpen, setTreeOpen] = useState(false);
-  const sceneContainer = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number | null>(null);
-  const maxTreeWidth = Math.max(1, Math.min(480, (containerWidth ?? 1067) * 0.45));
-  const minTreeWidth = Math.min(180, maxTreeWidth);
-  const treeResize = useResizableWidth({
-    storageKey: "cadsense:cad-components-width",
-    defaultWidth: 256,
-    minWidth: minTreeWidth,
-    maxWidth: maxTreeWidth,
-    edge: "right",
-  });
-  const cancelTreeResize = treeResize.cancelResize;
-  useLayoutEffect(() => {
-    if (!fullscreen || disabled) cancelTreeResize();
-  }, [fullscreen, disabled, cancelTreeResize]);
-  useLayoutEffect(() => {
-    if (!fullscreen || !sceneContainer.current) return;
-    const node = sceneContainer.current;
-    const measure = () => setContainerWidth(node.clientWidth);
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    measure();
-    return () => observer.disconnect();
-  }, [fullscreen]);
   const previousCapture = useRef(captureId);
   const previousCamera = useRef(view.camera);
   const previousExplosion = useRef(view.explosion);
@@ -360,10 +331,7 @@ export function CadScene({
   const unavailable =
     error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null);
   return (
-    <div
-      ref={sceneContainer}
-      className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}
-    >
+    <div className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}>
       {/* The wrapper holds the viewer's minimum height so the strip never pushes it over the tree. */}
       <div className={`flex ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 flex-col`}>
         <div
@@ -406,83 +374,18 @@ export function CadScene({
           {manifest && !unavailable && !compact && (
             <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
           )}
-        </div>
-        {lockStatus && <CadLockStrip status={lockStatus} />}
-      </div>
-      {manifest && !compact && (
-        <Collapsible
-          open={fullscreen || treeOpen}
-          onOpenChange={(open) => {
-            if (!fullscreen) setTreeOpen(open);
-          }}
-          className={
-            fullscreen
-              ? `relative order-first flex min-h-0 shrink-0 flex-col border-r ${disabled ? "cursor-not-allowed [&_:disabled]:cursor-not-allowed [&_[aria-label='CAD_components']]:grayscale [&_[aria-label='CAD_components']]:opacity-55" : ""}`
-              : `shrink-0 ${disabled ? "cursor-not-allowed [&_:disabled]:cursor-not-allowed [&_[aria-label='CAD_components']]:grayscale [&_[aria-label='CAD_components']]:opacity-55" : ""}`
-          }
-          style={fullscreen ? { width: treeResize.width } : undefined}
-        >
-          <CollapsibleTrigger
-            render={
-              <Button
-                variant="ghost"
-                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:opacity-100 ${disabled ? "text-muted-foreground" : ""} ${fullscreen ? "" : `border-t ${treeOpen ? "" : "h-10 pb-1 sm:h-9"}`}`}
-                disabled={disabled || fullscreen}
-              />
-            }
-            disabled={disabled || fullscreen}
-          >
-            {!fullscreen && (treeOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}{" "}
-            Components{" "}
-            <span className="ml-auto text-muted-foreground">{manifest.nodes.length}</span>
-          </CollapsibleTrigger>
-          <CollapsiblePanel className={fullscreen ? "flex min-h-0 flex-1 flex-col" : undefined}>
-            <CadHierarchyTree
+          {manifest && !unavailable && !compact && (
+            <CadViewChanges
               manifest={manifest}
               view={view}
               disabled={disabled}
               onChange={onChange}
-              fullHeight={fullscreen}
-            />
-          </CollapsiblePanel>
-          {fullscreen && (
-            <div
-              role="separator"
-              aria-label="Resize CAD components"
-              aria-orientation="vertical"
-              aria-valuemin={Math.round(minTreeWidth)}
-              aria-valuemax={Math.round(maxTreeWidth)}
-              aria-valuenow={Math.round(treeResize.width)}
-              aria-disabled={disabled}
-              tabIndex={disabled ? -1 : 0}
-              className={`absolute inset-y-0 -right-1 z-10 w-2 touch-none outline-none focus-visible:bg-ring/40 ${disabled ? "cursor-not-allowed" : "cursor-col-resize hover:bg-border/70"}`}
-              {...(disabled ? {} : treeResize.handlers)}
-              onPointerDown={(event) => {
-                if (disabled) return;
-                event.currentTarget.focus();
-                treeResize.handlers.onPointerDown(event);
-              }}
-              onKeyDown={(event) => {
-                if (disabled) return;
-                const step = event.shiftKey ? 40 : 10;
-                const next =
-                  event.key === "ArrowLeft"
-                    ? treeResize.width - step
-                    : event.key === "ArrowRight"
-                      ? treeResize.width + step
-                      : event.key === "Home"
-                        ? minTreeWidth
-                        : event.key === "End"
-                          ? maxTreeWidth
-                          : null;
-                if (next === null) return;
-                event.preventDefault();
-                treeResize.setWidth(next);
-              }}
+              belowRevisionNotice={commentsCard.historical}
             />
           )}
-        </Collapsible>
-      )}
+        </div>
+        {lockStatus && <CadLockStrip status={lockStatus} />}
+      </div>
     </div>
   );
 }
