@@ -24,11 +24,11 @@ const REASON_LABELS = {
 } satisfies Record<MessageRatingReason, string>;
 
 /**
- * Thumbs up and down for a completed assistant response, rendered as direct
- * children of the hover-revealed meta row. Clicking a thumb sets that rating
- * and clicking the active one clears it. A thumbs down saves right away, then
- * asks for an optional reason; dismissing that popover keeps the rating.
- * The active thumb carries `data-persistent` so the row keeps it visible.
+ * Thumbs up and down for a completed assistant response, shown in the
+ * hover-revealed meta row. Clicking a thumb sets that rating and clicking the
+ * active one clears it. A thumbs down saves right away, then asks for an
+ * optional reason; dismissing that popover keeps the rating. While the popover
+ * is open the thumbs down carries `data-popup-open` so the row stays visible.
  */
 export const MessageRatingButtons = memo(function MessageRatingButtons({
   threadRef,
@@ -62,6 +62,7 @@ export const MessageRatingButtons = memo(function MessageRatingButtons({
         icon={ThumbsDownIcon}
         label="Bad response"
         active={rating?.value === "down"}
+        popupOpen={askingReason}
         onClick={() => {
           if (rating?.value === "down") {
             save(null);
@@ -90,12 +91,14 @@ function RatingButton({
   icon: Icon,
   label,
   active,
+  popupOpen = false,
   onClick,
 }: {
   ref?: Ref<HTMLButtonElement>;
   icon: LucideIcon;
   label: string;
   active: boolean;
+  popupOpen?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -106,7 +109,7 @@ function RatingButton({
             ref={ref}
             aria-label={label}
             aria-pressed={active}
-            data-persistent={active ? "" : undefined}
+            data-popup-open={popupOpen ? "" : undefined}
             onClick={onClick}
             type="button"
             size="xs"
