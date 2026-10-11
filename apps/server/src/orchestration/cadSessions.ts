@@ -67,12 +67,14 @@ export const decideCadSession = Effect.fn("decideCadSession")(function* (
   const project = yield* requireActiveProject({ readModel, command, projectId: thread.projectId });
   if (thread.deletedAt !== null || !project.onshapeSource || project.cad?.enabled === false)
     return yield* fail("CAD capability unavailable.");
-  yield* requireProjectCadIdle({
-    readModel,
-    command,
-    projectId: project.id,
-    includeRuns: command.type === "thread.cad.user-view.set",
-  });
+  yield* requireProjectCadIdle({ readModel, command, projectId: project.id });
+  // Each chat saves only its own view, so another chat's run never blocks this one.
+  if (
+    command.type === "thread.cad.user-view.set" &&
+    (isCadThreadRunActive(thread) ||
+      project.cad?.pendingPresentations?.some((item) => item.threadId === thread.id))
+  )
+    return yield* fail("An agent run is active for this chat.");
   if (command.type === "thread.cad.context.ensure") {
     const existing = readModel.cadSessions?.find(
       (session) => session.threadId === thread.id && session.childKey === command.childKey,

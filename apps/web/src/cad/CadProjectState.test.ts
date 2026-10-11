@@ -10,7 +10,11 @@ import {
 } from "@cadsense/contracts";
 import { expect, it } from "vite-plus/test";
 import type { Project, ThreadShell } from "../types";
-import { cadPanelLockStatus, findCadProjectRunBlocker } from "./CadProjectState";
+import {
+  cadPanelLockStatus,
+  findCadThreadRunBlocker,
+  isCadProjectRunActive,
+} from "./CadProjectState";
 
 const environmentId = EnvironmentId.make("env");
 const projectId = ProjectId.make("project");
@@ -52,38 +56,50 @@ const shell = (id: string, title: string, runningTurn: string | null): ThreadShe
 const self = ThreadId.make("self");
 const idle = { agentControlling: false, agentActivityTurnId: null, captureId: null };
 
-it("names another chat's run as the lock cause and grays out the viewer", () => {
-  const threads = [
-    shell("self", "This chat", null),
-    { ...shell("other", "Gearbox review", "turn-9"), environmentId: EnvironmentId.make("x") },
-    shell("other", "Gearbox review", "turn-9"),
-  ];
-  const blocker = findCadProjectRunBlocker(project, threads, self);
-  expect(blocker?.threadId).toBe("other");
-  expect(blocker?.thread?.environmentId).toBe(environmentId);
-  expect(cadPanelLockStatus({ threadId: self, blocker, panel: idle, operation: "sync" })).toEqual({
-    message: 'Locked while "Gearbox review" runs.',
-    agent: false,
-  });
+it("leaves this chat's panel unlocked while another chat runs or presents", () => {
+  const other = ThreadId.make("other");
+  const presenting = {
+    ...project,
+    cad: {
+      ...project.cad,
+      pendingPresentations: [
+        {
+          threadId: other,
+          turnId: TurnId.make("turn-9"),
+          captureId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+          rootId: CadHash.make("1".repeat(64)),
+        },
+      ],
+    },
+  };
+  const threads = [shell("self", "This chat", null), shell("other", "Gearbox review", "turn-9")];
+  expect(findCadThreadRunBlocker(presenting, threads, self)).toBeNull();
+  expect(cadPanelLockStatus({ blocker: null, panel: idle, operation: null })).toBeNull();
+  // Project-wide CAD changes, like sync and cleanup, still wait for every chat.
+  expect(isCadProjectRunActive(project, threads)).toBe(true);
+  expect(isCadProjectRunActive(presenting, [shell("self", "This chat", null)])).toBe(true);
+  expect(isCadProjectRunActive(project, [shell("self", "This chat", null)])).toBe(false);
 });
 
-it("prefers this chat's own run over another chat's", () => {
-  const threads = [shell("other", "Other", "turn-9"), shell("self", "This chat", "turn-1")];
-  expect(findCadProjectRunBlocker(project, threads, self)?.threadId).toBe("self");
-  expect(findCadProjectRunBlocker(project, threads)?.threadId).toBe("other");
+it("only counts this chat's own run in this project and environment", () => {
+  const elsewhere = [
+    { ...shell("self", "This chat", "turn-1"), environmentId: EnvironmentId.make("x") },
+    { ...shell("self", "This chat", "turn-1"), projectId: ProjectId.make("other-project") },
+  ];
+  expect(findCadThreadRunBlocker(project, elsewhere, self)).toBeNull();
+  const own = shell("self", "This chat", "turn-1");
+  expect(findCadThreadRunBlocker(project, [...elsewhere, own], self)).toEqual({ thread: own });
 });
 
 it("keeps agent status steady across the gap between CAD tool calls in one run", () => {
-  const blocker = findCadProjectRunBlocker(project, [shell("self", "This chat", "turn-1")], self);
+  const blocker = findCadThreadRunBlocker(project, [shell("self", "This chat", "turn-1")], self);
   const turn = TurnId.make("turn-1");
   const during = cadPanelLockStatus({
-    threadId: self,
     blocker,
     panel: { ...idle, agentControlling: true, agentActivityTurnId: turn },
     operation: null,
   });
   const between = cadPanelLockStatus({
-    threadId: self,
     blocker,
     panel: { ...idle, agentActivityTurnId: turn },
     operation: null,
@@ -96,10 +112,9 @@ it("keeps agent status steady across the gap between CAD tool calls in one run",
 });
 
 it("does not credit CAD use from an earlier run to a new run", () => {
-  const blocker = findCadProjectRunBlocker(project, [shell("self", "This chat", "turn-2")], self);
+  const blocker = findCadThreadRunBlocker(project, [shell("self", "This chat", "turn-2")], self);
   expect(
     cadPanelLockStatus({
-      threadId: self,
       blocker,
       panel: { ...idle, agentActivityTurnId: TurnId.make("turn-1") },
       operation: null,
@@ -122,10 +137,9 @@ it("does not credit the previous turn's CAD use while a new run is starting", ()
       updatedAt: now,
     },
   };
-  const blocker = findCadProjectRunBlocker(project, [starting], self);
+  const blocker = findCadThreadRunBlocker(project, [starting], self);
   expect(
     cadPanelLockStatus({
-      threadId: self,
       blocker,
       panel: { ...idle, agentActivityTurnId: TurnId.make("turn-1") },
       operation: null,
@@ -149,16 +163,16 @@ it("explains the agent's captured view while its presentation is pending", () =>
       ],
     },
   };
-  const blocker = findCadProjectRunBlocker(pending, [shell("self", "This chat", null)], self);
-  expect(blocker?.threadId).toBe("self");
+  const blocker = findCadThreadRunBlocker(pending, [shell("self", "This chat", null)], self);
+  expect(blocker?.thread?.id).toBe(self);
   // The run has ended, so the strip must not promise an unlock "when the run ends".
-  expect(
-    cadPanelLockStatus({ threadId: self, blocker, panel: { ...idle, captureId }, operation: null }),
-  ).toEqual({ message: "Showing the agent's last view.", agent: true });
-  const running = findCadProjectRunBlocker(pending, [shell("self", "This chat", "turn-1")], self);
+  expect(cadPanelLockStatus({ blocker, panel: { ...idle, captureId }, operation: null })).toEqual({
+    message: "Showing the agent's last view.",
+    agent: true,
+  });
+  const running = findCadThreadRunBlocker(pending, [shell("self", "This chat", "turn-1")], self);
   expect(
     cadPanelLockStatus({
-      threadId: self,
       blocker: running,
       panel: { ...idle, captureId },
       operation: null,
@@ -170,13 +184,11 @@ it("explains the agent's captured view while its presentation is pending", () =>
 });
 
 it("explains operations and returns null once nothing locks the panel", () => {
-  const blocker = findCadProjectRunBlocker(project, [shell("self", "This chat", null)], self);
+  const blocker = findCadThreadRunBlocker(project, [shell("self", "This chat", null)], self);
   expect(blocker).toBeNull();
-  expect(
-    cadPanelLockStatus({ threadId: self, blocker, panel: idle, operation: "discover" }),
-  ).toEqual({
+  expect(cadPanelLockStatus({ blocker, panel: idle, operation: "discover" })).toEqual({
     message: "Updating CAD from Onshape.",
     agent: false,
   });
-  expect(cadPanelLockStatus({ threadId: self, blocker, panel: idle, operation: null })).toBeNull();
+  expect(cadPanelLockStatus({ blocker, panel: idle, operation: null })).toBeNull();
 });

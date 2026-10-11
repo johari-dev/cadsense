@@ -31,7 +31,7 @@ import { cadVisibleViewer } from "./CadVisibleViewer";
 import { CadHierarchyTree } from "./CadHierarchyTree";
 import {
   cadPanelLockStatus,
-  findCadProjectRunBlocker,
+  findCadThreadRunBlocker,
   type CadPanelLockStatus,
 } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
@@ -547,7 +547,7 @@ export function CadPanel({
     useCadCommentReviewStore.getState().consume(threadRef);
   }, [compact, pendingReview, threadRef, updateReview]);
   const threads = useThreadShells();
-  const runBlocker = findCadProjectRunBlocker(project, threads, threadRef.threadId);
+  const runBlocker = findCadThreadRunBlocker(project, threads, threadRef.threadId);
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
@@ -557,7 +557,6 @@ export function CadPanel({
   );
   const locked = !!runBlocker || data?.agentControlling || !!project.cad?.operation || !data;
   const lockStatus = cadPanelLockStatus({
-    threadId: threadRef.threadId,
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
