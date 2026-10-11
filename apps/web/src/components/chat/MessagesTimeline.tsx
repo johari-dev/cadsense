@@ -77,6 +77,7 @@ import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImage
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { keepTimelineEndVisibleAfterOverlayGrowth } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { RedoFeedbackForm, RedoWithFeedbackButton } from "./RedoWithFeedback";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -134,6 +135,7 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  onRedoWithFeedback: (prompt: string) => void;
 }
 
 interface TimelineRowActivityState {
@@ -225,6 +227,8 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
+  /** Sends feedback on the latest response as a new user turn. */
+  onRedoWithFeedback: (prompt: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +262,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  onRedoWithFeedback,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
@@ -505,6 +510,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      onRedoWithFeedback,
     }),
     [
       routeThreadKey,
@@ -519,6 +525,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      onRedoWithFeedback,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -1176,6 +1183,11 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // A new turn closes the box, so a failed send never reopens a stale one.
+  if (feedbackOpen && !row.canRedoWithFeedback) {
+    setFeedbackOpen(false);
+  }
 
   return (
     <>
@@ -1192,6 +1204,12 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <AssistantCopyButton row={row} />
+            {row.canRedoWithFeedback ? (
+              <RedoWithFeedbackButton
+                open={feedbackOpen}
+                onToggle={() => setFeedbackOpen((open) => !open)}
+              />
+            ) : null}
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger
@@ -1203,6 +1221,12 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
               </Tooltip>
             )}
           </div>
+        ) : null}
+        {feedbackOpen ? (
+          <RedoFeedbackForm
+            onSubmit={ctx.onRedoWithFeedback}
+            onClose={() => setFeedbackOpen(false)}
+          />
         ) : null}
       </div>
     </>
