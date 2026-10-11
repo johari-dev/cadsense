@@ -48,6 +48,7 @@ import {
   EMPTY_CAD_PANEL_REVIEW,
   useCadCommentReviewStore,
   type CadPanelReviewSession,
+  type CadCommentLocation,
 } from "./cadCommentReviewStore";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
@@ -129,6 +130,8 @@ export function CadScene({
   const ticket = AsyncResult.isSuccess(lease) ? lease.value : null;
   const canvas = useRef<HTMLDivElement>(null);
   const renderer = commentsCard.renderer;
+  // Where the primary pointer went down on the viewer, to tell a click from an orbit drag.
+  const press = useRef<{ id: number; x: number; y: number } | null>(null);
   const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
   const latest = useRef({ view, disabled, onChange });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
@@ -370,6 +373,22 @@ export function CadScene({
             ref={canvas}
             className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
             style={{ pointerEvents: disabled ? "none" : "auto" }}
+            onPointerDown={(event) => {
+              press.current =
+                event.isPrimary && event.button === 0
+                  ? { id: event.pointerId, x: event.clientX, y: event.clientY }
+                  : null;
+            }}
+            onPointerUp={(event) => {
+              // A click (not a drag) on empty space leaves the focused comment.
+              const start = press.current;
+              press.current = null;
+              if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
+              if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+              const box = event.currentTarget.getBoundingClientRect();
+              if (renderer.current?.isEmptyAt(event.clientX - box.left, event.clientY - box.top))
+                commentsCard.clearSelection();
+            }}
           />
           {(!manifest || unavailable) && (
             <div
@@ -479,7 +498,7 @@ export function CadPanel({
   threadRef: ScopedThreadRef;
   fullscreen?: boolean;
   compact?: boolean;
-  onOpenComments?: (target?: { id: string; target: number }) => void;
+  onOpenComments?: (target?: { id: string; target: CadCommentLocation }) => void;
 }) {
   const state = useAtomValue(
     cadPanelEnvironment.watch({
@@ -605,7 +624,7 @@ export function CadPanel({
     setError(null);
     edits.select(next);
   };
-  const choose = (comment: CadComment, target: number) => {
+  const choose = (comment: CadComment, target: CadCommentLocation) => {
     if (onOpenComments) {
       onOpenComments({ id: comment.id, target });
       return;
