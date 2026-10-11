@@ -1688,7 +1688,16 @@ it.effect(
 it.effect("locks only the running chat's view while another chat in the project pans", () =>
   Effect.gen(function* () {
     const h = yield* harness();
-    const contextId = yield* h.service.resolveContext(threadId);
+    const pan = (id: ThreadId, expectedRevision: number | null, explosion: number) =>
+      h.service.saveUserView(id, expectedRevision, {
+        ...initialCadView(snapshot, expectedRevision === null ? 0 : expectedRevision + 1),
+        explosion,
+      });
+    const rejected = (id: ThreadId) =>
+      pan(id, null, 0.1).pipe(
+        Effect.flip,
+        Effect.map((error) => error.reason),
+      );
     const liveness = yield* ThreadBackgroundLiveness.ThreadBackgroundLivenessService;
     liveness.recordTaskLiveness({
       threadId,
@@ -1697,6 +1706,10 @@ it.effect("locks only the running chat's view while another chat in the project 
       status: "running",
       kind: "started",
     });
+    // The run alone locks its own chat, before any capture is pending.
+    assert.equal(yield* rejected(threadId), "capability-unavailable");
+    yield* pan(otherThreadId, null, 0.3);
+    const contextId = yield* h.service.resolveContext(threadId);
     yield* h.service.withActivation(
       contextId,
       (tools) =>
@@ -1706,26 +1719,13 @@ it.effect("locks only the running chat's view while another chat in the project 
         }),
       TurnId.make("other-chat-pans"),
     );
-    const pan = (id: ThreadId, expectedRevision: number | null, explosion: number) =>
-      h.service.saveUserView(id, expectedRevision, {
-        ...initialCadView(snapshot, expectedRevision === null ? 0 : expectedRevision + 1),
-        explosion,
-      });
-    // The running chat stays locked, both by its run and by its pending presentation.
-    assert.equal(
-      (yield* pan(threadId, null, 0.1).pipe(Effect.flip)).reason,
-      "capability-unavailable",
-    );
-    yield* pan(otherThreadId, null, 0.3);
+    liveness.clearThreadLiveness(threadId);
+    // The pending presentation alone keeps its own chat locked once the run ends.
+    assert.equal(yield* rejected(threadId), "capability-unavailable");
     yield* pan(otherThreadId, 0, 0.5);
     const other = yield* h.panel.watch(otherThreadId).pipe(Stream.runHead);
     assert.equal(other._tag === "Some" ? other.value.view?.explosion : null, 0.5);
     assert.isNull(yield* h.service.getUserView(threadId));
-    liveness.clearThreadLiveness(threadId);
-    assert.equal(
-      (yield* pan(threadId, null, 0.1).pipe(Effect.flip)).reason,
-      "capability-unavailable",
-    );
     assert.isTrue(yield* h.presentation.settle(threadId));
     const settled = yield* h.service.getUserView(threadId);
     yield* pan(threadId, settled!.revision, 0.2);
