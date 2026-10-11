@@ -148,6 +148,7 @@ const makeHarness = Effect.fn(function* (options?: {
         getProjectShellById: () => Effect.succeed(Option.fromNullishOr(options?.project)),
         getFirstActiveThreadIdByProjectId: () => unsupported(),
         getThreadShellById: () => unsupported(),
+        getThreadMessage: () => unsupported(),
         getThreadDetailById: () => unsupported(),
         getThreadDetailSnapshot: () => unsupported(),
       }),
