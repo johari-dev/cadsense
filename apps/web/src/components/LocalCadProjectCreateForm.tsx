@@ -17,7 +17,8 @@ const errorMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message ? cause.message : fallback;
 
 /**
- * Picks a folder, lists its STEP and IGES files, and creates a project that reviews the chosen one.
+ * Picks a folder, lists its STEP, IGES, and SolidWorks files, and creates a project that reviews
+ * the chosen one.
  * `pickFolder` is null without a native folder picker (a browser, or a remote environment); the
  * form then takes a typed path, which the server resolves.
  */
@@ -117,8 +118,9 @@ export function LocalCadProjectCreateForm(props: {
       <div>
         <h2 className="text-base font-medium">New local CAD project</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          On {props.environmentLabel}. Review a STEP or IGES file in a folder. Nothing is uploaded,
-          and you can sync again after re-exporting.
+          On {props.environmentLabel}. Review a STEP, IGES, or SolidWorks file in a folder. Nothing
+          is uploaded, and you can sync again after saving. SolidWorks files need SolidWorks
+          installed on this computer.
         </p>
       </div>
       {!props.connected && (
@@ -193,7 +195,7 @@ export function LocalCadProjectCreateForm(props: {
             </div>
             {listing.files.length === 0 ? (
               <p role="status" className="rounded-lg border p-3 text-sm text-muted-foreground">
-                No STEP or IGES files in this folder. Export one from your CAD tool, then rescan.
+                No STEP, IGES, or SolidWorks files in this folder. Add one, then rescan.
               </p>
             ) : (
               <RadioGroup

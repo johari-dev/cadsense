@@ -3,7 +3,11 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
-import { LOCAL_CAD_FILE_EXTENSIONS, type LocalCadFileEntry } from "@cadsense/contracts";
+import {
+  LOCAL_CAD_FILE_EXTENSIONS,
+  isSolidWorksFile,
+  type LocalCadFileEntry,
+} from "@cadsense/contracts";
 import { FileBoxIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -21,7 +25,7 @@ import type { Project } from "../types";
 // Both cases, since some Linux file dialogs match extensions case-sensitively.
 const CAD_FILE_FILTERS = [
   {
-    name: "STEP or IGES",
+    name: "STEP, IGES, or SolidWorks",
     extensions: LOCAL_CAD_FILE_EXTENSIONS.flatMap((extension) => [
       extension.slice(1),
       extension.slice(1).toUpperCase(),
@@ -37,9 +41,10 @@ const failureMessage = (result: AtomCommandResult<unknown, unknown>, fallback: s
 
 /**
  * What the CAD panel shows in a folder project with nothing imported: the linked file's import
- * progress or failure, and a button that picks a STEP or IGES file in the project folder and
- * imports it. The desktop app opens the native file dialog; a browser, which cannot read a path
- * from one, lists the folder's CAD files instead.
+ * progress or failure, and a button that picks a STEP, IGES, or SolidWorks file in the project
+ * folder and imports it. The desktop app opens the native file dialog; a browser, which cannot read
+ * a path from one, lists the folder's CAD files instead. SolidWorks files convert with the
+ * SolidWorks on the backend's machine, and the progress text says so.
  */
 export function CadFilePrompt({ project }: { project: Project }) {
   const { environments } = useEnvironments();
@@ -96,7 +101,11 @@ export function CadFilePrompt({ project }: { project: Project }) {
   if (cad?.operation?.kind === "sync")
     return (
       <div role="status" className="flex flex-1 items-center justify-center p-8 text-sm">
-        <span className="text-muted-foreground">Importing {linked ?? "CAD"}…</span>
+        <span className="text-muted-foreground">
+          {linked && isSolidWorksFile(linked)
+            ? `Converting ${linked} with SolidWorks…`
+            : `Importing ${linked ?? "CAD"}…`}
+        </span>
       </div>
     );
   const failure =
@@ -113,7 +122,7 @@ export function CadFilePrompt({ project }: { project: Project }) {
             {failure ??
               (linked
                 ? "This file has not been imported yet."
-                : `Pick a STEP or IGES file in ${folder} to review it here.`)}
+                : `Pick a STEP, IGES, or SolidWorks file in ${folder} to review it here.`)}
           </p>
         </div>
         {nativePicker ? (
@@ -133,7 +142,7 @@ export function CadFilePrompt({ project }: { project: Project }) {
               {files === null ? (
                 <MenuItem disabled>Scanning {folder}…</MenuItem>
               ) : files.length === 0 ? (
-                <MenuItem disabled>No STEP or IGES files in {folder}</MenuItem>
+                <MenuItem disabled>No CAD files in {folder}</MenuItem>
               ) : (
                 files.map((file) => (
                   <MenuItem key={file.path} onClick={() => void link(file.path)}>

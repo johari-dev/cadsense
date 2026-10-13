@@ -563,7 +563,7 @@ export function CadPanel({
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
-    localCad: project.localCadSource !== undefined,
+    localCadFile: project.localCadSource?.filePath ?? null,
   });
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;

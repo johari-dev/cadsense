@@ -3,7 +3,11 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
-import { CadUserOperationError, type CadUserStartInput } from "@cadsense/contracts";
+import {
+  CadUserOperationError,
+  isSolidWorksFile,
+  type CadUserStartInput,
+} from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { useEffect, useRef, useState } from "react";
 import { onshapeProjectEnvironment } from "../../state/onshapeProjects";
@@ -53,8 +57,8 @@ const COPY = {
     rootLabel: "Other CAD file",
     choose: "Choose a file",
     syncSelected: "Import",
-    emptyCatalog: "No STEP or IGES files are in this folder.",
-    noCatalog: "Rescan the folder to import another STEP or IGES file.",
+    emptyCatalog: "No STEP, IGES, or SolidWorks files are in this folder.",
+    noCatalog: "Rescan the folder to import another CAD file.",
     synced: "Imported",
     missing: "Not imported",
     discoverDone: "Folder scanned.",
@@ -63,6 +67,14 @@ const COPY = {
     unchanged: "Existing imported CAD is unchanged.",
   },
 } as const;
+
+/** A linked SolidWorks file converts with the SolidWorks on this machine, so the wording says so. */
+const SOLIDWORKS_COPY = {
+  ...COPY.local,
+  sectionDescription:
+    "Imports are read-only and stay on this machine. SolidWorks opens a copy of the file to convert it, so it needs to be installed here. Sync again after saving the file.",
+  syncing: "Converting with SolidWorks…",
+};
 
 export function CadProjectSettings({
   project,
@@ -88,7 +100,11 @@ export function CadProjectSettings({
     project.onshapeSource?.configuration || "default",
   );
   const local = project.localCadSource !== undefined;
-  const copy = COPY[local ? "local" : "onshape"];
+  const copy = !project.localCadSource
+    ? COPY.onshape
+    : isSolidWorksFile(project.localCadSource.filePath)
+      ? SOLIDWORKS_COPY
+      : COPY.local;
   const cad = project.cad;
   const retryAt = cad?.lastOutcome?.retryAt;
   const [clock, setClock] = useState(Date.now);

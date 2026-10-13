@@ -4,7 +4,7 @@ import type { Atom } from "effect/unstable/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { createAtomCommandScheduler, createEnvironmentRpcCommand } from "./runtime.ts";
 
-/** Commands for folder projects that review a local STEP or IGES file. */
+/** Commands for folder projects that review a local STEP, IGES, or SolidWorks file. */
 export function createLocalCadProjectAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {

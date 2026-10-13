@@ -2,8 +2,23 @@ import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
+/** SolidWorks parts and assemblies. They import through the SolidWorks installed on the machine. */
+export const SOLIDWORKS_FILE_EXTENSIONS = [".sldprt", ".sldasm"] as const;
+
 /** Extensions a local CAD project can import, lowercase with the dot. */
-export const LOCAL_CAD_FILE_EXTENSIONS = [".step", ".stp", ".iges", ".igs"] as const;
+export const LOCAL_CAD_FILE_EXTENSIONS = [
+  ".step",
+  ".stp",
+  ".iges",
+  ".igs",
+  ...SOLIDWORKS_FILE_EXTENSIONS,
+] as const;
+
+/** True for a SolidWorks file, which needs SolidWorks on the machine to import. */
+export const isSolidWorksFile = (filePath: string) => {
+  const lower = filePath.toLowerCase();
+  return SOLIDWORKS_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+};
 
 export const MAX_LOCAL_CAD_PATH_LENGTH = 1024;
 
@@ -88,7 +103,7 @@ export class LocalCadError extends Schema.TaggedErrorClass<LocalCadError>()("Loc
       case "outside-folder":
         return "The CAD file must be inside the project folder.";
       case "unsupported-file":
-        return "Choose a STEP or IGES file.";
+        return "Choose a STEP, IGES, or SolidWorks file.";
       case "onshape-project":
         return "That folder belongs to an Onshape project.";
       case "project-not-found":

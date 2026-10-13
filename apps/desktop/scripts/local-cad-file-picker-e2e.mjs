@@ -140,8 +140,10 @@ try {
   NodeAssert.deepEqual(fileCall?.properties, ["openFile"]);
   NodeAssert.equal(fileCall?.defaultPath, folder, "The file dialog opens in the project folder");
   NodeAssert.ok(
-    fileCall?.filters?.[0]?.extensions.includes("step"),
-    "The file dialog filters to STEP and IGES",
+    ["step", "igs", "sldprt", "SLDASM"].every((extension) =>
+      fileCall?.filters?.[0]?.extensions.includes(extension),
+    ),
+    "The file dialog filters to STEP, IGES, and SolidWorks",
   );
   NodeAssert.equal(summary.steps.at(-1)?.observed?.title, "exports/bracket.step");
   NodeAssert.deepEqual(summary.pageErrors, []);
