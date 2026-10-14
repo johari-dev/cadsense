@@ -1,9 +1,11 @@
-// End-to-end check that the CAD panel's "Pick a file" button opens the native file dialog and
-// imports the chosen file. Launches the dev desktop app with an isolated profile, replaces
-// Electron's dialog.showOpenDialog in the main process with a stub that records its options and
-// answers with prepared paths, then clicks through: add a plain folder project, open CAD, pick a
-// file, and wait for the model. Everything between the click and the dialog (preload, IPC, the
-// main-process handler) and after it (link, import, render) is the real app.
+// End-to-end check that both native CAD file pickers open the file dialog and import the chosen
+// file: the CAD panel's "Pick a file" button, and Add project's "Local CAD file", which opens the
+// dialog by itself. Launches the dev desktop app with an isolated profile, replaces Electron's
+// dialog.showOpenDialog in the main process with a stub that records its options and answers with
+// prepared paths, then clicks through: add a plain folder project, open CAD, pick a file, wait for
+// the model; then add a local CAD project from a picked file and wait for its model. Everything
+// between the click and the dialog (preload, IPC, the main-process handler) and after it (link,
+// import, render) is the real app.
 //
 //   node apps/desktop/scripts/local-cad-file-picker-e2e.mjs --web-url http://localhost:7083 \
 //     --server-port 15123 --out .cadsense/local-cad-picker-e2e/run
@@ -37,6 +39,10 @@ const folder = NodePath.join(out, "bracket-rig");
 NodeFS.mkdirSync(NodePath.join(folder, "exports"), { recursive: true });
 NodeFS.copyFileSync(fixture, NodePath.join(folder, "exports/bracket.step"));
 const pickedFile = NodePath.join(folder, "exports/bracket.step");
+const gearbox = NodePath.join(out, "gearbox");
+NodeFS.mkdirSync(gearbox, { recursive: true });
+const gearFile = NodePath.join(gearbox, "gear.step");
+NodeFS.copyFileSync(fixture, gearFile);
 
 const summary = { steps: [], dialogCalls: [], pageErrors: [], ok: false };
 const writeSummary = () =>
@@ -69,7 +75,8 @@ const application = await _electron.launch({
   timeout: 60_000,
 });
 try {
-  // Each dialog call gets the next path: first the project folder, then the CAD file.
+  // Each dialog call gets the next path: the project folder, the panel's CAD file, then Add
+  // project's CAD file. Any further call is answered as canceled.
   await application.evaluate(
     ({ dialog }, answers) => {
       globalThis.__cadsenseDialogCalls = [];
@@ -80,7 +87,7 @@ try {
         return path ? { canceled: false, filePaths: [path] } : { canceled: true, filePaths: [] };
       };
     },
-    [folder, pickedFile],
+    [folder, pickedFile, gearFile],
   );
 
   // Development builds also open a detached DevTools window, so find the app's own page.
@@ -134,8 +141,30 @@ try {
     return { title: (await panel.innerText()).split("\n")[0] };
   });
 
+  await run("local-cad-file-picked", async () => {
+    await page.getByTestId("sidebar-add-project-trigger").click();
+    await page.getByRole("button", { name: "Local CAD file" }).click();
+    // The dialog opens with the form, so the picked file shows without another click.
+    const form = page.getByRole("form", { name: "Create local CAD project" });
+    await form.getByText(gearFile, { exact: true }).waitFor();
+    return { name: await form.getByLabel("Project name").inputValue() };
+  });
+  await run("local-cad-project-model", async () => {
+    await page.getByRole("button", { name: "Create project" }).click();
+    await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
+    if (!(await panel.isVisible())) {
+      await page.getByRole("button", { name: "Toggle right panel" }).click();
+      await page.getByText("Review this project's CAD.").click();
+    }
+    await panel.getByText("gear.step").first().waitFor({ timeout: 120_000 });
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await page.waitForTimeout(5000);
+    return { title: (await panel.innerText()).split("\n")[0] };
+  });
+
   summary.dialogCalls = await application.evaluate(() => globalThis.__cadsenseDialogCalls);
-  const [folderCall, fileCall] = summary.dialogCalls;
+  const [folderCall, fileCall, cadFileCall] = summary.dialogCalls;
+  NodeAssert.equal(summary.dialogCalls.length, 3, "Add project opens the file dialog once");
   NodeAssert.deepEqual(folderCall?.properties, ["openDirectory", "createDirectory"]);
   NodeAssert.deepEqual(fileCall?.properties, ["openFile"]);
   NodeAssert.equal(fileCall?.defaultPath, folder, "The file dialog opens in the project folder");
@@ -143,7 +172,21 @@ try {
     fileCall?.filters?.[0]?.extensions.includes("step"),
     "The file dialog filters to STEP and IGES",
   );
-  NodeAssert.equal(summary.steps.at(-1)?.observed?.title, "exports/bracket.step");
+  NodeAssert.equal(
+    summary.steps.find((step) => step.name === "model-imported")?.observed?.title,
+    "exports/bracket.step",
+  );
+  NodeAssert.deepEqual(cadFileCall?.properties, ["openFile"]);
+  NodeAssert.ok(
+    cadFileCall?.filters?.[0]?.extensions.includes("step"),
+    "Add project's file dialog filters to CAD files",
+  );
+  NodeAssert.equal(
+    summary.steps.find((step) => step.name === "local-cad-file-picked")?.observed?.name,
+    "gearbox",
+    "The project is named after the picked file's folder",
+  );
+  NodeAssert.equal(summary.steps.at(-1)?.observed?.title, "gear.step");
   NodeAssert.deepEqual(summary.pageErrors, []);
   summary.ok = true;
 } finally {

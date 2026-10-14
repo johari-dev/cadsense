@@ -19,7 +19,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
 
 // Both cases, since some Linux file dialogs match extensions case-sensitively.
-const CAD_FILE_FILTERS = [
+export const CAD_FILE_FILTERS = [
   {
     name: "STEP or IGES",
     extensions: LOCAL_CAD_FILE_EXTENSIONS.flatMap((extension) => [
