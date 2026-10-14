@@ -1,8 +1,8 @@
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
 import type { EnvironmentId, LocalCadFilesListResult } from "@cadsense/contracts";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import { inferProjectTitleFromPath } from "../lib/projectPaths";
+import { getBrowseParentPath, inferProjectTitleFromPath } from "../lib/projectPaths";
 import { localCadProjectEnvironment } from "../state/localCadProjects";
 import { useAtomCommand } from "../state/use-atom-command";
 import { Button } from "./ui/button";
@@ -17,16 +17,17 @@ const errorMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message ? cause.message : fallback;
 
 /**
- * Picks a folder, lists its STEP, IGES, and SolidWorks files, and creates a project that reviews
- * the chosen one.
- * `pickFolder` is null without a native folder picker (a browser, or a remote environment); the
- * form then takes a typed path, which the server resolves.
+ * Creates a project that reviews one local CAD file. With a native file picker (`pickFile`), the
+ * dialog opens as soon as the form does, and the project folder is the picked file's folder.
+ * `pickFile` is null without one (a browser, or a remote environment); the form then takes a typed
+ * folder path, which the server resolves, and lists its STEP, IGES, and SolidWorks files to choose
+ * from.
  */
 export function LocalCadProjectCreateForm(props: {
   environmentId: EnvironmentId;
   environmentLabel: string;
   connected: boolean;
-  pickFolder: (() => Promise<string | null>) | null;
+  pickFile: (() => Promise<string | null>) | null;
   onCancel: () => void;
   onCreate: (input: {
     title: string;
@@ -37,6 +38,8 @@ export function LocalCadProjectCreateForm(props: {
   const id = useId();
   const listFiles = useAtomCommand(localCadProjectEnvironment.listFiles, { reportFailure: false });
   const submittingRef = useRef(false);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [listing, setListing] = useState<LocalCadFilesListResult | null>(null);
   const [typedFolder, setTypedFolder] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -45,7 +48,12 @@ export function LocalCadProjectCreateForm(props: {
   const [titleEdited, setTitleEdited] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const busy = pending || scanning;
+  const busy = pending || scanning || picking;
+  // Native picks create the project in the file's folder; typed folders use the scanned listing.
+  const pickedFolder = picked === null ? null : getBrowseParentPath(picked);
+  const selection = props.pickFile
+    ? picked && pickedFolder && { workspaceRoot: pickedFolder, filePath: picked }
+    : listing && filePath && { workspaceRoot: listing.workspaceRoot, filePath };
 
   const scan = async (workspaceRoot: string) => {
     setScanning(true);
@@ -74,11 +82,28 @@ export function LocalCadProjectCreateForm(props: {
     }
   };
 
-  const chooseFolder = async () => {
-    if (!props.pickFolder || busy) return;
-    const folder = await props.pickFolder();
-    if (folder) await scan(folder);
+  const chooseFile = async () => {
+    if (!props.pickFile || busy) return;
+    setPicking(true);
+    try {
+      const file = await props.pickFile();
+      if (!file) return;
+      setPicked(file);
+      setError(null);
+      const folder = getBrowseParentPath(file);
+      if (!titleEdited && folder) setTitle(inferProjectTitleFromPath(folder));
+    } finally {
+      setPicking(false);
+    }
   };
+
+  // Choosing "Local CAD file" means picking one, so open the dialog right away, once.
+  const autoPicked = useRef(false);
+  useEffect(() => {
+    if (autoPicked.current || !props.pickFile || !props.connected) return;
+    autoPicked.current = true;
+    void chooseFile();
+  });
 
   return (
     <form
@@ -87,8 +112,8 @@ export function LocalCadProjectCreateForm(props: {
       noValidate
       onSubmit={async (event) => {
         event.preventDefault();
-        if (submittingRef.current || !listing) return;
-        if (!filePath) {
+        if (submittingRef.current) return;
+        if (!selection) {
           setError("Choose the CAD file to review.");
           return;
         }
@@ -100,13 +125,7 @@ export function LocalCadProjectCreateForm(props: {
         setPending(true);
         setError(null);
         try {
-          setError(
-            await props.onCreate({
-              title: title.trim(),
-              workspaceRoot: listing.workspaceRoot,
-              filePath,
-            }),
-          );
+          setError(await props.onCreate({ title: title.trim(), ...selection }));
         } catch {
           setError("Could not create the local CAD project. Try again.");
         } finally {
@@ -129,28 +148,33 @@ export function LocalCadProjectCreateForm(props: {
         </p>
       )}
       <fieldset disabled={pending || !props.connected} className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor={`${id}-folder`}>
-            Folder
-          </label>
-          {props.pickFolder ? (
+        {props.pickFile ? (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor={`${id}-file`}>
+              CAD file
+            </label>
             <div className="flex items-center gap-2">
               <p
-                id={`${id}-folder`}
+                id={`${id}-file`}
                 className="min-w-0 flex-1 break-all rounded-lg border border-input px-3 py-2 text-sm text-muted-foreground"
               >
-                {listing?.workspaceRoot ?? "No folder chosen"}
+                {picked ?? "No file chosen"}
               </p>
               <Button
                 type="button"
                 variant="outline"
                 disabled={busy}
-                onClick={() => void chooseFolder()}
+                onClick={() => void chooseFile()}
               >
-                {listing ? "Change…" : "Choose folder…"}
+                {picked ? "Change…" : "Pick a file…"}
               </Button>
             </div>
-          ) : (
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor={`${id}-folder`}>
+              Folder
+            </label>
             <div className="flex items-center gap-2">
               <Input
                 id={`${id}-folder`}
@@ -175,8 +199,8 @@ export function LocalCadProjectCreateForm(props: {
                 Scan
               </Button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
         {listing && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2">
@@ -226,7 +250,7 @@ export function LocalCadProjectCreateForm(props: {
             )}
           </div>
         )}
-        {listing && (
+        {(listing || picked) && (
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor={`${id}-name`}>
               Project name
@@ -252,7 +276,7 @@ export function LocalCadProjectCreateForm(props: {
         <Button type="button" variant="ghost" disabled={pending} onClick={props.onCancel}>
           Back
         </Button>
-        <Button type="submit" disabled={busy || !props.connected || !listing || !filePath}>
+        <Button type="submit" disabled={busy || !props.connected || !selection}>
           {pending ? "Creating…" : "Create project"}
         </Button>
       </div>

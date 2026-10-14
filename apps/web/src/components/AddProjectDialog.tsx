@@ -4,6 +4,7 @@ import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/enviro
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
 import { FileBoxIcon, FolderPlusIcon } from "lucide-react";
 import type { ProjectId } from "@cadsense/contracts";
+import { CAD_FILE_FILTERS } from "../cad/CadFilePrompt";
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { isElectron } from "../env";
@@ -45,8 +46,8 @@ export function AddProjectDialog() {
   const createLocalCadProject = useAtomCommand(localCadProjectEnvironment.create, {
     reportFailure: false,
   });
-  // Folder pickers are native, so folder-based projects need the desktop app's local backend.
-  const canPickFolder =
+  // Native folder and file pickers browse the desktop app's local backend, so they need it.
+  const canPickNatively =
     !!environment &&
     environment.connection.phase === "connected" &&
     (environment.entry.target._tag === "PrimaryConnectionTarget" ||
@@ -64,16 +65,28 @@ export function AddProjectDialog() {
     [],
   );
 
-  async function pickFolder() {
-    const api = readLocalApi();
-    if (!api || !environment) return null;
+  /** Where the native pickers open, and which backend they browse, for the chosen environment. */
+  function pickerOptions() {
+    if (!environment) return null;
     const backendId = desktopLocalBackendId(environment.entry.target);
-    return api.dialogs.pickFolder({
+    return {
       ...(backendId ? { targetEnvironmentId: backendId } : {}),
       initialPath:
         environment.serverConfig?.settings?.addProjectBaseDirectory ||
         (environment.serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/"),
-    });
+    };
+  }
+
+  async function pickFolder() {
+    const api = readLocalApi();
+    const options = pickerOptions();
+    return api && options ? api.dialogs.pickFolder(options) : null;
+  }
+
+  async function pickCadFile() {
+    const api = readLocalApi();
+    const options = pickerOptions();
+    return api && options ? api.dialogs.pickFile({ ...options, filters: CAD_FILE_FILTERS }) : null;
   }
 
   /** Opens the project's most recent chat, or a new one when it has none. */
@@ -217,7 +230,7 @@ export function AddProjectDialog() {
             environmentId={environment.environmentId}
             environmentLabel={environment.label}
             connected={environment.connection.phase === "connected"}
-            pickFolder={isElectron && canPickFolder ? pickFolder : null}
+            pickFile={isElectron && canPickNatively ? pickCadFile : null}
             onCancel={() => setKind(null)}
             onCreate={async (input) => {
               busyRef.current = true;
@@ -252,7 +265,7 @@ export function AddProjectDialog() {
             <Button
               variant="outline"
               className="h-auto justify-start gap-3 px-4 py-4"
-              disabled={busy || !canPickFolder}
+              disabled={busy || !canPickNatively}
               onClick={() => void addFolder()}
             >
               <FolderPlusIcon className="size-5" />
