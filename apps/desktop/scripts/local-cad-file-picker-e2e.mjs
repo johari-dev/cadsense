@@ -166,14 +166,11 @@ try {
       if (promptGone && panelOpen) break;
       if (Date.now() > deadline) throw new Error("Sending never started a thread");
     }
-    const stop = page.getByRole("button", { name: "Stop generation" });
-    if (
-      await stop.waitFor({ timeout: 15_000 }).then(
-        () => true,
-        () => false,
-      )
-    )
-      await stop.click();
+    // Stops the turn if it is still running. A turn that ends by itself first is just as good.
+    await page
+      .getByRole("button", { name: "Stop generation" })
+      .click({ timeout: 15_000 })
+      .catch(() => {});
   };
 
   await run("folder-project", async () => {

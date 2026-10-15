@@ -166,14 +166,11 @@ const startThread = async (page: Page) => {
     if (promptGone && panelOpen) break;
     if (Date.now() > deadline) throw new Error("Sending never started a thread");
   }
-  const stop = page.getByRole("button", { name: "Stop generation" });
-  if (
-    await stop.waitFor({ timeout: 15_000 }).then(
-      () => true,
-      () => false,
-    )
-  )
-    await stop.click();
+  // Stops the turn if it is still running. A turn that ends by itself first is just as good.
+  await page
+    .getByRole("button", { name: "Stop generation" })
+    .click({ timeout: 15_000 })
+    .catch(() => {});
 };
 const manifestDir = NodePath.join(out, "home/userdata/cad/manifests");
 const manifests = () => NodeFS.readdirSync(manifestDir).filter((name) => name.endsWith(".json"));
