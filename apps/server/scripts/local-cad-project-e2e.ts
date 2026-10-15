@@ -409,19 +409,6 @@ try {
     await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
     await startThread(page);
   };
-  /**
-   * The CAD view appears once the draft becomes a thread, by which time a small file may already
-   * be converted. Records whether the "with SolidWorks" status showed; `rendered` then requires
-   * the model and a successful import either way.
-   */
-  const convertingOrDone = async () => {
-    const converting = panel.getByText(/with SolidWorks/).first();
-    await converting.or(panel.locator("canvas").first()).waitFor({ timeout: 60_000 });
-    return {
-      convertingShown: await converting.isVisible(),
-      status: (await panel.innerText()).split("\n").filter(Boolean),
-    };
-  };
   const rendered = async (page: Page, folder: string) => {
     const outcome = await settled(folder);
     if (outcome.status !== "succeeded") throw new Error(`Import failed: ${outcome.reason}`);
@@ -509,11 +496,10 @@ try {
     }
 
     const assembly = stage("sw-assembly", values["solidworks-assembly"]!);
-    await run("solidworks-assembly-converting", async (page) => {
+    await run("solidworks-assembly-model", async (page) => {
       await addProject(page, assembly.folder, assembly.file);
-      return await convertingOrDone();
+      return rendered(page, assembly.folder);
     });
-    await run("solidworks-assembly-model", (page) => rendered(page, assembly.folder));
     await run("solidworks-assembly-unchanged-sync", async () => {
       const before = { outcome: lastOutcome(assembly.folder), conversions: conversions() };
       await syncButton.click();
@@ -577,14 +563,13 @@ try {
         listed: (await form.locator("label").allInnerTexts()).map((label) => label.split("\n")[0]),
       };
     });
-    await run("solidworks-sample-converting", async (page) => {
+    await run("solidworks-sample-model", async (page) => {
       await page.getByText(sampleAssembly, { exact: true }).click();
       await page.getByRole("button", { name: "Create project" }).click();
       await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
       await startThread(page);
-      return await convertingOrDone();
+      return rendered(page, sample);
     });
-    await run("solidworks-sample-model", (page) => rendered(page, sample));
     const samplePart = values["solidworks-sample-part"];
     if (samplePart !== undefined) {
       const folder = NodePath.join(out, "sw-sample-part");
