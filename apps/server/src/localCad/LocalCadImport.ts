@@ -258,7 +258,8 @@ export function localCadMeshGlb(mesh: LocalCadMesh, name: string): Uint8Array {
 /**
  * Maps the occt product tree onto snapshot occurrences under a root named for the file. A
  * component holding exactly one mesh becomes that part, named by the component, since STEP mesh
- * names are often generic ("SOLID"). Repeated sibling names get `#2`, `#3` path segments.
+ * names are often generic ("SOLID"). Repeated sibling names get `#2`, `#3` path segments,
+ * skipping any a sibling's own name already uses.
  */
 export function buildLocalCadDraft(
   context: CadSnapshotContext,
@@ -296,11 +297,13 @@ export function buildLocalCadDraft(
   const stack = [{ tree: model.root, path: [] as string[], parentId: rootNode.id }];
   while (stack.length > 0) {
     const frame = stack.pop()!;
-    const seen = new Map<string, number>();
+    // Sibling path segments, unique even when a literal name already looks like `bolt#2`.
+    const used = new Set<string>();
     const childPath = (name: string) => {
-      const count = (seen.get(name) ?? 0) + 1;
-      seen.set(name, count);
-      const path = [...frame.path, count === 1 ? name : `${name}#${count}`];
+      let segment = name;
+      for (let count = 2; used.has(segment); count++) segment = `${name}#${count}`;
+      used.add(segment);
+      const path = [...frame.path, segment];
       if (path.length > MAX_DEPTH || nodes.length >= MAX_NODES)
         throw new CadGeometryError({ reason: "too-large" });
       return path;

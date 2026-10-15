@@ -27,9 +27,11 @@ export function requireProjectCadIdle(input: {
   readonly command: OrchestrationCommand;
   readonly projectId: ProjectId;
   readonly includeRuns?: boolean;
+  // The command links the project's CAD source, so a project without one is checked too.
+  readonly linksSource?: boolean;
 }): Effect.Effect<void, OrchestrationCommandInvariantError> {
   const project = findProjectById(input.readModel, input.projectId);
-  if (!project || !hasCadSource(project)) return Effect.void;
+  if (!project || (!hasCadSource(project) && !input.linksSource)) return Effect.void;
   if (project.cad?.operation)
     return Effect.fail(
       invariantError(input.command.type, "A CAD operation is active for this project."),
