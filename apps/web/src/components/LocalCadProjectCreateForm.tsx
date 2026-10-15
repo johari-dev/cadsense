@@ -37,6 +37,8 @@ export function LocalCadProjectCreateForm(props: {
   const id = useId();
   const listFiles = useAtomCommand(localCadProjectEnvironment.listFiles, { reportFailure: false });
   const submittingRef = useRef(false);
+  // Bumped by every scan and folder edit, so a scan that finishes late can't restore a listing.
+  const scanTicketRef = useRef(0);
   const [picked, setPicked] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [listing, setListing] = useState<LocalCadFilesListResult | null>(null);
@@ -55,6 +57,7 @@ export function LocalCadProjectCreateForm(props: {
     : listing && filePath && { workspaceRoot: listing.workspaceRoot, filePath };
 
   const scan = async (workspaceRoot: string) => {
+    const ticket = ++scanTicketRef.current;
     setScanning(true);
     setError(null);
     try {
@@ -62,7 +65,10 @@ export function LocalCadProjectCreateForm(props: {
         environmentId: props.environmentId,
         input: { workspaceRoot },
       });
+      if (ticket !== scanTicketRef.current) return;
       if (result._tag === "Failure") {
+        setListing(null);
+        setFilePath(null);
         setError(errorMessage(squashAtomCommandFailure(result), "Could not read that folder."));
         return;
       }
@@ -178,7 +184,13 @@ export function LocalCadProjectCreateForm(props: {
                 id={`${id}-folder`}
                 autoFocus
                 value={typedFolder}
-                onChange={(event) => setTypedFolder(event.target.value)}
+                onChange={(event) => {
+                  // The listing belongs to the scanned folder, so Create never targets another.
+                  scanTicketRef.current++;
+                  setTypedFolder(event.target.value);
+                  setListing(null);
+                  setFilePath(null);
+                }}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
                   event.preventDefault();
