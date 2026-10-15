@@ -3,32 +3,40 @@ import {
   CadViewError,
   CadViewState,
   type CadSnapshotManifest,
-  type OnshapeProjectSource,
+  type OrchestrationProjectShell,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
+import { localCadElementId } from "../localCad/LocalCadFiles.ts";
 export { indexCadSnapshot } from "@cadsense/shared/cadScene";
 
 const invalid = () => new CadViewError({ reason: "invalid-operation" });
 
 /**
- * The root a thread opens when it has no saved view: the project's linked element, else its
- * only root. The panel and agent tools share this so an agent always sees what the user sees.
- * A link without a configuration stores "", which syncs as Onshape's "default".
+ * The root a thread opens when it has no saved view: the project's linked Onshape element or
+ * chosen local CAD file, else its only root. The panel and agent tools share this so an agent
+ * always sees what the user sees. An Onshape link without a configuration stores "", which syncs
+ * as Onshape's "default".
  */
 export const defaultCadRoot = <
   R extends { readonly elementId: string; readonly configuration: string },
 >(
-  source: Pick<OnshapeProjectSource, "elementId" | "configuration"> | undefined,
+  project: Pick<OrchestrationProjectShell, "onshapeSource" | "localCadSource">,
   roots: readonly R[],
-): R | undefined =>
-  roots.find(
-    (root) =>
-      source?.elementId !== undefined &&
-      root.elementId === source.elementId &&
-      root.configuration === (source.configuration || "default"),
-  ) ?? (roots.length === 1 ? roots[0] : undefined);
+): R | undefined => {
+  const linked = project.localCadSource
+    ? { elementId: localCadElementId(project.localCadSource.filePath), configuration: "default" }
+    : project.onshapeSource;
+  return (
+    roots.find(
+      (root) =>
+        linked?.elementId !== undefined &&
+        root.elementId === linked.elementId &&
+        root.configuration === (linked.configuration || "default"),
+    ) ?? (roots.length === 1 ? roots[0] : undefined)
+  );
+};
 
 /** Decodes agent input, returning the schema's field errors so the agent can correct and retry. */
 export const decodeCadToolInput = <S extends Schema.Top>(schema: S, input: unknown) =>

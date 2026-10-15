@@ -10,14 +10,18 @@ export const pruneCadSnapshots = Effect.fn("pruneCadSnapshots")(function* (proje
   // Enumerate first: a concurrently published snapshot cannot become a deletion candidate.
   const stored = yield* store.list();
   const model = yield* query.getCommandReadModel();
-  const protectedIds = model.projects.flatMap(
-    (project) =>
-      project.cad?.roots.flatMap((root) =>
-        [root.current?.snapshotId, root.rollback?.snapshotId].filter(
-          (id): id is string => id !== undefined,
-        ),
-      ) ?? [],
-  );
+  const protectedIds = model.projects
+    // A deleted local CAD project has no retain-or-delete choice to honor (Onshape removal records
+    // one in `cad.storage`), and its file is still on disk, so its snapshots are garbage.
+    .filter((project) => !(project.localCadSource && project.deletedAt && !project.cad?.storage))
+    .flatMap(
+      (project) =>
+        project.cad?.roots.flatMap((root) =>
+          [root.current?.snapshotId, root.rollback?.snapshotId].filter(
+            (id): id is string => id !== undefined,
+          ),
+        ) ?? [],
+    );
   for (const comment of model.cadComments ?? []) {
     const thread = model.threads.find((t) => t.id === comment.threadId && t.deletedAt === null);
     if (thread && model.projects.some((p) => p.id === thread.projectId && p.deletedAt === null))

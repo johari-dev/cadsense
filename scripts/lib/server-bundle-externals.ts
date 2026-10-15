@@ -50,6 +50,9 @@ export const SERVER_RUNTIME_EXTERNAL_PREFIXES = [
   // Loads manifold.wasm from its own package directory by path, which a bundle
   // chunk cannot provide. No runtime dependencies, so the closure is just this.
   "manifold-3d",
+  // Same as manifold-3d: occt-import-js.wasm loads from the package directory, and
+  // LocalCadTessellation requires the package by resolved path inside a worker.
+  "occt-import-js",
 ] as const;
 
 /**

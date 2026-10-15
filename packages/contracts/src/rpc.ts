@@ -76,6 +76,14 @@ import {
   OnshapeProjectSetConnectionInput,
 } from "./onshape.ts";
 import {
+  LocalCadError,
+  LocalCadFilesListInput,
+  LocalCadFilesListResult,
+  LocalCadProjectCreateInput,
+  LocalCadProjectCreateResult,
+  LocalCadProjectSetFileInput,
+} from "./localCad.ts";
+import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -177,6 +185,9 @@ export const WS_METHODS = {
   onshapeConnectionsRemove: "onshape.connections.remove",
   onshapeProjectsCreate: "onshape.projects.create",
   onshapeProjectsSetConnection: "onshape.projects.setConnection",
+  localCadFilesList: "localCad.files.list",
+  localCadProjectsCreate: "localCad.projects.create",
+  localCadProjectsSetFile: "localCad.projects.setFile",
   cadUserStart: "cad.user.start",
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
@@ -457,6 +468,27 @@ export const WsOnshapeProjectsSetConnectionRpc = Rpc.make(WS_METHODS.onshapeProj
   error: Schema.Union([OnshapeProjectError, EnvironmentAuthorizationError]),
 });
 
+export const WsLocalCadFilesListRpc = Rpc.make(WS_METHODS.localCadFilesList, {
+  payload: LocalCadFilesListInput,
+  success: LocalCadFilesListResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
+export const WsLocalCadProjectsCreateRpc = Rpc.make(WS_METHODS.localCadProjectsCreate, {
+  payload: Schema.Struct({
+    ...LocalCadProjectCreateInput.fields,
+    defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  }),
+  success: LocalCadProjectCreateResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
+export const WsLocalCadProjectsSetFileRpc = Rpc.make(WS_METHODS.localCadProjectsSetFile, {
+  payload: LocalCadProjectSetFileInput,
+  success: LocalCadProjectCreateResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
 export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
   payload: CadUserStartInput,
   success: CadUserStartResult,
@@ -718,6 +750,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeConnectionsRemoveRpc,
   WsOnshapeProjectsCreateRpc,
   WsOnshapeProjectsSetConnectionRpc,
+  WsLocalCadFilesListRpc,
+  WsLocalCadProjectsCreateRpc,
+  WsLocalCadProjectsSetFileRpc,
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
   WsCadPanelWatchRpc,

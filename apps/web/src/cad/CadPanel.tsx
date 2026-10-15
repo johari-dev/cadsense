@@ -37,6 +37,8 @@ import { CadCameraToolbar } from "./CadCameraToolbar";
 import { captureModelThumbnail } from "./modelThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
+import { CadLocalSyncButton } from "./CadLocalSyncButton";
+import { CadFilePrompt } from "./CadFilePrompt";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
@@ -488,6 +490,7 @@ export function CadPanel({
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
+    localCad: project.localCadSource !== undefined,
   });
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;
@@ -601,38 +604,46 @@ export function CadPanel({
     }));
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
+  // The header row: the scene picker and, for a local CAD file, its Sync button.
   const scenePicker = !compact && (
-    <CadScenePicker
-      documentUrl={project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined}
-      scenes={roots.map((root) => {
-        const name =
-          project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
-          (root.kind === "assembly" ? "Assembly" : "Part Studio");
-        return {
-          id: root.rootId,
-          label: roots.some(
-            (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
-          )
-            ? `${name} · ${root.configuration}`
-            : name,
-        };
-      })}
-      selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
-      disabled={locked || !!historicalView}
-      onSelect={(id) => {
-        const root = roots.find((root) => root.rootId === id);
-        if (root?.current)
-          void change({
-            rootId: root.rootId,
-            snapshotId: root.current.snapshotId,
-            revision: 0,
-            camera: { kind: "preset", preset: "isometric", fit: [] },
-            visibility: {},
-            isolatedOccurrenceIds: [],
-            explosion: 0,
-          });
-      }}
-    />
+    <>
+      <CadScenePicker
+        documentUrl={project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined}
+        scenes={roots.map((root) => {
+          const name =
+            project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
+            (root.kind === "assembly" ? "Assembly" : "Part Studio");
+          return {
+            id: root.rootId,
+            label: roots.some(
+              (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
+            )
+              ? `${name} · ${root.configuration}`
+              : name,
+          };
+        })}
+        selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
+        disabled={locked || !!historicalView}
+        onSelect={(id) => {
+          const root = roots.find((root) => root.rootId === id);
+          if (root?.current)
+            void change({
+              rootId: root.rootId,
+              snapshotId: root.current.snapshotId,
+              revision: 0,
+              camera: { kind: "preset", preset: "isometric", fit: [] },
+              visibility: {},
+              isolatedOccurrenceIds: [],
+              explosion: 0,
+            });
+        }}
+      />
+      <CadLocalSyncButton
+        project={project}
+        rootId={view?.rootId ?? data?.unavailableRootId ?? null}
+        disabled={!!runBlocker || !!data?.agentControlling || !!historicalView}
+      />
+    </>
   );
   return (
     <section
@@ -685,6 +696,8 @@ export function CadPanel({
         !AsyncResult.isFailure(state) &&
         cadVisibleViewer.hasResident(threadRef.environmentId) ? (
         <PendingCadScene environmentId={threadRef.environmentId} />
+      ) : data && !data.unavailableRootId && !roots.length && project.localCadSource ? (
+        <CadFilePrompt project={project} />
       ) : (
         <div
           role="status"

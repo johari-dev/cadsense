@@ -86,7 +86,7 @@ describe("selectServerRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectServerRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      ["@ff-labs/fff-node", "manifold-3d", "msgpackr-extract"],
+      ["@ff-labs/fff-node", "manifold-3d", "msgpackr-extract", "occt-import-js"],
     );
   });
 });
