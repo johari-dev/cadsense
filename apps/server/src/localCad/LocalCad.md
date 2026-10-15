@@ -49,8 +49,9 @@ with content-derived 24-hex IDs, so those consumers work unchanged:
 | `configuration`  | `default`                                                    |
 
 The catalog lists one root per CAD file, named by its relative path. Each occt mesh becomes one part
-occurrence. Occurrence paths use the STEP product names, with `#2`, `#3` for repeated siblings, so
-node IDs survive re-export when the structure does not change.
+occurrence. Occurrence paths use the STEP product names, with `#2`, `#3` for repeated siblings (skipping
+a suffix a sibling's own name already has, so IDs stay unique), so node IDs survive re-export when the
+structure does not change.
 
 Tessellation uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (OpenCascade compiled
 to WASM, LGPL-2.1, loaded unmodified from its own package) with Onshape's part tolerances: 0.5 mm

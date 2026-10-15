@@ -130,15 +130,23 @@ try {
     if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
   };
   // A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
-  // message is how a user gets there; the turn is stopped as soon as it starts.
+  // message is how a user gets there; the turn is stopped as soon as it starts. A message can't
+  // start a turn while the project's first import runs, so like a user, keep sending until it does.
   const startThread = async () => {
     await openRightPanel();
     await page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first().click();
     await page.keyboard.type("Open the CAD view.");
-    await page.getByRole("button", { name: "Send message" }).click();
-    await page
-      .getByText("Start a thread to open its CAD view.")
-      .waitFor({ state: "detached", timeout: 60_000 });
+    const placeholder = page.getByText("Start a thread to open its CAD view.");
+    const deadline = Date.now() + 5 * 60_000;
+    for (;;) {
+      await page.getByRole("button", { name: "Send message" }).click();
+      const started = await placeholder.waitFor({ state: "detached", timeout: 5_000 }).then(
+        () => true,
+        () => false,
+      );
+      if (started) break;
+      if (Date.now() > deadline) throw new Error("Sending never started a thread");
+    }
     const stop = page.getByRole("button", { name: "Stop generation" });
     if (
       await stop.waitFor({ timeout: 15_000 }).then(

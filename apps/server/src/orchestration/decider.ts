@@ -545,6 +545,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
         includeRuns: true,
+        linksSource: true,
       });
       const occurredAt = yield* nowIso;
       return {

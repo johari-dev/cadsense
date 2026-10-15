@@ -7,10 +7,14 @@ import * as NodeZlib from "node:zlib";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   LocalCadError,
   OnshapeDocumentId,
   OnshapeProjectSource,
   ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
   type OrchestrationProjectShell,
 } from "@cadsense/contracts";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
@@ -421,6 +425,43 @@ const makeFolderProject = Effect.fn(function* (projectId: ProjectId, workspaceRo
   });
 });
 
+/** Starts or ends an agent run in a new thread of `projectId`, as the provider runtime reports it. */
+const setAgentRun = Effect.fn(function* (
+  projectId: ProjectId,
+  threadId: ThreadId,
+  status: "running" | "ready",
+) {
+  const engine = yield* OrchestrationEngineService;
+  const createdAt = DateTime.formatIso(yield* DateTime.now);
+  if (status === "running")
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make(`create-${threadId}`),
+      threadId,
+      projectId,
+      title: "Agent",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+      runtimeMode: "full-access",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      createdAt,
+    });
+  yield* engine.dispatch({
+    type: "thread.session.set",
+    commandId: CommandId.make(`session-${threadId}-${status}`),
+    threadId,
+    session: {
+      threadId,
+      status,
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: status === "running" ? TurnId.make(`turn-${threadId}`) : null,
+      lastError: null,
+      updatedAt: createdAt,
+    },
+    createdAt,
+  });
+});
+
 const setFileError = Effect.fn(function* (projectId: ProjectId, filePath: string) {
   const error = yield* Effect.flip((yield* LocalCadProjects).setFile({ projectId, filePath }));
   assert.instanceOf(error, LocalCadError);
@@ -674,6 +715,30 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
       assert.deepStrictEqual(project.localCadSource, { filePath: "models/dm1.step" });
       assert.strictEqual(project.cad?.lastOutcome?.status, "succeeded");
       assert.isNotNull(project.cad?.roots[0]?.current ?? null);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("refuses to link a plain folder's first file while its agent runs", () =>
+    Effect.gen(function* () {
+      const root = yield* makeFolder();
+      const projectId = ProjectId.make("local-cad-first-link-busy");
+      const threadId = ThreadId.make("local-cad-first-link-busy-agent");
+      yield* makeFolderProject(projectId, root);
+      yield* setAgentRun(projectId, threadId, "running");
+      // A run in another project does not block this one.
+      const otherProjectId = ProjectId.make("local-cad-first-link-other");
+      yield* makeFolderProject(otherProjectId, yield* makeFolder());
+      yield* setAgentRun(otherProjectId, ThreadId.make("local-cad-first-link-other-agent"), "running");
+
+      assert.strictEqual(yield* setFileError(projectId, "models/dm1.step"), "busy");
+      // Nothing was linked, so the panel still offers the file prompt.
+      assert.strictEqual((yield* getProject(projectId)).localCadSource, undefined);
+
+      yield* setAgentRun(projectId, threadId, "ready");
+      yield* (yield* LocalCadProjects).setFile({ projectId, filePath: "models/dm1.step" });
+      const project = yield* settle(projectId);
+      assert.deepStrictEqual(project.localCadSource, { filePath: "models/dm1.step" });
+      assert.strictEqual(project.cad?.lastOutcome?.status, "succeeded");
     }).pipe(Effect.scoped),
   );
 
