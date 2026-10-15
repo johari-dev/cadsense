@@ -46,6 +46,7 @@ export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
+export type SetMessageRatingInput = CommandInput<"thread.message.rating.set">;
 
 type DispatchTag = typeof ORCHESTRATION_WS_METHODS.dispatchCommand;
 type CommandEffect = Effect.Effect<
@@ -273,5 +274,15 @@ export const stopThreadSession: (input: StopThreadSessionInput) => CommandEffect
     type: "thread.session.stop",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
+  });
+});
+
+export const setMessageRating: (input: SetMessageRatingInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setMessageRating",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.message.rating.set",
+    commandId: yield* commandId(input),
   });
 });

@@ -10,7 +10,10 @@ import {
   CadCommentsPublishInput,
   CadCommentLocateInput,
   CadCommentInspectInput,
+  CadCommentPoint,
   CadCommentReviewInput,
+  CadHash,
+  CadSnapshotId,
   CadReviewLearningRemoveInput,
   CadCaptureRecord,
   CadViewState,
@@ -60,6 +63,42 @@ import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
 import { cadCommentOutdatedCheck } from "./CadCommentOutdated.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
+/**
+ * Internal input for a candidate the checks placed, not a capture pick. CadProviderTools sends it
+ * for drafts with a check-proven placement; invokeCadTool never routes it, so agents cannot call it.
+ */
+const CadCommentPlaceInput = Schema.Struct({
+  key: Schema.String,
+  snapshotId: CadSnapshotId,
+  placement: Schema.Struct({
+    occurrenceId: CadHash,
+    point: CadCommentPoint,
+    normal: CadCommentPoint,
+    isolate: Schema.Array(CadHash).check(Schema.isMaxLength(256)),
+  }),
+});
+/** Stands in for a capture ID on check-placed candidates; no capture view exists for them. */
+const CHECK_PLACEMENT_CAPTURE = "cad-checks";
+/**
+ * Why an occurrence cannot be a whole-part target, or null when it can. Smaller models often
+ * target the subassembly that holds a part; naming the cause and a part inside lets them retry.
+ */
+const partTargetProblem = (manifest: CadSnapshotManifest, occurrenceId: string) => {
+  const node = manifest.nodes.find((n) => n.id === occurrenceId);
+  if (!node)
+    return "No occurrence with this ID is in the inspected snapshot. Copy a part ID from cad_checks, cad_find_parts, or cad_hierarchy.";
+  if (node.kind !== "part") {
+    const part = manifest.nodes.find((n) => n.parentId === node.id && n.kind === "part");
+    return `${node.name} is an assembly, and a part target must be one part. List its parts with cad_hierarchy {parentOccurrenceId} and target the part the comment is about${part ? `, such as ${part.name}` : ""}.`;
+  }
+  if (node.suppressed) return `${node.name} is suppressed in this configuration.`;
+  if (
+    node.sourcePartKey === null ||
+    !manifest.assets.some((a) => a.geometryKey === node.sourcePartKey)
+  )
+    return `${node.name} has no downloaded geometry, so it cannot be a target.`;
+  return null;
+};
 const isCommentError = Schema.is(CadCommentError);
 const isRenderError = Schema.is(CadRenderError);
 const isInvariantError = Schema.is(OrchestrationCommandInvariantError);
@@ -690,6 +729,67 @@ export const make = Effect.gen(function* () {
         png: rendered.png,
       };
     });
+    /**
+     * Registers a check-proven surface point as a candidate and inspects it. The inspection view
+     * shows only the given parts and starts from the placement's view direction. Returns the
+     * inspection ID only when the marker is visible, so a hidden point cannot be published.
+     */
+    const place = Effect.fn("CadComments.place")(function* (input: unknown) {
+      const request = yield* decode(CadCommentPlaceInput, input);
+      const binding = yield* bind(request.snapshotId);
+      const { occurrenceId, point, normal, isolate } = request.placement;
+      const node = binding.manifest.nodes.find((n) => n.id === occurrenceId && n.kind === "part");
+      if (!node) return yield* fail("occurrence-unavailable");
+      const m = node.transform;
+      const row = (r: number) =>
+        m[r]! * point[0] + m[r + 1]! * point[1] + m[r + 2]! * point[2] + m[r + 3]!;
+      const world = [row(0), row(4), row(8)] as const;
+      // Occurrence transforms are rigid, so the transpose carries a world normal into part space.
+      const column = (c: number) =>
+        m[c]! * normal[0] + m[c + 4]! * normal[1] + m[c + 8]! * normal[2];
+      const local = [column(0), column(1), column(2)] as const;
+      const length = Math.hypot(...local) || 1;
+      const state: CadViewState = {
+        rootId: binding.manifest.rootId,
+        snapshotId: binding.manifest.snapshotId,
+        revision: 0,
+        camera: {
+          kind: "pose",
+          pose: {
+            position: [
+              world[0] + normal[0] * 0.3,
+              world[1] + normal[1] * 0.3,
+              world[2] + normal[2] * 0.3,
+            ],
+            target: world,
+            up: Math.abs(normal[2]) > 0.99 ? [0, 1, 0] : [0, 0, 1],
+            projection: "perspective",
+            zoom: 1,
+          },
+          fit: null,
+        },
+        visibility: {},
+        isolatedOccurrenceIds: isolate,
+        explosion: 0,
+      };
+      const id = uuid();
+      candidates.set(id, {
+        id,
+        captureId: CHECK_PLACEMENT_CAPTURE,
+        state,
+        binding,
+        occurrenceId,
+        point,
+        normal: [local[0] / length, local[1] / length, local[2] / length],
+        inspectionIds: new Set(),
+      });
+      const inspected = yield* inspect({ candidateIds: [id] });
+      const visible = candidates.get(id)?.inspectionIds.has(inspected.result.inspectionId) ?? false;
+      return {
+        result: { candidateId: id, inspectionId: visible ? inspected.result.inspectionId : null },
+        png: inspected.png,
+      };
+    });
     const publish = Effect.fn("CadComments.publish")(function* (input: unknown) {
       const request = yield* decode(CadCommentsPublishInput, input);
       const project = yield* owner(threadId);
@@ -793,17 +893,12 @@ export const make = Effect.gen(function* () {
             const targets: CadCommentTarget[] = [];
             for (const target of item.targets) {
               if (target.kind === "part") {
-                if (
-                  !binding.manifest.nodes.some(
-                    (n) =>
-                      n.id === target.occurrenceId &&
-                      n.kind === "part" &&
-                      !n.suppressed &&
-                      n.sourcePartKey !== null &&
-                      binding.manifest.assets.some((a) => a.geometryKey === n.sourcePartKey),
-                  )
-                )
-                  return yield* fail("occurrence-unavailable");
+                const problem = partTargetProblem(binding.manifest, target.occurrenceId);
+                if (problem)
+                  return yield* new CadCommentError({
+                    reason: "occurrence-unavailable",
+                    details: problem,
+                  });
                 targets.push(target);
               } else {
                 const c = candidates.get(target.candidateId);
@@ -1038,6 +1133,8 @@ export const make = Effect.gen(function* () {
               return locate(input).pipe(Effect.mapError(error));
             case "cad_comment_inspect":
               return inspect(input).pipe(Effect.mapError(error));
+            case "cad_comment_place":
+              return place(input).pipe(Effect.mapError(error));
             case "cad_comments_publish":
               return publish(input).pipe(Effect.mapError(error));
             default:

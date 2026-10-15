@@ -119,6 +119,35 @@ try {
     console.log(`${index} ${name}`, observed ?? "");
   };
   const panel = page.getByRole("region", { name: "CAD panel" });
+  // The model's name sits beside its Sync button in the right panel's header, outside the CAD
+  // panel. A local file is the only model, so its name is a heading rather than a scene picker.
+  const sceneTitle = page
+    .getByRole("button", { name: "Sync", exact: true })
+    .locator("xpath=ancestor::div[.//h2][1]//h2");
+  // The right panel opens on the CAD view. Opens it unless it is already open.
+  const openRightPanel = async () => {
+    const toggle = page.getByRole("button", { name: /^Toggle right panel/ });
+    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  };
+  // A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
+  // message is how a user gets there; the turn is stopped as soon as it starts, so no agent work runs.
+  const startThread = async () => {
+    await openRightPanel();
+    await page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first().click();
+    await page.keyboard.type("Open the CAD view.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await page
+      .getByText("Start a thread to open its CAD view.")
+      .waitFor({ state: "detached", timeout: 60_000 });
+    const stop = page.getByRole("button", { name: "Stop generation" });
+    if (
+      await stop.waitFor({ timeout: 15_000 }).then(
+        () => true,
+        () => false,
+      )
+    )
+      await stop.click();
+  };
 
   await run("folder-project", async () => {
     await page.getByTestId("sidebar-add-project-trigger").click();
@@ -129,8 +158,7 @@ try {
       .waitFor();
   });
   await run("cad-prompt", async () => {
-    await page.getByRole("button", { name: "Toggle right panel" }).click();
-    await page.getByText("Review this project's CAD.").click();
+    await startThread();
     await page.getByText("No CAD file linked").waitFor();
     return { text: await page.getByText("No CAD file linked").locator("../..").innerText() };
   });
@@ -138,7 +166,7 @@ try {
     await page.getByRole("button", { name: "Pick a file" }).click();
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
-    return { title: (await panel.innerText()).split("\n")[0] };
+    return { title: (await sceneTitle.innerText()).trim() };
   });
 
   await run("local-cad-file-picked", async () => {
@@ -152,14 +180,11 @@ try {
   await run("local-cad-project-model", async () => {
     await page.getByRole("button", { name: "Create project" }).click();
     await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
-    if (!(await panel.isVisible())) {
-      await page.getByRole("button", { name: "Toggle right panel" }).click();
-      await page.getByText("Review this project's CAD.").click();
-    }
-    await panel.getByText("gear.step").first().waitFor({ timeout: 120_000 });
+    await startThread();
+    await sceneTitle.getByText("gear.step").waitFor({ timeout: 120_000 });
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
-    return { title: (await panel.innerText()).split("\n")[0] };
+    return { title: (await sceneTitle.innerText()).trim() };
   });
 
   summary.dialogCalls = await application.evaluate(() => globalThis.__cadsenseDialogCalls);

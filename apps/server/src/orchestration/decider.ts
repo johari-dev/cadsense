@@ -896,6 +896,45 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.message.rating.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Only finished agent responses can be rated. The engine adds messages
+      // that predate its in-memory read model, so a miss here is unknown.
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      const rejection =
+        message === undefined
+          ? `Message '${command.messageId}' does not exist in thread '${command.threadId}'.`
+          : message.role !== "assistant"
+            ? `Message '${command.messageId}' is not an assistant response.`
+            : message.streaming
+              ? `Message '${command.messageId}' is still streaming.`
+              : null;
+      if (rejection !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: rejection,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: yield* nowIso,
+          commandId: command.commandId,
+        })),
+        type: "thread.message-rating-set",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          rating: command.rating,
+        },
+      };
+    }
+
     case "thread.title.regeneration.complete": {
       const thread = yield* requireThread({
         readModel,

@@ -2,7 +2,7 @@ import { CadViewError, type TurnId } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ServerRequest__DynamicToolCallParams } from "effect-codex-app-server/schema";
-import type { CadProviderTools } from "../CadProviderTools.ts";
+import { cadDeliveryImages, type CadProviderTools } from "../CadProviderTools.ts";
 
 const identity = Schema.String.check(Schema.isNonEmpty());
 const encodeResult = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
@@ -42,14 +42,10 @@ export const handleCodexCadCall = Effect.fn("handleCodexCadCall")(function* (
         type: "inputText",
         text: yield* encodeResult(delivery.result).pipe(Effect.mapError(unavailable)),
       },
-      ...(delivery.png
-        ? [
-            {
-              type: "inputImage" as const,
-              imageUrl: `data:image/png;base64,${Buffer.from(delivery.png).toString("base64")}`,
-            },
-          ]
-        : []),
+      ...cadDeliveryImages(delivery).map((png) => ({
+        type: "inputImage" as const,
+        imageUrl: `data:image/png;base64,${Buffer.from(png).toString("base64")}`,
+      })),
     ],
   };
 });

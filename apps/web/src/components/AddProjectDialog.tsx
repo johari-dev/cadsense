@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
-import { FileBoxIcon, FolderPlusIcon } from "lucide-react";
 import type { ProjectId } from "@cadsense/contracts";
+import { CubeIcon, FolderPlusIcon } from "~/lib/icons";
 import { CAD_FILE_FILTERS } from "../cad/CadFilePrompt";
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -277,7 +277,7 @@ export function AddProjectDialog() {
               disabled={busy || !environment || environment.connection.phase !== "connected"}
               onClick={() => setKind("local-cad")}
             >
-              <FileBoxIcon className="size-5" />
+              <CubeIcon className="size-5" />
               Local CAD file
             </Button>
             <Button

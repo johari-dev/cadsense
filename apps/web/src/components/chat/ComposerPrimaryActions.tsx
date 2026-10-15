@@ -1,8 +1,11 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
-import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
+import {
+  ArrowElbowDownLeftIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretLeftIcon as ChevronLeftIcon,
+  StopIcon,
+} from "~/lib/icons";
 import { cn } from "~/lib/utils";
-import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
@@ -53,6 +56,13 @@ export const formatPendingPrimaryActionLabel = (input: {
   return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
 };
 
+/**
+ * Send and stop are quiet icon buttons like the composer's attach button: no fill until
+ * hovered, so the composer footer reads as one row of controls.
+ */
+export const COMPOSER_ICON_ACTION_CLASS_NAME =
+  "relative flex size-7.5 shrink-0 items-center justify-center rounded-[var(--control-radius)] text-muted-foreground transition-colors duration-150 enabled:cursor-pointer hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
+
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
@@ -77,26 +87,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
-  const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const isSendDisabled = sendDisabledReason !== null;
-  const stageBackdropVariant = useSidebarStageBackdropVariant(
-    environmentIdentificationMode === "artwork",
-  );
 
   const renderStopGenerationButton = () => (
     <button
       type="button"
-      className={cn(
-        "flex cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none",
-        "relative size-8 pointer-coarse:after:absolute pointer-coarse:after:size-11",
-      )}
+      className={COMPOSER_ICON_ACTION_CLASS_NAME}
       {...pointerFocusProps}
       onClick={onInterrupt}
       aria-label="Stop generation"
     >
-      <svg width="14" height="14" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-        <rect x="2" y="2" width="8" height="8" rx="1.5" />
-      </svg>
+      <StopIcon aria-hidden="true" />
     </button>
   );
 
@@ -215,12 +216,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const sendButton = (
     <button
       type="submit"
-      className={cn(
-        "relative isolate flex size-8 items-center justify-center rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 pointer-coarse:after:absolute pointer-coarse:after:size-11",
-        stageBackdropVariant
-          ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110"
-          : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
-      )}
+      className={COMPOSER_ICON_ACTION_CLASS_NAME}
       {...pointerFocusProps}
       disabled={
         isSendBusy ||
@@ -241,23 +237,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 : "Send message"
       }
     >
-      {stageBackdropVariant ? (
-        <span className="absolute inset-0 -z-10 overflow-hidden rounded-full" aria-hidden="true">
-          <StageBackdropButtonArt variant={stageBackdropVariant} />
-        </span>
-      ) : null}
       {isConnecting || isSendBusy ? (
-        <Spinner className="size-4" aria-hidden="true" />
+        <Spinner aria-hidden="true" />
       ) : (
-        <svg width="16" height="16" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-          <path
-            d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <ArrowElbowDownLeftIcon aria-hidden="true" />
       )}
     </button>
   );

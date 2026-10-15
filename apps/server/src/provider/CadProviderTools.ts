@@ -1,6 +1,7 @@
 import {
   CAD_CAPTURE_SIZE,
   CAD_TOOL_INPUTS,
+  CadChecksResult,
   CadViewError,
   type ThreadId,
   type TurnId,
@@ -9,15 +10,32 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import { CAD_DRAFT_DECLINE_RULE } from "../cad/CadChecks.ts";
 import { CadViewing, type CadAgentTools } from "../cad/CadViewing.ts";
+import { placeCadDrafts } from "./CadCheckPlacement.ts";
+import {
+  type CadDraftLedger,
+  makeCadDraftLedger,
+  presentRemaining,
+  recordCadChecks,
+  remainingDrafts,
+  settleDrafts,
+  preparePublication,
+  currentCatalogVersion,
+  presentPending,
+  followUpMessage,
+  recordPublished,
+} from "./CadCheckBackstop.ts";
+import { acceptShortIds, makeCadShortIds } from "./CadShortIds.ts";
 
 const descriptions = {
   cad_comments_list:
     "List this chat's CAD findings, including reviewed findings, before publishing. Paginate with the returned catalogVersion/cursor. Reuse unchanged findings without reopening them. A comment with outdated set describes a part that was removed, moved, or reshaped in the current model: re-verify it before proposing resolution or a follow-up.",
-  cad_comment_locate: `Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height}), not pixelX/pixelY. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.`,
+  cad_comment_locate: `Pick candidate surface locations from a specific retained capture. Input: {captureId,picks:[{pickKey:"hole-1",intendedOccurrenceId,x:530,y:456}]}. All four pick fields are required. x/y are original-image pixels with top-left origin (${CAD_CAPTURE_SIZE.width} by ${CAD_CAPTURE_SIZE.height}), not pixelX/pixelY. A pick that misses moves to the nearest pixel within 64 where the intended part is visible; the result's pixel says where. Use the occurrence ID from cad_hierarchy. A hit is not semantic verification: an opening may hit an inner wall. Inspect candidates before publishing precise targets; if input is rejected, correct the fields identified in details and retry.`,
   cad_comment_inspect:
     "Receive an annotated alternate view of candidate locations. Visually verify each surface and depth. Publish verified screw holes as separate precise comments; do not group them into a whole-part finding because other candidates are occluded. Inspect remaining candidates individually to choose a better angle, or capture a closer alternate view and locate a reliable rim. Render errors require retry, not a claim that precise location is unavailable. Use a whole-part target when the issue concerns the whole part, such as a duplicate or misplaced part, or after attempts to locate and verify the specific spot remain uncertain. This does not move the user view.",
   cad_comments_publish: [
@@ -27,6 +45,8 @@ const descriptions = {
     'Precise targets require successful cad_comment_locate then cad_comment_inspect and your visual confirmation of the alternate image. When the precise location cannot be verified, targets may instead contain {kind:"part",label,occurrenceId,preciseLocationLimitation}. The limitation belongs inside each target. Use targets (an array), not target; valid target kinds are point and part, not whole-part. Do not invent coordinates or verification IDs.',
     'To reuse: {expectedCatalogVersion,items:[{kind:"reuse",publicationKey,inspectedSnapshotId,reuseCommentId}]}. A new finding may also include link:{kind:"correction"|"follow-up",commentId,explanation} for materially new evidence. Published content and review state cannot be edited by the agent.',
     'When a newer model shows an open comment was addressed, propose resolution: {kind:"propose-resolve",publicationKey,inspectedSnapshotId,commentId,explanation}. The inspected snapshot must be newer than the comment\'s and the explanation must cite what you verified in the new geometry. The user confirms; the comment stays open until then. Comments listed with outdated set need this re-verification first.',
+    "To publish cad_checks drafts exactly as offered, pass publishDrafts:[publicationKey]; expectedCatalogVersion and items may then be left out. Results list remainingDrafts: proven defects no comment covers yet.",
+    CAD_DRAFT_DECLINE_RULE,
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
   cad_context:
@@ -34,9 +54,12 @@ const descriptions = {
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility. Part entries include material and massKg when Onshape has them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
   cad_checks: [
-    'Run deterministic geometry checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: mesh-interference, coincident-instances, degenerate-geometry.',
-    "mesh-interference lists part pairs whose solids actually intersect, with the shared volume in cubic meters, ordered by volume with pairs inside one subassembly last. Intended fits touch at zero volume, so a listed pair is usually a duplicate part, a misplaced gear or shaft, or a real collision; parts modeled undeformed on purpose (a squeezed game piece, press fits, threads) also appear. coincident-instances lists duplicate placements of one part; degenerate-geometry lists parts with unknown or near-zero bounds.",
-    "Treat each mesh-interference finding as a problem to explain, not a hint: capture the pair isolated and say what is wrong or ask why it is intended. summary.meshUnknown counts parts that are not closed solids; request overlapping-bounds for bounding-box leads on those. Read summary.budgetExhausted to know whether every pair was evaluated. Each page states every selected check's explanation once in explanations; a page may hold fewer findings than limit to stay small, so follow nextCursor.",
+    'Run deterministic checks over every unsuppressed part in the selected root and read a page of findings with occurrence IDs. Input: {expectedRevision, checks?:["drivetrain","mesh-interference","overlapping-bounds","coincident-instances","degenerate-geometry"], cursor?, limit?}. Default: everything except overlapping-bounds.',
+    "drivetrain findings come first. They trace power from each motor through recognized gears, belts, chains, and shafts, check gear center distances and belt or chain lengths, and find shafts with no bearing. A drivetrain finding with problem: true is a verified defect in the model as drawn: comment on each one.",
+    "The first page also returns drafts: one ready cad_comments_publish item per proven defect (drivetrain problems, spinning parts running into other parts, and near-total duplicates). Where the checks prove the spot, the draft already has an inspected point target, and draftImages names the image attached to this result that shows its marker: look at it before publishing. Other drafts have whole-part targets as a fallback. Reword them for the student, replace a whole-part target with a located and inspected point when the problem sits at one spot, add expectedCatalogVersion from cad_comments_list, and publish them.",
+    CAD_DRAFT_DECLINE_RULE,
+    "mesh-interference lists part pairs whose solids actually intersect, with a plain-language reading of each, ordered so likely duplicates and real collisions come before overlaps inside one subassembly, squeezed game pieces, and fastener threads. Intended fits touch at zero volume. coincident-instances lists duplicate placements of one part; degenerate-geometry lists parts with unknown or near-zero bounds.",
+    "Treat each duplicate or collision reading as a problem to explain, not a hint: capture the pair isolated and say what is wrong or ask why it is intended. summary.meshUnknown counts parts that are not closed solids; request overlapping-bounds for bounding-box leads on those. Read summary.budgetExhausted to know whether every pair was evaluated. Each page states every selected check's explanation once in explanations; a page may hold fewer findings than limit to stay small, so follow nextCursor.",
   ].join(" "),
   cad_diff:
     "Compare two retained snapshots of the selected root and list what changed: added, removed, moved (placement relative to the parent), geometry-changed, renamed, suppression-changed, and visibility-changed occurrences with IDs on both sides. targetSnapshotId defaults to the current snapshot; baseSnapshotId defaults to the newest earlier retained snapshot, such as the one earlier comments inspected, and baseSelection explains the choice. retainedSnapshots lists the bases available with createdAt and microversion. Page with nextCursor. Use it when earlier comments exist to focus on changed components and reuse unchanged findings; it changes no view state.",
@@ -75,7 +98,11 @@ export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, sc
     name,
     description: descriptions[name as keyof typeof descriptions],
     // Tool arguments are objects; Effect's empty Struct also encodes arrays unless narrowed.
-    inputSchema: { ...document.schema, type: "object" as const, $defs: document.definitions },
+    inputSchema: acceptShortIds({
+      ...document.schema,
+      type: "object" as const,
+      $defs: document.definitions,
+    }),
   };
 });
 /** `tools/list` entries for MCP clients, with read-only hints. */
@@ -90,7 +117,14 @@ export const mcpCadToolDefinitions = cadToolDefinitions.map(({ type: _type, ...t
 export interface CadToolDelivery {
   readonly result: unknown;
   readonly png?: Uint8Array;
+  /** More images after `png`, such as the inspection images for cad_checks drafts. */
+  readonly pngs?: readonly Uint8Array[];
 }
+/** Every image a delivery carries, in the order the agent should see them. */
+export const cadDeliveryImages = (delivery: CadToolDelivery): Uint8Array[] => [
+  ...(delivery.png ? [delivery.png] : []),
+  ...(delivery.pngs ?? []),
+];
 const encodeDeliveryResult = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const encodeCadViewError = Schema.encodeSync(Schema.fromJsonString(CadViewError));
 /** MCP `tools/call` result for a CAD tool: the result as JSON text and structured content, plus any render. */
@@ -102,15 +136,11 @@ export const mcpCadToolResult = (delivery: CadToolDelivery) =>
       structuredContent: delivery.result,
       content: [
         { type: "text" as const, text },
-        ...(delivery.png
-          ? [
-              {
-                type: "image" as const,
-                mimeType: "image/png",
-                data: Buffer.from(delivery.png).toString("base64"),
-              },
-            ]
-          : []),
+        ...cadDeliveryImages(delivery).map((png) => ({
+          type: "image" as const,
+          mimeType: "image/png",
+          data: Buffer.from(png).toString("base64"),
+        })),
       ],
     })),
   );
@@ -152,18 +182,44 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
   }
 });
 
-/** One native session owns these activations. Only trusted adapter callbacks supply child keys and turn IDs. */
+const decodeChecksResult = Schema.decodeUnknownOption(CadChecksResult);
+const REMINDER = `These cad_checks drafts describe proven defects that no comment in this chat covers yet. Publish each one, reworded for the student. ${CAD_DRAFT_DECLINE_RULE} Drafts still uncovered when the turn ends are published as drafted.`;
+
+/**
+ * How a turn ended. A `completed` main-agent turn publishes its leftover drafts, and so does a
+ * `failed` one after its follow-up was sent: the review had finished and only the follow-up failed.
+ * A `stopped` turn (the user pressed Stop, or child agents were still running) publishes nothing.
+ */
+export type CadTurnOutcome = "completed" | "failed" | "stopped";
+
+/**
+ * One native session owns these activations. Only trusted adapter callbacks supply child keys and
+ * turn IDs. `settleOnClose` makes closing the session publish leftover drafts too, for `cadsense mcp`,
+ * where the session is the review; an app session that closes publishes nothing.
+ */
 export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* (
   threadId: ThreadId,
+  options: { readonly settleOnClose?: boolean } = {},
 ) {
   const viewing = yield* CadViewing;
   const owner = yield* Scope.Scope;
   const gate = yield* Semaphore.make(1);
   const entries = new Map<
     string | null,
-    { turnId: TurnId; scope: Scope.Closeable; tools: CadAgentTools }
+    {
+      turnId: TurnId;
+      scope: Scope.Closeable;
+      tools: CadAgentTools;
+      ledger: CadDraftLedger;
+      settle: boolean;
+    }
   >();
   const ended = new Map<string | null, Set<TurnId>>();
+  // The main agent's declines and sent drafts last the session: a later turn on the same snapshot
+  // drafts the same keys.
+  const session = { declined: new Map<string, string>(), sent: new Map<string, unknown>() };
+  // Shared by the session's child agents so IDs one shows, another can use.
+  const ids = makeCadShortIds();
   let open = true;
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -198,7 +254,22 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
     const tools = yield* Deferred.await(ready).pipe(
       Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(scope, Exit.void) : Effect.void)),
     );
-    const entry = { turnId, scope, tools };
+    const entry = {
+      turnId,
+      scope,
+      tools,
+      ledger: makeCadDraftLedger(childKey === null ? session : undefined),
+      settle: childKey === null && options.settleOnClose === true,
+    };
+    // Scope finalizers run newest first, so this backstop runs before the activation above stops,
+    // however the scope closes. It publishes only once armed: by `end` for a completed main-agent
+    // turn, or from the start over MCP. See "Drafts, reminders, and the backstop" in CadChecks.md.
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.suspend(() => (entry.settle ? settleDrafts(tools, entry.ledger) : Effect.void)).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("CAD check backstop failed", cause)),
+      ),
+    );
     entries.set(childKey, entry);
     return entry;
   });
@@ -210,14 +281,115 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
   ) {
     const entry = yield* gate.withPermits(1)(get(childKey, turnId));
     if (!open) return yield* new CadViewError({ reason: "capability-unavailable" });
+    const expanded = ids.expand(input);
+    if (!expanded.ok)
+      return yield* new CadViewError({ reason: "invalid-operation", details: expanded.details });
+    const publishing = name === "cad_comments_publish";
+    const prepared = publishing ? preparePublication(entry.ledger, expanded.value) : null;
+    /** Recomputes the uncovered drafts and returns the publish-result reminder for them. */
+    const refreshRemaining = remainingDrafts(entry.tools, entry.ledger).pipe(
+      Effect.orElseSucceed(() => []),
+      Effect.tap((remaining) => {
+        const pending = remaining.map((draft) => draft.publicationKey);
+        const changed = pending.join(" ") !== entry.ledger.pending.join(" ");
+        entry.ledger.pending = pending;
+        // Logged so a host (or the e2e harness) can follow up when a turn ends with drafts pending.
+        return changed
+          ? Effect.logInfo("CAD drafts pending", {
+              count: pending.length,
+              publicationKeys: pending,
+            })
+          : Effect.void;
+      }),
+      Effect.map((remaining) => presentRemaining(remaining, REMINDER)),
+    );
+    // A call that only declines or names unusable drafts has nothing for the comment service.
+    if (prepared?.itemCount === 0)
+      return {
+        result: ids.shorten({
+          results: prepared.rejected,
+          declined: [...entry.ledger.declined.keys()],
+          ...(yield* refreshRemaining),
+        }),
+      };
+    const forwardInput =
+      prepared?.catalogMissing && typeof prepared.input === "object" && prepared.input !== null
+        ? {
+            ...prepared.input,
+            expectedCatalogVersion: yield* currentCatalogVersion(entry.tools).pipe(
+              Effect.orElseSucceed(() => 0),
+            ),
+          }
+        : (prepared?.input ?? expanded.value);
     const result = yield* Deferred.make<CadToolDelivery, CadViewError>();
-    const call = yield* invokeCadTool(entry.tools, name, input).pipe(
+    const call = yield* invokeCadTool(entry.tools, name, forwardInput).pipe(
       Effect.onExit((exit) => Deferred.done(result, exit)),
       Effect.forkIn(entry.scope),
     );
-    return yield* Deferred.await(result).pipe(Effect.ensuring(Fiber.interrupt(call)));
+    const delivery = yield* Deferred.await(result).pipe(
+      Effect.ensuring(Fiber.interrupt(call)),
+      Effect.mapError((error) =>
+        error.details === undefined
+          ? error
+          : new CadViewError({ reason: error.reason, details: ids.shorten(error.details) }),
+      ),
+    );
+    if (name === "cad_checks") {
+      const checks = decodeChecksResult(delivery.result);
+      if (Option.isSome(checks)) {
+        // Check-proven spots become inspected point targets before the agent sees the drafts.
+        const placed = yield* placeCadDrafts(
+          entry.tools.comments,
+          checks.value,
+          entry.ledger.placements,
+        );
+        recordCadChecks(entry.ledger, checks.value, placed.result);
+        yield* refreshRemaining;
+        return { ...delivery, result: ids.shorten(placed.result), pngs: placed.pngs };
+      }
+    }
+    if (typeof delivery.result !== "object" || delivery.result === null)
+      return { ...delivery, result: ids.shorten(delivery.result) };
+    if (!publishing)
+      return {
+        ...delivery,
+        result: ids.shorten({ ...delivery.result, ...presentPending(entry.ledger.pending) }),
+      };
+    if (prepared) recordPublished(entry.ledger, prepared.items, delivery.result);
+    // After each publication, name the proven defects that still have no comment.
+    const reminder = yield* refreshRemaining;
+    const results =
+      "results" in delivery.result && Array.isArray(delivery.result.results)
+        ? [...delivery.result.results, ...(prepared?.rejected ?? [])]
+        : prepared?.rejected;
+    return {
+      ...delivery,
+      result: ids.shorten({ ...delivery.result, ...(results ? { results } : {}), ...reminder }),
+    };
   });
-  const end = (childKey: string | null, turnId: TurnId) =>
+  /**
+   * Asked by an adapter when its agent tries to end a turn. Returns the message that sends the agent
+   * back to the drafts no comment covers and it did not decline, at most once per activation, and
+   * null otherwise. It never starts or ends an activation; see "The follow-up" in cad/CadChecks.md.
+   */
+  const followUp = (childKey: string | null, turnId: TurnId) =>
+    gate.withPermits(1)(
+      Effect.gen(function* () {
+        const entry = entries.get(childKey);
+        if (!open || entry?.turnId !== turnId || entry.ledger.followedUp) return null;
+        const remaining = yield* remainingDrafts(entry.tools, entry.ledger).pipe(
+          Effect.orElseSucceed(() => []),
+        );
+        if (remaining.length === 0) return null;
+        entry.ledger.followedUp = true;
+        yield* Effect.logInfo("CAD follow-up sent", {
+          publicationKeys: remaining.map((draft) => draft.publicationKey),
+        });
+        return followUpMessage(remaining);
+      }),
+    );
+  /** Ends a turn's activation; see CadTurnOutcome for which turns publish their leftover drafts. */
+  const end = (childKey: string | null, turnId: TurnId, outcome: CadTurnOutcome) =>
     gate.withPermits(1)(
       Effect.gen(function* () {
         const turns = ended.get(childKey) ?? new Set<TurnId>();
@@ -225,6 +397,11 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         ended.set(childKey, turns);
         const entry = entries.get(childKey);
         if (entry?.turnId !== turnId) return;
+        if (
+          childKey === null &&
+          (outcome === "completed" || (outcome === "failed" && entry.ledger.followedUp))
+        )
+          entry.settle = true;
         entries.delete(childKey);
         yield* Scope.close(entry.scope, Exit.void);
       }),
@@ -237,6 +414,6 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
       ended.clear();
     }),
   );
-  return { invoke, end, close };
+  return { invoke, followUp, end, close };
 });
 export type CadProviderTools = Effect.Success<ReturnType<typeof makeCadProviderTools>>;

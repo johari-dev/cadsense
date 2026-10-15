@@ -15,7 +15,7 @@ import {
 import { hasCadSource, type ModelSelection, type ProviderDriverKind } from "@cadsense/contracts";
 import { createModelSelection } from "@cadsense/shared/model";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
-import { FolderOpenIcon, SettingsIcon, Trash2Icon } from "lucide-react";
+import { FolderOpenIcon, GearSixIcon as SettingsIcon, TrashIcon as Trash2Icon } from "~/lib/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";

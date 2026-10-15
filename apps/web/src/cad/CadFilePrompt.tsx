@@ -8,7 +8,7 @@ import {
   isSolidWorksFile,
   type LocalCadFileEntry,
 } from "@cadsense/contracts";
-import { FileBoxIcon } from "lucide-react";
+import { CubeIcon } from "~/lib/icons";
 import { useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -115,7 +115,7 @@ export function CadFilePrompt({ project }: { project: Project }) {
   return (
     <div className="flex flex-1 items-center justify-center p-8">
       <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-        <FileBoxIcon aria-hidden className="size-8 text-muted-foreground/60" />
+        <CubeIcon aria-hidden className="size-8 text-muted-foreground/60" />
         <div className="space-y-1">
           <p className="break-all text-sm font-medium">{linked ?? "No CAD file linked"}</p>
           <p className="text-sm text-muted-foreground">

@@ -68,7 +68,6 @@ vi.mock("../state/cadPanel", () => ({
 vi.mock("../state/environments", () => ({ useEnvironmentHttpBaseUrl: () => "http://localhost/" }));
 vi.mock("../state/entities", () => ({ useThreadShells: () => boundary.threads }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
-vi.mock("../hooks/useResizableWidth", () => ({ useResizableWidth: () => ({ cancelResize() {} }) }));
 vi.mock("./CadVisibleViewer", () => ({ cadVisibleViewer: boundary }));
 vi.mock("./CadAppearance", () => ({ observeCadAppearance: () => () => {} }));
 vi.mock("./CadCommentsCard", () => ({
@@ -509,14 +508,11 @@ it("keeps this chat's viewer undimmed and explained between CAD tool calls in on
   });
 });
 
-it("grays out the viewer and names the other chat while it runs", () => {
+it("keeps this chat's viewer usable while another chat in the project runs", () => {
   const { render } = reviewHarness();
   boundary.threads = [runningShell("other", "Gearbox review", "turn-9")];
   const scene = render();
-  expect(scene.disabled).toBe(true);
-  expect(scene.cadDimmed).toBe(true);
-  expect(scene.lockStatus).toEqual({
-    message: 'Locked while "Gearbox review" runs.',
-    agent: false,
-  });
+  expect(scene.disabled).toBe(false);
+  expect(scene.cadDimmed).toBe(false);
+  expect(scene.lockStatus).toBeNull();
 });

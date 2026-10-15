@@ -244,6 +244,8 @@ export type MessagesTimelineRow =
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
+      /** The thread's latest settled reply while nothing runs; offers redo with feedback. */
+      canRedoWithFeedback: boolean;
     }
   | {
       kind: "proposed-plan";
@@ -819,6 +821,13 @@ export function deriveMessagesTimelineRows(input: {
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
   });
+  // Only the newest message can be redone, and only when it is an assistant
+  // reply: a user message after it means a new turn has already started.
+  const lastMessageEntry = input.timelineEntries.findLast((entry) => entry.kind === "message");
+  const redoableMessageId =
+    !input.isWorking && lastMessageEntry?.message.role === "assistant"
+      ? lastMessageEntry.message.id
+      : null;
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
     if (!input.expandedTurnIds?.has(fold.turnId)) {
@@ -1213,6 +1222,10 @@ export function deriveMessagesTimelineRows(input: {
       showAssistantMeta,
       showAssistantCopyButton: showAssistantMeta,
       assistantCopyStreaming: timelineEntry.message.streaming || assistantTurnStillInProgress,
+      canRedoWithFeedback:
+        showAssistantMeta &&
+        !timelineEntry.message.streaming &&
+        timelineEntry.message.id === redoableMessageId,
     });
   }
 
@@ -1321,7 +1334,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.durationStart === bm.durationStart &&
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
-        a.assistantCopyStreaming === bm.assistantCopyStreaming
+        a.assistantCopyStreaming === bm.assistantCopyStreaming &&
+        a.canRedoWithFeedback === bm.canRedoWithFeedback
       );
     }
   }

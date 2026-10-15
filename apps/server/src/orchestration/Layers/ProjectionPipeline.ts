@@ -844,6 +844,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.message-rating-set":
+          yield* projectionThreadMessageRepository.setRating(event.payload);
+          return;
+
         default:
           return;
       }

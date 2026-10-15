@@ -1,5 +1,5 @@
 import { isSolidWorksFile } from "@cadsense/contracts";
-import { RefreshCwIcon } from "lucide-react";
+import { ArrowsClockwiseIcon } from "~/lib/icons";
 
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
@@ -51,7 +51,7 @@ export function CadLocalSyncButton({
               })
             }
           >
-            <RefreshCwIcon />
+            <ArrowsClockwiseIcon />
             {syncing ? (solidWorks ? "Converting…" : "Importing…") : "Sync"}
           </Button>
         }

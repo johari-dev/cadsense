@@ -1,5 +1,5 @@
 import type { ScopedThreadRef } from "@cadsense/contracts";
-import { X } from "lucide-react";
+import { XIcon as X } from "~/lib/icons";
 
 import { isValidHistoryTimestamp, type BrowserHistoryEntry } from "~/browserHistoryStore";
 import { useNowMinute } from "~/hooks/useNowMinute";
