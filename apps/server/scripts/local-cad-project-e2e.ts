@@ -108,7 +108,11 @@ page.on("pageerror", (error) => pageErrors.push(error.message));
 let shots = 0;
 const run = async (name: string, action: (page: Page) => Promise<unknown>) => {
   const started = Date.now();
-  const observed = await action(page);
+  const observed = await action(page).catch(async (error: unknown) => {
+    // Keep what the page showed when the step failed.
+    await page.screenshot({ path: NodePath.join(out, `failed-${name}.png`) }).catch(() => {});
+    throw error;
+  });
   const index = String(++shots).padStart(2, "0");
   await page.screenshot({ path: NodePath.join(out, `${index}-${name}.png`) });
   summary.steps.push({ name, ms: Date.now() - started, ...(observed ? { observed } : {}) });
