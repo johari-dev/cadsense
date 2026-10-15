@@ -132,25 +132,38 @@ try {
   // A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
   // message is how a user gets there; the turn is stopped as soon as it starts. A message can't
   // start a turn while the project's first import runs, so like a user, keep sending until it does.
+  // A failed first send gives the draft a new thread id, and panel state is kept per thread id, so
+  // the panel closes. The prompt going away only means a thread started if the panel stayed open.
   const startThread = async () => {
     const placeholder = page.getByText("Start a thread to open its CAD view.");
-    // The new draft may still be loading, and its panel keeps its own open state. Open it until
-    // it asks for a thread; only then does the prompt going away mean a thread started.
-    for (let attempt = 0; !(await placeholder.isVisible()); attempt++) {
-      if (attempt === 30) throw new Error("The draft's right panel never asked for a thread");
-      await openRightPanel();
-      await placeholder.waitFor({ timeout: 1_000 }).catch(() => {});
-    }
-    await page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first().click();
-    await page.keyboard.type("Open the CAD view.");
-    const deadline = Date.now() + 5 * 60_000;
+    const composer = page
+      .locator('[data-chat-composer-form="true"] [contenteditable="true"]')
+      .first();
+    // Opens the draft's panel until it asks for a thread. It can start closed while the draft loads.
+    const showPrompt = async () => {
+      for (let attempt = 0; !(await placeholder.isVisible()); attempt++) {
+        if (attempt === 30) throw new Error("The draft's right panel never asked for a thread");
+        await openRightPanel();
+        await placeholder.waitFor({ timeout: 1_000 }).catch(() => {});
+      }
+    };
+    const deadline = Date.now() + 20 * 60_000;
     for (;;) {
+      await showPrompt();
+      if (!(await composer.innerText()).trim()) {
+        await composer.click();
+        await page.keyboard.type("Open the CAD view.");
+      }
       await page.getByRole("button", { name: "Send message" }).click();
-      const started = await placeholder.waitFor({ state: "detached", timeout: 5_000 }).then(
+      const promptGone = await placeholder.waitFor({ state: "detached", timeout: 5_000 }).then(
         () => true,
         () => false,
       );
-      if (started) break;
+      const panelOpen =
+        (await page
+          .getByRole("button", { name: /^Toggle right panel/ })
+          .getAttribute("aria-pressed")) === "true";
+      if (promptGone && panelOpen) break;
       if (Date.now() > deadline) throw new Error("Sending never started a thread");
     }
     const stop = page.getByRole("button", { name: "Stop generation" });
