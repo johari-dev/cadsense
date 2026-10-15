@@ -116,12 +116,44 @@ const run = async (name: string, action: (page: Page) => Promise<unknown>) => {
   console.log(`${index} ${name}`, observed ?? "");
 };
 const panel = page.getByRole("region", { name: "CAD panel" });
+// The model's name and its Sync button sit in the right panel's header, outside the CAD panel.
+// A local file is the only model, so its name is a heading rather than a scene picker.
+const syncButton = page.getByRole("button", { name: "Sync", exact: true });
+const sceneTitle = syncButton.locator("xpath=ancestor::div[.//h2][1]//h2");
+// The right panel opens on the CAD view. Opens it unless it is already open.
+const openRightPanel = async (page: Page) => {
+  const toggle = page.getByRole("button", { name: /^Toggle right panel/ });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+};
+// A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
+// message is how a user gets there; the turn is stopped as soon as it starts, so no agent work runs.
+const startThread = async (page: Page) => {
+  await openRightPanel(page);
+  await page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first().click();
+  await page.keyboard.type("Open the CAD view.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page
+    .getByText("Start a thread to open its CAD view.")
+    .waitFor({ state: "detached", timeout: 60_000 });
+  const stop = page.getByRole("button", { name: "Stop generation" });
+  if (
+    await stop.waitFor({ timeout: 15_000 }).then(
+      () => true,
+      () => false,
+    )
+  )
+    await stop.click();
+};
 const manifestDir = NodePath.join(out, "home/userdata/cad/manifests");
 const manifests = () => NodeFS.readdirSync(manifestDir).filter((name) => name.endsWith(".json"));
-const componentCount = async () =>
-  Number(
-    (await panel.getByText("Components").locator("..").innerText()).match(/(\d+)\s*$/)?.[1] ?? 0,
-  );
+// Components in the newest imported snapshot, read from the snapshot store.
+const componentCount = () => {
+  const newest = manifests()
+    .map((name) => NodePath.join(manifestDir, name))
+    .toSorted((a, b) => NodeFS.statSync(b).mtimeMs - NodeFS.statSync(a).mtimeMs)[0];
+  if (!newest) return 0;
+  return (JSON.parse(NodeFS.readFileSync(newest, "utf8")) as { nodes: unknown[] }).nodes.length;
+};
 
 try {
   await run("add-project", async (page) => {
@@ -152,8 +184,7 @@ try {
     return { url: page.url() };
   });
   await run("cad-panel-import-failed", async (page) => {
-    await page.getByRole("button", { name: "Toggle right panel" }).click();
-    await page.getByText("Review this project's CAD.").click();
+    await startThread(page);
     await panel.getByText(/Could not read this CAD file/).waitFor({ timeout: 120_000 });
     return { prompt: (await panel.innerText()).split("\n").filter(Boolean) };
   });
@@ -167,7 +198,7 @@ try {
     await page.getByRole("menuitem", { name: stepName }).click();
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
-    return { title: (await panel.innerText()).split("\n")[0], components: await componentCount() };
+    return { title: (await sceneTitle.innerText()).trim(), components: componentCount() };
   });
   await run("re-exported-and-synced", async (page) => {
     // A new export of the same model: different bytes, same structure.
@@ -177,12 +208,12 @@ try {
       NodeFS.readFileSync(file, "utf8").replace("FILE_NAME(", "FILE_NAME( /* re-export */ "),
     );
     const before = new Set(manifests());
-    await panel.getByRole("button", { name: "Sync" }).click();
+    await syncButton.click();
     // The import can finish before "Importing…" renders, so watch the snapshot store instead.
     const created = await waitFor("the re-imported snapshot", () =>
       manifests().find((name) => !before.has(name)),
     );
-    await panel.getByRole("button", { name: "Sync" }).waitFor({ timeout: 120_000 });
+    await syncButton.waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
     const revision = (name: string) =>
       (
@@ -191,7 +222,7 @@ try {
         }
       ).root.microversionId;
     return {
-      components: await componentCount(),
+      components: componentCount(),
       revisions: [...before].map(revision).concat(revision(created)),
     };
   });
