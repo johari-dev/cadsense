@@ -8,6 +8,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -39,7 +41,7 @@ const SolidWorksNode: Schema.Codec<SolidWorksNode> = Schema.Struct({
   key: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.suspend((): Schema.Codec<SolidWorksNode> => SolidWorksNode)),
 });
-// `pid` and `owned` say which SolidWorks process Cadsense started and left running, if any.
+// `pid` is the SolidWorks the bridge used, and `owned` says whether Cadsense started it.
 const decodeResult = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Union([
@@ -156,8 +158,9 @@ export const detectSolidWorksHost: Effect.Effect<SolidWorksHost | null> = Effect
 /**
  * The C# that drives SolidWorks over COM, compiled once by PowerShell against the installed
  * interop assembly. Rules it keeps: it opens only the staged copies, read-only; it closes only the
- * documents it opened; it restores the STEP preferences it changes; and it quits SolidWorks only
- * if Cadsense started it and no other conversion is waiting (the server writes `keep` then).
+ * documents it opened; and it restores the STEP preferences it changes. A conversion never quits
+ * SolidWorks. It reports whether Cadsense started the one it used, and the server runs quit mode
+ * when nothing else needs it.
  */
 const BRIDGE_SOURCE = String.raw`
 using System;
@@ -306,14 +309,34 @@ namespace CadsenseSolidWorks {
       return nodes;
     }
 
+    // Quits the SolidWorks that Cadsense started, if it still runs with nothing open in it.
+    // CreateInstance attaches to it (GetActiveObject cannot see a SolidWorks that COM started).
+    // If it exited meanwhile, CreateInstance starts a new one, which is Cadsense's to quit too. A
+    // SolidWorks that ran before this call and is not the owned one is the user's, and stays.
+    static void Quit(int ownedPid) {
+      var before = Process.GetProcessesByName("SLDWORKS").Select(p => p.Id).ToList();
+      if (!before.Contains(ownedPid)) return;
+      var sw = (SldWorks)Activator.CreateInstance(Type.GetTypeFromProgID("SldWorks.Application"));
+      var pid = sw.GetProcessID();
+      if ((pid != ownedPid && before.Contains(pid)) || sw.GetDocumentCount() > 0) return;
+      sw.ExitApp();
+      // Waits for the exit, so the next conversion cannot attach to a SolidWorks shutting down.
+      // A SolidWorks started through COM only exits once its clients let go, so release first.
+      Marshal.FinalReleaseComObject(sw);
+      sw = null;
+      GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); GC.WaitForPendingFinalizers();
+      try { Process.GetProcessById(pid).WaitForExit(120000); } catch (ArgumentException) { }
+    }
+
     public static void Run(string jobDir) {
       job = jobDir;
       input = Path.GetFullPath(Path.Combine(job, "in")) + Path.DirectorySeparatorChar;
       var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 1000 };
       var request = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(job, "request.json")));
+      int ownedPid = Convert.ToInt32(request["ownedPid"]);
+      if ((string)request["mode"] == "quit") { Quit(ownedPid); return; }
       var file = Path.Combine(input, (string)request["file"]);
       skip = new HashSet<string>(((System.Collections.ArrayList)request["skip"]).Cast<string>());
-      int ownedPid = Convert.ToInt32(request["ownedPid"]);
       Directory.CreateDirectory(Path.Combine(job, "out"));
       foreach (var copy in Directory.GetFiles(input, "*", SearchOption.AllDirectories)) FileSha(copy);
       var result = new Dictionary<string, object>();
@@ -393,21 +416,8 @@ namespace CadsenseSolidWorks {
             sw.SetUserPreferenceToggle(StepAppearancesToggle, appearances);
           }
         } catch (Exception) { }
-        bool quit = owned && !File.Exists(Path.Combine(job, "keep"));
-        // Waits for the exit, so the next conversion cannot attach to a SolidWorks shutting down.
-        // A SolidWorks started through COM only exits once its clients let go, so release first.
-        try {
-          if (quit) {
-            sw.ExitApp();
-            doc = null;
-            Marshal.FinalReleaseComObject(sw);
-            sw = null;
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); GC.WaitForPendingFinalizers();
-            Process.GetProcessById(pid).WaitForExit(120000);
-          }
-        } catch (Exception) { }
         result["pid"] = pid;
-        result["owned"] = owned && !quit;
+        result["owned"] = owned;
         File.WriteAllText(Path.Combine(job, "result.json"), json.Serialize(result));
       }
     }
@@ -450,10 +460,10 @@ const SCRIPT_NAME = `bridge-${NodeCrypto.createHash("sha256").update(BRIDGE_SCRI
 /** The UTF-8 byte order mark, which Windows PowerShell needs to read a script as UTF-8. */
 const BOM = String.fromCharCode(0xfeff);
 const CONVERSION_TIMEOUT = "30 minutes";
-const CANCEL_GRACE = "2 minutes";
 const encodeRequest = Schema.encodeEffect(
   Schema.fromJsonString(
     Schema.Struct({
+      mode: Schema.Literals(["convert", "quit"]),
       file: Schema.String,
       skip: Schema.Array(Schema.String),
       ownedPid: Schema.Number,
@@ -468,107 +478,142 @@ const failed = (detail: string) =>
     detail: detail.replace(/\s+/g, " ").trim().slice(0, 200),
   });
 
-/**
- * One SolidWorks conversion at a time: SolidWorks is single-threaded, and one job quitting it must
- * not pull it out from under another. `host` is detected unless given (tests pass null).
- */
-export const make = (hostOverride?: SolidWorksHost | null) =>
-  Effect.gen(function* () {
-    const lock = yield* Semaphore.make(1);
-    // Detected once, on the first SolidWorks file.
-    const host = yield* Effect.cached(
-      hostOverride === undefined ? detectSolidWorksHost : Effect.succeed(hostOverride),
-    );
-    // The SolidWorks process Cadsense started and kept for a queued conversion, or 0.
-    let ownedPid = 0;
-    let waiting = 0;
-    let runningJob: string | null = null;
+export interface SolidWorksOptions {
+  /** Where PowerShell is. Detected on first use when absent; null means no SolidWorks. */
+  readonly host?: SolidWorksHost | null;
+  /** How long a caller that stops waiting (cancel or timeout) gives the bridge to stop. */
+  readonly cancelGrace?: Duration.Input;
+}
 
-    /** Runs the bridge on a staged job folder until it exits. */
-    const runBridge = (resolved: SolidWorksHost, serverJob: string, windowsJob: string) =>
-      Effect.callback<void, LocalCadImportError>((resume) => {
-        let settled = false;
-        const settle = (effect: Effect.Effect<void, LocalCadImportError>) => {
-          if (settled) return;
-          settled = true;
-          resume(effect);
-        };
-        const child = NodeChildProcess.spawn(
-          resolved.powershell,
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            `${resolved.windowsRoot}\\${SCRIPT_NAME}`,
-            "-Job",
-            windowsJob,
-          ],
-          { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
-        );
-        let stderr = "";
-        child.stderr.on("data", (chunk: Buffer) => {
-          stderr = (stderr + chunk.toString()).slice(-4000);
-        });
-        child.stdout.resume();
-        const exited = new Promise<void>((done) => child.once("close", () => done()));
-        child.once("error", () => settle(Effect.fail(unavailable())));
-        void exited.then(() =>
-          settle(
-            stderr.trim() ? Effect.logWarning("SolidWorks bridge stderr", { stderr }) : Effect.void,
-          ),
-        );
-        // Cancel and timeout ask the bridge to stop between parts, then wait while it closes its
-        // documents and restores preferences, so SolidWorks is never left mid-job.
-        return Effect.promise(() =>
-          NodeFSP.writeFile(NodePath.join(serverJob, "cancel"), "").catch(() => {}),
-        ).pipe(
-          Effect.andThen(Effect.promise(() => exited)),
-          Effect.timeout(CANCEL_GRACE),
-          Effect.ignore,
-        );
+/**
+ * One bridge at a time, through a single slot. SolidWorks is single-threaded, and two bridges
+ * would fight over its preferences and its lifetime. A job holds the slot from staging until its
+ * bridge process exits and its folder is gone, even when its caller stopped waiting long before.
+ * Quitting a SolidWorks that Cadsense started is decided while holding the slot, never by the
+ * bridge. See LocalCad.md, SolidWorks files.
+ */
+export const make = (options: SolidWorksOptions = {}) =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope;
+    const slot = yield* Semaphore.make(1);
+    const host = yield* Effect.cached(
+      options.host === undefined ? detectSolidWorksHost : Effect.succeed(options.host),
+    );
+    const cancelGrace = options.cancelGrace ?? "2 minutes";
+    // The SolidWorks process Cadsense started and left running, or 0.
+    let ownedPid = 0;
+    // Callers waiting for the slot. While any wait, a SolidWorks Cadsense started stays warm.
+    let waiting = 0;
+    // Job folders that outlived their job because SolidWorks or a virus scanner still held a file
+    // open. Every reconcile tries them again.
+    const leftovers = new Set<string>();
+    const removeFolder = (folder: string) =>
+      Effect.promise(async () => {
+        await NodeFSP.rm(folder, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 200,
+        }).catch(() => {});
+        if (NodeFS.existsSync(folder)) leftovers.add(folder);
+        else leftovers.delete(folder);
       });
 
-    const runJob = (resolved: SolidWorksHost, input: SolidWorksExportInput, id: string) =>
+    /**
+     * Writes a job folder with its request and files, runs the bridge on it, and resolves when the
+     * bridge process exits. Interrupted only when the server stops: it then leaves a cancel marker
+     * and lets the bridge finish on its own.
+     */
+    const runBridge = (
+      resolved: SolidWorksHost,
+      folder: string,
+      request: Parameters<typeof encodeRequest>[0],
+      files: SolidWorksExportInput["files"],
+    ) =>
       Effect.gen(function* () {
-        const serverJob = NodePath.join(resolved.serverRoot, id);
-        const windowsJob = `${resolved.windowsRoot}\\${id}`;
-        const request = yield* encodeRequest({
-          file: input.files[0]!.path.split("/").join("\\"),
-          skip: input.skip,
-          ownedPid,
-        }).pipe(Effect.mapError(() => failed("Could not write the SolidWorks request.")));
-        // Uninterruptible: an interrupted promise keeps writing, and would refill the folder
-        // after cleanup removed it.
-        yield* Effect.uninterruptible(
-          Effect.tryPromise({
-            try: async () => {
-              await NodeFSP.mkdir(NodePath.join(serverJob, "in"), { recursive: true });
-              const script = NodePath.join(resolved.serverRoot, SCRIPT_NAME);
-              // Windows PowerShell reads a script without a byte order mark as ANSI.
-              if (!NodeFS.existsSync(script)) await NodeFSP.writeFile(script, BOM + BRIDGE_SCRIPT);
-              for (const file of input.files) {
-                const target = NodePath.join(serverJob, "in", ...file.path.split("/"));
-                await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
-                await NodeFSP.writeFile(target, file.bytes);
-              }
-              await NodeFSP.writeFile(NodePath.join(serverJob, "request.json"), request);
-            },
-            catch: () => failed("Could not stage the files for SolidWorks."),
-          }),
+        const body = yield* encodeRequest(request).pipe(
+          Effect.mapError(() => failed("Could not write the SolidWorks request.")),
         );
-        runningJob = serverJob;
-        if (waiting > 0) NodeFS.writeFileSync(NodePath.join(serverJob, "keep"), "");
+        yield* Effect.tryPromise({
+          try: async () => {
+            await NodeFSP.mkdir(NodePath.join(folder, "in"), { recursive: true });
+            const script = NodePath.join(resolved.serverRoot, SCRIPT_NAME);
+            // Windows PowerShell reads a script without a byte order mark as ANSI.
+            if (!NodeFS.existsSync(script)) await NodeFSP.writeFile(script, BOM + BRIDGE_SCRIPT);
+            for (const file of files) {
+              const target = NodePath.join(folder, "in", ...file.path.split("/"));
+              await NodeFSP.mkdir(NodePath.dirname(target), { recursive: true });
+              await NodeFSP.writeFile(target, file.bytes);
+            }
+            await NodeFSP.writeFile(NodePath.join(folder, "request.json"), body);
+          },
+          catch: () => failed("Could not stage the files for SolidWorks."),
+        });
+        yield* Effect.callback<void, LocalCadImportError>((resume) => {
+          let settled = false;
+          const settle = (effect: Effect.Effect<void, LocalCadImportError>) => {
+            if (settled) return;
+            settled = true;
+            resume(effect);
+          };
+          const child = NodeChildProcess.spawn(
+            resolved.powershell,
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              `${resolved.windowsRoot}\\${SCRIPT_NAME}`,
+              "-Job",
+              `${resolved.windowsRoot}\\${NodePath.basename(folder)}`,
+            ],
+            { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+          );
+          let stderr = "";
+          child.stderr.on("data", (chunk: Buffer) => {
+            stderr = (stderr + chunk.toString()).slice(-4000);
+          });
+          child.stdout.resume();
+          child.once("error", () => settle(Effect.fail(unavailable())));
+          child.once("close", () =>
+            settle(
+              stderr.trim()
+                ? Effect.logWarning("SolidWorks bridge stderr", { stderr })
+                : Effect.void,
+            ),
+          );
+          return Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(folder, "cancel"), "").catch(() => {}),
+          );
+        });
+      });
+
+    /**
+     * Converts in the job's folder and reads what the bridge left, then removes the folder. It
+     * records whether Cadsense owns the SolidWorks used even when the caller already gave up.
+     */
+    const convert = (
+      resolved: SolidWorksHost,
+      input: SolidWorksExportInput,
+      job: { readonly folder: string; cancelled: boolean },
+    ) =>
+      Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
-        yield* runBridge(resolved, serverJob, windowsJob).pipe(
-          Effect.timeoutOrElse({
-            duration: CONVERSION_TIMEOUT,
-            orElse: () => Effect.fail(new LocalCadImportError({ reason: "solidworks-timeout" })),
-          }),
+        if (job.cancelled) return yield* failed("Cancelled before SolidWorks started.");
+        yield* runBridge(
+          resolved,
+          job.folder,
+          {
+            mode: "convert",
+            file: input.files[0]!.path.split("/").join("\\"),
+            skip: input.skip,
+            ownedPid,
+          },
+          input.files,
         );
         const result = yield* Effect.tryPromise({
-          try: () => NodeFSP.readFile(NodePath.join(serverJob, "result.json"), "utf8"),
+          try: () => NodeFSP.readFile(NodePath.join(job.folder, "result.json"), "utf8"),
           catch: () => failed("SolidWorks stopped before it finished."),
         }).pipe(
           Effect.flatMap((text) => decodeResult(text.startsWith(BOM) ? text.slice(1) : text)),
@@ -591,7 +636,7 @@ export const make = (hostOverride?: SolidWorksHost | null) =>
           parts.set(key, {
             name: part.name,
             step: yield* Effect.tryPromise({
-              try: () => NodeFSP.readFile(NodePath.join(serverJob, ...part.step.split("\\"))),
+              try: () => NodeFSP.readFile(NodePath.join(job.folder, ...part.step.split("\\"))),
               catch: () => failed(`SolidWorks did not export ${part.name}.`),
             }),
           });
@@ -602,42 +647,122 @@ export const make = (hostOverride?: SolidWorksHost | null) =>
           seconds: Math.round(((yield* Clock.currentTimeMillis) - started) / 100) / 10,
         });
         return { root: result.root, parts, warnings: result.warnings } satisfies SolidWorksExport;
-      }).pipe(
-        Effect.ensuring(
-          Effect.promise(async () => {
-            runningJob = null;
-            await NodeFSP.rm(NodePath.join(resolved.serverRoot, id), {
-              recursive: true,
-              force: true,
-            }).catch(() => {});
-          }),
+      }).pipe(Effect.ensuring(removeFolder(job.folder)));
+
+    /**
+     * Quits the SolidWorks Cadsense started once nothing runs or waits, then retries leftover job
+     * folders. It takes the slot to decide, so a job that starts first inherits SolidWorks warm,
+     * and runs after every job and every waiter that gives up.
+     */
+    const reconcile = (resolved: SolidWorksHost) =>
+      slot.withPermits(1)(
+        Effect.suspend(() => (waiting > 0 ? Effect.void : quit(resolved))).pipe(
+          Effect.andThen(sweep),
         ),
       );
+    const sweep = Effect.suspend(() =>
+      Effect.forEach([...leftovers], removeFolder, { discard: true }),
+    );
+
+    /** Runs quit mode on the SolidWorks Cadsense started, if there is one. */
+    const quit = (resolved: SolidWorksHost) =>
+      Effect.suspend(() => {
+        if (ownedPid === 0) return Effect.void;
+        const folder = NodePath.join(resolved.serverRoot, NodeCrypto.randomUUID());
+        return runBridge(resolved, folder, { mode: "quit", file: "", skip: [], ownedPid }, []).pipe(
+          // Quit mode writes a result only when it fails.
+          Effect.andThen(
+            Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(folder, "result.json"), "utf8").catch(() => null),
+            ),
+          ),
+          Effect.flatMap((failure) =>
+            failure
+              ? Effect.logWarning("Could not quit the SolidWorks Cadsense started", { failure })
+              : Effect.void,
+          ),
+          Effect.catch((error) =>
+            Effect.logWarning("Could not quit the SolidWorks Cadsense started", { error }),
+          ),
+          // Only once quit mode ran to the end: an interrupted quit leaves it for the next try.
+          Effect.andThen(
+            Effect.sync(() => {
+              ownedPid = 0;
+            }),
+          ),
+          Effect.ensuring(removeFolder(folder)),
+        );
+      });
+
+    // On a graceful stop, quits the SolidWorks Cadsense started even if its reconcile was cut
+    // short. Quit mode leaves a SolidWorks alone while a document is open, so a bridge still
+    // running keeps it.
+    let resolvedHost: SolidWorksHost | null = null;
+    yield* Effect.addFinalizer(() =>
+      Effect.suspend(() =>
+        resolvedHost
+          ? quit(resolvedHost).pipe(
+              Effect.andThen(sweep),
+              Effect.timeout("2 minutes"),
+              Effect.ignore,
+            )
+          : Effect.void,
+      ),
+    );
 
     const exportParts = Effect.fn("SolidWorks.exportParts")(function* (
       input: SolidWorksExportInput,
     ) {
       const resolved = yield* host;
       if (!resolved) return yield* unavailable();
-      // A job already running keeps SolidWorks open for this one.
+      resolvedHost = resolved;
+      const job = {
+        folder: NodePath.join(resolved.serverRoot, NodeCrypto.randomUUID()),
+        cancelled: false,
+      };
+      const done = yield* Deferred.make<SolidWorksExport, LocalCadImportError>();
       waiting++;
-      if (runningJob) NodeFS.writeFileSync(NodePath.join(runningJob, "keep"), "");
-      let queued = true;
-      return yield* lock
-        .withPermits(1)(
-          Effect.suspend(() => {
-            queued = false;
-            waiting--;
-            return runJob(resolved, input, NodeCrypto.randomUUID());
-          }),
-        )
-        .pipe(
-          Effect.ensuring(
+      // Taking the slot and handing it to the job's own fiber happen together, so the slot is
+      // released exactly once: when the job is over, whenever the caller stops waiting.
+      yield* Effect.uninterruptibleMask((restore) =>
+        restore(slot.take(1)).pipe(
+          Effect.onExit(() =>
             Effect.sync(() => {
-              if (queued) waiting--;
+              waiting--;
             }),
           ),
-        );
+          // A waiter that gives up may have been the reason to keep SolidWorks running.
+          Effect.onInterrupt(() => Effect.forkIn(reconcile(resolved), scope)),
+          Effect.andThen(
+            convert(resolved, input, job).pipe(
+              Effect.exit,
+              Effect.flatMap((exit) => Deferred.done(done, exit)),
+              Effect.ensuring(slot.release(1)),
+              Effect.andThen(reconcile(resolved)),
+              Effect.forkIn(scope),
+            ),
+          ),
+        ),
+      );
+      // Cancel and timeout ask the bridge to stop between parts and wait a grace period for it.
+      // A bridge stuck in SolidWorks keeps the slot until it exits.
+      const giveUp = Effect.sync(() => {
+        job.cancelled = true;
+      }).pipe(
+        Effect.andThen(
+          Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(job.folder, "cancel"), "").catch(() => {}),
+          ),
+        ),
+        Effect.andThen(Deferred.await(done).pipe(Effect.timeout(cancelGrace), Effect.ignore)),
+      );
+      return yield* Deferred.await(done).pipe(
+        Effect.onInterrupt(() => giveUp),
+        Effect.timeoutOrElse({
+          duration: CONVERSION_TIMEOUT,
+          orElse: () => Effect.fail(new LocalCadImportError({ reason: "solidworks-timeout" })),
+        }),
+      );
     });
 
     return SolidWorks.of({ exportParts });

@@ -420,8 +420,8 @@ export const make = Effect.gen(function* () {
 
   /**
    * The workspace-relative files an import reads, the picked file first. That is the file alone,
-   * except for a SolidWorks assembly, which also needs every file it uses. Fails before reading
-   * anything when one is missing or they are too large together.
+   * except for a SolidWorks assembly, which also needs every file it uses. An assembly too large
+   * on its own fails before it is read for its file list. The caller checks the total size.
    */
   const sourceFiles = Effect.fn("LocalCadImport.sourceFiles")(function* (
     workspaceRoot: string,
@@ -433,6 +433,8 @@ export const make = Effect.gen(function* () {
       byteLength: file.byteLength,
     };
     if (file.format !== "sldasm") return [picked];
+    if (file.byteLength > MAX_LOCAL_CAD_FILE_BYTES)
+      return yield* new LocalCadImportError({ reason: "too-large" });
     const assembly = yield* fileSystem
       .readFile(file.absolutePath)
       .pipe(Effect.mapError(unreadable));

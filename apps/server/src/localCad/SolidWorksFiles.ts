@@ -7,6 +7,8 @@ import { SaxesParser } from "saxes";
 export interface SolidWorksReference {
   readonly path: string;
   readonly kind: "part" | "assembly";
+  /** A virtual component, saved inside the assembly rather than in a file of its own. */
+  readonly virtual: boolean;
 }
 
 const BLOCK_SIGNATURE = Buffer.from([0x14, 0x00, 0x06, 0x00, 0x08, 0x00]);
@@ -59,14 +61,16 @@ function readFileListXml(bytes: Uint8Array) {
 /**
  * Lists every file a SolidWorks assembly uses, across all of its subassemblies, without the
  * assembly itself. The list is `swHeader/swFile`; the assembly is the file whose model the
- * configuration list points at. Returns null when the file has no readable list.
+ * configuration list points at. A file is virtual when a component reference to its model says
+ * `swIsVirtualComponent="YES"`. Returns null when the file has no readable list.
  */
 export function readSolidWorksReferences(bytes: Uint8Array): readonly SolidWorksReference[] | null {
   const xml = readFileListXml(bytes);
   if (!xml) return null;
-  const files = new Map<string, SolidWorksReference>();
+  const files = new Map<string, Omit<SolidWorksReference, "virtual">>();
   const modelFiles = new Map<string, string>();
   const configuredModels = new Set<string>();
+  const virtualModels = new Set<string>();
   const parser = new SaxesParser();
   let failed = false;
   parser.on("error", () => {
@@ -89,6 +93,9 @@ export function readSolidWorksReferences(bytes: Uint8Array): readonly SolidWorks
     } else if (tag.name === "swConfiguration") {
       const modelRef = attribute("swModelRef");
       if (modelRef) configuredModels.add(modelRef);
+    } else if (tag.name === "swReference") {
+      const modelRef = attribute("swModelRef");
+      if (modelRef && attribute("swIsVirtualComponent") === "YES") virtualModels.add(modelRef);
     }
   });
   try {
@@ -101,7 +108,8 @@ export function readSolidWorksReferences(bytes: Uint8Array): readonly SolidWorks
     const fileRef = modelFiles.get(model);
     if (fileRef) files.delete(fileRef);
   }
-  return [...files.values()];
+  const virtualFiles = new Set([...virtualModels].map((model) => modelFiles.get(model)));
+  return [...files].map(([id, file]) => ({ ...file, virtual: virtualFiles.has(id) }));
 }
 
 const baseName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
@@ -121,7 +129,9 @@ export interface SolidWorksFilePlan {
  * Finds each file an assembly uses among the project folder's CAD files, by name and ignoring
  * case like Windows does. A name found more than once resolves to the copy beside the assembly,
  * then the first by path. 3D Interconnect inserts resolve to their source file when it is in the
- * folder. SolidWorks keeps their geometry inside the assembly, so they are never missing.
+ * folder. SolidWorks keeps their geometry inside the assembly, so they are never missing, and the
+ * same goes for virtual components. A real file a virtual component uses is still required: the
+ * list names it on its own.
  *
  * Cadsense copies these files beside the assembly before SolidWorks opens it, so SolidWorks loads
  * exactly them, and hashes them for the revision. See LocalCad.md, SolidWorks files.
@@ -144,6 +154,7 @@ export function planSolidWorksFiles(input: {
   const files = new Set<string>();
   const missing = new Set<string>();
   for (const reference of input.references) {
+    if (reference.virtual) continue;
     const name = baseName(reference.path);
     if (INTERCONNECT_CACHE.test(reference.path)) {
       const source = find(name.replace(SOLIDWORKS_SUFFIX, ""));

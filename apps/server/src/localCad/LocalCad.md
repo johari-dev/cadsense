@@ -90,7 +90,10 @@ the Windows host's PowerShell through interop and stages files under the Windows
    `SolidWorksFiles.ts` reads the file list SolidWorks keeps inside the assembly
    (`swXmlContents/COMPINSTANCETREE`, which lists the whole hierarchy with each file's original
    path) and finds each one in the project folder by name, preferring the assembly's own
-   directory. A missing file fails here, by name, before SolidWorks starts.
+   directory. A missing file fails here, by name, before SolidWorks starts. Virtual components
+   (`swIsVirtualComponent="YES"`, kept under a `VC~~` temp path) live inside the assembly, so they
+   are never required, but any real file they use still is. The picked file's own size is checked
+   before it is read.
 2. Hash them. The revision (`microversionId`) is a hash of every file. If the latest snapshot has
    the same revision it is reused as is, and SolidWorks does not start.
 3. Copy them, flat, into a job folder under `%TEMP%\cadsense-solidworks`. SolidWorks only ever
@@ -123,8 +126,25 @@ Rules the bridge keeps with SolidWorks:
 - It sets the STEP export to AP214 with appearances, since the default AP203 drops colors, and
   restores both preferences afterwards, on failure too.
 - If SolidWorks was already running, it attaches and leaves it running, visible or not. If Cadsense
-  started it, it stays hidden and quits after the conversion, unless another conversion is already
-  queued, in which case the next job inherits it and quits it in turn.
+  started it, it stays hidden and the server quits it once no conversion is running or waiting. A
+  queued conversion inherits it while it is still warm.
+
+The server runs one bridge at a time, and a job holds that slot until its bridge process exits, not
+until its caller stops waiting. Cancel and the 30-minute timeout write a `cancel` marker the bridge
+checks between parts, and stop waiting after two minutes, so a cancel never hangs. If the bridge is
+still stuck (a SolidWorks dialog waiting for an answer), its job folder and marker stay, and the next
+SolidWorks import waits for it to exit rather than drive SolidWorks alongside it.
+
+Quitting is the server's decision, made while holding the slot. Whenever a job ends or a waiting
+import is cancelled, the server takes the slot and checks again. If nothing is waiting and Cadsense
+owns the running SolidWorks, it runs the bridge in quit mode. Quit mode attaches with
+`CreateInstance`, since `GetActiveObject` cannot see a SolidWorks that COM started, and quits it only
+if its process is the one Cadsense started (or one the attach itself had to start) and no document
+is open in it. A SolidWorks that COM started does not exit on its own when its last client does. A
+graceful server stop runs quit mode once more, in case the last check was cut short.
+Job folders are removed when their job ends. One that SolidWorks still holds open is retried after
+each later job.
+
 - Opening hidden from the start (`DocumentVisible(false)`) is avoided on purpose: such documents
   have no display data, and exporting their parts crashes SolidWorks. Hiding the window right after
   opening works, so a user's open SolidWorks shows the window for a moment at most.
@@ -135,14 +155,18 @@ Rules the bridge keeps with SolidWorks:
 | ------------------------------------------------------ | ------------------------------------------------------------------- |
 | Not on Windows or WSL, or SolidWorks not installed     | Fails saying SolidWorks is needed, or to save a STEP copy instead   |
 | A file the assembly uses is not in the folder          | Fails before SolidWorks starts, naming the missing files            |
+| The assembly uses virtual components                   | They are not required as files; real files they use still are       |
 | Assembly with no readable file list (pre-2015, broken) | Fails before SolidWorks starts: SolidWorks 2015 or later is needed  |
 | Two files in the folder share a referenced name        | The one in the assembly's directory wins, then the first by path    |
+| The picked assembly alone is over 512 MiB              | Fails before reading it                                             |
 | Files over 512 MiB in total                            | Fails before reading them                                           |
 | A same-named file is open in SolidWorks                | Fails asking to close it; the user's document is not touched        |
 | SolidWorks cannot open or export the file              | Fails with SolidWorks' error; preferences restored, copies removed  |
 | A part with only sketches                              | Left out of an assembly; on its own it fails as having no geometry  |
 | Conversion running after 30 minutes                    | The bridge stops between parts and cleans up; fails as timed out    |
 | Cancel during the conversion                           | The bridge stops between parts, closes its documents, and cleans up |
+| Cancel while SolidWorks stays blocked                  | Cancelled after 2 minutes; the next import waits for the bridge     |
+| A waiting import is cancelled                          | A SolidWorks Cadsense started quits once the running job ends       |
 | Unchanged files synced again                           | The latest snapshot is reused; SolidWorks does not start            |
 | One part of an assembly changed                        | New revision; only that part is exported and tessellated again      |
 | Server killed mid-conversion                           | A SolidWorks that Cadsense started may stay running, hidden         |

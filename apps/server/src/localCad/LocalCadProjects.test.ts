@@ -85,7 +85,7 @@ const onshape = Layer.mergeAll(
 );
 
 /** Everything but the SolidWorks host, which the two suites below choose. */
-const withSolidWorks = (solidWorks: Layer.Layer<SolidWorksBridge.SolidWorks>) =>
+const withSolidWorks = <E, R>(solidWorks: Layer.Layer<SolidWorksBridge.SolidWorks, E, R>) =>
   localCadProjectsLayer.pipe(
     Layer.provideMerge(cadUserOperationsLayer),
     Layer.provideMerge(LocalCadImport.layer),
@@ -95,12 +95,132 @@ const withSolidWorks = (solidWorks: Layer.Layer<SolidWorksBridge.SolidWorks>) =>
     Layer.provideMerge(WorkspacePaths.layer),
     Layer.provideMerge(engine),
   );
+/** Every call the main suite makes to the real bridge: how many parts it skipped and exported. */
+const bridgeCalls: { skipped: number; exported: number | null }[] = [];
 // The real bridge, which finds SolidWorks on this machine or its Windows host when there is one.
-const layer = withSolidWorks(SolidWorksBridge.layer);
+const layer = withSolidWorks(
+  Layer.effect(
+    SolidWorksBridge.SolidWorks,
+    Effect.gen(function* () {
+      const real = yield* SolidWorksBridge.make();
+      return SolidWorksBridge.SolidWorks.of({
+        exportParts: (input) =>
+          Effect.suspend(() => {
+            const call = { skipped: input.skip.length, exported: null as number | null };
+            bridgeCalls.push(call);
+            return real.exportParts(input).pipe(
+              Effect.tap((result) =>
+                Effect.sync(() => {
+                  call.exported = result.parts.size;
+                }),
+              ),
+            );
+          }),
+      });
+    }),
+  ),
+);
 // The real bridge on a machine without Windows, so without SolidWorks.
 const noSolidWorksLayer = withSolidWorks(
-  Layer.effect(SolidWorksBridge.SolidWorks, SolidWorksBridge.make(null)),
+  Layer.effect(SolidWorksBridge.SolidWorks, SolidWorksBridge.make({ host: null })),
 );
+
+/**
+ * A stand-in for the PowerShell bridge, for races only a scripted bridge can order. It takes the
+ * same arguments and job folder and writes the same result, a dm1 export for any file. A file
+ * named `Hold...` waits for `control/release` and ignores cancel. Like the real bridge, it attaches
+ * to a running SolidWorks or starts one that Cadsense then owns (its pid is in `control/solidworks`),
+ * and quit mode stops that one. Every run appends to `control/log`.
+ */
+const SCRIPTED_BRIDGE = `
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const args = process.argv.slice(2);
+const job = args[args.indexOf("-Job") + 1].split("\\\\").join("/");
+const control = path.join(path.dirname(job), "control");
+const log = (line) => fs.appendFileSync(path.join(control, "log"), line + "\\n");
+const request = JSON.parse(fs.readFileSync(path.join(job, "request.json"), "utf8"));
+const state = path.join(control, "solidworks");
+const running = () => (fs.existsSync(state) ? Number(fs.readFileSync(state, "utf8")) : 0);
+if (request.mode === "quit") {
+  if (running() === request.ownedPid) {
+    fs.rmSync(state);
+    log("quit " + request.ownedPid);
+  }
+  process.exit(0);
+}
+const name = path.basename(request.file.split("\\\\").join("/"));
+log("start " + name + " owned=" + request.ownedPid);
+let pid = running();
+let owned = pid !== 0 && pid === request.ownedPid;
+if (pid === 0) {
+  pid = 4242;
+  owned = true;
+  fs.writeFileSync(state, String(pid));
+}
+const pause = new Int32Array(new SharedArrayBuffer(4));
+const until = Date.now() + 60000;
+if (name.startsWith("Hold"))
+  while (!fs.existsSync(path.join(control, "release")) && Date.now() < until)
+    Atomics.wait(pause, 0, 0, 50);
+const key = crypto.createHash("sha256").update(name).digest("hex");
+fs.mkdirSync(path.join(job, "out"), { recursive: true });
+fs.copyFileSync(${JSON.stringify(FIXTURE)}, path.join(job, "out", "0.step"));
+const root = { name, kind: "part", configuration: "Default", suppressed: false, visible: true };
+fs.writeFileSync(
+  path.join(job, "result.json"),
+  JSON.stringify({
+    ok: true,
+    pid,
+    owned,
+    warnings: [],
+    root: { ...root, transform: null, key, children: [] },
+    parts: { [key]: { name, step: "out\\\\0.step" } },
+  }),
+);
+log("exit " + name);
+`;
+/** The scripted bridge's folder: its job folders and `control`. Set when the suite's layer builds. */
+let scriptedRoot = "";
+const scriptedLayer = withSolidWorks(
+  Layer.effect(
+    SolidWorksBridge.SolidWorks,
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      scriptedRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-scripted-bridge-" });
+      yield* fs.makeDirectory(NodePath.join(scriptedRoot, "control"));
+      const bridge = NodePath.join(scriptedRoot, "bridge.cjs");
+      yield* fs.writeFileString(bridge, `#!${process.execPath}\n${SCRIPTED_BRIDGE}`, {
+        mode: 0o755,
+      });
+      return yield* SolidWorksBridge.make({
+        host: { powershell: bridge, windowsRoot: scriptedRoot, serverRoot: scriptedRoot },
+        cancelGrace: "300 millis",
+      });
+    }),
+  ),
+);
+const scriptedLog = () => {
+  const file = NodePath.join(scriptedRoot, "control/log");
+  return NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8").trim().split("\n") : [];
+};
+const scriptedJobs = () =>
+  NodeFS.readdirSync(scriptedRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
+/** Waits up to 20 seconds for the scripted bridge to log `line`. */
+const scriptedLogged = Effect.fn(function* (line: string) {
+  for (let attempt = 0; !scriptedLog().includes(line); attempt++) {
+    if (attempt > 400) return yield* Effect.die(`The scripted bridge never logged "${line}"`);
+    yield* Effect.sleep("50 millis");
+  }
+});
+/** A folder holding one generated SolidWorks part called `name`. */
+const makePartFolder = Effect.fn(function* (name: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-local-cad-scripted-" });
+  yield* fs.writeFile(NodePath.join(root, name), solidWorksFile({ "Contents/Config-0": "part" }));
+  return root;
+});
 /**
  * A SolidWorks 2015+ file: one raw-DEFLATE block per entry, each behind the 26-byte header and
  * nibble-swapped name SolidWorks writes. Enough for the reader, which only needs the file list.
@@ -133,9 +253,39 @@ const fileList = (assembly: string, parts: readonly string[]) =>
     )}</swHeader><swModelList><swModel id="m0" swFileRef="f0"/></swModelList><swConfigurationList><swConfiguration id="c0" swModelRef="m0"/></swConfigurationList></swSolidWorks>`;
 
 /**
+ * A file list with component references, like `patterndrivencomponentpattern.sldasm` in the
+ * SolidWorks samples. Virtual components are saved inside the assembly, listed under a `VC~~`
+ * temp path, and every reference to one says `swIsVirtualComponent="YES"`. `Arm.SLDASM` uses a
+ * virtual Housing, a virtual Joint subassembly holding the real Hinge pin (missing), and the real
+ * Bracket. `Pattern.SLDASM` uses only a virtual part.
+ */
+const virtualTree = {
+  arm: `<?xml version="1.0" encoding="UTF-8"?><swSolidWorks><swHeader>
+<swFile id="f0" swDocType="ASSEMBLY" swPath="H:\\Robot\\Arm.SLDASM"/>
+<swFile id="f1" swDocType="PART" swPath="C:\\Temp\\swx7\\VC~~\\Arm\\Housing^Arm.SLDPRT"/>
+<swFile id="f2" swDocType="ASSEMBLY" swPath="C:\\Temp\\swx7\\VC~~\\Arm\\Joint^Arm.SLDASM"/>
+<swFile id="f3" swDocType="PART" swPath="H:\\Robot\\Bracket.SLDPRT"/>
+<swFile id="f4" swDocType="PART" swPath="H:\\Robot\\Hinge pin.SLDPRT"/>
+</swHeader><swModelList>
+<swModel id="m1" swFileRef="f1"/><swModel id="m3" swFileRef="f3"/><swModel id="m4" swFileRef="f4"/>
+<swModel id="m2" swFileRef="f2"><swReference id="r4" swIsVirtualComponent="NO" swModelRef="m4"/></swModel>
+<swModel id="m0" swFileRef="f0"><swReference id="r1" swIsVirtualComponent="YES" swModelRef="m1"/>
+<swReference id="r2" swIsVirtualComponent="YES" swModelRef="m2"/>
+<swReference id="r3" swIsVirtualComponent="NO" swModelRef="m3"/></swModel>
+</swModelList><swConfigurationList><swConfiguration id="c0" swModelRef="m0"/></swConfigurationList></swSolidWorks>`,
+  pattern: `<?xml version="1.0" encoding="UTF-8"?><swSolidWorks><swHeader>
+<swFile id="f0" swDocType="ASSEMBLY" swPath="H:\\Robot\\Pattern.SLDASM"/>
+<swFile id="f1" swDocType="PART" swPath="C:\\Temp\\swx7\\VC~~\\Pattern\\Tooth^Pattern.SLDPRT"/>
+</swHeader><swModelList><swModel id="m1" swFileRef="f1"/>
+<swModel id="m0" swFileRef="f0"><swReference id="r1" swIsVirtualComponent="YES" swModelRef="m1"/></swModel>
+</swModelList><swConfigurationList><swConfiguration id="c0" swModelRef="m0"/></swConfigurationList></swSolidWorks>`,
+};
+
+/**
  * A folder of generated SolidWorks files. `Frame v2.SLDASM` was saved as `Frame.SLDASM` and uses
  * Bracket (beside it), Plate (missing), and a 3D Interconnect STEP insert. `Panel.SLDASM` uses only
- * Bracket. `Legacy.SLDASM` has no file list, like a pre-2015 file.
+ * Bracket. `Legacy.SLDASM` has no file list, like a pre-2015 file. `Arm.SLDASM` and
+ * `Pattern.SLDASM` use virtual components (see `virtualTree`).
  */
 const makeSolidWorksFolder = Effect.fn(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -164,6 +314,14 @@ const makeSolidWorksFolder = Effect.fn(function* () {
   );
   yield* write("cad/Bracket.SLDPRT", solidWorksFile({ "Contents/Config-0-Partition": "part" }));
   yield* write("cad/Legacy.SLDASM", new TextEncoder().encode("not a 2015 or later file"));
+  yield* write(
+    "cad/Arm.SLDASM",
+    solidWorksFile({ "swXmlContents/COMPINSTANCETREE": virtualTree.arm }),
+  );
+  yield* write(
+    "cad/Pattern.SLDASM",
+    solidWorksFile({ "swXmlContents/COMPINSTANCETREE": virtualTree.pattern }),
+  );
   yield* write(
     "cad/Rig.SLDASM",
     solidWorksFile({
@@ -633,10 +791,12 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
       assert.deepStrictEqual(
         result.files.map((file) => file.path),
         [
+          "cad/Arm.SLDASM",
           "cad/Bracket.SLDPRT",
           "cad/Frame v2.SLDASM",
           "cad/Legacy.SLDASM",
           "cad/Panel.SLDASM",
+          "cad/Pattern.SLDASM",
           "cad/Rig.SLDASM",
         ],
       );
@@ -674,17 +834,28 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
       assert.isAtMost(reason.length, 256);
       assert.match(reason, /^This assembly uses files that are not in the project folder: Vendor/);
       assert.match(reason, /… Existing imported CAD is unchanged\.$/);
+
+      // Virtual components live inside the assembly, so only the real Hinge pin that the virtual
+      // Joint uses is missing.
+      const arm = yield* sync(many, "cad/Arm.SLDASM");
+      assert.strictEqual(
+        arm.cad?.lastOutcome?.reason,
+        "This assembly uses files that are not in the project folder: Hinge pin.SLDPRT. Add them, then Sync. Existing imported CAD is unchanged.",
+      );
     }).pipe(Effect.scoped),
   );
 
   // Live: opens real SolidWorks files in the SolidWorks installed on this machine or its Windows
-  // host. Set CADSENSE_SOLIDWORKS_DIR (a folder holding an assembly and the files it uses),
-  // CADSENSE_SOLIDWORKS_ASSEMBLY (its name there), and optionally CADSENSE_SOLIDWORKS_EMPTY_PART
-  // (a part with only sketches). SolidWorks quits afterwards unless it was already running.
+  // host. Set CADSENSE_SOLIDWORKS_DIR (a folder holding an assembly and the files it uses, such as
+  // samples/learn/Mouse under the SolidWorks public documents), CADSENSE_SOLIDWORKS_ASSEMBLY (its
+  // name there), and optionally CADSENSE_SOLIDWORKS_EMPTY_PART (a part with only sketches) and
+  // CADSENSE_SOLIDWORKS_VIRTUAL_ASSEMBLY (an assembly with virtual components, such as
+  // samples/tutorial/api/assemsubassems.sldasm). SolidWorks quits afterwards unless it was running.
   const live = {
     dir: process.env.CADSENSE_SOLIDWORKS_DIR,
     assembly: process.env.CADSENSE_SOLIDWORKS_ASSEMBLY,
     emptyPart: process.env.CADSENSE_SOLIDWORKS_EMPTY_PART,
+    virtualAssembly: process.env.CADSENSE_SOLIDWORKS_VIRTUAL_ASSEMBLY,
   };
   const skipLive = !live.dir || !live.assembly;
 
@@ -717,6 +888,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         const snapshots = yield* CadSnapshotStore;
         const { root, uses } = yield* makeLiveFolder();
         const projectId = ProjectId.make("local-cad-solidworks-live");
+        const calls = bridgeCalls.length;
         yield* (yield* LocalCadProjects).create({
           projectId,
           title: "SolidWorks",
@@ -731,16 +903,21 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         );
         const manifest = yield* snapshots.load(first.cad!.roots[0]!.current!.snapshotId);
         assert.isAtLeast(manifest.parts.length, 2);
+        // One call that exported every part (a part with only sketches exports but adds none).
+        assert.strictEqual(bridgeCalls.length, calls + 1);
+        assert.strictEqual(bridgeCalls[calls]!.skipped, 0);
+        assert.isAtLeast(bridgeCalls[calls]!.exported ?? 0, manifest.parts.length);
         // SolidWorks placed the components: at least one is not at the origin unrotated.
         const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1].join();
         assert.isTrue(
           manifest.nodes.some((node) => node.kind === "part" && node.transform.join() !== identity),
         );
 
-        // Unchanged files: the same snapshot, so SolidWorks did not run.
+        // Unchanged files: the same snapshot, and no call to SolidWorks.
         const unchanged = yield* sync(first, live.assembly!);
         assert.strictEqual(unchanged.cad?.lastOutcome?.status, "succeeded");
         assert.strictEqual(unchanged.cad!.roots[0]!.current?.snapshotId, manifest.snapshotId);
+        assert.strictEqual(bridgeCalls.length, calls + 1);
         assert.strictEqual(
           cadCommentModelDescriptor(yield* snapshots.load(manifest.snapshotId)),
           cadCommentModelDescriptor(manifest),
@@ -761,6 +938,10 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         );
         const next = yield* snapshots.load(changed.cad!.roots[0]!.current!.snapshotId);
         assert.notStrictEqual(next.root.microversionId, manifest.root.microversionId);
+        // SolidWorks was told to skip every part it had, and exported only the swapped one.
+        assert.deepStrictEqual(bridgeCalls.slice(calls + 1), [
+          { skipped: manifest.parts.length, exported: 1 },
+        ]);
         const before = new Set(manifest.parts.map((part) => part.geometryKey));
         const kept = next.parts.filter((part) => before.has(part.geometryKey));
         assert.strictEqual(kept.length, next.parts.length - 1);
@@ -797,7 +978,11 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         });
         const project = yield* settle(projectId);
         assert.strictEqual(project.cad?.lastOutcome?.status, "failed");
-        assert.include(project.cad?.lastOutcome?.reason ?? "", files[0]!);
+        // Named as the assembly spells it, which can differ in case from the file on disk.
+        assert.include(
+          project.cad?.lastOutcome?.reason?.toLowerCase() ?? "",
+          files[0]!.toLowerCase(),
+        );
       }).pipe(Effect.scoped),
   );
 
@@ -816,6 +1001,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         const jobs = () =>
           NodeFS.readdirSync(host!.serverRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
         const wasRunning = running();
+        const before = new Set(jobs());
         const { root } = yield* makeLiveFolder();
         const projectId = ProjectId.make("local-cad-solidworks-live-cancel");
         yield* (yield* LocalCadProjects).create({
@@ -824,8 +1010,8 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
           workspaceRoot: root,
           filePath: live.assembly!,
         });
-        // Cancel as soon as the files are staged for SolidWorks.
-        for (let attempt = 0; jobs().length === 0; attempt++) {
+        // Cancel as soon as this job's files are staged for SolidWorks.
+        for (let attempt = 0; jobs().every((job) => before.has(job)); attempt++) {
           if (attempt > 600) return yield* Effect.die("The conversion never started");
           yield* Effect.sleep("50 millis");
         }
@@ -834,8 +1020,53 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         yield* (yield* CadUserOperations).cancel(projectId, operation!.operationId);
         const cancelled = yield* settle(projectId, operation!.operationId);
         assert.strictEqual(cancelled.cad?.lastOutcome?.status, "cancelled");
-        assert.deepStrictEqual(jobs(), []);
-        assert.strictEqual(running(), wasRunning);
+        // A SolidWorks that Cadsense started quits once the slot is idle, just after the job, and
+        // takes its hold on the job's files with it.
+        for (
+          let attempt = 0;
+          running() !== wasRunning || jobs().some((job) => !before.has(job));
+          attempt++
+        ) {
+          if (attempt > 120) return yield* Effect.die("SolidWorks was not left as it was found");
+          yield* Effect.sleep("1 second");
+        }
+      }).pipe(Effect.scoped),
+    5 * 60_000,
+  );
+
+  it.effect.skipIf(!live.virtualAssembly)(
+    "converts a real assembly with virtual components",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const source = live.virtualAssembly!;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-local-cad-live-" });
+        const { files, missing } = planSolidWorksFiles({
+          assemblyPath: path.basename(source),
+          references: readSolidWorksReferences(NodeFS.readFileSync(source))!,
+          folderFiles: NodeFS.readdirSync(path.dirname(source)),
+        });
+        assert.deepStrictEqual(missing, []);
+        for (const name of [path.basename(source), ...files])
+          yield* fs.copyFile(path.join(path.dirname(source), name), path.join(root, name));
+        const projectId = ProjectId.make("local-cad-solidworks-live-virtual");
+        yield* (yield* LocalCadProjects).create({
+          projectId,
+          title: "Virtual",
+          workspaceRoot: root,
+          filePath: path.basename(source),
+        });
+        const project = yield* settle(projectId);
+        assert.strictEqual(
+          project.cad?.lastOutcome?.status,
+          "succeeded",
+          project.cad?.lastOutcome?.reason ?? undefined,
+        );
+        const manifest = yield* (yield* CadSnapshotStore).load(
+          project.cad!.roots[0]!.current!.snapshotId,
+        );
+        assert.isAtLeast(manifest.parts.length, 1);
       }).pipe(Effect.scoped),
     5 * 60_000,
   );
@@ -888,8 +1119,118 @@ it.layer(noSolidWorksLayer, { timeout: 120_000, excludeTestServices: true })(
         );
         const part = yield* sync(assembly, "cad/Bracket.SLDPRT");
         assert.match(part.cad?.lastOutcome?.reason ?? "", /needs SolidWorks installed/);
-        const step = yield* sync(part, "cad/frame.step");
+        // An assembly of virtual components needs no other file, so it gets as far as SolidWorks.
+        const pattern = yield* sync(part, "cad/Pattern.SLDASM");
+        assert.match(pattern.cad?.lastOutcome?.reason ?? "", /needs SolidWorks installed/);
+        const step = yield* sync(pattern, "cad/frame.step");
         assert.strictEqual(step.cad?.lastOutcome?.status, "succeeded");
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("rejects an assembly over 512 MiB before reading it", () =>
+      Effect.gen(function* () {
+        const root = yield* makeSolidWorksFolder();
+        // Sparse, so it takes no disk. Reading it would mean 512 MiB of memory, then no file list.
+        const huge = NodePath.join(root, "cad/Huge.SLDASM");
+        NodeFS.writeFileSync(huge, "");
+        NodeFS.truncateSync(huge, 512 * 1024 * 1024 + 1);
+        const projectId = ProjectId.make("local-cad-solidworks-huge");
+        yield* (yield* LocalCadProjects).create({
+          projectId,
+          title: "Huge",
+          workspaceRoot: root,
+          filePath: "cad/Huge.SLDASM",
+        });
+        const project = yield* settle(projectId);
+        assert.strictEqual(
+          project.cad?.lastOutcome?.reason,
+          "This CAD file is over the 512 MiB import limit. Existing imported CAD is unchanged.",
+        );
+      }).pipe(Effect.scoped),
+    );
+  },
+);
+
+// The scripted bridge orders the races a real SolidWorks cannot: a bridge that stays busy after
+// its caller gives up, and an import that stops waiting while another runs.
+it.layer(scriptedLayer, { timeout: 120_000, excludeTestServices: true })(
+  "local CAD projects with a scripted SolidWorks bridge",
+  (it) => {
+    const reset = () => {
+      for (const name of ["log", "release", "solidworks"])
+        NodeFS.rmSync(NodePath.join(scriptedRoot, "control", name), { force: true });
+    };
+    const create = Effect.fn(function* (projectId: ProjectId, name: string) {
+      yield* (yield* LocalCadProjects).create({
+        projectId,
+        title: name,
+        workspaceRoot: yield* makePartFolder(name),
+        filePath: name,
+      });
+    });
+    const cancel = Effect.fn(function* (projectId: ProjectId) {
+      const operation = (yield* getProject(projectId)).cad?.operation;
+      assert.isDefined(operation ?? undefined);
+      yield* (yield* CadUserOperations).cancel(projectId, operation!.operationId);
+      return yield* settle(projectId, operation!.operationId);
+    });
+
+    it.effect("holds the SolidWorks slot until a cancelled bridge exits", () =>
+      Effect.gen(function* () {
+        reset();
+        const held = ProjectId.make("local-cad-scripted-held");
+        yield* create(held, "Hold.SLDPRT");
+        yield* scriptedLogged("start Hold.SLDPRT owned=0");
+        // The bridge ignores the cancel marker, like one stuck in SolidWorks. The cancel still
+        // ends after the grace, but the job keeps its folder, its marker, and the slot.
+        assert.strictEqual((yield* cancel(held)).cad?.lastOutcome?.status, "cancelled");
+        const jobs = scriptedJobs();
+        assert.lengthOf(jobs, 1);
+        assert.isTrue(NodeFS.existsSync(NodePath.join(scriptedRoot, jobs[0]!, "cancel")));
+
+        const next = ProjectId.make("local-cad-scripted-next");
+        yield* create(next, "Quick.SLDPRT");
+        yield* Effect.sleep("1 second");
+        assert.deepStrictEqual(scriptedLog(), ["start Hold.SLDPRT owned=0"]);
+        assert.isDefined((yield* getProject(next)).cad?.operation ?? undefined);
+
+        NodeFS.writeFileSync(NodePath.join(scriptedRoot, "control/release"), "");
+        assert.strictEqual((yield* settle(next)).cad?.lastOutcome?.status, "succeeded");
+        // The next job started only after the first bridge exited, and inherited its SolidWorks.
+        yield* scriptedLogged("quit 4242");
+        assert.deepStrictEqual(scriptedLog(), [
+          "start Hold.SLDPRT owned=0",
+          "exit Hold.SLDPRT",
+          "start Quick.SLDPRT owned=4242",
+          "exit Quick.SLDPRT",
+          "quit 4242",
+        ]);
+        assert.deepStrictEqual(scriptedJobs(), []);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("quits the SolidWorks it started when the import waiting for it is cancelled", () =>
+      Effect.gen(function* () {
+        reset();
+        const running = ProjectId.make("local-cad-scripted-running");
+        yield* create(running, "Hold.SLDPRT");
+        yield* scriptedLogged("start Hold.SLDPRT owned=0");
+        const waiting = ProjectId.make("local-cad-scripted-waiting");
+        yield* create(waiting, "Quick.SLDPRT");
+        yield* Effect.sleep("300 millis");
+        assert.strictEqual((yield* cancel(waiting)).cad?.lastOutcome?.status, "cancelled");
+
+        NodeFS.writeFileSync(NodePath.join(scriptedRoot, "control/release"), "");
+        assert.strictEqual((yield* settle(running)).cad?.lastOutcome?.status, "succeeded");
+        // Nothing waits any more, so the SolidWorks the first job started is quit.
+        yield* scriptedLogged("quit 4242");
+        assert.deepStrictEqual(scriptedLog(), [
+          "start Hold.SLDPRT owned=0",
+          "exit Hold.SLDPRT",
+          "quit 4242",
+        ]);
+        assert.isFalse(NodeFS.existsSync(NodePath.join(scriptedRoot, "control/solidworks")));
+        assert.deepStrictEqual(scriptedJobs(), []);
       }).pipe(Effect.scoped),
     );
   },
