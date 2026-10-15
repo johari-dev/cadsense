@@ -50,33 +50,41 @@ import ChatMarkdown from "../ChatMarkdown";
 import { CadFilmstrip, CadPublishedComments } from "../../cad/CadChatRows";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
-  BotIcon,
-  BoxIcon,
+  RobotIcon as BotIcon,
+  CubeIcon as BoxIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CircleAlertIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon as ChevronRightIcon,
+  WarningCircleIcon as CircleAlertIcon,
   DownloadIcon,
   EyeIcon,
   FileIcon,
   GlobeIcon,
   HammerIcon,
-  MessageCircleIcon,
-  MousePointerClickIcon,
-  PaintbrushIcon,
+  ChatCircleIcon as MessageCircleIcon,
+  CursorClickIcon as MousePointerClickIcon,
+  PaintBrushIcon as PaintbrushIcon,
   PlayIcon,
-  SearchIcon,
-  SquarePenIcon,
-  TerminalIcon,
+  MagnifyingGlassIcon as SearchIcon,
+  NotePencilIcon as SquarePenIcon,
+  TerminalWindowIcon as TerminalIcon,
   WrenchIcon,
   XIcon,
-  ZapIcon,
-} from "lucide-react";
+  LightningIcon as ZapIcon,
+} from "~/lib/icons";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { keepTimelineEndVisibleAfterOverlayGrowth } from "./timelineScrollAnchoring";
+import {
+  keepTimelineEndVisibleAfterOverlayGrowth,
+  measureTimelineEndOffset,
+  observeTimelineReflow,
+  type TimelineReflow,
+} from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessageRatingButtons } from "./MessageRatingButtons";
+import { QuoteReplyPill } from "./QuoteReplyPill";
+import { RedoFeedbackForm, RedoWithFeedbackButton } from "./RedoWithFeedback";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -134,6 +142,7 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  onRedoWithFeedback: (prompt: string) => void;
 }
 
 interface TimelineRowActivityState {
@@ -225,6 +234,8 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
+  /** Sends feedback on the latest response as a new user turn. */
+  onRedoWithFeedback: (prompt: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +269,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  onRedoWithFeedback,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
@@ -268,15 +280,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
   const previousContentInsetEndAdjustmentRef = useRef(contentInsetEndAdjustment);
 
+  const followingEnd = liveFollowEnabled && anchorMessageId === null;
+  const followingEndRef = useRef(followingEnd);
+  // Holds the timeline's place while the chat column changes width (see observeTimelineReflow).
+  const reflowRef = useRef<TimelineReflow | null>(null);
   useLayoutEffect(() => {
+    followingEndRef.current = followingEnd;
     keepTimelineEndVisibleAfterOverlayGrowth({
       timeline: listRef.current,
       previousOverlayHeight: previousContentInsetEndAdjustmentRef.current,
       overlayHeight: contentInsetEndAdjustment,
-      followingEnd: liveFollowEnabled && anchorMessageId === null,
+      followingEnd,
     });
     previousContentInsetEndAdjustmentRef.current = contentInsetEndAdjustment;
-  }, [anchorMessageId, contentInsetEndAdjustment, listRef, liveFollowEnabled]);
+  }, [contentInsetEndAdjustment, followingEnd, listRef]);
 
   useEffect(() => {
     return () => {
@@ -309,6 +326,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, []);
 
   const shouldRestoreVisibleContentPosition = useCallback((row: MessagesTimelineRow) => {
+    // Holding the top row in place would pull a timeline that is pinned to the end off it.
+    if (reflowRef.current?.pinningEnd()) return false;
     const disclosureAnchorKey = disclosureAnchorKeyRef.current;
     return disclosureAnchorKey === null || row.id === disclosureAnchorKey;
   }, []);
@@ -404,6 +423,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const lastRowIdRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    lastRowIdRef.current = rows.at(-1)?.id ?? null;
+  }, [rows]);
   const cadActivityVisible = timelineShowsCadActivity(rows);
   useLayoutEffect(() => {
     cadActivityIndicator.observe(routeThreadKey, cadActivityVisible, "chat");
@@ -413,6 +436,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
+  useLayoutEffect(() => {
+    if (!timelineViewportElement) return;
+    const reflow = observeTimelineReflow(timelineViewportElement, {
+      followingEnd: () => followingEndRef.current,
+      // Scroll the element directly: the list's scrollToEnd waits for rows to stop resizing,
+      // which never happens mid-resize, so it would land frames late. Line up the painted last
+      // row rather than trusting scrollHeight, which can be stale or padded for a frame.
+      pinToEnd: () => {
+        const scroller = listRef.current?.getScrollableNode();
+        if (!scroller) return;
+        const lastRowId = lastRowIdRef.current;
+        const offset = lastRowId ? measureTimelineEndOffset(scroller, lastRowId) : null;
+        if (offset === null) scroller.scrollTop = scroller.scrollHeight;
+        else if (Math.abs(offset) >= 1) scroller.scrollTop += offset;
+      },
+    });
+    reflowRef.current = reflow;
+    return () => {
+      reflow.dispose();
+      reflowRef.current = null;
+    };
+  }, [listRef, timelineViewportElement]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const handleAnchorReady = useCallback(
@@ -433,7 +478,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state, contentInsetEndAdjustment);
-    if (isAtEnd !== undefined) {
+    // While a width change settles, scroll positions come from the reflow, not the user.
+    if (isAtEnd !== undefined && !reflowRef.current?.isSettling()) {
       onIsAtEndChange(isAtEnd);
     }
     if (!state || minimapItems.length === 0) {
@@ -505,6 +551,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      onRedoWithFeedback,
     }),
     [
       routeThreadKey,
@@ -519,6 +566,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      onRedoWithFeedback,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -606,6 +654,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               });
             }}
           />
+          <QuoteReplyPill />
         </div>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
@@ -1059,7 +1108,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                     {isOpening ? (
                       <span className="text-[11px]">Loading…</span>
                     ) : (
-                      <PlayIcon className="size-8 fill-current" />
+                      <PlayIcon className="size-8" weight="fill" />
                     )}
                     <span className="max-w-full truncate text-[11px]">{file.name}</span>
                   </button>
@@ -1176,6 +1225,11 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // A new turn closes the box, so a failed send never reopens a stale one.
+  if (feedbackOpen && !row.canRedoWithFeedback) {
+    setFeedbackOpen(false);
+  }
 
   return (
     <>
@@ -1190,8 +1244,22 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onImageExpand={ctx.onImageExpand}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          // Stays shown while a child's popup (the thumbs-down reason) is open.
+          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100 has-data-popup-open:opacity-100">
             <AssistantCopyButton row={row} />
+            {ctx.threadRef && !row.assistantCopyStreaming ? (
+              <MessageRatingButtons
+                threadRef={ctx.threadRef}
+                messageId={row.message.id}
+                rating={row.message.rating}
+              />
+            ) : null}
+            {row.canRedoWithFeedback ? (
+              <RedoWithFeedbackButton
+                open={feedbackOpen}
+                onToggle={() => setFeedbackOpen((open) => !open)}
+              />
+            ) : null}
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger
@@ -1203,6 +1271,12 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
               </Tooltip>
             )}
           </div>
+        ) : null}
+        {feedbackOpen ? (
+          <RedoFeedbackForm
+            onSubmit={ctx.onRedoWithFeedback}
+            onClose={() => setFeedbackOpen(false)}
+          />
         ) : null}
       </div>
     </>

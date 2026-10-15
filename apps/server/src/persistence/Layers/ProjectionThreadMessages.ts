@@ -15,6 +15,7 @@ import {
   DeleteProjectionThreadMessagesInput,
   ListProjectionThreadMessagesInput,
   ProjectionThreadMessage,
+  SetProjectionThreadMessageRatingInput,
 } from "../Services/ProjectionThreadMessages.ts";
 
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -137,6 +138,17 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       `,
   });
 
+  const setProjectionThreadMessageRating = SqlSchema.void({
+    Request: SetProjectionThreadMessageRatingInput,
+    execute: ({ messageId, threadId, rating }) =>
+      sql`
+        UPDATE projection_thread_messages
+        SET rating_json = ${rating}
+        WHERE message_id = ${messageId}
+          AND thread_id = ${threadId}
+      `,
+  });
+
   const deleteProjectionThreadMessageRows = SqlSchema.void({
     Request: DeleteProjectionThreadMessagesInput,
     execute: ({ threadId }) =>
@@ -167,6 +179,11 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       Effect.map((rows) => rows.map(toProjectionThreadMessage)),
     );
 
+  const setRating: ProjectionThreadMessageRepositoryShape["setRating"] = (input) =>
+    setProjectionThreadMessageRating(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionThreadMessageRepository.setRating:query")),
+    );
+
   const deleteByThreadId: ProjectionThreadMessageRepositoryShape["deleteByThreadId"] = (input) =>
     deleteProjectionThreadMessageRows(input).pipe(
       Effect.mapError(
@@ -178,6 +195,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
     upsert,
     getByMessageId,
     listByThreadId,
+    setRating,
     deleteByThreadId,
   } satisfies ProjectionThreadMessageRepositoryShape;
 });

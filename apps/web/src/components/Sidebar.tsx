@@ -1,15 +1,16 @@
+import { singleCadModelName } from "../cad/cadModelName";
 import { useRemoveCadProject } from "../cad/useRemoveCadProject";
 import {
   ArchiveIcon,
-  ArrowUpDownIcon,
-  ChevronRightIcon,
+  ArrowsDownUpIcon as ArrowUpDownIcon,
+  CaretRightIcon as ChevronRightIcon,
   FolderPlusIcon,
-  Globe2Icon,
-  LoaderIcon,
-  SettingsIcon,
-  SquarePenIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+  GlobeIcon as Globe2Icon,
+  SpinnerIcon as LoaderIcon,
+  GearSixIcon as SettingsIcon,
+  NotePencilIcon as SquarePenIcon,
+  WarningIcon as TriangleAlertIcon,
+} from "~/lib/icons";
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
@@ -2023,13 +2024,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       startThreadRename,
     ],
   );
+  const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
+  // One synced model shows its Onshape name; several show a count.
+  const cadSummary =
+    singleCadModelName(project.cad) ??
+    (currentCadRoots.length > 1 ? `${currentCadRoots.length} models` : null);
 
   return (
     <>
       <div className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
-          className={`pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
+          className={`h-auto min-h-12 pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2068,13 +2074,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             />
           )}
           <ProjectFavicon
+            cadSnapshotId={currentCadRoots[0]?.current?.snapshotId}
+            className="size-7 rounded border border-sidebar-border bg-sidebar-control-surface p-1"
             environmentId={project.environmentId}
             cwd={project.workspaceRoot}
             onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
           />
           <span className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate text-sm font-medium text-sidebar-foreground/90">
-              {project.displayName}
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-sidebar-foreground">
+                {project.displayName}
+              </span>
+              <span className="block truncate text-[10px] text-sidebar-muted-foreground">
+                {cadSummary ?? (project.onshapeSource ? "Onshape project" : "Local project")}
+              </span>
             </span>
             {project.groupedProjectCount > 1 ? (
               <span className="shrink-0 text-secondary-label text-[10px]">

@@ -4,7 +4,7 @@ import type {
   CadCommentsPublishedCard,
   ScopedThreadRef,
 } from "@cadsense/contracts";
-import { CircleAlertIcon, MessageSquareIcon } from "lucide-react";
+import { WarningCircleIcon as CircleAlertIcon, ChatIcon as MessageSquareIcon } from "~/lib/icons";
 import { useMemo } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
@@ -15,11 +15,11 @@ import { CadSeverityLabel, CommentBadge } from "./CadCommentsCard";
 const MAX_THUMBNAILS = 6;
 const MAX_LISTED_COMMENTS = 8;
 
-/** Opens the CAD panel's comments, optionally focused on one comment's first location. */
+/** Opens the CAD panel's comments, optionally focused on one comment with all its locations. */
 function openCadComments(threadRef: ScopedThreadRef, commentId?: string) {
   useCadCommentReviewStore
     .getState()
-    .request(threadRef, commentId ? { id: commentId, target: 0 } : undefined);
+    .request(threadRef, commentId ? { id: commentId, target: "all" } : undefined);
   useRightPanelStore.getState().open(threadRef, "cad");
 }
 

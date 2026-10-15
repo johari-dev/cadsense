@@ -1,4 +1,4 @@
-import { CheckIcon } from "lucide-react";
+import { CheckIcon } from "~/lib/icons";
 
 import { cn } from "../../lib/utils";
 import {

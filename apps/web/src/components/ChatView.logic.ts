@@ -1,4 +1,5 @@
 import {
+  DEFAULT_RUNTIME_MODE,
   type EnvironmentId,
   isProviderDriverKind,
   ProjectId,
@@ -6,6 +7,7 @@ import {
   type ModelSelection,
   type ProviderInteractionMode,
   type ProviderDriverKind,
+  type RuntimeMode,
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
@@ -579,4 +581,25 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionStatus !== (session?.status ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
+}
+
+/**
+ * Picks the runtime mode the composer sends with the next turn. With access controls hidden,
+ * threads move to the app default, which the next send persists. The move waits for client
+ * settings to load, so a saved choice to show the controls is never overwritten, and for the
+ * session to be idle, because a runtime mode change restarts the provider session and stops a
+ * running turn. While busy it keeps the persisted thread mode, never a leftover composer draft.
+ */
+export function resolveComposerRuntimeMode(input: {
+  readonly clientSettingsHydrated: boolean;
+  readonly showPermissionSettings: boolean;
+  readonly composerRuntimeMode: RuntimeMode | null;
+  readonly threadRuntimeMode: RuntimeMode | null;
+  readonly sessionPhase: SessionPhase;
+}): RuntimeMode {
+  if (!input.clientSettingsHydrated || input.showPermissionSettings)
+    return input.composerRuntimeMode ?? input.threadRuntimeMode ?? DEFAULT_RUNTIME_MODE;
+  if (input.sessionPhase === "running" || input.sessionPhase === "connecting")
+    return input.threadRuntimeMode ?? DEFAULT_RUNTIME_MODE;
+  return DEFAULT_RUNTIME_MODE;
 }

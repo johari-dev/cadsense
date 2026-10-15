@@ -45,6 +45,9 @@ Then ask for a review with the Onshape tab URL. Unattended runs work the same wa
   request. It returns `importing` after 45 seconds so clients with a 60 second tool limit can call
   again. Each opened review is a new chat with a synthetic turn ID (`mcp-<uuid>`), which scopes the CAD
   activation, captures, and comments like a provider turn.
+- A microversion URL (`/m/`) names CAD that cannot change. When the data directory already holds that
+  microversion of the element, `cad_open` opens it with no Onshape requests at all: no key
+  verification and no sync.
 - The other tools are the provider CAD tools, unchanged, with the same schemas and descriptions.
   The review guidance comes back in the `cad_open` result because clients handle MCP `instructions`
   differently.
@@ -64,12 +67,33 @@ Then ask for a review with the Onshape tab URL. Unattended runs work the same wa
   capture.
 - Connection verification lists documents, so a key that can only open specific documents is
   rejected.
+- The `cad_checks` draft backstop runs when a review closes, which over MCP means when the client
+  ends the session. Codex and Claude Code usually kill the server right after closing its stdin, so
+  the backstop may not finish publishing. In the app it runs at every turn end.
 - It is not published to npm yet. Run it from a checkout.
 
 ## Verify
 
 `apps/server/scripts/cad-mcp-review-e2e.ts` runs Claude Code or Codex against a fresh data directory
-and keeps the transcript, the final message, the MCP log, the report, and a summary of tool calls:
+and keeps the transcript, the final message, the MCP log, the report, and a summary of tool calls.
+The script starts the MCP server itself and gives the agent a relay to it, so the server still
+closes the review in order after the agent exits, as an app turn would. `--seed-home <dir>` starts
+from a copy of an earlier run's data directory; with a microversion URL it holds, runs make no
+Onshape requests. `--follow-up` resumes the agent once if it exits with `cad_checks` drafts still
+pending (the server logs `CAD drafts pending`). The app sends that follow-up itself, inside the
+turn (see "The follow-up" in [CadChecks.md](../cad/CadChecks.md)); over MCP the server cannot start
+a turn, so only the harness does.
+
+`apps/server/scripts/cad-app-review-e2e.ts` runs a review through the app's own turn handling
+instead: the orchestration engine, the Codex or Claude adapter, and their CAD tools, on a copy of a
+data directory that holds a synced project, with headless Chromium rendering. Use it for behavior
+only the app has, such as the follow-up. It keeps the server log, the chat's messages and
+activities, the report, and a summary with follow-ups and backstop comments.
+
+`apps/server/scripts/cad-mcp-replay.ts` replays a recorded run's tool calls against the current
+server with no model, mapping capture, candidate, and snapshot IDs, and reports how every
+`cad_comment_locate` and `cad_comment_inspect` call turns out now. Use it to check a locate or
+inspection change on the exact views and pixels an agent used.
 
 ```sh
 ONSHAPE_CREDENTIAL_FILE=key.json node apps/server/scripts/cad-mcp-review-e2e.ts \

@@ -8,6 +8,8 @@
  */
 import type {
   CadReviewLearning,
+  MessageId,
+  OrchestrationMessage,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -141,6 +143,16 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadShellById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
+
+  /**
+   * Read one projected message of a thread without hydrating the rest of it.
+   * The engine uses it for commands aimed at messages older than its
+   * message-free command read model.
+   */
+  readonly getThreadMessage: (
+    threadId: ThreadId,
+    messageId: MessageId,
+  ) => Effect.Effect<Option.Option<OrchestrationMessage>, ProjectionRepositoryError>;
 
   /**
    * Read a single active thread detail snapshot by id.

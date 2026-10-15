@@ -1,4 +1,9 @@
-import { ArchiveIcon, ArchiveX, ChevronRightIcon, LoaderIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveIcon as ArchiveX,
+  CaretRightIcon as ChevronRightIcon,
+  SpinnerIcon as LoaderIcon,
+} from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -428,7 +433,7 @@ export function AppearanceSettingsPanel() {
       <SettingsSection title="Visibility">
         <SettingsRow
           {...searchableSetting("show-permission-settings")}
-          description="Show access controls in the composer. New threads automatically accept edits."
+          description="Show access controls in the composer. When hidden, agents edit the project freely and an automatic reviewer checks actions that need more access."
           control={
             <Switch
               checked={settings.showPermissionSettings}

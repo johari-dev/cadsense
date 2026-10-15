@@ -1,3 +1,8 @@
+import {
+  COMMENT_FOCUS_AGENT_VIEW,
+  COMMENT_FOCUS_CLIPPED,
+  COMMENT_FOCUS_UNAVAILABLE,
+} from "./cadCommentFocus";
 import type {
   CadCommentTarget,
   CadCommentRenderWork,
@@ -5,6 +10,7 @@ import type {
 } from "@cadsense/contracts";
 import {
   locateCadCommentPoints,
+  cadVisibleIntersections,
   cadCommentWorldPoint,
   cadCommentVisible,
   cadCommentCameraUp,
@@ -40,6 +46,8 @@ import {
 export { CadRendererError } from "./CadSceneModel";
 /** Parts in front of a reviewed target stay faintly visible for context. */
 const REVIEW_GHOST_OPACITY = 0.15;
+// Comment reviews fade the parts outside an isolation to this opacity instead of hiding them.
+const REVIEW_APPLY = { fadeIsolatedOut: 0.08 } as const;
 export interface CadSceneRendererOptions {
   readonly cacheScenes?: boolean;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -148,18 +156,22 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (disposed || lost || renderer.getContext().isContextLost())
       throw new CadRendererError("renderer-unavailable");
   };
-  const render = () => {
-    assertAvailable();
-    const start = options.onFrame ? performance.now() : 0;
+  /** Draws the model and its outline from `eye`, without comment markers or frame callbacks. */
+  const drawScene = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
     renderer.clippingPlanes = model?.clippingPlanes() ?? [];
-    renderer.render(scene, camera);
+    renderer.render(scene, eye);
     if (
       model &&
       outlineSupported &&
       !view?.sectionPlanes?.length &&
       !view?.ghost?.occurrenceIds.length
     )
-      outline.render(scene, camera, model.bounds.getSize(outlineBounds).length());
+      outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
+  };
+  const render = () => {
+    assertAvailable();
+    const start = options.onFrame ? performance.now() : 0;
+    drawScene(camera);
     if (commentMarkers.children.length) {
       const autoClear = renderer.autoClear;
       const clippingPlanes = renderer.clippingPlanes;
@@ -183,8 +195,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     projection: camera instanceof THREE.OrthographicCamera ? "orthographic" : "perspective",
     zoom: camera.zoom,
   });
+  // Whether the camera moved since the pointer went down. A plain click moves nothing and
+  // must not save the camera (it would save a comment focus close-up as the user's view).
+  let movedSinceStart = false;
+  const interactionStarted = () => {
+    movedSinceStart = false;
+    cancelTransition();
+  };
   const changed = () => {
     if (!applying && !disposed && !lost) {
+      movedSinceStart = true;
       if (controls) {
         const navigation = controls.object;
         const direction = camera.position.clone().sub(target).normalize();
@@ -211,9 +231,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     }
   };
   const ended = () => {
-    if (controls?.enabled && !applying && !lost && !disposed) options.onInteractionEnd?.(pose());
+    if (movedSinceStart && controls?.enabled && !applying && !lost && !disposed)
+      options.onInteractionEnd?.(pose());
   };
-  controls?.addEventListener("start", cancelTransition);
+  controls?.addEventListener("start", interactionStarted);
   controls?.addEventListener("change", changed);
   controls?.addEventListener("end", ended);
   const contextLost = (event: Event) => {
@@ -225,7 +246,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     options.onUnavailable?.(new CadRendererError("renderer-unavailable"));
   };
   canvas.addEventListener("webglcontextlost", contextLost);
-  const configureCamera = (resolved: ResolvedCadCamera, synchronizeControls = true) => {
+  /** Builds a camera for `resolved` with clip planes sized to the loaded model. */
+  const createCamera = (resolved: ResolvedCadCamera) => {
     const distance = new THREE.Vector3(...resolved.position).distanceTo(
       new THREE.Vector3(...resolved.target),
     );
@@ -238,12 +260,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         : distance;
     const far = Math.max(centerDistance + size * 3, distance * 2, 1);
     const near = Math.max(Math.min(distance * 0.001, 0.01), 1e-7);
+    let created: THREE.PerspectiveCamera | THREE.OrthographicCamera;
     if (resolved.projection === "orthographic") {
       const halfHeight = Math.max(
         distance * Math.tan(THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2)),
         1e-7,
       );
-      camera = new THREE.OrthographicCamera(
+      created = new THREE.OrthographicCamera(
         (-halfHeight * width) / height,
         (halfHeight * width) / height,
         halfHeight,
@@ -251,14 +274,18 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         near,
         far,
       );
-    } else camera = new THREE.PerspectiveCamera(CAD_CAMERA_FOV, width / height, near, far);
-    camera.position.fromArray(resolved.position);
-    camera.up.fromArray(resolved.up);
-    camera.zoom = resolved.zoom;
-    camera.lookAt(new THREE.Vector3(...resolved.target));
+    } else created = new THREE.PerspectiveCamera(CAD_CAMERA_FOV, width / height, near, far);
+    created.position.fromArray(resolved.position);
+    created.up.fromArray(resolved.up);
+    created.zoom = resolved.zoom;
+    created.lookAt(new THREE.Vector3(...resolved.target));
+    created.updateProjectionMatrix();
+    return created;
+  };
+  const configureCamera = (resolved: ResolvedCadCamera, synchronizeControls = true) => {
+    camera = createCamera(resolved);
     if (focusOffset.x || focusOffset.y)
       camera.setViewOffset(width, height, focusOffset.x, focusOffset.y, width, height);
-    camera.updateProjectionMatrix();
     target.fromArray(resolved.target);
     if (controls && synchronizeControls) {
       // Display up determines image roll; navigation always uses the same world-Z limits.
@@ -272,7 +299,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     assertAvailable();
     if (!model) throw new CadRendererError("invalid-view");
     clearCommentMarkers();
-    const bounds = model.apply(displayed(state));
+    const bounds = model.apply(displayed(state), review ? REVIEW_APPLY : undefined);
     const resolved = resolveCadCamera(state.camera, bounds, width / height);
     applying = true;
     try {
@@ -298,7 +325,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     }
     const from = pose();
     const explosion = view.explosion;
-    const to = resolveCadCamera(state.camera, model.apply(displayed(state)), width / height);
+    const to = resolveCadCamera(
+      state.camera,
+      model.apply(displayed(state), review ? REVIEW_APPLY : undefined),
+      width / height,
+    );
     const fromTarget = new THREE.Vector3(...from.target);
     const toTarget = new THREE.Vector3(...to.target);
     const fromDistance = new THREE.Vector3(...from.position).distanceTo(fromTarget);
@@ -508,14 +539,209 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!blob) throw new CadRendererError("capture-failed");
     return blob;
   };
-  const endCommentReview = () => {
+  /**
+   * Snapshots every shown part from a fitted isometric camera, for project thumbnails that must
+   * not depend on where the user left the camera. Encoding copies the drawing buffer before this
+   * returns to the event loop, so the live frame is redrawn before the browser can present the
+   * overview.
+   */
+  const captureOverview = async (): Promise<Blob> => {
+    assertAvailable();
+    if (!model || !view) throw new CadRendererError("invalid-view");
+    const overview = createCamera(
+      resolveCadCamera(
+        { kind: "preset", preset: "isometric", fit: [] },
+        model.visibleBounds(),
+        width / height,
+      ),
+    );
+    drawScene(overview);
+    let encoded: Promise<Blob | null>;
+    try {
+      encoded =
+        "convertToBlob" in canvas
+          ? canvas.convertToBlob({ type: "image/png" })
+          : new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    } finally {
+      render();
+    }
+    const blob = await encoded.catch(() => null);
+    if (!blob) throw new CadRendererError("capture-failed");
+    return blob;
+  };
+  // Camera and framing from before the current comment review began, so leaving the focus
+  // can return to them.
+  let reviewStart: { pose: ResolvedCadCamera; offset: { x: number; y: number } } | null = null;
+  const beginCommentReview = () => {
+    if (!reviewStart) reviewStart = { pose: pose(), offset: { ...focusOffset } };
+  };
+  /** Eases the camera to `to` and the comment framing offset to `offset`. */
+  const easeCameraTo = (
+    to: ResolvedCadCamera,
+    offset: { x: number; y: number },
+    reducedMotion: boolean,
+  ) => {
+    const from = pose();
+    const fromOffset = { ...focusOffset };
+    const started = performance.now();
+    const move = (now: number) => {
+      animationFrame = null;
+      if (disposed || lost) return;
+      const fraction = reducedMotion ? 1 : Math.min(1, (now - started) / 280),
+        eased = 1 - (1 - fraction) ** 3;
+      focusOffset = {
+        x: THREE.MathUtils.lerp(fromOffset.x, offset.x, eased),
+        y: THREE.MathUtils.lerp(fromOffset.y, offset.y, eased),
+      };
+      const position = new THREE.Vector3(...from.position).lerp(
+          new THREE.Vector3(...to.position),
+          eased,
+        ),
+        aim = new THREE.Vector3(...from.target).lerp(new THREE.Vector3(...to.target), eased),
+        roll = new THREE.Vector3(...from.up).lerp(new THREE.Vector3(...to.up), eased);
+      if (roll.lengthSq() < 1e-12) roll.fromArray(to.up);
+      applying = true;
+      configureCamera({
+        ...to,
+        position: [position.x, position.y, position.z],
+        target: [aim.x, aim.y, aim.z],
+        up:
+          Math.abs(position.clone().sub(aim).normalize().dot(roll.normalize())) > 0.99
+            ? cadCommentCameraUp(position.clone().sub(aim))
+            : [roll.x, roll.y, roll.z],
+        zoom: THREE.MathUtils.lerp(from.zoom, to.zoom, eased),
+      });
+      applying = false;
+      render();
+      if (fraction < 1) animationFrame = requestAnimationFrame(move);
+    };
+    if (controls) controls.enabled = interactive;
+    move(started);
+  };
+  /**
+   * Ends a comment review and restores the view's own visibility. With `returnCamera`, the
+   * camera also eases back to where it was before the review began.
+   */
+  const endCommentReview = (returnCamera?: { reducedMotion: boolean }) => {
     cancelTransition();
     review = null;
+    const start = reviewStart;
+    reviewStart = null;
     if (model && view) {
       model.apply(view);
       render();
     }
+    if (returnCamera && start && model && view)
+      easeCameraTo(start.pose, start.offset, returnCamera.reducedMotion);
   };
+  /**
+   * The shared end of a comment focus. Faded context in a line of sight to the parts in focus is
+   * hidden so it cannot haze over them, then the camera eases from `from` to look at `point`.
+   */
+  const finishCommentFocus = ({
+    loaded,
+    base,
+    from,
+    eye,
+    point,
+    up,
+    zoom,
+    safe,
+    reducedMotion,
+    orthographic,
+  }: {
+    loaded: CadSceneModel;
+    base: CadViewState;
+    from: ResolvedCadCamera;
+    eye: THREE.Vector3;
+    point: THREE.Vector3;
+    up: THREE.Vector3;
+    zoom: number;
+    safe: { width: number; height: number; centerX: number; centerY: number };
+    reducedMotion: boolean;
+    orthographic: boolean;
+  }) => {
+    // Faded context between the camera and the parts in focus would haze over them, so any
+    // faded part crossing a line of sight stays hidden; the rest stays faded around the focus.
+    const sightOrigin = (sample: THREE.Vector3) =>
+      orthographic ? sample.clone().add(eye.clone().sub(point)) : eye;
+    const sights = [...loaded.objects]
+      .filter(([id, e]) => e.object.visible && !loaded.isFaded(id))
+      .slice(0, 64)
+      .flatMap(([, e]) => {
+        const box = new THREE.Box3().setFromObject(e.object);
+        const middle = box.getCenter(new THREE.Vector3());
+        return [
+          middle,
+          ...[0, 1, 2, 3, 4, 5, 6, 7].map((corner) =>
+            new THREE.Vector3(
+              corner & 1 ? box.max.x : box.min.x,
+              corner & 2 ? box.max.y : box.min.y,
+              corner & 4 ? box.max.z : box.min.z,
+            ).lerp(middle, 0.5),
+          ),
+        ];
+      });
+    const occluding: string[] = [];
+    for (const [id, e] of loaded.objects) {
+      if (!e.object.visible || !loaded.isFaded(id)) continue;
+      const box = new THREE.Box3().setFromObject(e.object);
+      const hit = new THREE.Vector3();
+      if (
+        sights.some((sample) => {
+          const origin = sightOrigin(sample);
+          const ray = new THREE.Ray(origin, sample.clone().sub(origin).normalize());
+          return (
+            ray.intersectBox(box, hit) !== null &&
+            hit.distanceTo(origin) < origin.distanceTo(sample)
+          );
+        })
+      )
+        occluding.push(id);
+    }
+    if (review && occluding.length) {
+      const framed = review;
+      review = (state) => {
+        const next = framed(state);
+        return {
+          ...next,
+          visibility: {
+            ...next.visibility,
+            ...Object.fromEntries(occluding.map((id) => [id, false])),
+          },
+        };
+      };
+      loaded.apply(review(base), REVIEW_APPLY);
+    }
+    focusOffset = { x: width / 2 - safe.centerX, y: height / 2 - safe.centerY };
+    const started = performance.now();
+    const move = (now: number) => {
+      animationFrame = null;
+      const fraction = reducedMotion ? 1 : Math.min(1, (now - started) / 280),
+        eased = 1 - (1 - fraction) ** 3;
+      const position = new THREE.Vector3(...from.position).lerp(eye, eased),
+        aim = new THREE.Vector3(...from.target).lerp(point, eased),
+        roll = new THREE.Vector3(...from.up).lerp(up, eased);
+      if (roll.lengthSq() < 1e-12) roll.copy(up);
+      applying = true;
+      configureCamera({
+        ...from,
+        position: [position.x, position.y, position.z],
+        target: [aim.x, aim.y, aim.z],
+        up:
+          Math.abs(position.clone().sub(aim).normalize().dot(roll.normalize())) > 0.99
+            ? cadCommentCameraUp(position.clone().sub(aim))
+            : [roll.x, roll.y, roll.z],
+        zoom: THREE.MathUtils.lerp(from.zoom, zoom, eased),
+      });
+      applying = false;
+      render();
+      if (fraction < 1) animationFrame = requestAnimationFrame(move);
+    };
+    if (controls) controls.enabled = interactive;
+    move(started);
+  };
+
   return {
     cameraPose: pose,
     subscribeFrames: (listener: () => void) => {
@@ -549,6 +775,29 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     },
     endCommentReview,
     /**
+     * Whether a viewport point (CSS pixels) lands on empty space: nothing but background or
+     * faded and ghosted context, so clicking there leaves the focused comment.
+     */
+    isEmptyAt: (x: number, y: number) => {
+      if (!model) return true;
+      const loaded = model;
+      camera.updateMatrixWorld(true);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2((x / width) * 2 - 1, 1 - (y / height) * 2), camera);
+      return !cadVisibleIntersections(loaded, ray).some((hit) => {
+        let node: THREE.Object3D | null = hit.object;
+        while (node && loaded.objects.get(node.name)?.object !== node) node = node.parent;
+        if (!node || loaded.isFaded(node.name)) return false;
+        const material =
+          hit.object instanceof THREE.Mesh
+            ? Array.isArray(hit.object.material)
+              ? hit.object.material[hit.face?.materialIndex ?? 0]
+              : hit.object.material
+            : null;
+        return (material?.opacity ?? 1) > REVIEW_GHOST_OPACITY;
+      });
+    },
+    /**
      * Frames a comment target outside the card. A point replays the agent capture it was located
      * in, because locating proved it visible there. Other targets are revealed, and the parts in
      * front of them are ghosted. Returns the notice the card shows.
@@ -560,7 +809,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       capture?: CadViewState,
     ) => {
       cancelTransition();
-      if (!model || !view) return "Location unavailable";
+      if (!model || !view) return COMMENT_FOCUS_UNAVAILABLE;
+      beginCommentReview();
       const loaded = model,
         base = view;
       const fail = (reason: string) => {
@@ -568,7 +818,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         return reason;
       };
       const entry = loaded.objects.get(t.occurrenceId);
-      if (!entry) return fail("Location unavailable");
+      if (!entry) return fail(COMMENT_FOCUS_UNAVAILABLE);
       review = null;
       loaded.apply(base);
       const wasHidden = !entry.object.visible;
@@ -584,7 +834,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           camera: state.camera,
         });
         try {
-          loaded.apply(replay(base));
+          loaded.apply(replay(base), REVIEW_APPLY);
           review = replay;
           replayed = true;
         } catch (error) {
@@ -601,7 +851,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
             : [],
         });
         review = revealed;
-        loaded.apply(revealed(base));
+        loaded.apply(revealed(base), REVIEW_APPLY);
       }
       const bounds = new THREE.Box3().setFromObject(entry.object),
         size = bounds.getSize(new THREE.Vector3()).length();
@@ -609,9 +859,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         t.kind === "point"
           ? cadCommentWorldPoint(loaded, t.occurrenceId, t.point)
           : bounds.getCenter(new THREE.Vector3());
-      if (!point) return fail("Location unavailable");
-      if (loaded.isClipped(point))
-        return fail("Location clipped by section planes; reset inspection to review");
+      if (!point) return fail(COMMENT_FOCUS_UNAVAILABLE);
+      if (loaded.isClipped(point)) return fail(COMMENT_FOCUS_CLIPPED);
       const from = pose();
       let eye: THREE.Vector3, up: THREE.Vector3, zoom: number, notice: string;
       if (agent && replayed) {
@@ -635,7 +884,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
             safe.height / height,
             (safe.width * CAD_CAPTURE_SIZE.height) / (CAD_CAPTURE_SIZE.width * height),
           );
-        notice = "Showing the agent's view";
+        notice = COMMENT_FOCUS_AGENT_VIEW;
       } else {
         const radius =
           t.kind === "part"
@@ -673,6 +922,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
             for (const [id, e] of loaded.objects)
               if (
                 e.object.visible &&
+                // Faded context does not block the view, just as when it was hidden.
+                !loaded.isFaded(id) &&
                 (t.kind === "point" || id !== t.occurrenceId) &&
                 ray.intersectObject(e.object, true).some((hit) => !loaded.isClipped(hit.point))
               )
@@ -712,7 +963,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
               },
             };
           };
-          loaded.apply(review(base));
+          loaded.apply(review(base), REVIEW_APPLY);
         }
         eye = point.clone().addScaledVector(direction, distance);
         up = new THREE.Vector3(...from.up);
@@ -725,34 +976,93 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
               ? "Target temporarily revealed"
               : "";
       }
-      focusOffset = { x: width / 2 - safe.centerX, y: height / 2 - safe.centerY };
-      const started = performance.now();
-      const move = (now: number) => {
-        animationFrame = null;
-        const fraction = reducedMotion ? 1 : Math.min(1, (now - started) / 280),
-          eased = 1 - (1 - fraction) ** 3;
-        const position = new THREE.Vector3(...from.position).lerp(eye, eased),
-          aim = new THREE.Vector3(...from.target).lerp(point, eased),
-          roll = new THREE.Vector3(...from.up).lerp(up, eased);
-        if (roll.lengthSq() < 1e-12) roll.copy(up);
-        applying = true;
-        configureCamera({
-          ...from,
-          position: [position.x, position.y, position.z],
-          target: [aim.x, aim.y, aim.z],
-          up:
-            Math.abs(position.clone().sub(aim).normalize().dot(roll.normalize())) > 0.99
-              ? cadCommentCameraUp(position.clone().sub(aim))
-              : [roll.x, roll.y, roll.z],
-          zoom: THREE.MathUtils.lerp(from.zoom, zoom, eased),
-        });
-        applying = false;
-        render();
-        if (fraction < 1) animationFrame = requestAnimationFrame(move);
-      };
-      if (controls) controls.enabled = interactive;
-      move(started);
+      finishCommentFocus({
+        loaded,
+        base,
+        from,
+        eye,
+        point,
+        up,
+        zoom,
+        safe,
+        reducedMotion,
+        orthographic: !!agent && replayed && agent.projection === "orthographic",
+      });
       return notice;
+    },
+    /**
+     * Frames every location of a multi-location comment in one view outside the card, from the
+     * current viewing direction. The locations are revealed like a single part target.
+     */
+    focusCommentTargets: (
+      targets: readonly CadCommentTarget[],
+      safe: { width: number; height: number; centerX: number; centerY: number },
+      reducedMotion: boolean,
+    ) => {
+      cancelTransition();
+      if (!model || !view) return COMMENT_FOCUS_UNAVAILABLE;
+      beginCommentReview();
+      const loaded = model,
+        base = view;
+      const ids = [...new Set(targets.map((t) => t.occurrenceId))];
+      if (!ids.length || ids.some((id) => !loaded.objects.has(id))) {
+        endCommentReview();
+        return COMMENT_FOCUS_UNAVAILABLE;
+      }
+      review = null;
+      loaded.apply(base);
+      const wasHidden = ids.some((id) => !loaded.objects.get(id)?.object.visible);
+      const revealed = (state: CadViewState): CadViewState => ({
+        ...state,
+        visibility: revealCadOccurrences(loaded.index, state, ids),
+        isolatedOccurrenceIds: state.isolatedOccurrenceIds.length
+          ? [...new Set([...state.isolatedOccurrenceIds, ...ids])]
+          : [],
+      });
+      review = revealed;
+      loaded.apply(revealed(base), REVIEW_APPLY);
+      // Points get some room around them, scaled to their part, so close points still show
+      // where they sit; whole parts are framed by their bounds.
+      const box = new THREE.Box3();
+      for (const t of targets) {
+        const entry = loaded.objects.get(t.occurrenceId);
+        if (!entry) continue;
+        const part = new THREE.Box3().setFromObject(entry.object);
+        if (t.kind !== "point") {
+          box.union(part);
+          continue;
+        }
+        const point = cadCommentWorldPoint(loaded, t.occurrenceId, t.point);
+        if (!point) continue;
+        const margin = Math.max(part.getSize(new THREE.Vector3()).length() * 0.2, 0.001);
+        box.union(
+          new THREE.Box3().setFromCenterAndSize(point, new THREE.Vector3().setScalar(margin * 2)),
+        );
+      }
+      if (box.isEmpty()) {
+        endCommentReview();
+        return COMMENT_FOCUS_UNAVAILABLE;
+      }
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const angle = Math.atan(
+        Math.tan(Math.PI / 8) * Math.min(safe.height / height, safe.width / height),
+      );
+      const distance = (Math.max(sphere.radius, 1e-6) / Math.sin(Math.max(angle, 0.01))) * 1.15;
+      const direction = camera.position.clone().sub(target).normalize();
+      const from = pose();
+      finishCommentFocus({
+        loaded,
+        base,
+        from,
+        eye: sphere.center.clone().addScaledVector(direction, distance),
+        point: sphere.center.clone(),
+        up: new THREE.Vector3(...from.up),
+        zoom: 1,
+        safe,
+        reducedMotion,
+        orthographic: false,
+      });
+      return wasHidden ? "Locations temporarily revealed" : "";
     },
     commentWork: (work: CadCommentRenderWork): CadCommentRenderHit[] => {
       assertAvailable();
@@ -898,6 +1208,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     apply,
     transition,
     capture,
+    captureOverview,
     setAppearance: (next: CadAppearance) => {
       assertAvailable();
       if (next.background === appearance.background && next.dark === appearance.dark) return;
@@ -943,7 +1254,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       frameListeners.clear();
       generation++;
       canvas.removeEventListener("webglcontextlost", contextLost);
-      controls?.removeEventListener("start", cancelTransition);
+      controls?.removeEventListener("start", interactionStarted);
       controls?.removeEventListener("change", changed);
       controls?.removeEventListener("end", ended);
       controls?.dispose();

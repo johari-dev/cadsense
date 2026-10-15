@@ -10,13 +10,13 @@ import {
   type ServerProviderSlashCommand,
 } from "@cadsense/contracts";
 import {
-  BlocksIcon,
+  ShapesIcon as BlocksIcon,
   FolderIcon,
   PackageIcon,
-  SettingsIcon,
-  UserRoundIcon,
-  type LucideIcon,
-} from "lucide-react";
+  GearSixIcon as SettingsIcon,
+  UserCircleIcon as UserRoundIcon,
+  type Icon as LucideIcon,
+} from "~/lib/icons";
 import { memo, useLayoutEffect, useRef } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";

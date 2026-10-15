@@ -63,11 +63,11 @@ it("opens a published comment at its location in the CAD panel", () => {
   (commentButton?.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-1",
-    target: 0,
+    target: "all",
   });
   expect(useRightPanelStore.getState().byThreadKey[scopedThreadKey(threadRef)]).toMatchObject({
     isOpen: true,
-    activeSurfaceId: "cad",
+    section: "cad",
   });
 });
 
@@ -100,6 +100,6 @@ it("lists resolution proposals apart from written comments and opens their comme
   (button!.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-2",
-    target: 0,
+    target: "all",
   });
 });

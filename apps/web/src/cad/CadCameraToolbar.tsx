@@ -1,6 +1,6 @@
 import type { CadViewState } from "@cadsense/contracts";
 import { useState } from "react";
-import { Boxes } from "lucide-react";
+import { StackIcon as Boxes } from "~/lib/icons";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -65,11 +65,12 @@ export function CadCameraToolbar({
   const validOffset =
     sectionOffset.trim() !== "" && Number.isFinite(offset) && Math.abs(offset) <= 1e9;
   return (
-    <div className="pointer-events-none absolute inset-x-2 bottom-3 flex justify-center">
+    // Above the comment marker layer (z-20) and opaque, so markers never show through it.
+    <div className="pointer-events-none absolute inset-x-2 bottom-3 z-30 flex justify-center">
       <div
         role="toolbar"
         aria-label="CAD camera views"
-        className="pointer-events-auto flex max-w-full flex-wrap justify-center gap-0.5 rounded-md border border-border/70 bg-background/90 p-1 shadow-lg"
+        className="pointer-events-auto flex max-w-full flex-wrap justify-center gap-0.5 rounded-md border border-border/70 bg-background p-1 shadow-lg"
       >
         {sectionOpen && (
           <form

@@ -236,6 +236,7 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   {
     type:
       | "thread.message-sent"
+      | "thread.message-rating-set"
       | "thread.proposed-plan-upserted"
       | "thread.activity-appended"
       | "thread.session-set";
@@ -243,6 +244,7 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
 > {
   return (
     event.type === "thread.message-sent" ||
+    event.type === "thread.message-rating-set" ||
     event.type === "thread.proposed-plan-upserted" ||
     event.type === "thread.activity-appended" ||
     event.type === "thread.session-set"
@@ -487,6 +489,7 @@ const makeWsRpcLayer = (
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":
+          case "thread.message-rating-set":
             return Effect.succeed(Option.none());
           case "thread.cad-capture-recorded":
           case "thread.cad-presentation-settled":

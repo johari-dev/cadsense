@@ -1,43 +1,95 @@
+/* The comments card morphs between the 34px toggle and a panel sized to its content (up to a
+   cap). `interpolate-size` lets height animate to and from `auto` where supported; other
+   browsers keep the size change without animating it. */
+/* Size of the viewport's corner controls: the comments toggle and the view changes chip. */
+:root {
+  --cad-overlay-control: 34px;
+}
+
 .cad-comments-surface {
-  width: 34px;
-  height: 34px;
+  interpolate-size: allow-keywords;
+  display: flex;
+  flex-direction: column;
+  width: var(--cad-overlay-control);
+  height: var(--cad-overlay-control);
   transition:
-    width 200ms ease,
-    height 200ms ease,
-    box-shadow 200ms ease;
+    width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 240ms ease;
 }
 
 .cad-comments-surface[data-open="true"] {
   width: min(304px, calc(100% - 24px));
-  height: min(440px, 60%);
+  height: auto;
+  max-height: min(440px, 60%);
+}
+
+/* Clip the panel while it is open and while it shrinks back into the toggle. */
+.cad-comments-surface:is([data-open="true"], [data-closing="true"]) {
   overflow: hidden;
 }
 
 /* Keep revision navigation reachable while a finding is expanded. */
 .cad-comments-surface[data-open="true"][data-historical="true"] {
   top: 56px;
-  height: min(440px, 60%, calc(100% - 68px));
+  max-height: min(440px, 60%, calc(100% - 68px));
 }
 
+/* The content keeps the open panel's width and right edge, so the shrinking surface clips it
+   instead of rewrapping text on every frame. */
 .cad-comments-content {
-  animation: cad-comments-appear 200ms ease both;
+  flex: 1 1 auto;
+  align-self: flex-end;
+  width: min(304px, calc(100cqw - 24px));
+  min-height: 0;
+  transform-origin: top right;
+  transition:
+    opacity 180ms ease,
+    transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-@keyframes cad-comments-appear {
-  from {
+@starting-style {
+  .cad-comments-content {
     opacity: 0;
+    transform: scale(0.97);
   }
-  to {
-    opacity: 1;
-  }
+}
+
+.cad-comments-surface[data-open="false"] .cad-comments-content {
+  opacity: 0;
+  transform: scale(0.97);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cad-comments-surface {
+  .cad-comments-surface,
+  .cad-comments-content {
     transition: none;
   }
-  .cad-comments-content {
-    animation: none;
+}
+
+/* The view changes card grows out of its chip in the top-left corner (see CadViewChanges). */
+.cad-view-changes-card {
+  transform-origin: top left;
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@starting-style {
+  .cad-view-changes-card {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+.cad-view-changes-card[data-closing="true"] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cad-view-changes-card {
+    transition: none;
   }
 }
 

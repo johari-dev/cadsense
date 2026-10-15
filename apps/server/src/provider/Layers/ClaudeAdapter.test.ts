@@ -117,6 +117,8 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
+  /** Modes the fake CLI refuses, like a real CLI whose model or account lacks auto mode. */
+  public readonly rejectedPermissionModes = new Set<string>();
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public closeCalls = 0;
   public closeError: unknown | undefined;
@@ -161,6 +163,10 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   readonly setPermissionMode = async (mode: PermissionMode): Promise<void> => {
     this.setPermissionModeCalls.push(mode);
+    if (this.rejectedPermissionModes.has(mode))
+      throw new Error(
+        `Cannot set permission mode to ${mode}: auto mode unavailable for this model`,
+      );
   };
 
   readonly setMaxThinkingTokens = async (maxThinkingTokens: number | null): Promise<void> => {
@@ -4608,6 +4614,76 @@ describe("ClaudeAdapterLive", () => {
       );
     },
   );
+
+  it.effect.each([
+    { name: "keeps auto when the CLI accepts it", rejected: [], expectedCalls: ["auto"] },
+    {
+      name: "falls back to acceptEdits when auto mode is unavailable",
+      rejected: ["auto"],
+      expectedCalls: ["auto", "acceptEdits"],
+    },
+  ])("auto runtime mode $name", ({ rejected, expectedCalls }) => {
+    const harness = makeHarness();
+    for (const mode of rejected) harness.query.rejectedPermissionModes.add(mode);
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "auto",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        interactionMode: "default",
+        attachments: [],
+      });
+      assert.ok(turn.turnId);
+      assert.deepEqual(harness.query.setPermissionModeCalls, expectedCalls);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect.each([
+    {
+      name: "a rejected non-auto base mode",
+      runtimeMode: "auto-accept-edits" as const,
+      rejected: ["acceptEdits"],
+      expectedCalls: ["acceptEdits"],
+    },
+    {
+      name: "a rejected acceptEdits fallback",
+      runtimeMode: "auto" as const,
+      rejected: ["auto", "acceptEdits"],
+      expectedCalls: ["auto", "acceptEdits"],
+    },
+  ])("fails the turn on $name", ({ runtimeMode, rejected, expectedCalls }) => {
+    const harness = makeHarness();
+    for (const mode of rejected) harness.query.rejectedPermissionModes.add(mode);
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode,
+      });
+      const error = yield* adapter
+        .sendTurn({
+          threadId: session.threadId,
+          input: "hello",
+          interactionMode: "default",
+          attachments: [],
+        })
+        .pipe(Effect.flip);
+      assert.ok(error);
+      assert.deepEqual(harness.query.setPermissionModeCalls, expectedCalls);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 
   it.effect("does not call setPermissionMode when interactionMode is absent", () => {
     const harness = makeHarness();

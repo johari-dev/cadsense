@@ -9,6 +9,14 @@ export type ResolvedCadCamera = typeof CadCameraPose.Type;
 export const CAD_CAMERA_FOV = 45;
 const decodeView = Schema.decodeUnknownSync(CadViewState);
 
+export type CadApplyOptions = {
+  /**
+   * Comment reviews show the parts an isolation would hide at this opacity instead of hiding
+   * them, so the isolated part keeps its surroundings for context.
+   */
+  fadeIsolatedOut?: number;
+};
+
 /** GLTF hierarchy clones share immutable geometry, materials, and texture buffers. */
 export const buildCadSceneModel = (
   manifest: CadSnapshotManifest,
@@ -56,11 +64,15 @@ export const buildCadSceneModel = (
     entry.offset.normalize().multiplyScalar(scale * 0.45);
   }
   let planes: THREE.Plane[] = [];
+  // Bounds of every part the last applied view shows, ignoring any camera fit selection.
+  let shownBounds = bounds.clone();
   const overrides = new Map<
     THREE.Mesh | THREE.Line | THREE.Points,
     { original: THREE.Material | THREE.Material[]; copies: THREE.Material[] }
   >();
   let materialStyle = "";
+  // Parts the last applied view faded instead of hiding (see CadApplyOptions).
+  let faded: ReadonlySet<string> = new Set();
   const clearOverrides = () => {
     const disposed = new Set<THREE.Material>();
     for (const [object, entry] of overrides) {
@@ -76,7 +88,7 @@ export const buildCadSceneModel = (
   };
   const isClipped = (point: THREE.Vector3) =>
     planes.some((plane) => plane.distanceToPoint(point) < 0);
-  const apply = (input: CadViewState) => {
+  const apply = (input: CadViewState, options?: CadApplyOptions) => {
     let state: CadViewState;
     try {
       state = decodeView(input);
@@ -93,7 +105,21 @@ export const buildCadSceneModel = (
       ...(state.camera.fit ?? []),
     ];
     if (ids.some((id) => !index.nodes.has(id))) throw new CadRendererError("invalid-view");
-    const nextStyle = JSON.stringify([state.highlightedOccurrenceIds ?? [], state.ghost ?? null]);
+    const shown = index.visible(state);
+    const fadeOpacity = state.isolatedOccurrenceIds.length ? options?.fadeIsolatedOut : undefined;
+    // With fading on, everything the view shows without its isolation stays visible, and the
+    // parts only the isolation hid are faded.
+    const visible =
+      fadeOpacity === undefined ? shown : index.visible({ ...state, isolatedOccurrenceIds: [] });
+    const fadedIds = new Set<string>();
+    if (fadeOpacity !== undefined)
+      for (const [id, isVisible] of visible) if (isVisible && !shown.get(id)) fadedIds.add(id);
+    const nextStyle = JSON.stringify([
+      state.highlightedOccurrenceIds ?? [],
+      state.ghost ?? null,
+      fadeOpacity ?? null,
+      [...fadedIds],
+    ]);
     const changedStyle = materialStyle !== nextStyle;
     if (changedStyle) {
       clearOverrides();
@@ -105,13 +131,16 @@ export const buildCadSceneModel = (
     );
     const highlighted = index.subtree(state.highlightedOccurrenceIds ?? []);
     const ghosted = index.subtree(state.ghost?.occurrenceIds ?? []);
-    const visible = index.visible(state);
     const selected = state.camera.fit?.length ? index.subtree(state.camera.fit) : null;
     const fitBounds = new THREE.Box3();
     const visibleBounds = new THREE.Box3();
     for (const [id, entry] of objects) {
       entry.object.visible = visible.get(id) ?? false;
-      if (changedStyle && (highlighted.has(id) || ghosted.has(id)))
+      const opacity = Math.min(
+        ghosted.has(id) ? state.ghost!.opacity : 1,
+        fadedIds.has(id) ? fadeOpacity! : 1,
+      );
+      if (changedStyle && (highlighted.has(id) || opacity < 1))
         entry.object.traverse((object) => {
           if (
             !(
@@ -123,7 +152,7 @@ export const buildCadSceneModel = (
             return;
           const original = object.material;
           const copies = (Array.isArray(original) ? original : [original]).map((material) => {
-            const style = `${highlighted.has(id)}:${ghosted.has(id)}`;
+            const style = `${highlighted.has(id)}:${opacity}`;
             const variants = styledMaterials.get(material) ?? new Map<string, THREE.Material>();
             styledMaterials.set(material, variants);
             const existing = variants.get(style);
@@ -132,8 +161,8 @@ export const buildCadSceneModel = (
             variants.set(style, copy);
             if (highlighted.has(id) && "color" in copy && copy.color instanceof THREE.Color)
               copy.color.set(0xffbf36);
-            if (ghosted.has(id)) {
-              copy.opacity = Math.min(copy.opacity, state.ghost!.opacity);
+            if (opacity < 1) {
+              copy.opacity = Math.min(copy.opacity, opacity);
               copy.transparent = true;
               copy.depthWrite = false;
             }
@@ -147,13 +176,16 @@ export const buildCadSceneModel = (
       entry.object.matrix.elements[12]! += offset.x;
       entry.object.matrix.elements[13]! += offset.y;
       entry.object.matrix.elements[14]! += offset.z;
-      if (entry.object.visible) {
+      // Faded parts are context only: they never widen framing or fit bounds.
+      if (entry.object.visible && !fadedIds.has(id)) {
         const box = entry.bounds.clone().translate(offset);
         visibleBounds.union(box);
         if (selected === null || selected.has(id)) fitBounds.union(box);
       }
     }
     group.updateMatrixWorld(true);
+    faded = fadedIds;
+    shownBounds = visibleBounds.isEmpty() ? bounds.clone() : visibleBounds;
     // All-hidden/empty fits remain deterministic and never produce NaN camera positions.
     return fitBounds.isEmpty()
       ? visibleBounds.isEmpty()
@@ -169,6 +201,9 @@ export const buildCadSceneModel = (
     apply,
     isClipped,
     clippingPlanes: () => planes,
+    visibleBounds: () => shownBounds.clone(),
+    /** Parts shown faded rather than hidden by the last applied view. */
+    isFaded: (id: string) => faded.has(id),
     dispose: clearOverrides,
   };
 };

@@ -182,6 +182,69 @@ describe("CAD comment anchors", () => {
       )[0]?.reason,
     ).toBe("invalid-image-point");
   });
+  // Nearby snapping; cases from "Helping smaller models place points" in server CadComments.md.
+  const pickAt = (
+    model: ReturnType<typeof setup>["model"],
+    camera: THREE.Camera,
+    x: number,
+    y: number,
+    intended = id(3),
+  ) =>
+    locateCadCommentPoints(
+      model,
+      camera,
+      [{ pickKey: "p", intendedOccurrenceId: intended, x, y }],
+      1280,
+      960,
+    )[0]!;
+  const pixelOf = (camera: THREE.Camera, point: THREE.Vector3) => {
+    const projected = point.clone().project(camera);
+    return { x: (projected.x + 1) * 640, y: (1 - projected.y) * 480 };
+  };
+  it("snaps a near miss to the closest pixel where the intended part is visible", () => {
+    const { model, camera, point } = setup();
+    const { x, y } = pixelOf(camera, point);
+    // Just outside the torus's outer edge, in empty space.
+    const hit = pickAt(model, camera, x + 40, y);
+    expect(hit.reason).toBe("candidate");
+    expect(hit.occurrenceId).toBe(id(3));
+    expect(hit.pixel).toBeDefined();
+    const [px, py] = hit.pixel!;
+    expect(Math.hypot(px - (x + 40), py - y)).toBeLessThanOrEqual(64);
+    expect(px).toBeLessThan(x + 40);
+  });
+  it("leaves an exact hit where it was and reports no moved pixel", () => {
+    const { model, camera, point } = setup();
+    const { x, y } = pixelOf(camera, point);
+    const hit = pickAt(model, camera, x, y);
+    expect(hit.reason).toBe("candidate");
+    expect(hit.pixel).toBeUndefined();
+    expect(hit.point?.[0]).toBeCloseTo(0.3, 5);
+  });
+  it("does not snap past the search radius or onto another part", () => {
+    const { model, camera } = setup();
+    const center = pixelOf(camera, cadCommentWorldPoint(model, id(3), [0, 0, 0.1])!);
+    // The torus ring is about 90 pixels from the center of its opening.
+    expect(pickAt(model, camera, center.x, center.y).reason).toBe("no-hit");
+    expect(pickAt(model, camera, center.x + 40, center.y, id(4)).reason).not.toBe("candidate");
+  });
+  it("does not snap to a spot hidden behind another part or a translucent surface", () => {
+    const { model, camera, point } = setup();
+    const { x, y } = pixelOf(camera, point);
+    // A large opaque sheet in front of the torus: the torus is hidden everywhere.
+    const sheet = model.objects.get(id(4))!.object;
+    sheet.clear();
+    sheet.add(new THREE.Mesh(new THREE.BoxGeometry(6, 6, 0.01), new THREE.MeshBasicMaterial()));
+    sheet.matrixAutoUpdate = true;
+    sheet.position.set(2, 0, 1);
+    sheet.updateMatrixWorld(true);
+    expect(pickAt(model, camera, x + 40, y).reason).not.toBe("candidate");
+    sheet.traverse((child) => {
+      if (child instanceof THREE.Mesh)
+        child.material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.3 });
+    });
+    expect(pickAt(model, camera, x + 40, y).reason).not.toBe("candidate");
+  });
   it("uses parallel occlusion rays in orthographic views", () => {
     const { model, point } = setup();
     const camera = new THREE.OrthographicCamera(-4, 4, 3, -3, 0.001, 100);

@@ -118,10 +118,9 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
-  selectActiveRightPanel,
-  selectActiveRightPanelSurface,
+  resolveRightPanelSection,
   selectThreadRightPanelState,
-  type RightPanelSurface,
+  type RightPanelSection,
   useRightPanelStore,
 } from "../rightPanelStore";
 import {
@@ -129,7 +128,6 @@ import {
   setActivePreviewTab,
   useThreadPreviewState,
 } from "../previewStateStore";
-import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
@@ -139,14 +137,19 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanel } from "./RightPanel";
+import { singleCadModelName } from "../cad/cadModelName";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,
 } from "@cadsense/client-runtime/state/subagentRuntime";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { ChevronDownIcon, PaperclipIcon, WifiOffIcon } from "lucide-react";
+import {
+  CaretDownIcon as ChevronDownIcon,
+  PaperclipIcon,
+  WifiSlashIcon as WifiOffIcon,
+} from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -158,7 +161,11 @@ import {
   deriveProviderInstanceEntries,
   NO_PROVIDER_MODEL_SELECTION,
 } from "../providerInstances";
-import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useClientSettingsHydrated,
+  useEnvironmentSettings,
+} from "../hooks/useSettings";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
@@ -249,6 +256,7 @@ import {
   readFileAsDataUrl,
   loadVideoPreviewUrl,
   isVideoPreviewRequestCurrent,
+  resolveComposerRuntimeMode,
   resolveDraftHeroState,
   resolveThreadMetadataUpdateForNextTurn,
   revokeBlobPreviewUrl,
@@ -365,7 +373,7 @@ const CadFilePrompt = lazy(() =>
 const CadAutoPreview = lazy(() =>
   import("../cad/CadAutoPreview").then((module) => ({ default: module.CadAutoPreview })),
 );
-const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
+const EMPTY_PENDING_FILE_PATHS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -417,14 +425,6 @@ function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
   if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
-
-  // The right-panel surface launcher claims its shortcut letters while it is
-  // visible (data attribute set in RightPanelTabs); those keys open surfaces
-  // instead of typing into the composer.
-  const launcherKeys = document
-    .querySelector("[data-surface-launcher-keys]")
-    ?.getAttribute("data-surface-launcher-keys");
-  if (launcherKeys && launcherKeys.toLowerCase().includes(event.key.toLowerCase())) return false;
 
   return true;
 }
@@ -834,7 +834,15 @@ function ChatViewContent(props: ChatViewProps) {
   // local shadow is already empty and the banner is driven purely by
   // session.lastError. Bump a tick so the banner hides immediately.
   const [, setThreadErrorBannerDismissTick] = useState(0);
-  const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const clientSettingsHydrated = useClientSettingsHydrated();
+  const showPermissionSettings = useClientSettings((settings) => settings.showPermissionSettings);
+  const runtimeMode = resolveComposerRuntimeMode({
+    clientSettingsHydrated,
+    showPermissionSettings,
+    composerRuntimeMode,
+    threadRuntimeMode: activeThread?.runtimeMode ?? null,
+    sessionPhase: derivePhase(activeThread?.session ?? null),
+  });
   // The app always dispatches in the normal interaction mode. Persisting this
   // on the next turn also releases threads stored in the removed plan mode.
   const interactionMode = DEFAULT_INTERACTION_MODE;
@@ -857,33 +865,13 @@ function ChatViewContent(props: ChatViewProps) {
     setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
   }
   const timelineAnchorMessageId = timelineAnchor.messageId;
-  const activeRightPanelKind = useRightPanelStore((state) =>
-    selectActiveRightPanel(state.byThreadKey, activeThreadRef),
-  );
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
-  const activeRightPanelSurface = useRightPanelStore((state) =>
-    selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
-  );
-  const displayedRightPanelSurface =
-    rightPanelState.surfaces.find((surface) => surface.id === rightPanelState.activeSurfaceId) ??
-    null;
-  const activeFileSurface =
-    activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
   const activePreviewState = useThreadPreviewState(activeThreadRef);
-  const activePreviewServerEpoch = activePreviewState.serverEpoch;
-  const resolvePreviewRuntimeTabId = useMemo(
-    () =>
-      activeThreadRef
-        ? (tabId: string) => previewRuntimeTabId(activeThreadRef, activePreviewServerEpoch, tabId)
-        : undefined,
-    [activeThreadRef, activePreviewServerEpoch],
-  );
   const activePreviewMiniPlayer = usePreviewMiniPlayerStore((state) =>
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
-  const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
   const rightPanelOpen = rightPanelState.isOpen;
   const rightPanelPresence = usePanelPresence(rightPanelOpen);
   useEffect(() => {
@@ -902,26 +890,8 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore
       .getState()
-      .reconcileBrowserSurfaces(activeThreadRef, Object.keys(activePreviewState.sessions));
+      .reconcileBrowser(activeThreadRef, Object.keys(activePreviewState.sessions));
   }, [activePreviewState.sessions, activeThreadRef]);
-
-  useEffect(() => {
-    if (!activeThreadRef || !activePreviewMiniPlayer) return;
-    const miniTabStillExists = Boolean(activePreviewState.sessions[activePreviewMiniPlayer.tabId]);
-    const sameTabOpenInPanel =
-      previewPanelOpen &&
-      activeRightPanelSurface?.kind === "preview" &&
-      activeRightPanelSurface.resourceId === activePreviewMiniPlayer.tabId;
-    if (!miniTabStillExists || sameTabOpenInPanel) {
-      usePreviewMiniPlayerStore.getState().close(activeThreadRef);
-    }
-  }, [
-    activePreviewMiniPlayer,
-    activePreviewState.sessions,
-    activeRightPanelSurface,
-    activeThreadRef,
-    previewPanelOpen,
-  ]);
 
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const activeRunningTurnId =
@@ -944,22 +914,21 @@ function ChatViewContent(props: ChatViewProps) {
   const activeProjectKey = activeProject
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
-  const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
+  const [pendingFilePathsByProject, setPendingFilePathsByProject] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
   >(() => new Map());
-  const pendingFileSurfaceIds = activeProjectKey
-    ? (pendingFileSurfaceIdsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
-    : EMPTY_PENDING_FILE_SURFACE_IDS;
+  const pendingFilePaths = activeProjectKey
+    ? (pendingFilePathsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_PATHS)
+    : EMPTY_PENDING_FILE_PATHS;
   const handleFilePendingChange = useCallback(
     (relativePath: string, pending: boolean) => {
       if (!activeProjectKey) return;
-      setPendingFileSurfaceIdsByProject((currentByProject) => {
-        const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
-        const surfaceId = `file:${relativePath}`;
-        if (current.has(surfaceId) === pending) return currentByProject;
+      setPendingFilePathsByProject((currentByProject) => {
+        const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_PATHS;
+        if (current.has(relativePath) === pending) return currentByProject;
         const next = new Set(current);
-        if (pending) next.add(surfaceId);
-        else next.delete(surfaceId);
+        if (pending) next.add(relativePath);
+        else next.delete(relativePath);
         const nextByProject = new Map(currentByProject);
         if (next.size === 0) nextByProject.delete(activeProjectKey);
         else nextByProject.set(activeProjectKey, next);
@@ -972,7 +941,7 @@ function ChatViewContent(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThreadRef || !activeEnvironmentBootstrapComplete) return;
-    useRightPanelStore.getState().reconcileFileSurfaces(activeThreadRef, activeProject !== null);
+    useRightPanelStore.getState().reconcileFiles(activeThreadRef, activeProject !== null);
   }, [activeEnvironmentBootstrapComplete, activeProject, activeThreadRef]);
 
   useEffect(() => {
@@ -1127,6 +1096,43 @@ function ChatViewContent(props: ChatViewProps) {
       }),
     [agentSessionLive, threadActivities],
   );
+  // Every project offers CAD unless it is turned off. Without a linked file, the panel asks for one.
+  const cadAvailable = !!activeProject && activeProject.cad?.enabled !== false;
+  const cadLinked = cadAvailable && hasCadSource(activeProject);
+  // The browser page Browser shows: the one last opened in the panel, else the
+  // thread's active page, else any page. Null when the thread has no pages.
+  const browserTabId =
+    [rightPanelState.browserTabId, activePreviewState.activeTabId].find(
+      (tabId): tabId is string => !!tabId && tabId in activePreviewState.sessions,
+    ) ??
+    Object.keys(activePreviewState.sessions)[0] ??
+    null;
+  const rightPanelAvailable: Record<RightPanelSection, boolean> = {
+    cad: cadAvailable,
+    files: activeProject !== null,
+    agents: agentPanelModel.hasAgents,
+    browser: browserTabId !== null && isPreviewSupportedInRuntime(),
+  };
+  const rightPanelSection = resolveRightPanelSection(rightPanelState.section, rightPanelAvailable);
+  // The right panel's title row, where the CAD panel puts its scene picker.
+  const [cadTitleSlot, setCadTitleSlot] = useState<HTMLElement | null>(null);
+  const rightPanelFile = rightPanelSection === "files" ? rightPanelState.file : null;
+  const browserInPanel = rightPanelOpen && rightPanelSection === "browser";
+
+  useEffect(() => {
+    if (!activeThreadRef || !activePreviewMiniPlayer) return;
+    const miniTabStillExists = Boolean(activePreviewState.sessions[activePreviewMiniPlayer.tabId]);
+    const sameTabOpenInPanel = browserInPanel && browserTabId === activePreviewMiniPlayer.tabId;
+    if (!miniTabStillExists || sameTabOpenInPanel) {
+      usePreviewMiniPlayerStore.getState().close(activeThreadRef);
+    }
+  }, [
+    activePreviewMiniPlayer,
+    activePreviewState.sessions,
+    activeThreadRef,
+    browserInPanel,
+    browserTabId,
+  ]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
@@ -1735,20 +1741,9 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
   }, [activeThreadRef, openPreview]);
-  const addFilesSurface = useCallback(() => {
-    if (!activeThreadRef || !activeProject) return;
-    useRightPanelStore.getState().open(activeThreadRef, "files");
-  }, [activeProject, activeThreadRef]);
-  const addAgentsSurface = useCallback(() => {
-    if (!activeThreadRef) return;
-    useRightPanelStore.getState().open(activeThreadRef, "agents");
-  }, [activeThreadRef]);
-  // Every project offers CAD unless it is turned off. Without a linked file, the panel asks for one.
-  const cadAvailable = !!activeProject && activeProject.cad?.enabled !== false;
-  const cadLinked = cadAvailable && hasCadSource(activeProject);
   const cadOpeningRef = useRef(false);
   const [cadOpening, setCadOpening] = useState(false);
-  const addCadSurface = useCallback(() => {
+  const openCadSection = useCallback(() => {
     if (
       !activeThreadRef ||
       !activeThread ||
@@ -1812,34 +1807,56 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeProject, activeThreadRef],
   );
+  const openAgentsSection = useCallback(() => {
+    if (activeThreadRef) useRightPanelStore.getState().open(activeThreadRef, "agents");
+  }, [activeThreadRef]);
+  const closeFileSurface = useCallback(() => {
+    if (activeThreadRef) useRightPanelStore.getState().closeFile(activeThreadRef);
+  }, [activeThreadRef]);
   const togglePreviewPanel = useCallback(() => {
     if (!activeThreadRef || !isPreviewSupportedInRuntime()) return;
-    if (previewPanelOpen) {
+    if (browserInPanel) {
       useRightPanelStore.getState().close(activeThreadRef);
       return;
     }
-    const activeTabId = activePreviewState.activeTabId;
-    if (activeTabId) {
-      useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId);
+    if (browserTabId) {
+      useRightPanelStore.getState().openBrowser(activeThreadRef, browserTabId);
     } else {
       createBrowserSurface();
     }
-  }, [activePreviewState.activeTabId, activeThreadRef, createBrowserSurface, previewPanelOpen]);
+  }, [activeThreadRef, browserInPanel, browserTabId, createBrowserSurface]);
   const closePreviewPanel = useCallback(() => {
     if (activeThreadRef) {
       useRightPanelStore.getState().close(activeThreadRef);
     }
   }, [activeThreadRef]);
-  const activateRightPanelSurface = useCallback(
-    (surface: RightPanelSurface) => {
+  const selectRightPanelSection = useCallback(
+    (section: RightPanelSection) => {
       if (!activeThreadRef) return;
-      useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
-      if (surface.kind === "preview" && surface.resourceId) {
-        setActivePreviewTab(activeThreadRef, surface.resourceId);
+      if (section === "cad") {
+        // A draft thread has to become a server thread before CAD can load.
+        openCadSection();
+        return;
       }
+      if (section === "browser") {
+        if (!browserTabId) return;
+        useRightPanelStore.getState().openBrowser(activeThreadRef, browserTabId);
+        setActivePreviewTab(activeThreadRef, browserTabId);
+        return;
+      }
+      useRightPanelStore.getState().open(activeThreadRef, section);
     },
-    [activeThreadRef],
+    [activeThreadRef, browserTabId, openCadSection],
   );
+  const closeBrowserPage = useCallback(() => {
+    if (!activeThreadRef || !browserTabId) return;
+    void closePreviewSession({
+      closePreview,
+      snapshot: activePreviewState.sessions[browserTabId] ?? null,
+      tabId: browserTabId,
+      threadRef: activeThreadRef,
+    });
+  }, [activeThreadRef, activePreviewState.sessions, browserTabId, closePreview]);
   const toggleRightPanel = useCallback(() => {
     if (!activeThreadRef) return;
     if (rightPanelOpen) {
@@ -1854,109 +1871,6 @@ function ChatViewContent(props: ChatViewProps) {
       threadKey === routeThreadKey ? null : routeThreadKey,
     );
   }, [canMaximizeRightPanel, routeThreadKey]);
-  const cleanupRightPanelSurfaces = useCallback(
-    (surfaces: readonly RightPanelSurface[]) => {
-      if (!activeThreadRef) return;
-      for (const surface of surfaces) {
-        if (surface.kind === "preview" && surface.resourceId) {
-          void closePreviewSession({
-            closePreview,
-            snapshot: activePreviewState.sessions[surface.resourceId] ?? null,
-            tabId: surface.resourceId,
-            threadRef: activeThreadRef,
-          });
-        }
-      }
-    },
-    [activeThreadRef, activePreviewState.sessions, closePreview],
-  );
-  const syncActivePreviewSurface = useCallback(() => {
-    if (!activeThreadRef) return;
-    const nextActiveSurface = selectActiveRightPanelSurface(
-      useRightPanelStore.getState().byThreadKey,
-      activeThreadRef,
-    );
-    if (nextActiveSurface?.kind === "preview" && nextActiveSurface.resourceId) {
-      setActivePreviewTab(activeThreadRef, nextActiveSurface.resourceId);
-    }
-  }, [activeThreadRef]);
-  const closeRightPanelSurface = useCallback(
-    (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
-      cleanupRightPanelSurfaces([surface]);
-      useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
-    },
-    [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
-  );
-  const closeOtherRightPanelSurfaces = useCallback(
-    (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
-      const surfaces = rightPanelState.surfaces.filter((entry) => entry.id !== surface.id);
-      cleanupRightPanelSurfaces(surfaces);
-      useRightPanelStore.getState().closeOtherSurfaces(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
-    },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
-  );
-  const closeRightPanelSurfacesToRight = useCallback(
-    (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
-      const surfaceIndex = rightPanelState.surfaces.findIndex((entry) => entry.id === surface.id);
-      if (surfaceIndex < 0) return;
-      const surfaces = rightPanelState.surfaces.slice(surfaceIndex + 1);
-      cleanupRightPanelSurfaces(surfaces);
-      useRightPanelStore.getState().closeSurfacesToRight(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
-    },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
-  );
-  const closeAllRightPanelSurfaces = useCallback(() => {
-    if (!activeThreadRef) return;
-    cleanupRightPanelSurfaces(rightPanelState.surfaces);
-    useRightPanelStore.getState().closeAllSurfaces(activeThreadRef);
-  }, [activeThreadRef, cleanupRightPanelSurfaces, rightPanelState.surfaces]);
-  const copyRightPanelFilePath = useCallback((relativePath: string) => {
-    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to copy path",
-          description: "Clipboard API unavailable.",
-        }),
-      );
-      return;
-    }
-
-    void navigator.clipboard.writeText(relativePath).then(
-      () => {
-        toastManager.add({
-          type: "success",
-          title: "Path copied",
-          description: relativePath,
-        });
-      },
-      (error) => {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to copy path",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      },
-    );
-  }, []);
   useEffect(
     () =>
       subscribePreviewAction((action) => {
@@ -2671,12 +2585,19 @@ function ChatViewContent(props: ChatViewProps) {
   const onSend = async (
     e?: { preventDefault: () => void },
     submissionIntent: ComposerSubmissionIntent = "foreground",
-    directAnnotation?: {
-      annotation: PreviewAnnotationPayload;
-      image: ComposerImageAttachment | null;
-    },
+    // Content from outside the composer. An annotation rides along with the
+    // composer draft; a prompt is sent on its own and leaves the draft alone.
+    direct?:
+      | {
+          kind: "annotation";
+          annotation: PreviewAnnotationPayload;
+          image: ComposerImageAttachment | null;
+        }
+      | { kind: "prompt"; text: string },
   ) => {
     e?.preventDefault();
+    const directAnnotation = direct?.kind === "annotation" ? direct : undefined;
+    const directPrompt = direct?.kind === "prompt" ? direct.text : undefined;
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -2710,7 +2631,8 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (activePendingProgress) {
-      if (directAnnotation) {
+      // Only the composer answers a pending question.
+      if (direct) {
         notifyDirectAnnotationAttached();
         return;
       }
@@ -2727,6 +2649,10 @@ function ChatViewContent(props: ChatViewProps) {
       files: composerFiles,
       elementContexts: composerElementContexts,
       previewAnnotations: sendContextPreviewAnnotations,
+    } = directPrompt === undefined
+      ? sendCtx
+      : { images: [], files: [], elementContexts: [], previewAnnotations: [] };
+    const {
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
@@ -2765,7 +2691,14 @@ function ChatViewContent(props: ChatViewProps) {
             },
           ]
         : sendContextPreviewAnnotations;
-    const promptForSend = promptRef.current;
+    const promptForSend = directPrompt ?? promptRef.current;
+    // The composer only empties when its own draft is what went out.
+    const clearSentComposerDraft = () => {
+      if (directPrompt !== undefined) return;
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+    };
     const { trimmedPrompt: trimmed, hasSendableContent } = deriveComposerSendState({
       prompt: promptForSend,
       imageCount: composerImages.length + composerFiles.length,
@@ -2886,9 +2819,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (composerRef.current?.validateProviderInput(outgoingFollowUpText) === false) {
         return;
       }
-      promptRef.current = "";
-      clearComposerDraftContent(composerDraftTarget);
-      composerRef.current?.resetCursorState();
+      clearSentComposerDraft();
       await onSubmitPlanFollowUp({
         text: followUp.text,
         interactionMode: followUp.interactionMode,
@@ -3094,9 +3025,7 @@ function ChatViewContent(props: ChatViewProps) {
       },
     ]);
     setThreadError(threadIdForSend, null);
-    promptRef.current = "";
-    clearComposerDraftContent(composerDraftTarget);
-    composerRef.current?.resetCursorState();
+    clearSentComposerDraft();
 
     let firstComposerImageName: string | null = null;
     if (composerImagesSnapshot.length > 0) {
@@ -3321,6 +3250,13 @@ function ChatViewContent(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+  // The memoized timeline needs a stable callback; the ref always reaches the
+  // latest onSend, so redo feedback follows every composer send rule.
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  const onRedoWithFeedback = useCallback((prompt: string) => {
+    void onSendRef.current(undefined, "foreground", { kind: "prompt", text: prompt });
+  }, []);
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -3919,7 +3855,7 @@ function ChatViewContent(props: ChatViewProps) {
       // Suppressed while the Agents surface is visible: the roster itself is
       // on screen, so the toggle badge would be pointing at nothing.
       liveAgentCount={
-        rightPanelOpen && activeRightPanelSurface?.kind === "agents" ? 0 : agentPanelModel.liveCount
+        rightPanelOpen && rightPanelSection === "agents" ? 0 : agentPanelModel.liveCount
       }
       onToggleRightPanel={toggleRightPanel}
     />
@@ -3939,7 +3875,7 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    displayedRightPanelSurface?.kind === "cad" && activeProject ? (
+    rightPanelSection === "cad" && activeProject ? (
       <Suspense fallback={null}>
         {cadLinked && isServerThread ? (
           <CadPanel
@@ -3947,6 +3883,7 @@ function ChatViewContent(props: ChatViewProps) {
             project={activeProject}
             threadRef={activeThreadRef}
             fullscreen={rightPanelMaximized}
+            titleSlot={cadTitleSlot}
           />
         ) : cadAvailable && isServerThread ? (
           <CadFilePrompt project={activeProject} />
@@ -3958,29 +3895,26 @@ function ChatViewContent(props: ChatViewProps) {
           </div>
         )}
       </Suspense>
-    ) : displayedRightPanelSurface?.kind === "preview" ? (
+    ) : rightPanelSection === "browser" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
           threadRef={activeThreadRef}
-          tabId={displayedRightPanelSurface.resourceId}
+          tabId={browserTabId}
           configuredUrls={configuredPreviewUrls}
           visible
           onSendAnnotation={(annotation, image) => {
-            void onSend(undefined, "foreground", { annotation, image });
+            void onSend(undefined, "foreground", { kind: "annotation", annotation, image });
           }}
         />
       </Suspense>
-    ) : displayedRightPanelSurface?.kind === "agents" ? (
+    ) : rightPanelSection === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
-    ) : (displayedRightPanelSurface?.kind === "files" ||
-        displayedRightPanelSurface?.kind === "file") &&
-      activeProject &&
-      activeWorkspaceRoot ? (
+    ) : rightPanelSection === "files" && activeProject && activeWorkspaceRoot ? (
       <Suspense fallback={null}>
         <FilePreviewPanel
           key={`${activeProject.environmentId}:${activeWorkspaceRoot}`}
@@ -3988,23 +3922,36 @@ function ChatViewContent(props: ChatViewProps) {
           cwd={activeWorkspaceRoot}
           projectName={activeProject.title}
           threadRef={activeThreadRef}
-          relativePath={
-            displayedRightPanelSurface.kind === "file"
-              ? displayedRightPanelSurface.relativePath
-              : null
-          }
-          revealLine={activeFileSurface?.revealLine ?? null}
-          revealRequestId={activeFileSurface?.revealRequestId ?? 0}
+          relativePath={rightPanelFile?.relativePath ?? null}
+          revealLine={rightPanelFile?.revealLine ?? null}
+          revealRequestId={rightPanelFile?.revealRequestId ?? 0}
           onOpenFile={openFileSurface}
+          onCloseFile={closeFileSurface}
           onPendingChange={handleFilePendingChange}
           selectedFilePending={
-            activeFileSurface !== null && pendingFileSurfaceIds.has(activeFileSurface.id)
+            rightPanelFile !== null && pendingFilePaths.has(rightPanelFile.relativePath)
           }
           workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
     ) : null
   ) : null;
+
+  // Back from Files, Agents, or Browser returns to the model on CAD projects and to the
+  // file tree elsewhere.
+  const rightPanelHome =
+    (["cad", "files"] as const).find((section) => rightPanelAvailable[section]) ?? null;
+  const rightPanelHeaderProps = {
+    section: rightPanelSection,
+    home: rightPanelHome,
+    homeLabel:
+      rightPanelHome === "cad" ? (singleCadModelName(activeProject?.cad) ?? "CAD") : "Files",
+    onBack: () => {
+      if (rightPanelHome) selectRightPanelSection(rightPanelHome);
+    },
+    onCloseBrowser: closeBrowserPage,
+    titleSlotRef: setCadTitleSlot,
+  };
 
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
     setDragActive: setIsWorkspaceFileDragActive,
@@ -4089,7 +4036,7 @@ function ChatViewContent(props: ChatViewProps) {
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 agentPanelModel={agentPanelModel}
-                onOpenAgents={addAgentsSurface}
+                onOpenAgents={openAgentsSection}
                 key={activeThread.id}
                 isWorking={isWorking}
                 workingStepLabel={workingStepLabel}
@@ -4115,6 +4062,7 @@ function ChatViewContent(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                onRedoWithFeedback={onRedoWithFeedback}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
@@ -4158,6 +4106,10 @@ function ChatViewContent(props: ChatViewProps) {
                         <DraftHeroHeadline
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          onChooseTask={(prompt) => {
+                            setComposerDraftPrompt(composerDraftTarget, prompt);
+                            scheduleComposerFocus();
+                          }}
                         />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
@@ -4175,7 +4127,7 @@ function ChatViewContent(props: ChatViewProps) {
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >
-                      <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+                      <div className="chat-composer-glass-host relative z-10 w-full rounded-(--chat-composer-radius)">
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
                             composerRef={composerRef}
@@ -4286,10 +4238,8 @@ function ChatViewContent(props: ChatViewProps) {
                   project={activeProject}
                   threadRef={activeThreadRef}
                   runId={!latestTurnSettled ? (activeLatestTurn?.turnId ?? null) : null}
-                  inPanel={rightPanelOpen && activeRightPanelSurface?.kind === "cad"}
-                  panelPresent={
-                    rightPanelPresence.present && displayedRightPanelSurface?.kind === "cad"
-                  }
+                  inPanel={rightPanelOpen && rightPanelSection === "cad"}
+                  panelPresent={rightPanelPresence.present && rightPanelSection === "cad"}
                   bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
                 />
               </Suspense>
@@ -4301,35 +4251,24 @@ function ChatViewContent(props: ChatViewProps) {
       </div>
 
       {!shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
-        <RightPanelTabs
+        <RightPanel
+          // CAD threads get a wider panel with its own remembered width. The width is
+          // read on mount, so remount only when a thread with CAD swaps in for one without.
+          key={cadAvailable ? "design" : "tools"}
           open={rightPanelOpen}
           onExited={rightPanelPresence.onExited}
-          onAddCad={addCadSurface}
-          cadAvailable={cadAvailable}
           mode="inline"
+          {...(cadAvailable
+            ? {
+                widthStorageKey: "cadsense:design-viewport-width",
+                defaultWidth: Math.round(window.innerWidth * 0.6),
+              }
+            : {})}
           maximized={rightPanelMaximized}
-          surfaces={rightPanelState.surfaces}
-          activeSurfaceId={displayedRightPanelSurface?.id ?? null}
-          pendingSurfaceIds={pendingFileSurfaceIds}
-          previewSessions={activePreviewState.sessions}
-          desktopByTabId={activePreviewState.desktopByTabId}
-          previewRuntimeTabId={resolvePreviewRuntimeTabId}
-          onActivate={activateRightPanelSurface}
-          onCloseSurface={closeRightPanelSurface}
-          onCloseOtherSurfaces={closeOtherRightPanelSurfaces}
-          onCloseSurfacesToRight={closeRightPanelSurfacesToRight}
-          onCloseAllSurfaces={closeAllRightPanelSurfaces}
-          onCopyFilePath={copyRightPanelFilePath}
-          onAddBrowser={createBrowserSurface}
-          onAddFiles={addFilesSurface}
-          onAddAgents={addAgentsSurface}
-          browserAvailable={isPreviewSupportedInRuntime()}
-          filesAvailable={activeProject !== null}
-          agentsAvailable
-          liveAgentCount={agentPanelModel.liveCount}
+          {...rightPanelHeaderProps}
         >
           {rightPanelContent}
-        </RightPanelTabs>
+        </RightPanel>
       ) : null}
       {shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
         <RightPanelSheet
@@ -4337,37 +4276,17 @@ function ChatViewContent(props: ChatViewProps) {
           onClose={closePreviewPanel}
           onExited={rightPanelPresence.onExited}
         >
-          <RightPanelTabs
-            onAddCad={addCadSurface}
-            cadAvailable={cadAvailable}
+          <RightPanel
             mode="sheet"
             // Same effective inset as the closed-state titlebar controls
-            // (pr-3 in the tab bar plus this pixel equals the absolute
+            // (pr-3 in the title row plus this pixel equals the absolute
             // right inset plus mr-px), so the cluster does not creep when
             // the sheet opens.
             layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
-            surfaces={rightPanelState.surfaces}
-            activeSurfaceId={displayedRightPanelSurface?.id ?? null}
-            pendingSurfaceIds={pendingFileSurfaceIds}
-            previewSessions={activePreviewState.sessions}
-            desktopByTabId={activePreviewState.desktopByTabId}
-            previewRuntimeTabId={resolvePreviewRuntimeTabId}
-            onActivate={activateRightPanelSurface}
-            onCloseSurface={closeRightPanelSurface}
-            onCloseOtherSurfaces={closeOtherRightPanelSurfaces}
-            onCloseSurfacesToRight={closeRightPanelSurfacesToRight}
-            onCloseAllSurfaces={closeAllRightPanelSurfaces}
-            onCopyFilePath={copyRightPanelFilePath}
-            onAddBrowser={createBrowserSurface}
-            onAddFiles={addFilesSurface}
-            onAddAgents={addAgentsSurface}
-            browserAvailable={isPreviewSupportedInRuntime()}
-            filesAvailable={activeProject !== null}
-            agentsAvailable
-            liveAgentCount={agentPanelModel.liveCount}
+            {...rightPanelHeaderProps}
           >
             {rightPanelContent}
-          </RightPanelTabs>
+          </RightPanel>
         </RightPanelSheet>
       ) : null}
 
