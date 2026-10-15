@@ -133,10 +133,16 @@ const openRightPanel = async (page: Page) => {
 // message is how a user gets there; the turn is stopped as soon as it starts. A message can't
 // start a turn while the project's first import runs, so like a user, keep sending until it does.
 const startThread = async (page: Page) => {
-  await openRightPanel(page);
+  const placeholder = page.getByText("Start a thread to open its CAD view.");
+  // The new draft may still be loading, and its panel keeps its own open state. Open it until
+  // it asks for a thread; only then does the prompt going away mean a thread started.
+  for (let attempt = 0; !(await placeholder.isVisible()); attempt++) {
+    if (attempt === 30) throw new Error("The draft's right panel never asked for a thread");
+    await openRightPanel(page);
+    await placeholder.waitFor({ timeout: 1_000 }).catch(() => {});
+  }
   await page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first().click();
   await page.keyboard.type("Open the CAD view.");
-  const placeholder = page.getByText("Start a thread to open its CAD view.");
   const deadline = Date.now() + 5 * 60_000;
   for (;;) {
     await page.getByRole("button", { name: "Send message" }).click();
