@@ -224,7 +224,7 @@ const openRightPanel = async (page: Page) => {
   if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
 };
 // A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
-// message is how a user gets there; the turn is stopped as soon as it starts, so no agent work runs.
+// message is how a user gets there; the turn is stopped as soon as it starts.
 const startThread = async (page: Page) => {
   await openRightPanel(page);
   await page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first().click();
