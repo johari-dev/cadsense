@@ -56,6 +56,7 @@ const backendConfigurationLayer = Layer.succeed(
     primaryPort: Effect.succeed(3773),
     resolvePrimary: Effect.die("unexpected resolvePrimary"),
     resolvePrimaryLabel: Effect.succeed("Windows"),
+    primaryRunsInWsl: Effect.succeed(false),
     resolveWsl: () => Effect.die("unexpected resolveWsl"),
   } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"],
 );
