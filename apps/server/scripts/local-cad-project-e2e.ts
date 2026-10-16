@@ -264,14 +264,11 @@ const startThread = async (page: Page) => {
     if (promptGone && panelOpen) break;
     if (Date.now() > deadline) throw new Error("Sending never started a thread");
   }
-  const stop = page.getByRole("button", { name: "Stop generation" });
-  if (
-    await stop.waitFor({ timeout: 15_000 }).then(
-      () => true,
-      () => false,
-    )
-  )
-    await stop.click();
+  // Stops the turn if it is still running. A turn that ends by itself first is just as good.
+  await page
+    .getByRole("button", { name: "Stop generation" })
+    .click({ timeout: 15_000 })
+    .catch(() => {});
 };
 const manifestDir = NodePath.join(out, "home/userdata/cad/manifests");
 const manifests = () => NodeFS.readdirSync(manifestDir).filter((name) => name.endsWith(".json"));
@@ -302,6 +299,22 @@ try {
     return {
       listed: (await form.locator("label").allInnerTexts()).map((text) => text.split("\n")[0]),
     };
+  });
+  // The file list belongs to the scanned folder. Editing the folder drops it, and a folder that
+  // fails to scan leaves nothing to create from, rather than the previous folder's file.
+  await run("other-folder-failed", async (page) => {
+    const form = page.getByRole("form", { name: "Create local CAD project" });
+    await page.getByLabel("Folder").fill(`${folder}-missing`);
+    if (await form.getByText(stepName, { exact: true }).isVisible())
+      throw new Error("The previous folder's files are still listed");
+    await page.getByRole("button", { name: "Scan" }).click();
+    const scanError = (await form.getByRole("alert").innerText()).trim();
+    if (await page.getByRole("button", { name: "Create project" }).isEnabled())
+      throw new Error("Create still targets the previous folder");
+    await page.getByLabel("Folder").fill(folder);
+    await page.getByRole("button", { name: "Scan" }).click();
+    await page.getByText(stepName, { exact: true }).waitFor({ timeout: 30_000 });
+    return { scanError };
   });
   // Start from the corrupt export, so the panel has to recover through its file prompt.
   await run("corrupt-file-chosen", (page) =>

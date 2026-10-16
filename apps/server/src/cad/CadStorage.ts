@@ -14,8 +14,10 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { forkParked } from "../serverActivation.ts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import { CadProjectQuiescence } from "./CadUserOperations.ts";
+import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadPanel } from "./CadPanel.ts";
 
@@ -201,6 +203,30 @@ export const make = Effect.gen(function* () {
         ),
       );
     }),
+  );
+  // A local CAD project is deleted like any folder project, with no storage choice to honor, so its
+  // snapshots go with it. Its viewers are released first, because a pinned snapshot can't be removed.
+  // Anything left behind is pruned at the next start.
+  const deletions = yield* engine.subscribeDomainEvents;
+  yield* forkParked(
+    Stream.fromSubscription(deletions).pipe(
+      Stream.runForEach((event) =>
+        Effect.gen(function* () {
+          if (event.type !== "project.deleted") return;
+          const project = (yield* read).projects.find(
+            (item) => item.id === event.payload.projectId,
+          );
+          if (!project?.localCadSource) return;
+          yield* panel.releaseProject(project.id);
+          yield* pruneCadSnapshots(project.id).pipe(
+            Effect.provideService(CadSnapshotStore, store),
+            Effect.provideService(ProjectionSnapshotQuery, query),
+          );
+        }).pipe(
+          Effect.catch(() => Effect.logWarning("Deleted local CAD cleanup is pending a restart.")),
+        ),
+      ),
+    ),
   );
   return CadStorage.of({ run, watch });
 });

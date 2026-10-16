@@ -76,7 +76,7 @@ and cancelling terminates the worker.
 | Folder already used by a folder project               | That project gets the CAD source                             |
 | Folder used by an Onshape project                     | `onshape-project`                                            |
 | Agent run or CAD operation active                     | `busy`                                                       |
-| Local CAD project deleted                             | Its snapshots are pruned instead of retained forever         |
+| Local CAD project deleted                             | Its viewers close and its snapshots are removed right away   |
 
 ## SolidWorks files
 

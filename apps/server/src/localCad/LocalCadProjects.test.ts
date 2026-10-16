@@ -20,6 +20,7 @@ import {
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -30,6 +31,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { vi } from "vite-plus/test";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
@@ -45,12 +47,14 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
 import { CadDiskSpace, CadSnapshotStore, make as makeStore } from "../cad/CadSnapshotStore.ts";
-import { pruneCadSnapshots } from "../cad/CadSnapshotRetention.ts";
+import { CadPanel } from "../cad/CadPanel.ts";
+import * as CadStorage from "../cad/CadStorage.ts";
 import {
   CadProjectQuiescence,
   CadUserOperations,
   layer as cadUserOperationsLayer,
 } from "../cad/CadUserOperations.ts";
+import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as LocalCadImport from "./LocalCadImport.ts";
 import { LocalCadProjects, layer as localCadProjectsLayer } from "./LocalCadProjects.ts";
@@ -93,9 +97,21 @@ const onshape = Layer.mergeAll(
   Layer.succeed(CadProjectQuiescence, { confirm: () => Effect.void }),
 );
 
+// What the CAD panel does when a project is released, per project. Unset means no open viewer.
+const panelReleases = new Map<ProjectId, Effect.Effect<void>>();
+const panel = Layer.mergeAll(
+  Layer.succeed(CadPanel, {
+    watch: () => Stream.die("The CAD panel is not under test"),
+    scene: () => Stream.die("The CAD panel is not under test"),
+    read: unused,
+    releaseProject: (projectId) => panelReleases.get(projectId) ?? Effect.void,
+  }),
+  Layer.succeed(ManagedWorkspaceAllocator, { provision: unused, remove: unused, resolve: unused }),
+);
 /** Everything but the SolidWorks host, which the two suites below choose. */
 const withSolidWorks = <E, R>(solidWorks: Layer.Layer<SolidWorksBridge.SolidWorks, E, R>) =>
-  localCadProjectsLayer.pipe(
+  Layer.mergeAll(localCadProjectsLayer, CadStorage.layer).pipe(
+    Layer.provideMerge(panel),
     Layer.provideMerge(cadUserOperationsLayer),
     Layer.provideMerge(LocalCadImport.layer),
     Layer.provideMerge(solidWorks),
@@ -859,30 +875,48 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     }).pipe(Effect.scoped),
   );
 
-  it.effect("prunes a deleted local CAD project's snapshots", () =>
+  // An open viewer pins the snapshot it shows. Deleting the project must release the viewer, then
+  // remove the snapshots: a pinned snapshot can't be removed, and nothing else prunes before restart.
+  it.effect("deleting a local CAD project releases its viewer and removes its snapshots", () =>
     Effect.gen(function* () {
       const engineService = yield* OrchestrationEngineService;
       const snapshots = yield* CadSnapshotStore;
-      const root = yield* makeFolder();
       const projectId = ProjectId.make("local-cad-delete");
-      yield* (yield* LocalCadProjects).create({
+      const keptId = ProjectId.make("local-cad-kept");
+      for (const id of [projectId, keptId]) {
+        yield* (yield* LocalCadProjects).create({
+          projectId: id,
+          title: "Bracket",
+          workspaceRoot: yield* makeFolder(),
+          filePath: "models/dm1.step",
+        });
+        yield* settle(id);
+      }
+      const owned = (id: ProjectId) =>
+        snapshots.list().pipe(Effect.map((all) => all.filter((entry) => entry.projectId === id)));
+      const [shown] = yield* owned(projectId);
+      assert.isDefined(shown);
+      const release = yield* Deferred.make<void>();
+      const viewer = yield* snapshots
+        .withPinned(shown!.snapshotId, () => Deferred.await(release))
+        .pipe(Effect.forkScoped);
+      panelReleases.set(
         projectId,
-        title: "Bracket",
-        workspaceRoot: root,
-        filePath: "models/dm1.step",
-      });
-      yield* settle(projectId);
-      const owned = (yield* snapshots.list()).filter((entry) => entry.projectId === projectId);
-      assert.strictEqual(owned.length, 1);
+        Deferred.succeed(release, undefined).pipe(
+          Effect.andThen(Fiber.await(viewer)),
+          Effect.asVoid,
+        ),
+      );
 
       yield* engineService.dispatch({
         type: "project.delete",
         commandId: CommandId.make("local-cad-delete"),
         projectId,
       });
-      yield* pruneCadSnapshots(projectId);
-      const remaining = (yield* snapshots.list()).filter((entry) => entry.projectId === projectId);
-      assert.strictEqual(remaining.length, 0);
+      for (let attempt = 0; attempt < 200 && (yield* owned(projectId)).length > 0; attempt++)
+        yield* Effect.sleep("50 millis");
+      assert.deepStrictEqual(yield* owned(projectId), []);
+      assert.strictEqual((yield* owned(keptId)).length, 1);
     }).pipe(Effect.scoped),
   );
 
