@@ -249,6 +249,23 @@ namespace CadsenseSolidWorks {
     static void CheckCancel() {
       if (File.Exists(Path.Combine(job, "cancel"))) throw new BridgeFailure("cancelled", "Cancelled.");
     }
+
+    // One bridge at a time on this computer, whichever Cadsense server started it. The lock file
+    // stays open, unshared, until this process exits, and Windows closes it even if the process
+    // dies. False when the job is cancelled before it gets the lock.
+    static FileStream machineLock;
+    static bool TakeMachineLock() {
+      var path = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(job)), "bridge.lock");
+      while (!File.Exists(Path.Combine(job, "cancel"))) {
+        try {
+          machineLock = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+          return true;
+        } catch (IOException) {
+          Thread.Sleep(250);
+        }
+      }
+      return false;
+    }
     static bool Staged(string path) {
       return File.Exists(path) && Path.GetFullPath(path).StartsWith(input, StringComparison.OrdinalIgnoreCase);
     }
@@ -330,6 +347,8 @@ namespace CadsenseSolidWorks {
 
     public static void Run(string jobDir) {
       job = jobDir;
+      // Cancelled before it starts: no result, so the server keeps what it knew about SolidWorks.
+      if (!TakeMachineLock()) return;
       input = Path.GetFullPath(Path.Combine(job, "in")) + Path.DirectorySeparatorChar;
       var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 1000 };
       var request = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(job, "request.json")));
@@ -488,9 +507,11 @@ export interface SolidWorksOptions {
 /**
  * One bridge at a time, through a single slot. SolidWorks is single-threaded, and two bridges
  * would fight over its preferences and its lifetime. A job holds the slot from staging until its
- * bridge process exits and its folder is gone, even when its caller stopped waiting long before.
- * Quitting a SolidWorks that Cadsense started is decided while holding the slot, never by the
- * bridge. See LocalCad.md, SolidWorks files.
+ * bridge process exits, even when its caller stopped waiting long before, and its folder outlives
+ * that process. The bridge itself holds `bridge.lock` while it runs, so another Cadsense server,
+ * or this one restarted, waits for a bridge left running. Quitting a SolidWorks that Cadsense
+ * started is decided while holding the slot, never by the bridge. See LocalCad.md, SolidWorks
+ * files.
  */
 export const make = (options: SolidWorksOptions = {}) =>
   Effect.gen(function* () {
@@ -504,27 +525,37 @@ export const make = (options: SolidWorksOptions = {}) =>
     let ownedPid = 0;
     // Callers waiting for the slot. While any wait, a SolidWorks Cadsense started stays warm.
     let waiting = 0;
+    // Bridge processes still running, by job folder. Each settles once its process has exited.
+    const running = new Map<string, Promise<void>>();
     // Job folders that outlived their job because SolidWorks or a virus scanner still held a file
     // open. Every reconcile tries them again.
     const leftovers = new Set<string>();
-    const removeFolder = (folder: string) =>
-      Effect.promise(async () => {
-        await NodeFSP.rm(folder, {
-          recursive: true,
-          force: true,
-          maxRetries: 5,
-          retryDelay: 200,
-        }).catch(() => {});
-        if (NodeFS.existsSync(folder)) leftovers.add(folder);
-        else leftovers.delete(folder);
-      });
-
+    const removeNow = async (folder: string) => {
+      await NodeFSP.rm(folder, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 200,
+      }).catch(() => {});
+      if (NodeFS.existsSync(folder)) leftovers.add(folder);
+      else leftovers.delete(folder);
+    };
     /**
-     * Writes a job folder with its request and files, runs the bridge on it, and resolves when the
-     * bridge process exits. Interrupted only when the server stops: it then leaves a cancel marker
-     * and lets the bridge finish on its own.
+     * Removes a job folder, never under its running bridge. A job interrupted because the server
+     * stops can end before its bridge does: that folder goes when the bridge process exits.
      */
-    const runBridge = (
+    const removeFolder = (folder: string) =>
+      Effect.suspend(() => {
+        const exited = running.get(folder);
+        if (!exited) return Effect.promise(() => removeNow(folder));
+        void exited.then(() => removeNow(folder));
+        return Effect.void;
+      });
+    const writeCancel = (folder: string) =>
+      Effect.promise(() => NodeFSP.writeFile(NodePath.join(folder, "cancel"), "").catch(() => {}));
+
+    /** Writes a job folder: its files under `in`, then the request that tells the bridge what to do. */
+    const stage = (
       resolved: SolidWorksHost,
       folder: string,
       request: Parameters<typeof encodeRequest>[0],
@@ -549,32 +580,35 @@ export const make = (options: SolidWorksOptions = {}) =>
           },
           catch: () => failed("Could not stage the files for SolidWorks."),
         });
-        yield* Effect.callback<void, LocalCadImportError>((resume) => {
-          let settled = false;
-          const settle = (effect: Effect.Effect<void, LocalCadImportError>) => {
-            if (settled) return;
-            settled = true;
-            resume(effect);
-          };
-          const child = NodeChildProcess.spawn(
-            resolved.powershell,
-            [
-              "-NoProfile",
-              "-NonInteractive",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              `${resolved.windowsRoot}\\${SCRIPT_NAME}`,
-              "-Job",
-              `${resolved.windowsRoot}\\${NodePath.basename(folder)}`,
-            ],
-            { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
-          );
-          let stderr = "";
-          child.stderr.on("data", (chunk: Buffer) => {
-            stderr = (stderr + chunk.toString()).slice(-4000);
-          });
-          child.stdout.resume();
+      });
+
+    /**
+     * Runs the bridge on a staged job folder and resolves when its process exits. Interrupted only
+     * when the server stops: it then leaves a cancel marker and waits up to the grace period for
+     * the bridge to stop. A bridge still running after that keeps its folder until it exits.
+     */
+    const runBridge = (resolved: SolidWorksHost, folder: string) =>
+      Effect.callback<void, LocalCadImportError>((resume) => {
+        const child = NodeChildProcess.spawn(
+          resolved.powershell,
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            `${resolved.windowsRoot}\\${SCRIPT_NAME}`,
+            "-Job",
+            `${resolved.windowsRoot}\\${NodePath.basename(folder)}`,
+          ],
+          { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+        );
+        let stderr = "";
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr = (stderr + chunk.toString()).slice(-4000);
+        });
+        child.stdout.resume();
+        const exited = new Promise<Effect.Effect<void, LocalCadImportError>>((settle) => {
           child.once("error", () => settle(Effect.fail(unavailable())));
           child.once("close", () =>
             settle(
@@ -583,10 +617,17 @@ export const make = (options: SolidWorksOptions = {}) =>
                 : Effect.void,
             ),
           );
-          return Effect.promise(() =>
-            NodeFSP.writeFile(NodePath.join(folder, "cancel"), "").catch(() => {}),
-          );
+        }).then((outcome) => {
+          // Before resuming, so the job that resumes removes its folder at once.
+          running.delete(folder);
+          resume(outcome);
         });
+        running.set(folder, exited);
+        return writeCancel(folder).pipe(
+          Effect.andThen(Effect.promise(() => exited)),
+          Effect.timeout(cancelGrace),
+          Effect.ignore,
+        );
       });
 
     /**
@@ -600,8 +641,7 @@ export const make = (options: SolidWorksOptions = {}) =>
     ) =>
       Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
-        if (job.cancelled) return yield* failed("Cancelled before SolidWorks started.");
-        yield* runBridge(
+        yield* stage(
           resolved,
           job.folder,
           {
@@ -612,6 +652,10 @@ export const make = (options: SolidWorksOptions = {}) =>
           },
           input.files,
         );
+        // Checked once the folder exists: a cancel during staging had nowhere to put its marker,
+        // and a later one leaves the marker for the bridge.
+        if (job.cancelled) return yield* failed("Cancelled before SolidWorks started.");
+        yield* runBridge(resolved, job.folder);
         const result = yield* Effect.tryPromise({
           try: () => NodeFSP.readFile(NodePath.join(job.folder, "result.json"), "utf8"),
           catch: () => failed("SolidWorks stopped before it finished."),
@@ -669,7 +713,8 @@ export const make = (options: SolidWorksOptions = {}) =>
       Effect.suspend(() => {
         if (ownedPid === 0) return Effect.void;
         const folder = NodePath.join(resolved.serverRoot, NodeCrypto.randomUUID());
-        return runBridge(resolved, folder, { mode: "quit", file: "", skip: [], ownedPid }, []).pipe(
+        return stage(resolved, folder, { mode: "quit", file: "", skip: [], ownedPid }, []).pipe(
+          Effect.andThen(runBridge(resolved, folder)),
           // Quit mode writes a result only when it fails.
           Effect.andThen(
             Effect.promise(() =>
@@ -745,15 +790,12 @@ export const make = (options: SolidWorksOptions = {}) =>
         ),
       );
       // Cancel and timeout ask the bridge to stop between parts and wait a grace period for it.
-      // A bridge stuck in SolidWorks keeps the slot until it exits.
+      // A bridge stuck in SolidWorks keeps the slot until it exits. The flag covers a job still
+      // staging, whose folder may not exist yet for the marker.
       const giveUp = Effect.sync(() => {
         job.cancelled = true;
       }).pipe(
-        Effect.andThen(
-          Effect.promise(() =>
-            NodeFSP.writeFile(NodePath.join(job.folder, "cancel"), "").catch(() => {}),
-          ),
-        ),
+        Effect.andThen(writeCancel(job.folder)),
         Effect.andThen(Deferred.await(done).pipe(Effect.timeout(cancelGrace), Effect.ignore)),
       );
       return yield* Deferred.await(done).pipe(

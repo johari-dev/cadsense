@@ -134,7 +134,23 @@ The server runs one bridge at a time, and a job holds that slot until its bridge
 until its caller stops waiting. Cancel and the 30-minute timeout write a `cancel` marker the bridge
 checks between parts, and stop waiting after two minutes, so a cancel never hangs. If the bridge is
 still stuck (a SolidWorks dialog waiting for an answer), its job folder and marker stay, and the next
-SolidWorks import waits for it to exit rather than drive SolidWorks alongside it.
+SolidWorks import waits for it to exit rather than drive SolidWorks alongside it. A cancel that
+lands while the job's files are still being copied finds no folder for its marker yet, so the
+server checks again once the copy is done and starts no bridge.
+
+A job folder outlives its bridge process, never the other way round. This holds when the server
+stops too. Stopping writes the marker into the running job and waits up to two minutes for its
+bridge. A bridge still stuck after that keeps its folder and marker, and the folder goes when that
+process exits. If the server process ends first, the folder stays in the job root. A stop during the
+first conversion leaves running a SolidWorks that conversion started: the server learns it owns
+one only from a finished conversion's result.
+
+The slot only covers one server. The bridge also holds `bridge.lock` in the job root, open with no
+sharing, for as long as its process runs, and Windows releases it however the process exits. A
+bridge from a restarted Cadsense, or from a second one on the same machine, waits there for the
+earlier bridge, checking its own cancel marker every quarter second. A bridge that finds its marker
+before it gets the lock exits without a result and without touching SolidWorks. It creates its
+`out` folder only once it holds the lock.
 
 Quitting is the server's decision, made while holding the slot. Whenever a job ends or a waiting
 import is cancelled, the server takes the slot and checks again. If nothing is waiting and Cadsense
@@ -167,10 +183,13 @@ each later job.
 | Conversion running after 30 minutes                    | The bridge stops between parts and cleans up; fails as timed out    |
 | Cancel during the conversion                           | The bridge stops between parts, closes its documents, and cleans up |
 | Cancel while SolidWorks stays blocked                  | Cancelled after 2 minutes; the next import waits for the bridge     |
+| Cancel while the job's files are being copied          | No bridge starts; the job ends cancelled                            |
 | A waiting import is cancelled                          | A SolidWorks Cadsense started quits once the running job ends       |
+| The server stops while a bridge runs                   | Marker written; folder kept until the bridge exits (2-minute wait)  |
+| A restarted or second Cadsense converts meanwhile      | Its bridge waits for `bridge.lock` until the earlier bridge exits   |
 | Unchanged files synced again                           | The latest snapshot is reused; SolidWorks does not start            |
 | One part of an assembly changed                        | New revision; only that part is exported and tessellated again      |
-| Server killed mid-conversion                           | A SolidWorks that Cadsense started may stay running, hidden         |
+| Server killed mid-conversion                           | A SolidWorks Cadsense started and the job folder may stay behind    |
 
 ## Limits
 

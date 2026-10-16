@@ -20,12 +20,17 @@ import {
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import { vi } from "vite-plus/test";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
@@ -166,8 +171,14 @@ if (pid === 0) {
 const pause = new Int32Array(new SharedArrayBuffer(4));
 const until = Date.now() + 60000;
 if (name.startsWith("Hold"))
-  while (!fs.existsSync(path.join(control, "release")) && Date.now() < until)
+  while (
+    fs.existsSync(control) &&
+    !fs.existsSync(path.join(control, "release")) &&
+    Date.now() < until
+  )
     Atomics.wait(pause, 0, 0, 50);
+// The suite removed its folder while this bridge waited (a test failed): leave nothing behind.
+if (!fs.existsSync(control)) process.exit(0);
 const key = crypto.createHash("sha256").update(name).digest("hex");
 fs.mkdirSync(path.join(job, "out"), { recursive: true });
 fs.copyFileSync(${JSON.stringify(FIXTURE)}, path.join(job, "out", "0.step"));
@@ -187,6 +198,28 @@ log("exit " + name);
 `;
 /** The scripted bridge's folder: its job folders and `control`. Set when the suite's layer builds. */
 let scriptedRoot = "";
+
+/**
+ * Holds a SolidWorks job's first `mkdir` (its `in` folder) until `release`, so a test can cancel
+ * while the job's files are being staged and its folder does not exist yet.
+ */
+const staging = vi.hoisted(() => ({
+  hold: null as Promise<void> | null,
+  held: false,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
+      if (staging.hold && /[\\/]in$/.test(String(args[0]))) {
+        staging.held = true;
+        await staging.hold;
+      }
+      return actual.mkdir(...args);
+    },
+  };
+});
 const scriptedLayer = withSolidWorks(
   Layer.effect(
     SolidWorksBridge.SolidWorks,
@@ -728,7 +761,11 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
       // A run in another project does not block this one.
       const otherProjectId = ProjectId.make("local-cad-first-link-other");
       yield* makeFolderProject(otherProjectId, yield* makeFolder());
-      yield* setAgentRun(otherProjectId, ThreadId.make("local-cad-first-link-other-agent"), "running");
+      yield* setAgentRun(
+        otherProjectId,
+        ThreadId.make("local-cad-first-link-other-agent"),
+        "running",
+      );
 
       assert.strictEqual(yield* setFileError(projectId, "models/dm1.step"), "busy");
       // Nothing was linked, so the panel still offers the file prompt.
@@ -1099,6 +1136,115 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     5 * 60_000,
   );
 
+  it.effect.skipIf(skipLive)(
+    "runs one SolidWorks bridge at a time across Cadsense servers",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* SolidWorksBridge.detectSolidWorksHost;
+        assert.isNotNull(host);
+        const tasklist = NodePath.join(host!.powershell, "../../../tasklist.exe");
+        const running = () =>
+          NodeChildProcess.execFileSync(tasklist, ["/FI", "IMAGENAME eq SLDWORKS.exe", "/NH"])
+            .toString()
+            .includes("SLDWORKS.exe");
+        const jobs = () =>
+          NodeFS.readdirSync(host!.serverRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
+        const wasRunning = running();
+        const before = new Set(jobs());
+        const decodeRequest = Schema.decodeUnknownOption(
+          Schema.fromJsonString(Schema.Struct({ file: Schema.String })),
+        );
+        const inJob = (job: string, name: string) =>
+          NodeFS.existsSync(NodePath.join(host!.serverRoot, job, name));
+        /** Waits for the new job folder whose request opens `file` to satisfy `ready`. */
+        const jobFor = Effect.fn(function* (file: string, ready: (job: string) => boolean) {
+          for (let attempt = 0; ; attempt++) {
+            const job = jobs().find(
+              (job) =>
+                !before.has(job) &&
+                inJob(job, "request.json") &&
+                Option.getOrUndefined(
+                  decodeRequest(
+                    NodeFS.readFileSync(
+                      NodePath.join(host!.serverRoot, job, "request.json"),
+                      "utf8",
+                    ),
+                  ),
+                )?.file === file,
+            );
+            if (job && ready(job)) return job;
+            if (attempt > 1200) return yield* Effect.die(`No SolidWorks job for ${file}`);
+            yield* Effect.sleep("100 millis");
+          }
+        });
+        const read = (name: string) => ({
+          path: name,
+          bytes: new Uint8Array(NodeFS.readFileSync(NodePath.join(live.dir!, name))),
+        });
+        const { files } = planSolidWorksFiles({
+          assemblyPath: live.assembly!,
+          references: readSolidWorksReferences(
+            NodeFS.readFileSync(NodePath.join(live.dir!, live.assembly!)),
+          )!,
+          folderFiles: NodeFS.readdirSync(live.dir!),
+        });
+        const part = NodeFS.readdirSync(live.dir!).find(
+          (name) => /\.sldprt$/i.test(name) && !files.includes(name),
+        );
+        assert.isDefined(part);
+
+        // Two services, like a restarted Cadsense beside a bridge the earlier one left running.
+        const server = Effect.fn(function* () {
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const service = yield* SolidWorksBridge.make({ host }).pipe(
+            Effect.provideService(Scope.Scope, scope),
+          );
+          return { service, stop: Scope.close(scope, Exit.void) };
+        });
+        const { service: first, stop: stopFirst } = yield* server();
+        const { service: second, stop: stopSecond } = yield* server();
+        const assembly = yield* first
+          .exportParts({ files: [live.assembly!, ...files].map(read), skip: [] })
+          .pipe(Effect.forkChild);
+        // A bridge creates `out` once it holds the lock.
+        const a = yield* jobFor(live.assembly!, (job) => inJob(job, "out"));
+        const single = yield* second
+          .exportParts({ files: [read(part!)], skip: [] })
+          .pipe(Effect.forkChild);
+        const b = yield* jobFor(part!, () => true);
+        // The second bridge gets the lock only after the first wrote its result and exited. Read
+        // in this order, a second bridge holding the lock means the first result is already there.
+        let queued = false;
+        for (let attempt = 0; ; attempt++) {
+          const secondHolds = inJob(b, "out");
+          const firstDone = inJob(a, "result.json") || !inJob(a, ".");
+          assert.isTrue(!secondHolds || firstDone, "Two SolidWorks bridges ran at once");
+          if (firstDone) break;
+          queued = true;
+          if (attempt > 3000) return yield* Effect.die("The first conversion never finished");
+          yield* Effect.sleep("100 millis");
+        }
+        assert.isTrue(queued, "The second job was staged only after the first one finished");
+        assert.isAtLeast((yield* Fiber.join(assembly)).parts.size, 2);
+        assert.strictEqual((yield* Fiber.join(single)).parts.size, 1);
+
+        // The first service quits the SolidWorks it started once the second bridge lets go.
+        for (let attempt = 0; running() !== wasRunning; attempt++) {
+          if (attempt > 120) return yield* Effect.die("SolidWorks was not left as it was found");
+          yield* Effect.sleep("1 second");
+        }
+        // A server retries only its own leftover job folders, and stopping retries them once more.
+        yield* stopSecond;
+        yield* stopFirst;
+        assert.deepStrictEqual(
+          jobs().filter((job) => !before.has(job)),
+          [],
+        );
+      }).pipe(Effect.scoped),
+    5 * 60_000,
+  );
+
   it.effect.skipIf(!live.virtualAssembly)(
     "converts a real assembly with virtual components",
     () =>
@@ -1296,6 +1442,80 @@ it.layer(scriptedLayer, { timeout: 120_000, excludeTestServices: true })(
         ]);
         assert.isFalse(NodeFS.existsSync(NodePath.join(scriptedRoot, "control/solidworks")));
         assert.deepStrictEqual(scriptedJobs(), []);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("starts no bridge when cancelled while its files are staged", () =>
+      Effect.gen(function* () {
+        reset();
+        let release = () => {};
+        staging.held = false;
+        staging.hold = new Promise((resolve) => {
+          release = resolve;
+        });
+        const staged = ProjectId.make("local-cad-scripted-staged");
+        yield* create(staged, "Staged.SLDPRT");
+        for (let attempt = 0; !staging.held; attempt++) {
+          if (attempt > 400) return yield* Effect.die("Staging never started");
+          yield* Effect.sleep("50 millis");
+        }
+        // The job's folder does not exist yet, so the cancel marker has nowhere to go.
+        assert.strictEqual((yield* cancel(staged)).cad?.lastOutcome?.status, "cancelled");
+        staging.hold = null;
+        release();
+        // The next job runs only once the staged one is over, so its log entry comes first if
+        // the staged job started a bridge after all.
+        const next = ProjectId.make("local-cad-scripted-after-staged");
+        yield* create(next, "Quick.SLDPRT");
+        assert.strictEqual((yield* settle(next)).cad?.lastOutcome?.status, "succeeded");
+        yield* scriptedLogged("quit 4242");
+        assert.deepStrictEqual(scriptedLog(), [
+          "start Quick.SLDPRT owned=0",
+          "exit Quick.SLDPRT",
+          "quit 4242",
+        ]);
+        assert.deepStrictEqual(scriptedJobs(), []);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("keeps a stopping server's job folder until its bridge exits", () =>
+      Effect.gen(function* () {
+        reset();
+        // A service of its own, so the test can stop it the way a server stops.
+        const scope = yield* Scope.make();
+        const solidWorks = yield* SolidWorksBridge.make({
+          host: {
+            powershell: NodePath.join(scriptedRoot, "bridge.cjs"),
+            windowsRoot: scriptedRoot,
+            serverRoot: scriptedRoot,
+          },
+          cancelGrace: "300 millis",
+        }).pipe(Effect.provideService(Scope.Scope, scope));
+        const caller = yield* solidWorks
+          .exportParts({
+            files: [{ path: "Hold.SLDPRT", bytes: solidWorksFile({ "Contents/Config-0": "p" }) }],
+            skip: [],
+          })
+          .pipe(Effect.forkChild);
+        yield* scriptedLogged("start Hold.SLDPRT owned=0");
+        const [job] = scriptedJobs();
+        const folder = NodePath.join(scriptedRoot, job!);
+
+        // Stopping waits out the grace, not the stuck bridge, then leaves the bridge its marker
+        // and inputs.
+        const [stopping] = yield* Effect.timed(Scope.close(scope, Exit.void));
+        assert.isBelow(Duration.toMillis(stopping), 5_000);
+        assert.isTrue(NodeFS.existsSync(NodePath.join(folder, "cancel")));
+        assert.isTrue(NodeFS.existsSync(NodePath.join(folder, "in/Hold.SLDPRT")));
+
+        // Once the bridge exits, its folder goes.
+        NodeFS.writeFileSync(NodePath.join(scriptedRoot, "control/release"), "");
+        yield* scriptedLogged("exit Hold.SLDPRT");
+        for (let attempt = 0; NodeFS.existsSync(folder); attempt++) {
+          if (attempt > 100) return yield* Effect.die("The job folder outlived its bridge");
+          yield* Effect.sleep("50 millis");
+        }
+        yield* Fiber.interrupt(caller);
       }).pipe(Effect.scoped),
     );
   },
