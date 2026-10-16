@@ -39,7 +39,7 @@ import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import {
   MAX_LOCAL_CAD_FILE_BYTES,
   localCadCatalog,
-  localCadMicroversionId,
+  localCadFilesMicroversionId,
   localCadRootIdentity,
   resolveLocalCadFile,
   scanLocalCadFiles,
@@ -52,12 +52,22 @@ import {
   type LocalCadModel,
   type Rgb,
 } from "./LocalCadTessellation.ts";
+import { SolidWorks } from "./SolidWorksBridge.ts";
+import { planSolidWorksFiles, readSolidWorksReferences } from "./SolidWorksFiles.ts";
+import {
+  buildSolidWorksDraft,
+  mergeLocalCadMeshes,
+  reusableSolidWorksParts,
+  type SolidWorksPartGeometry,
+} from "./SolidWorksImport.ts";
 export { LocalCadImportError } from "./LocalCadTessellation.ts";
 
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const DEFAULT_COLOR: Rgb = [0.5, 0.5, 0.5];
 const MAX_NODES = 100_000;
 const MAX_DEPTH = 128;
+/** Any face entity: a STEP without one has no geometry to tessellate. */
+const STEP_FACE = /\b(?:ADVANCED_FACE|FACE_SURFACE|FACETED_BREP|POLY_LOOP|TRIANGULATED_FACE)\b/;
 
 export interface LocalCadImportInput {
   readonly projectId: ProjectId;
@@ -126,13 +136,17 @@ function colorGroups(mesh: LocalCadMesh) {
   }
   for (let triangle = 0; triangle < triangles; triangle++)
     if (!assigned[triangle]) group(fallback).triangles.push(triangle);
-  return [...groups.values()].map(({ color, triangles: list }) => {
-    const index = new Uint32Array(list.length * 3);
-    list.forEach((triangle, offset) =>
-      index.set(mesh.index.subarray(triangle * 3, triangle * 3 + 3), offset * 3),
-    );
-    return { color, index };
-  });
+  // A color whose triangles an earlier face already claimed has none left; glTF rejects an
+  // empty primitive.
+  return [...groups.values()]
+    .filter(({ triangles: list }) => list.length > 0)
+    .map(({ color, triangles: list }) => {
+      const index = new Uint32Array(list.length * 3);
+      list.forEach((triangle, offset) =>
+        index.set(mesh.index.subarray(triangle * 3, triangle * 3 + 3), offset * 3),
+      );
+      return { color, index };
+    });
 }
 
 /** Unit normals from occt, or area-weighted vertex normals when occt omitted them. */
@@ -404,18 +418,129 @@ export const make = Effect.gen(function* () {
       Effect.provideService(WorkspacePaths, workspacePaths),
     );
 
-  const run = Effect.fn("LocalCadImport.acquire")(function* (input: LocalCadImportInput) {
-    const file = yield* withFiles(resolveLocalCadFile(input));
+  const solidWorks = yield* SolidWorks;
+  const unreadable = () => new LocalCadImportError({ reason: "unreadable" });
+
+  /**
+   * The workspace-relative files an import reads, the picked file first. That is the file alone,
+   * except for a SolidWorks assembly, which also needs every file it uses. An assembly too large
+   * on its own fails before it is read for its file list. The caller checks the total size.
+   */
+  const sourceFiles = Effect.fn("LocalCadImport.sourceFiles")(function* (
+    workspaceRoot: string,
+    file: Effect.Success<ReturnType<typeof resolveLocalCadFile>>,
+  ) {
+    const picked = {
+      path: file.relativePath,
+      absolutePath: file.absolutePath,
+      byteLength: file.byteLength,
+    };
+    if (file.format !== "sldasm") return [picked];
     if (file.byteLength > MAX_LOCAL_CAD_FILE_BYTES)
       return yield* new LocalCadImportError({ reason: "too-large" });
-    yield* store.checkReserve(file.byteLength);
-    const bytes = yield* fileSystem
+    const assembly = yield* fileSystem
       .readFile(file.absolutePath)
-      .pipe(Effect.mapError(() => new LocalCadImportError({ reason: "unreadable" })));
+      .pipe(Effect.mapError(unreadable));
+    const references = readSolidWorksReferences(assembly);
+    if (!references) return yield* new LocalCadImportError({ reason: "no-file-list" });
+    const folder = (yield* withFiles(scanLocalCadFiles(workspaceRoot))).files;
+    const plan = planSolidWorksFiles({
+      assemblyPath: file.relativePath,
+      references,
+      folderFiles: folder.map((entry) => entry.path),
+    });
+    if (plan.missing.length > 0)
+      return yield* new LocalCadImportError({ reason: "missing-files", missing: plan.missing });
+    // The scan only lists regular files inside the folder, never through a symlink.
+    return [
+      picked,
+      ...folder
+        .filter((entry) => plan.files.includes(entry.path))
+        .map((entry) => ({ ...entry, absolutePath: path.join(workspaceRoot, entry.path) })),
+    ];
+  });
+
+  /** The latest snapshot of this root, whatever its revision. */
+  const latestSnapshot = Effect.fn("LocalCadImport.latestSnapshot")(function* (
+    context: CadSnapshotContext,
+  ) {
+    const latest = (yield* store.list())
+      .filter((entry) => entry.projectId === context.projectId && entry.rootId === context.rootId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+    if (!latest) return null;
+    return Option.getOrNull(yield* store.load(latest.snapshotId).pipe(Effect.option));
+  });
+
+  /**
+   * Converts a SolidWorks file with the local SolidWorks. Unchanged files reuse the latest
+   * snapshot without starting SolidWorks. Otherwise SolidWorks exports only the parts the latest
+   * snapshot lacks, and every other part keeps its geometry.
+   */
+  const solidWorksDraft = Effect.fn("LocalCadImport.solidWorksDraft")(function* (
+    context: CadSnapshotContext,
+    files: readonly { readonly path: string; readonly bytes: Uint8Array }[],
+    rootName: string,
+  ) {
+    const latest = yield* latestSnapshot(context);
+    if (
+      latest?.root.microversionId === context.root.microversionId &&
+      latest.root.tessellationProfile === context.root.tessellationProfile
+    )
+      return { unchanged: latest } as const;
+    const reusable = reusableSolidWorksParts(latest?.parts ?? [], context.root.tessellationProfile);
+    // Staged flat: the plan already picked one file per name, and SolidWorks looks for each
+    // reference beside the assembly first.
+    const exported = yield* solidWorks.exportParts({
+      files: files.map((file) => ({ path: path.basename(file.path), bytes: file.bytes })),
+      skip: [...reusable.keys()],
+    });
+    for (const warning of exported.warnings)
+      yield* Effect.logWarning("SolidWorks import warning", { warning });
+    const geometry = new Map<string, SolidWorksPartGeometry>(
+      [...reusable].map(([key, part]) => [key, { kind: "reused", part }] as const),
+    );
+    yield* Effect.forEach(
+      exported.parts,
+      ([key, part]) =>
+        tessellateLocalCad(part.step, "step").pipe(
+          Effect.map((model) => mergeLocalCadMeshes(model.meshes)),
+          // A part with only sketches exports a STEP with no faces, which occt rejects.
+          Effect.catchTag("LocalCadImportError", (error) =>
+            STEP_FACE.test(Buffer.from(part.step).toString("latin1"))
+              ? Effect.fail(error)
+              : Effect.succeed(null),
+          ),
+          Effect.map((mesh) => {
+            geometry.set(key, mesh ? { kind: "mesh", name: part.name, mesh } : { kind: "empty" });
+          }),
+        ),
+      { concurrency: 2, discard: true },
+    );
+    const built = yield* Effect.try({
+      try: () => buildSolidWorksDraft(context, exported.root, rootName, geometry),
+      catch: geometryFailure,
+    });
+    return { ...built, previousAssets: latest?.assets ?? [] };
+  });
+
+  const run = Effect.fn("LocalCadImport.acquire")(function* (input: LocalCadImportInput) {
+    const file = yield* withFiles(resolveLocalCadFile(input));
+    const sources = yield* sourceFiles(input.workspaceRoot, file);
+    const byteLength = sources.reduce((total, source) => total + source.byteLength, 0);
+    if (byteLength > MAX_LOCAL_CAD_FILE_BYTES)
+      return yield* new LocalCadImportError({ reason: "too-large" });
+    yield* store.checkReserve(byteLength);
+    const files = yield* Effect.forEach(sources, (source) =>
+      fileSystem.readFile(source.absolutePath).pipe(
+        Effect.map((bytes) => ({ path: source.path, bytes })),
+        Effect.mapError(unreadable),
+      ),
+    );
+    const bytes = files[0]!.bytes;
     const root: CadSnapshotRoot = {
       ...localCadRootIdentity(input.projectId, file.relativePath),
       kind: "assembly",
-      microversionId: localCadMicroversionId(bytes),
+      microversionId: localCadFilesMicroversionId(files),
       tessellationProfile: LOCAL_CAD_TESSELLATION_PROFILE,
     };
     const context: CadSnapshotContext = {
@@ -427,19 +552,49 @@ export const make = Effect.gen(function* () {
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
-    const model = yield* tessellateLocalCad(bytes, file.format);
-    const { draft, meshes } = yield* Effect.try({
-      try: () => buildLocalCadDraft(context, model, path.basename(file.relativePath)),
-      catch: geometryFailure,
-    });
+    const rootName = path.basename(file.relativePath);
+    let built: {
+      readonly draft: Parameters<typeof completeSnapshotManifest>[0];
+      readonly meshes: ReadonlyMap<string, LocalCadMesh>;
+      readonly previousAssets: readonly CadGeometryAsset[];
+    };
+    if (file.format === "sldprt" || file.format === "sldasm") {
+      const solidWorksBuilt = yield* solidWorksDraft(context, files, rootName);
+      if ("unchanged" in solidWorksBuilt) return solidWorksBuilt.unchanged;
+      built = solidWorksBuilt;
+    } else {
+      const model = yield* tessellateLocalCad(bytes, file.format);
+      built = {
+        ...(yield* Effect.try({
+          try: () => buildLocalCadDraft(context, model, rootName),
+          catch: geometryFailure,
+        })),
+        previousAssets: [],
+      };
+    }
+    const { draft, meshes } = built;
     if (draft.parts.length === 0) return yield* new LocalCadImportError({ reason: "no-geometry" });
     const budget = yield* Effect.try({
       try: () => createCadSceneBudget(draft.nodes),
       catch: geometryFailure,
     });
+    const reusedAssets = new Map(built.previousAssets.map((asset) => [asset.geometryKey, asset]));
     const assets: CadGeometryAsset[] = [];
     for (const part of draft.parts) {
-      const mesh = meshes.get(part.geometryKey)!;
+      const reused = meshes.has(part.geometryKey) ? undefined : reusedAssets.get(part.geometryKey);
+      if (reused) {
+        yield* Effect.try({
+          try: () => {
+            if (!reused.complexity) throw new Error("CAD geometry metrics unavailable");
+            budget.add(reused, reused.complexity);
+          },
+          catch: geometryFailure,
+        });
+        assets.push(reused);
+        continue;
+      }
+      const mesh = meshes.get(part.geometryKey);
+      if (!mesh) return yield* new LocalCadImportError({ reason: "unreadable" });
       const glb = yield* normalizeCadGeometry(localCadMeshGlb(mesh, part.metadata?.name ?? ""));
       const complexity = yield* Effect.try({
         try: () => measureCadGeometry(glb),

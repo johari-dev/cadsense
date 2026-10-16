@@ -218,8 +218,10 @@ try {
   NodeAssert.deepEqual(fileCall?.properties, ["openFile"]);
   NodeAssert.equal(fileCall?.defaultPath, folder, "The file dialog opens in the project folder");
   NodeAssert.ok(
-    fileCall?.filters?.[0]?.extensions.includes("step"),
-    "The file dialog filters to STEP and IGES",
+    ["step", "igs", "sldprt", "SLDASM"].every((extension) =>
+      fileCall?.filters?.[0]?.extensions.includes(extension),
+    ),
+    "The file dialog filters to STEP, IGES, and SolidWorks",
   );
   NodeAssert.equal(
     summary.steps.find((step) => step.name === "model-imported")?.observed?.title,
@@ -227,8 +229,10 @@ try {
   );
   NodeAssert.deepEqual(cadFileCall?.properties, ["openFile"]);
   NodeAssert.ok(
-    cadFileCall?.filters?.[0]?.extensions.includes("step"),
-    "Add project's file dialog filters to CAD files",
+    ["step", "igs", "sldprt", "SLDASM"].every((extension) =>
+      cadFileCall?.filters?.[0]?.extensions.includes(extension),
+    ),
+    "Add project's file dialog filters to STEP, IGES, and SolidWorks",
   );
   NodeAssert.equal(
     summary.steps.find((step) => step.name === "local-cad-file-picked")?.observed?.name,

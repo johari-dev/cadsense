@@ -1,3 +1,4 @@
+import { isSolidWorksFile } from "@cadsense/contracts";
 import { ArrowsClockwiseIcon } from "~/lib/icons";
 
 import { Button } from "../components/ui/button";
@@ -8,7 +9,8 @@ import type { Project } from "../types";
 
 /**
  * Re-imports the local CAD file shown in the panel after it was re-exported, or the project's
- * default file when nothing has imported yet. Renders nothing for Onshape projects.
+ * default file when nothing has imported yet. A SolidWorks file converts with SolidWorks again, so
+ * the label and tooltip say so. Renders nothing for Onshape projects.
  */
 export function CadLocalSyncButton({
   project,
@@ -29,6 +31,7 @@ export function CadLocalSyncButton({
     cad?.catalog?.roots.find((entry) => entry.elementId === elementId)?.name ??
     project.localCadSource.filePath;
   const syncing = cad?.operation?.kind === "sync";
+  const solidWorks = isSolidWorksFile(name);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -49,11 +52,15 @@ export function CadLocalSyncButton({
             }
           >
             <ArrowsClockwiseIcon />
-            {syncing ? "Importing…" : "Sync"}
+            {syncing ? (solidWorks ? "Converting…" : "Importing…") : "Sync"}
           </Button>
         }
       />
-      <TooltipPopup>Import {name} again after re-exporting it</TooltipPopup>
+      <TooltipPopup>
+        {solidWorks
+          ? `Convert ${name} with SolidWorks again after saving it`
+          : `Import ${name} again after re-exporting it`}
+      </TooltipPopup>
     </Tooltip>
   );
 }

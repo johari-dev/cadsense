@@ -36,7 +36,27 @@ export type LocalCadFormat = "step" | "iges";
 
 export class LocalCadImportError extends Schema.TaggedErrorClass<LocalCadImportError>()(
   "LocalCadImportError",
-  { reason: Schema.Literals(["too-large", "unreadable", "no-geometry"]) },
+  {
+    reason: Schema.Literals([
+      "too-large",
+      "unreadable",
+      "no-geometry",
+      // SolidWorks files, which open in the local SolidWorks. See LocalCad.md.
+      "no-file-list",
+      "missing-files",
+      "solidworks-unavailable",
+      "solidworks-file-open",
+      "solidworks-failed",
+      "solidworks-timeout",
+    ]),
+    /**
+     * File names: those an assembly uses that are not in the folder (`missing-files`), or those
+     * already open in SolidWorks (`solidworks-file-open`).
+     */
+    missing: Schema.optionalKey(Schema.Array(Schema.String)),
+    /** What SolidWorks reported, for `solidworks-failed`. */
+    detail: Schema.optionalKey(Schema.String),
+  },
 ) {}
 
 /**
