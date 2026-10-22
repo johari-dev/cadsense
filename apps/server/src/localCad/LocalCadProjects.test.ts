@@ -38,6 +38,7 @@ import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
 import { CadDiskSpace, CadSnapshotStore, make as makeStore } from "../cad/CadSnapshotStore.ts";
 import { CadPanel } from "../cad/CadPanel.ts";
+import { pruneCadSnapshots } from "../cad/CadSnapshotRetention.ts";
 import * as CadStorage from "../cad/CadStorage.ts";
 import {
   CadProjectQuiescence,
@@ -228,6 +229,21 @@ const setFileError = Effect.fn(function* (projectId: ProjectId, filePath: string
   const error = yield* Effect.flip((yield* LocalCadProjects).setFile({ projectId, filePath }));
   assert.instanceOf(error, LocalCadError);
   return error.reason;
+});
+
+/** IDs of the snapshots the store holds for `projectId`. */
+const owned = Effect.fn(function* (projectId: ProjectId) {
+  return (yield* (yield* CadSnapshotStore).list())
+    .filter((entry) => entry.projectId === projectId)
+    .map((entry) => entry.snapshotId);
+});
+
+/** The CAD storage entry of a removed project. */
+const retained = Effect.fn(function* (projectId: ProjectId) {
+  const entries = yield* (yield* CadStorage.CadStorage).watch.pipe(Stream.runHead);
+  const entry = Option.getOrThrow(entries).find((item) => item.projectId === projectId);
+  assert.isDefined(entry, `${projectId} is retained`);
+  return entry!;
 });
 
 // Real clock: imports run in a worker thread and the tests poll for their outcome.
@@ -588,12 +604,60 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     }).pipe(Effect.scoped),
   );
 
-  // An open viewer pins the snapshot it shows. Deleting the project must release the viewer, then
-  // remove the snapshots: a pinned snapshot can't be removed, and nothing else prunes before restart.
-  it.effect("deleting a local CAD project releases its viewer and removes its snapshots", () =>
+  // Removal keeps the threads and, unless the user deletes it, the imported CAD. The folder is the
+  // user's, so restore needs no managed workspace: provisioning one dies in this layer.
+  it.effect("keeps a removed local CAD project's threads and imported CAD, and restores it", () =>
     Effect.gen(function* () {
-      const engineService = yield* OrchestrationEngineService;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const storage = yield* CadStorage.CadStorage;
+      const query = yield* ProjectionSnapshotQuery;
+      const root = yield* makeFolder();
+      const projectId = ProjectId.make("local-cad-retain");
+      const threadId = ThreadId.make("local-cad-retain-thread");
+      yield* (yield* LocalCadProjects).create({
+        projectId,
+        title: "Bracket",
+        workspaceRoot: root,
+        filePath: "models/dm1.step",
+      });
+      const roots = (yield* settle(projectId)).cad!.roots;
+      const keep = {
+        kind: "remove",
+        projectId,
+        deleteCad: false,
+        deleteWorkspace: false,
+      } as const;
+      yield* setAgentRun(projectId, threadId, "running");
+      assert.strictEqual((yield* Effect.flip(storage.run(keep))).reason, "busy");
+      yield* setAgentRun(projectId, threadId, "ready");
+
+      yield* storage.run(keep);
+      assert.isTrue(Option.isNone(yield* query.getProjectShellById(projectId)));
+      assert.isTrue(Option.isSome(yield* query.getThreadDetailById(threadId)));
+      const entry = yield* retained(projectId);
+      assert.strictEqual(entry.source, "local");
+      assert.isFalse(entry.cleanupPending);
+      // Pruning, as at the next start, keeps what removal retained.
+      yield* pruneCadSnapshots(projectId);
+      assert.deepStrictEqual(yield* owned(projectId), [roots[0]!.current!.snapshotId]);
+
+      yield* storage.run({ kind: "restore", projectId, removedAt: entry.removedAt });
+      const restored = yield* getProject(projectId);
+      assert.deepStrictEqual(restored.localCadSource, { filePath: "models/dm1.step" });
+      assert.deepStrictEqual(restored.cad?.roots, roots);
+      assert.strictEqual(restored.cad?.storage, undefined);
+      assert.isTrue(Option.isSome(yield* query.getThreadDetailById(threadId)));
+      assert.isTrue(yield* fs.exists(path.join(root, "models/dm1.step")));
+    }).pipe(Effect.scoped),
+  );
+
+  // An open viewer pins the snapshot it shows, and a pinned snapshot can't be removed, so removal
+  // releases the project's viewers before it deletes the imported CAD. Other projects keep theirs.
+  it.effect("removing a local CAD project with its imported CAD releases its viewer first", () =>
+    Effect.gen(function* () {
       const snapshots = yield* CadSnapshotStore;
+      const storage = yield* CadStorage.CadStorage;
       const projectId = ProjectId.make("local-cad-delete");
       const keptId = ProjectId.make("local-cad-kept");
       for (const id of [projectId, keptId]) {
@@ -605,13 +669,11 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         });
         yield* settle(id);
       }
-      const owned = (id: ProjectId) =>
-        snapshots.list().pipe(Effect.map((all) => all.filter((entry) => entry.projectId === id)));
       const [shown] = yield* owned(projectId);
       assert.isDefined(shown);
       const release = yield* Deferred.make<void>();
       const viewer = yield* snapshots
-        .withPinned(shown!.snapshotId, () => Deferred.await(release))
+        .withPinned(shown!, () => Deferred.await(release))
         .pipe(Effect.forkScoped);
       panelReleases.set(
         projectId,
@@ -621,15 +683,95 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         ),
       );
 
-      yield* engineService.dispatch({
-        type: "project.delete",
-        commandId: CommandId.make("local-cad-delete"),
-        projectId,
-      });
-      for (let attempt = 0; attempt < 200 && (yield* owned(projectId)).length > 0; attempt++)
-        yield* Effect.sleep("50 millis");
+      yield* storage.run({ kind: "remove", projectId, deleteCad: true, deleteWorkspace: false });
       assert.deepStrictEqual(yield* owned(projectId), []);
       assert.strictEqual((yield* owned(keptId)).length, 1);
+      const entry = yield* retained(projectId);
+      assert.isTrue(entry.deleteCad);
+      assert.isFalse(entry.cleanupPending);
+
+      // Restored without its CAD, the project imports the file again.
+      yield* storage.run({ kind: "restore", projectId, removedAt: entry.removedAt });
+      const restored = yield* getProject(projectId);
+      assert.deepStrictEqual(restored.cad?.roots, []);
+      const reimported = yield* sync(restored, "models/dm1.step");
+      assert.strictEqual(reimported.cad?.lastOutcome?.status, "succeeded");
+      assert.strictEqual((yield* owned(projectId)).length, 1);
+    }).pipe(Effect.scoped),
+  );
+
+  // Nothing deletes the folder or deletes the project outright, and a removed project comes back
+  // only while no other project uses its folder.
+  it.effect("never deletes a local CAD project's folder and restores it only into a free one", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const engineService = yield* OrchestrationEngineService;
+      const storage = yield* CadStorage.CadStorage;
+      const query = yield* ProjectionSnapshotQuery;
+      const root = yield* makeFolder();
+      const projectId = ProjectId.make("local-cad-folder-kept");
+      yield* (yield* LocalCadProjects).create({
+        projectId,
+        title: "Bracket",
+        workspaceRoot: root,
+        filePath: "models/dm1.step",
+      });
+      yield* settle(projectId);
+
+      const removeFolder = storage.run({
+        kind: "remove",
+        projectId,
+        deleteCad: false,
+        deleteWorkspace: true,
+      });
+      assert.strictEqual((yield* Effect.flip(removeFolder)).reason, "busy");
+      const deleted = yield* Effect.exit(
+        engineService.dispatch({
+          type: "project.delete",
+          commandId: CommandId.make("local-cad-folder-kept-delete"),
+          projectId,
+          force: true,
+        }),
+      );
+      assert.strictEqual(deleted._tag, "Failure");
+      assert.isTrue(Option.isSome(yield* query.getProjectShellById(projectId)));
+
+      yield* storage.run({ kind: "remove", projectId, deleteCad: false, deleteWorkspace: false });
+      const entry = yield* retained(projectId);
+      const cleanupFolder = storage.run({
+        kind: "cleanup",
+        projectId,
+        removedAt: entry.removedAt,
+        deleteCad: false,
+        deleteWorkspace: true,
+      });
+      assert.strictEqual((yield* Effect.flip(cleanupFolder)).reason, "busy");
+      assert.isFalse((yield* retained(projectId)).deleteWorkspace);
+
+      // The removed project frees its folder for a new project, which does not take its place.
+      const reusedId = ProjectId.make("local-cad-folder-reused");
+      const reused = yield* (yield* LocalCadProjects).create({
+        projectId: reusedId,
+        title: "Reused",
+        workspaceRoot: root,
+        filePath: "models/dm1.step",
+      });
+      assert.strictEqual(reused.projectId, reusedId);
+      yield* settle(reusedId);
+      const restore = storage.run({ kind: "restore", projectId, removedAt: entry.removedAt });
+      assert.strictEqual((yield* Effect.flip(restore)).reason, "busy");
+      assert.isTrue(Option.isNone(yield* query.getProjectShellById(projectId)));
+
+      yield* storage.run({
+        kind: "remove",
+        projectId: reusedId,
+        deleteCad: true,
+        deleteWorkspace: false,
+      });
+      yield* restore;
+      assert.isTrue(Option.isSome(yield* query.getProjectShellById(projectId)));
+      assert.isTrue(yield* fs.exists(path.join(root, "models/dm1.step")));
     }).pipe(Effect.scoped),
   );
 });

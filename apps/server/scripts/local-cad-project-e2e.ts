@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off preferSchemaOverJson:off globalTimers:off globalFetch:off
 /**
  * End-to-end check of local CAD projects through the real app. Starts the dev server and web app on
- * a fresh data directory, then drives headless Chromium through the whole flow and keeps the
- * evidence under --out:
+ * a fresh data directory, then drives headless Chromium through the whole flow, ending with removing
+ * the project from the sidebar and restoring it from CAD storage, and keeps the evidence under --out:
  *
  *   bracket-rig/         the project folder: the STEP file, an older export, and a corrupt file
  *   NN-*.png             a screenshot after each step
@@ -182,6 +182,17 @@ const componentCount = () => {
   if (!newest) return 0;
   return (JSON.parse(NodeFS.readFileSync(newest, "utf8")) as { nodes: unknown[] }).nodes.length;
 };
+// The chat whose CAD panel shows the model. Removal and restore come back to it.
+let threadUrl = url;
+const projectRow = page
+  .locator('[data-sidebar="menu-button"]')
+  .filter({ hasText: NodePath.basename(folder) })
+  .first();
+const removalDialog = page.getByRole("alertdialog");
+const retainedEntry = page.locator("article").filter({ hasText: NodePath.basename(folder) });
+// Every file in the project folder, so removal and restore can show they left it alone.
+const folderFiles = () =>
+  NodeFS.readdirSync(folder, { recursive: true, encoding: "utf8" }).toSorted();
 
 try {
   await run("add-project", async (page) => {
@@ -242,6 +253,7 @@ try {
     await page.getByRole("menuitem", { name: stepName }).click();
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
+    threadUrl = page.url();
     return { title: (await sceneTitle.innerText()).trim(), components: componentCount() };
   });
   await run("re-exported-and-synced", async (page) => {
@@ -279,6 +291,67 @@ try {
     await page.waitForTimeout(1000);
     const section = page.getByText("Rescan folder").locator("xpath=ancestor::section[1]");
     return { text: (await section.innerText()).split("\n").slice(0, 12) };
+  });
+  // Removing the project from the sidebar while its chat is open keeps the chat and, here, the
+  // imported CAD, then opens CAD storage. The folder is the user's, so nothing offers to delete it.
+  await run("remove-dialog", async (page) => {
+    await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await openRightPanel(page);
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await projectRow.click({ button: "right" });
+    // The browser's context menu is a list of plain buttons, added last.
+    await page.getByRole("button", { name: "Remove", exact: true }).last().click();
+    await removalDialog.waitFor();
+    const checkbox = removalDialog.getByRole("checkbox");
+    if ((await checkbox.count()) !== 1) throw new Error("The dialog offers more than imported CAD");
+    await removalDialog.getByText("Delete imported CAD data").click();
+    if ((await checkbox.getAttribute("aria-checked")) !== "false")
+      throw new Error("Could not choose to keep the imported CAD");
+    return { dialog: (await removalDialog.innerText()).split("\n").filter(Boolean) };
+  });
+  const kept = { manifests: 0, files: [] as string[] };
+  await run("removed-opens-cad-storage", async (page) => {
+    kept.manifests = manifests().length;
+    kept.files = folderFiles();
+    await removalDialog.getByRole("button", { name: "Remove project" }).click();
+    await page.waitForURL(/\/settings\/cad-storage$/, { timeout: 60_000 });
+    await retainedEntry.waitFor({ timeout: 30_000 });
+    if (await projectRow.isVisible()) throw new Error("The removed project is still listed");
+    if (manifests().length !== kept.manifests) throw new Error("Removal deleted the kept CAD");
+    if (folderFiles().join() !== kept.files.join()) throw new Error("Removal changed the folder");
+    // Deleting the retained data later offers the imported CAD only.
+    await retainedEntry.getByRole("button", { name: "Delete retained data" }).click();
+    await removalDialog.waitFor();
+    const cleanup = (await removalDialog.innerText()).split("\n").filter(Boolean);
+    if ((await removalDialog.getByRole("checkbox").count()) !== 1)
+      throw new Error("Deleting retained data offers more than imported CAD");
+    await removalDialog.getByRole("button", { name: "Cancel" }).click();
+    await removalDialog.waitFor({ state: "detached" });
+    return {
+      url: page.url(),
+      entry: (await retainedEntry.innerText()).split("\n").filter(Boolean),
+      cleanup,
+      manifests: kept.manifests,
+    };
+  });
+  await run("thread-link-while-removed", async (page) => {
+    await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await page.waitForTimeout(3000);
+    return { url: page.url() };
+  });
+  await run("restored", async (page) => {
+    await page.goto(new URL("settings/cad-storage", url).href, { waitUntil: "networkidle" });
+    await retainedEntry.getByRole("button", { name: "Restore project" }).click();
+    await retainedEntry.waitFor({ state: "detached", timeout: 60_000 });
+    await projectRow.waitFor();
+    await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await openRightPanel(page);
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await page.waitForTimeout(5000);
+    // The kept snapshot came back with the project, so nothing was imported again.
+    if (manifests().length !== kept.manifests) throw new Error("Restore imported the file again");
+    if (folderFiles().join() !== kept.files.join()) throw new Error("Restore changed the folder");
+    return { url: page.url(), title: (await sceneTitle.innerText()).trim() };
   });
   const { ask, model } = values;
   if (ask !== undefined && model !== undefined)

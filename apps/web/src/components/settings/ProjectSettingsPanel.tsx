@@ -78,7 +78,7 @@ export function ProjectSettingsPage({ projectKey: selectedProjectKey }: { projec
     previousProject.current = project;
     if (!project && previous && projectKey(previous) === selectedProjectKey) {
       void navigate({
-        to: previous.onshapeSource ? "/settings/cad-storage" : "/",
+        to: hasCadSource(previous) ? "/settings/cad-storage" : "/",
         replace: true,
       });
     }
@@ -194,7 +194,8 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   const removeCadProject = useRemoveCadProject();
   const removeProject = useCallback(async () => {
     if (cadBusy) return;
-    if (project.onshapeSource) {
+    // CAD projects are removed through CAD storage, which keeps their threads for a restore.
+    if (hasCadSource(project)) {
       const result = await removeCadProject(project);
       if (result?._tag === "Failure") reportFailure("Failed to remove project", result);
       return;
@@ -376,7 +377,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
               project.onshapeSource
                 ? "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files."
                 : project.localCadSource
-                  ? "Deletes this project's threads and imported CAD without touching its files."
+                  ? "Preserves threads and captures. Choose whether to delete imported CAD. Files in the folder are not touched."
                   : "Deletes this project's threads without touching its files."
             }
             control={

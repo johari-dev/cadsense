@@ -30,7 +30,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "cad-storage",
-    title: "CAD storage, retained Onshape projects, restore and cleanup",
+    title: "CAD storage, removed Onshape and local CAD projects, restore and cleanup",
     to: "/settings/cad-storage",
   },
   { id: "interface-font", title: "Interface font", to: "/settings/appearance" },
