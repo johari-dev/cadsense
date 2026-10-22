@@ -46,6 +46,7 @@ import {
 } from "./LocalCadFiles.ts";
 import {
   LOCAL_CAD_TESSELLATION_PROFILE,
+  SOLIDWORKS_IMPORT_PROFILE,
   LocalCadImportError,
   tessellateLocalCad,
   type LocalCadMesh,
@@ -559,7 +560,10 @@ export const make = Effect.gen(function* () {
       ...localCadRootIdentity(input.projectId, file.relativePath, input.configuration),
       kind: "assembly",
       microversionId: localCadFilesMicroversionId(files),
-      tessellationProfile: LOCAL_CAD_TESSELLATION_PROFILE,
+      tessellationProfile:
+        file.format === "sldprt" || file.format === "sldasm"
+          ? SOLIDWORKS_IMPORT_PROFILE
+          : LOCAL_CAD_TESSELLATION_PROFILE,
     };
     const context: CadSnapshotContext = {
       root,

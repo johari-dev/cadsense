@@ -263,9 +263,16 @@ material or mass rather than failing the conversion.
 - Meshes come back in world coordinates, so moving a part between exports reads as
   `geometry-changed` in `cad_diff`, not `moved`. Both outdate comments the same way. SolidWorks
   imports place parts by their component transforms instead, so moves read as moves there.
+- Occurrence IDs come from names (STEP product names, SolidWorks component names), so renaming a
+  component reads as removed and added in `cad_diff`, not `renamed`, and outdates its comments.
 - Mass, materials, and hidden flags are not read from STEP. Part colors are. SolidWorks files
-  carry materials and known masses (see [Materials and mass](#materials-and-mass)). Their parts
-  reused from a snapshot converted before materials were read keep no material until they change.
+  carry materials and known masses (see [Materials and mass](#materials-and-mass)). SolidWorks
+  imports have their own profile (`SOLIDWORKS_IMPORT_PROFILE`), versioned with what the bridge
+  reads, so a snapshot converted before materials were read is converted again in full at the next
+  Sync instead of being reused.
+- A part derived from another part (a mirrored part, Insert Part) converts from the geometry saved
+  in it. Only the files an assembly lists are copied and hashed, so a change to the base part shows
+  once the derived part is opened and saved in SolidWorks.
 - SolidWorks files need SolidWorks on the machine running the Cadsense server (or its Windows host,
   for WSL). Component appearance overrides set in an assembly, and assembly-level features such as
   cuts, are not carried over: each part looks as it does in its own file. Other native formats

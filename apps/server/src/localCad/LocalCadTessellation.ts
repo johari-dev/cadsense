@@ -82,6 +82,13 @@ const TESSELLATION_PARAMS = {
   angularDeflection: 0.1,
 } as const;
 export const LOCAL_CAD_TESSELLATION_PROFILE = "occt-import-js-0.0.23-chord-0.0005-angle-0.1";
+/**
+ * A SolidWorks import's profile: the tessellation, and the version of what the bridge reads from
+ * SolidWorks. A snapshot with another profile is converted again in full, so bump the version when
+ * the bridge reads something new. Root IDs leave the profile out, so roots and comments carry on.
+ * Version 1 added part materials and masses.
+ */
+export const SOLIDWORKS_IMPORT_PROFILE = `${LOCAL_CAD_TESSELLATION_PROFILE}-solidworks-1`;
 
 // Resolved here, not in the worker, so a bundled server still finds the external package on disk.
 const OCCT_ENTRY = NodeModule.createRequire(import.meta.url).resolve("occt-import-js");

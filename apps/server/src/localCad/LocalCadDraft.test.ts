@@ -1,15 +1,26 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // SolidWorks part keys are SHA-256 hex, like the bridge makes them.
 import * as NodeCrypto from "node:crypto";
-import { CadSnapshotDraft, ProjectId } from "@cadsense/contracts";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { CadSnapshotDraft, ProjectId, type CadSnapshotManifest } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 
-import { snapshotRootId } from "../onshape/OnshapeSnapshotManifest.ts";
-import { localCadMicroversionId, localCadRootIdentity } from "./LocalCadFiles.ts";
-import { buildLocalCadDraft } from "./LocalCadImport.ts";
+import { CadSnapshotStore, type CadSnapshotStoreShape } from "../cad/CadSnapshotStore.ts";
+import { completeSnapshotManifest, snapshotRootId } from "../onshape/OnshapeSnapshotManifest.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import {
+  localCadFilesMicroversionId,
+  localCadMicroversionId,
+  localCadRootIdentity,
+} from "./LocalCadFiles.ts";
+import { buildLocalCadDraft, make as makeImport } from "./LocalCadImport.ts";
 import { LOCAL_CAD_TESSELLATION_PROFILE, type LocalCadModel } from "./LocalCadTessellation.ts";
-import type { SolidWorksNode } from "./SolidWorksBridge.ts";
+import { SolidWorks, type SolidWorksNode } from "./SolidWorksBridge.ts";
 import {
   buildSolidWorksDraft,
   reusableSolidWorksParts,
@@ -193,4 +204,122 @@ describe("buildSolidWorksDraft", () => {
     assert.deepStrictEqual(next.parts[0]!.metadata, first.parts[0]!.metadata);
     assert.strictEqual(next.parts[0]!.metadata?.massKg, 0.0251);
   });
+});
+
+// A SolidWorks import's profile versions what the bridge reads, beside the tessellation. Snapshots
+// from before materials and masses were read have the plain tessellation profile, so they must be
+// converted again in full: not returned as unchanged, and none of their parts reused.
+describe("SolidWorks import profile", () => {
+  it.effect(
+    "converts a SolidWorks file again when its snapshot predates materials and masses",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-sw-profile-" });
+        const filePath = "Part.SLDPRT";
+        const bytes = new Uint8Array([1, 2, 3]);
+        yield* fs.writeFile(NodePath.join(workspaceRoot, filePath), bytes);
+        const projectId = ProjectId.make("local-cad-sw-profile");
+        const root = {
+          ...localCadRootIdentity(projectId, filePath, "default"),
+          kind: "assembly" as const,
+          microversionId: localCadFilesMicroversionId([{ path: filePath, bytes }]),
+          tessellationProfile: LOCAL_CAD_TESSELLATION_PROFILE,
+        };
+        const context = {
+          projectId,
+          root,
+          rootId: snapshotRootId(root),
+          snapshotId: "00000000-0000-4000-8000-000000000001",
+          createdAt: "2026-10-21T00:00:00.000Z",
+        };
+        const key = "1".repeat(64);
+        const node: SolidWorksNode = {
+          name: "Part",
+          kind: "part",
+          configuration: "Default",
+          suppressed: false,
+          visible: true,
+          transform: null,
+          key,
+          children: [],
+        };
+        const legacyDraft = buildSolidWorksDraft(
+          context,
+          node,
+          filePath,
+          new Map([
+            [key, { kind: "mesh", name: "Part", material: null, massKg: null, mesh: triangle }],
+          ]),
+        ).draft;
+        const legacySha = "2".repeat(64);
+        const legacy = yield* completeSnapshotManifest(legacyDraft, [
+          {
+            geometryKey: legacyDraft.parts[0]!.geometryKey,
+            sha256: legacySha,
+            byteLength: 1,
+            relativePath: `${legacySha}.glb`,
+            format: "glb",
+          },
+        ]);
+        let latest: CadSnapshotManifest = legacy;
+        const store = {
+          checkReserve: () => Effect.void,
+          findGeometry: () => Effect.succeed([]),
+          putAsset: (asset: Uint8Array) =>
+            Effect.sync(() => {
+              const sha256 = NodeCrypto.createHash("sha256").update(asset).digest("hex");
+              return {
+                sha256,
+                byteLength: asset.length,
+                relativePath: `${sha256}.glb`,
+                format: "glb" as const,
+              };
+            }),
+          publish: (manifest: CadSnapshotManifest) =>
+            Effect.sync(() => {
+              latest = manifest;
+            }),
+          load: () => Effect.sync(() => latest),
+          list: () => Effect.sync(() => [{ ...latest, byteLength: 1 }]),
+          readAsset: () => Effect.die("No asset reads"),
+          remove: () => Effect.die("No removals"),
+          withPinned: () => Effect.die("No pins"),
+          withAcquisition: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
+        } satisfies CadSnapshotStoreShape;
+        const skipped: (readonly string[])[] = [];
+        const step = NodeFS.readFileSync(new URL("./testFixtures/dm1-id-214.stp", import.meta.url));
+        const service = yield* makeImport.pipe(
+          Effect.provideService(CadSnapshotStore, store),
+          Effect.provideService(SolidWorks, {
+            exportParts: (input) => {
+              skipped.push(input.skip);
+              return Effect.succeed({
+                root: node,
+                parts: new Map([
+                  [key, { name: "Part", step, material: "Alloy Steel", massKg: 1.5 }],
+                ]),
+                warnings: [],
+              });
+            },
+          }),
+        );
+        const result = yield* service.acquire({
+          projectId,
+          workspaceRoot,
+          filePath,
+          configuration: "default",
+        });
+        assert.notStrictEqual(result.snapshotId, legacy.snapshotId);
+        assert.deepStrictEqual(skipped, [[]]);
+        assert.notStrictEqual(result.root.tessellationProfile, LOCAL_CAD_TESSELLATION_PROFILE);
+        assert.strictEqual(result.rootId, legacy.rootId);
+        assert.strictEqual(result.parts[0]!.metadata?.material?.displayName, "Alloy Steel");
+        assert.strictEqual(result.parts[0]!.metadata?.massKg, 1.5);
+      }).pipe(
+        Effect.provide(WorkspacePaths.layer),
+        Effect.provide(NodeServices.layer),
+        Effect.scoped,
+      ),
+  );
 });
