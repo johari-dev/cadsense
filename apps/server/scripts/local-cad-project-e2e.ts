@@ -316,7 +316,6 @@ try {
     await removalDialog.getByRole("button", { name: "Remove project" }).click();
     await page.waitForURL(/\/settings\/cad-storage$/, { timeout: 60_000 });
     await retainedEntry.waitFor({ timeout: 30_000 });
-    if (await projectRow.isVisible()) throw new Error("The removed project is still listed");
     if (manifests().length !== kept.manifests) throw new Error("Removal deleted the kept CAD");
     if (folderFiles().join() !== kept.files.join()) throw new Error("Removal changed the folder");
     // Deleting the retained data later offers the imported CAD only.
@@ -334,17 +333,22 @@ try {
       manifests: kept.manifests,
     };
   });
+  // Settings pages show their own navigation, so the project list is checked from the chat.
   await run("thread-link-while-removed", async (page) => {
     await page.goto(threadUrl, { waitUntil: "networkidle" });
     await page.waitForTimeout(3000);
-    return { url: page.url() };
+    if (await projectRow.isVisible()) throw new Error("The removed project is still listed");
+    return {
+      url: page.url(),
+      chat: (await page.locator("main").first().innerText()).slice(0, 200),
+    };
   });
   await run("restored", async (page) => {
     await page.goto(new URL("settings/cad-storage", url).href, { waitUntil: "networkidle" });
     await retainedEntry.getByRole("button", { name: "Restore project" }).click();
     await retainedEntry.waitFor({ state: "detached", timeout: 60_000 });
-    await projectRow.waitFor();
     await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await projectRow.waitFor();
     await openRightPanel(page);
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
