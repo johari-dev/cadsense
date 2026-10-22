@@ -1,6 +1,7 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   CadSnapshotManifest,
+  isSolidWorksFile,
   type CadComment,
   type CadViewState,
   type ScopedThreadRef,
@@ -622,7 +623,8 @@ export function CadPanel({
         openFile={
           shownFile
             ? {
-                action: "Open file",
+                // Its default app is SolidWorks wherever Cadsense can convert the file.
+                action: isSolidWorksFile(shownFile) ? "Open in SolidWorks" : "Open file",
                 onOpen: () =>
                   void openPath(
                     project.environmentId,
