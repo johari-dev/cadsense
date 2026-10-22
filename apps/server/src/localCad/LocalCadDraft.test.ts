@@ -8,6 +8,7 @@ import { CadSnapshotDraft, ProjectId, type CadSnapshotManifest } from "@cadsense
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import { CadSnapshotStore, type CadSnapshotStoreShape } from "../cad/CadSnapshotStore.ts";
@@ -317,8 +318,7 @@ describe("SolidWorks import profile", () => {
         assert.strictEqual(result.parts[0]!.metadata?.material?.displayName, "Alloy Steel");
         assert.strictEqual(result.parts[0]!.metadata?.massKg, 1.5);
       }).pipe(
-        Effect.provide(WorkspacePaths.layer),
-        Effect.provide(NodeServices.layer),
+        Effect.provide(WorkspacePaths.layer.pipe(Layer.provideMerge(NodeServices.layer))),
         Effect.scoped,
       ),
   );
