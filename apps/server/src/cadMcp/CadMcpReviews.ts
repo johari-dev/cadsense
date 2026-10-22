@@ -189,13 +189,20 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
   const importWaitMs = options.importWaitMs ?? IMPORT_WAIT_MS;
 
   const verified = new Map<string, OnshapeConnectionSummary>();
-  // The CAD operation this process started or joined for each project, and still waits on.
-  const started = new Map<ProjectId, { kind: "discover" | "sync"; operationId: string }>();
+  // The CAD operation this process started or joined for each project, and still waits on. A local
+  // file's import also keeps the file hash it was asked for, so it only counts for that revision.
+  const started = new Map<
+    ProjectId,
+    { kind: "discover" | "sync"; operationId: string; revision: string | null }
+  >();
   const discovered = new Set<ProjectId>();
   const synced = new Set<ProjectId>();
   let current: Review | null = null;
 
-  const startOperation = (input: Parameters<typeof operations.start>[0]) =>
+  const startOperation = (
+    input: Parameters<typeof operations.start>[0],
+    revision: string | null = null,
+  ) =>
     operations.start(input).pipe(
       Effect.mapError((error) =>
         fail(
@@ -206,7 +213,9 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
         ),
       ),
       Effect.tap(({ operationId }) =>
-        Effect.sync(() => started.set(input.projectId, { kind: input.kind, operationId })),
+        Effect.sync(() =>
+          started.set(input.projectId, { kind: input.kind, operationId, revision }),
+        ),
       ),
     );
 
@@ -396,7 +405,11 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
       const operation = cad?.operation;
       if (operation) {
         if (operation.kind === "sync" && operation.root?.elementId === elementId)
-          started.set(projectId, { kind: "sync", operationId: operation.operationId });
+          started.set(projectId, {
+            kind: "sync",
+            operationId: operation.operationId,
+            revision: microversionId,
+          });
         if ((yield* Clock.currentTimeMillis) >= deadline) return false;
         yield* Effect.sleep("1 second");
         continue;
@@ -407,14 +420,18 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
         started.delete(projectId);
         if (root.lastOutcome.status !== "succeeded")
           return yield* fail("import-failed", root.lastOutcome.reason ?? "The CAD import failed.");
+        // The file changed after that import was asked for, so it shows an older revision.
+        if (pending.revision === microversionId) return true;
+      } else if (microversionId !== null && root?.current?.microversionId === microversionId)
         return true;
-      }
-      if (microversionId !== null && root?.current?.microversionId === microversionId) return true;
-      yield* startOperation({
-        projectId,
-        kind: "sync",
-        root: { elementId, kind: "assembly", configuration: "default" },
-      });
+      yield* startOperation(
+        {
+          projectId,
+          kind: "sync",
+          root: { elementId, kind: "assembly", configuration: "default" },
+        },
+        microversionId,
+      );
     }
   });
 

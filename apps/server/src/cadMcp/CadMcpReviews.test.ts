@@ -431,5 +431,33 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })(
           );
         }).pipe(Effect.ensuring(Effect.sync(() => (importGate = Effect.void))), Effect.scoped),
     );
+
+    // A finished import counts only for the file it read. A re-export after it, before the next
+    // call, is imported rather than opening the older model.
+    it.effect("imports again when the file changed after the import a call waited on", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const folder = yield* makeFolder();
+        const reviews = yield* makeReviews(0);
+        const gate = yield* Deferred.make<void>();
+        importGate = Deferred.await(gate);
+        yield* openImporting(reviews, { file: folder.part });
+        yield* Deferred.succeed(gate, undefined);
+        const imported = yield* settle((yield* projectFor(folder.root)).id);
+
+        yield* fs.writeFileString(folder.part, "\n", { flag: "a" });
+        yield* openImporting(reviews, { file: folder.part });
+        const reimported = yield* settle(imported.id);
+        assert.notStrictEqual(
+          reimported.cad?.lastOutcome?.operationId,
+          imported.cad?.lastOutcome?.operationId,
+        );
+        assert.notStrictEqual(
+          reimported.cad?.roots[0]?.current?.microversionId,
+          imported.cad?.roots[0]?.current?.microversionId,
+        );
+        yield* openReady(reviews, { file: folder.part });
+      }).pipe(Effect.ensuring(Effect.sync(() => (importGate = Effect.void))), Effect.scoped),
+    );
   },
 );
