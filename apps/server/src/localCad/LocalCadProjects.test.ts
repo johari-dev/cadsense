@@ -1600,12 +1600,23 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
           .exportParts({ files: [read(part!)], skip: [], configuration: "default" })
           .pipe(Effect.forkChild);
         const b = yield* jobFor(part!, () => true);
+        // Whether a bridge process still runs for this job, from its command line.
+        const bridgeRuns = (job: string) =>
+          NodeChildProcess.execFileSync(host.powershell, [
+            "-NoProfile",
+            "-Command",
+            `@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${job}*' }).Count`,
+          ])
+            .toString()
+            .trim() !== "0";
         // The second bridge gets the lock only after the first wrote its result and exited. Read
-        // in this order, a second bridge holding the lock means the first result is already there.
+        // in this order, a second bridge holding the lock means the first result is already there,
+        // or the first job's folder is being removed, which only happens once its bridge exited.
         let queued = false;
         for (let attempt = 0; ; attempt++) {
           const secondHolds = inJob(b, "out");
-          const firstDone = inJob(a, "result.json") || !inJob(a, ".");
+          const firstDone =
+            inJob(a, "result.json") || !inJob(a, ".") || (secondHolds && !bridgeRuns(a));
           assert.isTrue(!secondHolds || firstDone, "Two SolidWorks bridges ran at once");
           if (firstDone) break;
           queued = true;
