@@ -15,6 +15,8 @@ vi.mock("../state/onshapeProjects", () => ({
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => start }));
 import { CadLocalSyncButton } from "./CadLocalSyncButton";
 
+const decodeProject = Schema.decodeUnknownSync(OrchestrationProjectShell);
+
 const element = "d".repeat(24);
 const roots = ["default", "NPD-16"].map((configuration, index) => ({
   rootId: String(index + 1).repeat(64),
@@ -33,7 +35,7 @@ const roots = ["default", "NPD-16"].map((configuration, index) => ({
 }));
 /** A local project linking a SolidWorks assembly, imported in `roots`. */
 const projectWith = (cadRoots: readonly unknown[]) => ({
-  ...Schema.decodeUnknownSync(OrchestrationProjectShell)({
+  ...decodeProject({
     id: "cad-sync-button",
     title: "Pillow",
     workspaceRoot: "C:/cad-sync-button",
