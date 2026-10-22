@@ -3,12 +3,14 @@ import {
   type ModelCapabilities,
   type ServerProviderSlashCommand,
 } from "@cadsense/contracts";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@cadsense/shared/model";
 import { resolveSpawnCommand } from "@cadsense/shared/shell";
@@ -384,6 +386,47 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
     shell: spawnCommand.shell,
   });
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
+});
+
+export class ClaudeSignInError extends Data.TaggedError("ClaudeSignInError")<{
+  readonly message: string;
+}> {}
+
+/**
+ * Start `claude auth login`. The CLI opens the browser itself and listens for
+ * the OAuth callback, so the process stays alive in the caller's scope until
+ * it exits. A zero exit code means the login succeeded.
+ */
+export const beginClaudeSignIn = Effect.fn("beginClaudeSignIn")(function* (
+  claudeSettings: ClaudeSettings,
+  environment?: NodeJS.ProcessEnv,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const spawnCommand = yield* resolveSpawnCommand(
+    claudeSettings.binaryPath,
+    ["auth", "login", "--claudeai"],
+    { env: claudeEnvironment },
+  );
+  const child = yield* spawner.spawn(
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      env: claudeEnvironment,
+      shell: spawnCommand.shell,
+    }),
+  );
+  return {
+    authUrl: null,
+    finished: Effect.all(
+      [child.stdout.pipe(Stream.runDrain), child.stderr.pipe(Stream.runDrain), child.exitCode],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.flatMap(([, , exitCode]) =>
+        Number(exitCode) === 0
+          ? Effect.void
+          : Effect.fail(new ClaudeSignInError({ message: "Claude sign-in did not finish." })),
+      ),
+    ),
+  };
 });
 
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (

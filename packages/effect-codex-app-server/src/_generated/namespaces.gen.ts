@@ -9,7 +9,10 @@ export const v1 = {
 } as const;
 
 export const v2 = {
+  AccountLoginCompletedNotification: CodexSchema.V2AccountLoginCompletedNotification,
   AgentMessageDeltaNotification: CodexSchema.V2AgentMessageDeltaNotification,
+  CancelLoginAccountParams: CodexSchema.V2CancelLoginAccountParams,
+  CancelLoginAccountResponse: CodexSchema.V2CancelLoginAccountResponse,
   CommandExecutionOutputDeltaNotification: CodexSchema.V2CommandExecutionOutputDeltaNotification,
   ConfigWarningNotification: CodexSchema.V2ConfigWarningNotification,
   ContextCompactedNotification: CodexSchema.V2ContextCompactedNotification,
@@ -22,6 +25,8 @@ export const v2 = {
   GetAccountResponse: CodexSchema.V2GetAccountResponse,
   ItemCompletedNotification: CodexSchema.V2ItemCompletedNotification,
   ItemStartedNotification: CodexSchema.V2ItemStartedNotification,
+  LoginAccountParams: CodexSchema.V2LoginAccountParams,
+  LoginAccountResponse: CodexSchema.V2LoginAccountResponse,
   McpServerOauthLoginCompletedNotification: CodexSchema.V2McpServerOauthLoginCompletedNotification,
   McpServerRefreshResponse: CodexSchema.V2McpServerRefreshResponse,
   McpToolCallProgressNotification: CodexSchema.V2McpToolCallProgressNotification,

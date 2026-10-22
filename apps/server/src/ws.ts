@@ -1322,6 +1322,18 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.serverInstallProvider]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverInstallProvider,
+            providerMaintenanceRunner.installProvider(input),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverSignInProvider]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSignInProvider,
+            providerRegistry.signInInstance(input.instanceId),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverUpsertKeybinding,
@@ -1776,6 +1788,9 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    // One runner for the whole server: its locks must span connections, and
+    // installs fork into its scope so they outlive the request that started them.
+    const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -1805,7 +1820,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               previewAutomationBroker,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(ProviderMaintenanceRunner.layer),
+              Layer.provide(
+                Layer.succeed(
+                  ProviderMaintenanceRunner.ProviderMaintenanceRunner,
+                  providerMaintenanceRunner,
+                ),
+              ),
             ),
           ),
         );
@@ -1818,4 +1838,4 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       ),
     );
   }),
-);
+).pipe(Layer.provide(ProviderMaintenanceRunner.layer));

@@ -1,4 +1,6 @@
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -317,14 +319,22 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
-const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
+export interface CodexAppServerLaunch {
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly launchArgs?: string;
   readonly cwd: string;
-  readonly customModels?: ReadonlyArray<string>;
   readonly environment?: NodeJS.ProcessEnv;
-}) {
+}
+
+/**
+ * Spawn `codex app-server` and complete the initialize handshake. The child
+ * process lives until the caller's scope closes. Used by the status probe and
+ * by sign-in, which keeps the process alive while the login server runs.
+ */
+export const startCodexAppServerClient = Effect.fn("startCodexAppServerClient")(function* (
+  input: CodexAppServerLaunch,
+) {
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
   // so `CODEX_HOME=~/.codex_work` would reach codex verbatim and trip
   // "CODEX_HOME points to '~/.codex_work', but that path does not exist".
@@ -378,6 +388,51 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     },
   });
   yield* client.notify("initialized", undefined);
+  return { client, initialize };
+});
+
+export class CodexSignInError extends Data.TaggedError("CodexSignInError")<{
+  readonly message: string;
+}> {}
+
+/**
+ * Start a ChatGPT browser login through app-server. app-server runs the
+ * local OAuth callback server, so the process must stay alive (in the
+ * caller's scope) until `finished` settles. app-server does not open a
+ * browser; the client opens `authUrl`.
+ */
+export const beginCodexChatGptSignIn = Effect.fn("beginCodexChatGptSignIn")(function* (
+  input: CodexAppServerLaunch,
+) {
+  const { client } = yield* startCodexAppServerClient(input);
+  const completed = yield* Deferred.make<CodexSchema.V2AccountLoginCompletedNotification>();
+  yield* client.handleServerNotification("account/login/completed", (notification) =>
+    Deferred.succeed(completed, notification).pipe(Effect.asVoid),
+  );
+  const response = yield* client.request("account/login/start", { type: "chatgpt" });
+  if (response.type !== "chatgpt") {
+    return yield* new CodexSignInError({ message: "Codex did not start a ChatGPT login." });
+  }
+  return {
+    authUrl: response.authUrl,
+    finished: Deferred.await(completed).pipe(
+      Effect.flatMap((notification) =>
+        notification.success
+          ? Effect.void
+          : Effect.fail(
+              new CodexSignInError({
+                message: notification.error ?? "The ChatGPT login did not finish.",
+              }),
+            ),
+      ),
+    ),
+  };
+});
+
+const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (
+  input: CodexAppServerLaunch & { readonly customModels?: ReadonlyArray<string> },
+) {
+  const { client, initialize } = yield* startCodexAppServerClient(input);
 
   // Extract the version string after the first '/' in userAgent, up to the next space or the end
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);

@@ -27,6 +27,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
+  ServerProviderSignInError,
   type ServerProviderUpdateState,
 } from "@cadsense/contracts";
 import * as Cause from "effect/Cause";
@@ -42,7 +43,11 @@ import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
-import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
+import {
+  ProviderRegistry,
+  type ProviderMaintenanceActionKind,
+  type ProviderRegistryShape,
+} from "../Services/ProviderRegistry.ts";
 import {
   hydrateCachedProvider,
   isCachedProviderCorrelated,
@@ -268,7 +273,10 @@ export const ProviderRegistryLive = Layer.effect(
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
     const maintenanceActionStatesRef = yield* Ref.make<
-      ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
+      ReadonlyMap<
+        ProviderInstanceId,
+        Partial<Record<ProviderMaintenanceActionKind, ServerProviderUpdateState>>
+      >
     >(new Map());
 
     // Live-source registry — the dynamic counterpart to the boot-time
@@ -310,15 +318,16 @@ export const ProviderRegistryLive = Layer.effect(
     const applyProviderUpdateState = Effect.fn("applyProviderUpdateState")(function* (
       provider: ServerProvider,
     ) {
-      const maintenanceActionStates = yield* Ref.get(maintenanceActionStatesRef);
-      const updateState = maintenanceActionStates.get(provider.instanceId)?.update;
-      if (!updateState) {
-        const { updateState: _updateState, ...providerWithoutUpdateState } = provider;
-        return providerWithoutUpdateState;
-      }
+      const actions = (yield* Ref.get(maintenanceActionStatesRef)).get(provider.instanceId);
+      const {
+        updateState: _updateState,
+        installState: _installState,
+        ...providerWithoutActionStates
+      } = provider;
       return {
-        ...provider,
-        updateState,
+        ...providerWithoutActionStates,
+        ...(actions?.update ? { updateState: actions.update } : {}),
+        ...(actions?.install ? { installState: actions.install } : {}),
       };
     });
 
@@ -391,7 +400,7 @@ export const ProviderRegistryLive = Layer.effect(
     const setProviderMaintenanceActionState = Effect.fn("setProviderMaintenanceActionState")(
       function* (input: {
         readonly instanceId: ProviderInstanceId;
-        readonly action: "update";
+        readonly action: ProviderMaintenanceActionKind;
         readonly state: ServerProviderUpdateState | null;
       }) {
         yield* Ref.update(maintenanceActionStatesRef, (previous) => {
@@ -472,6 +481,17 @@ export const ProviderRegistryLive = Layer.effect(
         return yield* Ref.get(providersRef);
       }
       return yield* refreshOneSource(providerSource);
+    });
+
+    const signInInstance = Effect.fn("signInInstance")(function* (instanceId: ProviderInstanceId) {
+      const instance = (yield* Ref.get(liveSubsRef)).get(instanceId);
+      if (instance?.signIn === undefined) {
+        return yield* new ServerProviderSignInError({
+          instanceId,
+          reason: "This provider cannot sign in from Cadsense.",
+        });
+      }
+      return yield* instance.signIn;
     });
 
     const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
@@ -690,6 +710,7 @@ export const ProviderRegistryLive = Layer.effect(
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       getProviderMaintenanceCapabilitiesForInstance,
       setProviderMaintenanceActionState,
+      signInInstance,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

@@ -10,6 +10,8 @@ import type {
   ProviderInstanceId,
   ProviderDriverKind,
   ServerProvider,
+  ServerProviderSignInError,
+  ServerProviderSignInResult,
   ServerProviderUpdateState,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
@@ -17,7 +19,7 @@ import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
-export type ProviderMaintenanceActionKind = "update";
+export type ProviderMaintenanceActionKind = "update" | "install";
 
 export interface ProviderRegistryShape {
   /**
@@ -58,10 +60,17 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ProviderMaintenanceCapabilities>;
 
   /**
+   * Start a browser sign-in for one instance. Fails when the instance is
+   * unknown or its driver cannot sign in from the app.
+   */
+  readonly signInInstance: (
+    instanceId: ProviderInstanceId,
+  ) => Effect.Effect<ServerProviderSignInResult, ServerProviderSignInError>;
+
+  /**
    * Apply volatile maintenance-action state to one configured instance.
-   * This state is never persisted to disk. Today only update actions are
-   * projected onto `ServerProvider.updateState`; install/auth actions can
-   * extend this action map without adding driver-scoped APIs.
+   * This state is never persisted to disk. Update actions are projected onto
+   * `ServerProvider.updateState` and install actions onto `installState`.
    */
   readonly setProviderMaintenanceActionState: (input: {
     readonly instanceId: ProviderInstanceId;

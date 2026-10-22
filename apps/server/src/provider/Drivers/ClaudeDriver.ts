@@ -30,6 +30,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeClaudeAdapter } from "../Layers/ClaudeAdapter.ts";
 import {
+  beginClaudeSignIn,
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
@@ -43,6 +44,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
+import { makeProviderSignIn } from "../providerSignIn.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -228,9 +230,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ),
       );
 
+      const signIn = yield* makeProviderSignIn({
+        instanceId,
+        providerLabel: "Claude",
+        begin: beginClaudeSignIn(effectiveConfig, processEnv).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Path.Path, path),
+        ),
+        // The capabilities probe carries auth metadata and is cached; drop it
+        // so the refresh sees the new login.
+        refresh: Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
+          Effect.andThen(snapshot.refresh),
+        ),
+      });
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
+        signIn,
         continuationIdentity: {
           ...fallbackContinuationIdentity,
           continuationKey: continuationGroupKey,
