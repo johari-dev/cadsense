@@ -450,9 +450,11 @@ try {
     await page.getByRole("button", { name: "Local CAD file" }).click();
     await page.getByLabel("Folder").fill(folder);
     await page.getByRole("button", { name: "Scan" }).click();
-    await page.getByText(file, { exact: true }).click({ timeout: 60_000 });
+    // The sidebar names each project's file too, so the file is picked inside the dialog.
+    const dialog = page.getByRole("dialog", { name: "Add project" });
+    await dialog.getByText(file, { exact: true }).click({ timeout: 60_000 });
     await page.getByRole("button", { name: "Create project" }).click();
-    await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
+    await dialog.waitFor({ state: "detached" });
     await startThread(page);
   };
   const rendered = async (page: Page, folder: string) => {
@@ -546,14 +548,25 @@ try {
       await addProject(page, assembly.folder, assembly.file);
       return rendered(page, assembly.folder);
     });
-    await run("solidworks-assembly-unchanged-sync", async () => {
+    await run("solidworks-assembly-unchanged-sync", async (page) => {
       const before = { outcome: lastOutcome(assembly.folder), conversions: conversions() };
-      await syncButton.click();
-      const outcome = await settled(assembly.folder, before.outcome?.operationId);
+      // A sync waits for the project's agents to stop, and the chat's first turn can still be
+      // finishing in the background (its title, or a provider retrying a failed request). Like a
+      // user, Sync again until it runs, for up to two minutes.
+      let outcome = before.outcome;
+      const attempts: string[] = [];
+      for (const deadline = Date.now() + 2 * 60_000; ; ) {
+        await syncButton.click();
+        outcome = await settled(assembly.folder, outcome?.operationId);
+        attempts.push(`${new Date().toISOString()} ${outcome.status}`);
+        if (outcome.status === "succeeded" || Date.now() > deadline) break;
+        if (!outcome.reason?.startsWith("Native agent shutdown could not be confirmed")) break;
+        await page.waitForTimeout(10_000);
+      }
       if (outcome.status !== "succeeded") throw new Error(`Sync failed: ${outcome.reason}`);
       if (conversions() !== before.conversions)
         throw new Error("The unchanged sync converted again");
-      return { before, outcome, conversions: conversions() };
+      return { before, outcome, attempts, conversions: conversions() };
     });
 
     const large = values["solidworks-large"];
