@@ -1,6 +1,7 @@
 import type { Project, ThreadShell } from "../types";
 import {
   isCadThreadRunActive,
+  isSolidWorksFile,
   type CadPanelState,
   type CadProjectState,
   type ThreadId,
@@ -58,13 +59,13 @@ export function cadPanelLockStatus({
   blocker,
   panel,
   operation,
-  localCad = false,
+  localCadFile = null,
 }: {
   blocker: CadThreadRunBlocker | null;
   panel: Pick<CadPanelState, "agentControlling" | "agentActivityTurnId" | "captureId"> | null;
   operation: NonNullable<CadProjectState["operation"]>["kind"] | null;
-  /** The project imports a local CAD file instead of syncing from Onshape. */
-  localCad?: boolean;
+  /** The local CAD file the project imports, or null when it syncs from Onshape. */
+  localCadFile?: string | null;
 }): CadPanelLockStatus | null {
   if (blocker || panel?.agentControlling) {
     const thread = blocker?.thread;
@@ -96,11 +97,13 @@ export function cadPanelLockStatus({
       message:
         operation === "cleanup"
           ? "Cleaning up CAD files."
-          : !localCad
+          : localCadFile === null
             ? "Updating CAD from Onshape."
             : operation === "discover"
               ? "Scanning the project folder."
-              : "Importing the CAD file.",
+              : isSolidWorksFile(localCadFile)
+                ? "Converting the SolidWorks file with SolidWorks."
+                : "Importing the CAD file.",
       agent: false,
     };
   return null;

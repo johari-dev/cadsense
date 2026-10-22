@@ -36,7 +36,39 @@ export type LocalCadFormat = "step" | "iges";
 
 export class LocalCadImportError extends Schema.TaggedErrorClass<LocalCadImportError>()(
   "LocalCadImportError",
-  { reason: Schema.Literals(["too-large", "unreadable", "no-geometry"]) },
+  {
+    reason: Schema.Literals([
+      "too-large",
+      "unreadable",
+      "no-geometry",
+      // SolidWorks files, which open in the local SolidWorks. See LocalCad.md.
+      "no-file-list",
+      "missing-files",
+      "solidworks-unavailable",
+      "solidworks-file-open",
+      "solidworks-failed",
+      "solidworks-timeout",
+      "solidworks-no-configuration",
+    ]),
+    /**
+     * File names: those an assembly uses that are not in the folder (`missing-files`), or those
+     * already open in SolidWorks (`solidworks-file-open`).
+     */
+    missing: Schema.optionalKey(Schema.Array(Schema.String)),
+    /** What SolidWorks reported, for `solidworks-failed`. */
+    detail: Schema.optionalKey(Schema.String),
+    /**
+     * For `solidworks-no-configuration`: the file, the configuration asked for, and the
+     * configurations the file has.
+     */
+    configuration: Schema.optionalKey(
+      Schema.Struct({
+        file: Schema.String,
+        requested: Schema.String,
+        available: Schema.Array(Schema.String),
+      }),
+    ),
+  },
 ) {}
 
 /**
@@ -50,6 +82,13 @@ const TESSELLATION_PARAMS = {
   angularDeflection: 0.1,
 } as const;
 export const LOCAL_CAD_TESSELLATION_PROFILE = "occt-import-js-0.0.23-chord-0.0005-angle-0.1";
+/**
+ * A SolidWorks import's profile: the tessellation, and the version of what the bridge reads from
+ * SolidWorks. A snapshot with another profile is converted again in full, so bump the version when
+ * the bridge reads something new. Root IDs leave the profile out, so roots and comments carry on.
+ * Version 1 added part materials and masses.
+ */
+export const SOLIDWORKS_IMPORT_PROFILE = `${LOCAL_CAD_TESSELLATION_PROFILE}-solidworks-1`;
 
 // Resolved here, not in the worker, so a bundled server still finds the external package on disk.
 const OCCT_ENTRY = NodeModule.createRequire(import.meta.url).resolve("occt-import-js");

@@ -16,6 +16,7 @@ import { ServerConfig } from "../config.ts";
 import { localCadElementId } from "../localCad/LocalCadFiles.ts";
 import * as LocalCadImport from "../localCad/LocalCadImport.ts";
 import { layer as localCadProjectsLayer } from "../localCad/LocalCadProjects.ts";
+import * as SolidWorksBridge from "../localCad/SolidWorksBridge.ts";
 import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
 import { OnshapeProjects } from "../onshape/OnshapeProjects.ts";
@@ -132,6 +133,10 @@ const gatedImport = Layer.effect(
 const layer = Layer.mergeAll(localCadProjectsLayer, CadViewing.layer, CadRenderBroker.layer).pipe(
   Layer.provideMerge(cadUserOperationsLayer),
   Layer.provideMerge(gatedImport),
+  // These tests open STEP files only, so no SolidWorks is found.
+  Layer.provideMerge(
+    Layer.effect(SolidWorksBridge.SolidWorks, SolidWorksBridge.make({ host: null })),
+  ),
   Layer.provideMerge(store),
   Layer.provideMerge(onshape),
   Layer.provideMerge(WorkspacePaths.layer),

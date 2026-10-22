@@ -4,6 +4,7 @@ import {
   LocalCadError,
   OnshapeConnectionError,
   CommandId,
+  isSolidWorksFile,
   type CadRootIdentity,
   type CadUserStartInput,
   type ProjectId,
@@ -67,6 +68,8 @@ const isCadGeometryError = Schema.is(CadGeometryError);
 const isOnshapeExportError = Schema.is(OnshapeExportError);
 const isLocalCadError = Schema.is(LocalCadError);
 const isLocalCadImportError = Schema.is(LocalCadImportError);
+/** `CadOperationOutcome.reason`'s maximum length. */
+const MAX_OUTCOME_REASON_LENGTH = 256;
 const failureReason = (error: unknown, source: "onshape" | "local"): string => {
   let detail = "CAD operation failed.";
   if (isLocalCadError(error)) {
@@ -94,6 +97,43 @@ const failureReason = (error: unknown, source: "onshape" | "local"): string => {
       case "no-geometry":
         detail = "This CAD file has no solid geometry to show.";
         break;
+      case "no-file-list":
+        detail =
+          "Could not read which parts this assembly uses. Save it in SolidWorks 2015 or later.";
+        break;
+      case "missing-files": {
+        const missing = error.missing ?? [];
+        const named = missing.slice(0, 5).join(", ");
+        detail = `This assembly uses files that are not in the project folder: ${named}${
+          missing.length > 5 ? `, and ${missing.length - 5} more` : ""
+        }. Add them, then Sync.`;
+        break;
+      }
+      case "solidworks-unavailable":
+        detail =
+          "Opening SolidWorks files needs SolidWorks installed on this computer. Install it, or save a STEP copy from SolidWorks and pick that.";
+        break;
+      case "solidworks-file-open":
+        detail = `Close ${(error.missing ?? []).slice(0, 5).join(", ")} in SolidWorks, then Sync. SolidWorks cannot open two files with the same name.`;
+        break;
+      case "solidworks-failed":
+        detail = `SolidWorks could not convert this file.${error.detail ? ` ${error.detail}` : ""}`;
+        break;
+      case "solidworks-timeout":
+        detail = "SolidWorks took more than 30 minutes to convert this file.";
+        break;
+      case "solidworks-no-configuration": {
+        const asked = error.configuration;
+        const available = asked?.available ?? [];
+        detail = `${asked?.file ?? "This file"} has no configuration named "${asked?.requested ?? ""}".${
+          available.length > 0
+            ? ` Its configurations are ${available.slice(0, 5).join(", ")}${
+                available.length > 5 ? `, and ${available.length - 5} more` : ""
+              }.`
+            : ""
+        }`;
+        break;
+      }
     }
   } else if (isCadGeometryError(error) && error.reason === "too-large")
     detail = "This CAD exceeds the supported scene size. Choose a smaller assembly or part studio.";
@@ -146,7 +186,10 @@ const failureReason = (error: unknown, source: "onshape" | "local"): string => {
     }
   } else if (isCadUserOperationError(error) && error.reason === "busy")
     detail = "Native agent shutdown could not be confirmed. Stop active runs before trying again.";
-  return `${detail} Existing ${source === "local" ? "imported" : "downloaded"} CAD is unchanged.`;
+  const suffix = ` Existing ${source === "local" ? "imported" : "downloaded"} CAD is unchanged.`;
+  // The outcome schema caps reasons, and a reason that does not fit cannot be recorded at all.
+  const room = MAX_OUTCOME_REASON_LENGTH - suffix.length;
+  return `${detail.length > room ? `${detail.slice(0, room - 1).trimEnd()}…` : detail}${suffix}`;
 };
 
 /** Only user RPC handlers receive this service. Accepted jobs outlive route and socket changes. */
@@ -200,12 +243,18 @@ export const make = Effect.gen(function* () {
             ? source.filePath
             : (project.cad?.catalog?.roots.find((entry) => entry.elementId === selected.elementId)
                 ?.name ?? null);
-        if (localFilePath === null || selected.kind !== "assembly")
+        // Each SolidWorks configuration is a root of its own. STEP and IGES have only "default".
+        const configuration = selected.configuration || "default";
+        if (
+          localFilePath === null ||
+          selected.kind !== "assembly" ||
+          (configuration !== "default" && !isSolidWorksFile(localFilePath))
+        )
           return yield* new CadUserOperationError({ reason: "invalid-root" });
         root = {
           ...selected,
-          configuration: "default",
-          rootId: snapshotRootId(localCadRootIdentity(project.id, localFilePath)),
+          configuration,
+          rootId: snapshotRootId(localCadRootIdentity(project.id, localFilePath, configuration)),
         };
       } else {
         const available =
@@ -279,6 +328,7 @@ export const make = Effect.gen(function* () {
                     projectId: input.projectId,
                     workspaceRoot: project.workspaceRoot,
                     filePath: localFilePath ?? source.filePath,
+                    configuration: root?.configuration ?? "default",
                   });
             // A rescan is free, so local syncs keep the file list current. Its failure is not the
             // sync's failure.
@@ -330,6 +380,11 @@ export const make = Effect.gen(function* () {
               const error = Exit.isFailure(exit)
                 ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
                 : undefined;
+              // The outcome's reason is written for people; the log keeps the cause.
+              if (Exit.isFailure(exit) && !cancelled)
+                yield* Effect.logWarning("CAD operation failed", {
+                  cause: Cause.pretty(exit.cause),
+                });
               const retryAfter =
                 isOnshapeConnectionError(error) && "retryAfterSeconds" in error
                   ? error.retryAfterSeconds

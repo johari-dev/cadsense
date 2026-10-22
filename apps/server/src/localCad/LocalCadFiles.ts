@@ -37,31 +37,66 @@ export const localCadElementId = (filePath: string) =>
 /** A file revision: a hash of its bytes, so an unchanged file keeps its comment revision. */
 export const localCadMicroversionId = (bytes: Uint8Array) => OnshapeWorkspaceId.make(id24(bytes));
 
-/** The identity fields `snapshotRootId` hashes, for one file in one project. See LocalCad.md. */
-export const localCadRootIdentity = (projectId: ProjectId, filePath: string) => {
+/**
+ * The revision of an assembly and the files it uses: a hash over each path and its bytes, so a
+ * change to any of them is a new revision. A single file hashes like `localCadMicroversionId`.
+ */
+export const localCadFilesMicroversionId = (
+  files: readonly { readonly path: string; readonly bytes: Uint8Array }[],
+) =>
+  files.length === 1
+    ? localCadMicroversionId(files[0]!.bytes)
+    : OnshapeWorkspaceId.make(
+        id24(
+          files
+            .map(
+              (file) =>
+                `${file.path}\0${NodeCrypto.createHash("sha256").update(file.bytes).digest("hex")}`,
+            )
+            .sort()
+            .join("\n"),
+        ),
+      );
+
+/**
+ * The identity fields `snapshotRootId` hashes, for one file in one configuration of one project.
+ * "default" is the configuration the file was saved in, and the only one STEP and IGES files
+ * have, so their root IDs are the ones local files had before SolidWorks configurations. See
+ * LocalCad.md.
+ */
+export const localCadRootIdentity = (
+  projectId: ProjectId,
+  filePath: string,
+  configuration: string,
+) => {
   const documentId = id24(`local-cad-project:${projectId}`);
   return {
     host: LOCAL_CAD_HOST,
     documentId: OnshapeDocumentId.make(documentId),
     originalRevision: { kind: "w", id: OnshapeWorkspaceId.make(documentId) },
     elementId: localCadElementId(filePath),
-    configuration: "default",
+    configuration,
   } satisfies Pick<
     CadSnapshotRoot,
     "host" | "documentId" | "originalRevision" | "elementId" | "configuration"
   >;
 };
 
-export const localCadFormat = (filePath: string): LocalCadFormat | null => {
+/** What a local file imports as. SolidWorks files convert with the local SolidWorks first. */
+export type LocalCadFileFormat = LocalCadFormat | "sldprt" | "sldasm";
+
+export const localCadFormat = (filePath: string): LocalCadFileFormat | null => {
   const lower = filePath.toLowerCase();
   if (!LOCAL_CAD_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension))) return null;
+  if (lower.endsWith(".sldprt")) return "sldprt";
+  if (lower.endsWith(".sldasm")) return "sldasm";
   return lower.endsWith(".iges") || lower.endsWith(".igs") ? "iges" : "step";
 };
 
 /**
  * Resolves a CAD file chosen inside a project folder, given workspace-relative or absolute (a
  * native file picker's result). Rejects paths that leave the folder, including through symlinks,
- * files that are not STEP or IGES, and files that do not exist.
+ * files that are not STEP, IGES, or SolidWorks, and files that do not exist.
  */
 export const resolveLocalCadFile = Effect.fn("resolveLocalCadFile")(function* (input: {
   readonly workspaceRoot: string;
@@ -110,7 +145,7 @@ export const resolveLocalCadFile = Effect.fn("resolveLocalCadFile")(function* (i
 });
 
 /**
- * Lists STEP and IGES files under a folder, breadth first and sorted by path. Skips hidden
+ * Lists STEP, IGES, and SolidWorks files under a folder, breadth first and sorted by path. Skips hidden
  * directories, node_modules, and symlinks, and stops at fixed depth, entry, and file limits.
  */
 export const scanLocalCadFiles = Effect.fn("scanLocalCadFiles")(function* (workspaceRoot: string) {

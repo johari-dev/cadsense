@@ -80,6 +80,7 @@ import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
 import * as LocalCadImport from "./localCad/LocalCadImport.ts";
 import * as LocalCadProjects from "./localCad/LocalCadProjects.ts";
+import * as SolidWorksBridge from "./localCad/SolidWorksBridge.ts";
 import * as CadStorage from "./cad/CadStorage.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
 import * as CadRenderLifecycle from "./cad/CadRenderLifecycle.ts";
@@ -261,7 +262,10 @@ const CadSnapshotStoreLayerLive = CadSnapshotStore.layer.pipe(Layer.provide(Pers
 
 const CadAcquisitionLayerLive = Layer.mergeAll(
   OnshapeSnapshotAcquisition.layer,
-  LocalCadImport.layer.pipe(Layer.provide(WorkspacePaths.layer)),
+  LocalCadImport.layer.pipe(
+    Layer.provide(WorkspacePaths.layer),
+    Layer.provide(SolidWorksBridge.layer),
+  ),
 ).pipe(Layer.provideMerge(CadSnapshotStoreLayerLive), Layer.provideMerge(OnshapeCadRoots.layer));
 const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadViewing.layer),

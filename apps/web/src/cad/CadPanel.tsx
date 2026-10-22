@@ -1,6 +1,7 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   CadSnapshotManifest,
+  isSolidWorksFile,
   type CadComment,
   type CadViewState,
   type ScopedThreadRef,
@@ -494,7 +495,7 @@ export function CadPanel({
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
-    localCad: project.localCadSource !== undefined,
+    localCadFile: project.localCadSource?.filePath ?? null,
   });
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;
@@ -622,7 +623,8 @@ export function CadPanel({
         openFile={
           shownFile
             ? {
-                action: "Open file",
+                // Its default app is SolidWorks wherever Cadsense can convert the file.
+                action: isSolidWorksFile(shownFile) ? "Open in SolidWorks" : "Open file",
                 onOpen: () =>
                   void openPath(
                     project.environmentId,
