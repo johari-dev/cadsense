@@ -206,4 +206,23 @@ it.layer(NodeServices.layer)("User-only CAD operations", (it) => {
         assert.deepEqual(yield* Ref.get(h.calls), ["reserve-space", "quiesce"]);
       }),
   );
+  // The work runs on a forked fiber that has not taken a step when start returns. A cancel in that
+  // window must still end the operation, or the project stays busy until the server restarts.
+  it.effect("cancelling before the operation's work starts still ends it as cancelled", () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const started = yield* h.service.start({ projectId, kind: "discover" });
+      yield* h.service.cancel(projectId, started.operationId);
+      // Cancel returns once the work has exited, so its outcome is already recorded.
+      assert.isTrue(yield* Deferred.isDone(h.settled));
+      const result = yield* Deferred.await(h.settled);
+      assert.equal(result.type, "project.cad.operation.end");
+      assert.equal("status" in result && result.status, "cancelled");
+      assert.deepEqual(yield* Ref.get(h.calls), []);
+      assert.deepEqual(
+        yield* h.service.cancel(projectId, started.operationId).pipe(Effect.flip),
+        new CadUserOperationError({ reason: "unavailable" }),
+      );
+    }),
+  );
 });
