@@ -23,6 +23,7 @@ import {
   RuntimeTaskId,
   type RuntimeTaskUsage,
   ProviderApprovalDecision,
+  type ProviderApprovalOption,
   ThreadId,
   ProviderSendTurnInput,
 } from "@cadsense/contracts";
@@ -822,6 +823,26 @@ function mapToRuntimeEvents(
         ? readPayload(EffectCodexSchema.McpServerElicitationRequestParams, event.payload)
         : undefined;
     const elicitationApproval = elicitation ? describeMcpElicitation(elicitation) : undefined;
+    // Codex remembers an "acceptForSession" approval for that exact command, or
+    // those files, only (its own prompt says "don't ask again for this command
+    // in this session"), so the button says that instead of the default
+    // "Always allow this session".
+    const sessionLabel =
+      event.method === "item/commandExecution/requestApproval"
+        ? "Allow command this session"
+        : event.method === "item/fileChange/requestApproval"
+          ? "Allow these files this session"
+          : undefined;
+    const options =
+      elicitationApproval?.options ??
+      (sessionLabel
+        ? ([
+            { decision: "cancel", label: "Cancel" },
+            { decision: "decline", label: "Decline" },
+            { decision: "acceptForSession", label: sessionLabel },
+            { decision: "accept", label: "Approve" },
+          ] satisfies ReadonlyArray<ProviderApprovalOption>)
+        : undefined);
     const detail = (() => {
       switch (event.method) {
         case "item/commandExecution/requestApproval": {
@@ -873,12 +894,8 @@ function mapToRuntimeEvents(
         payload: {
           requestType: toRequestTypeFromMethod(event.method),
           ...(detail ? { detail } : {}),
-          ...(elicitationApproval
-            ? {
-                appName: elicitationApproval.appName,
-                options: elicitationApproval.options,
-              }
-            : {}),
+          ...(elicitationApproval ? { appName: elicitationApproval.appName } : {}),
+          ...(options ? { options } : {}),
           ...(event.payload !== undefined ? { args: event.payload } : {}),
         },
       },
