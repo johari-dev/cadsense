@@ -523,12 +523,16 @@ $interop = Join-Path (Split-Path -Parent $exe) "api\\redist\\SolidWorks.Interop.
 if (-not (Test-Path -LiteralPath $interop)) { Fail "not-installed" "The SolidWorks API is not installed." }
 try {
   Add-Type -Path $interop
-  # Compiled once per bridge version and SolidWorks install, then reused.
+  # Compiled once per bridge version and SolidWorks install, then reused. Each process compiles to
+  # its own file and moves it into place, so servers compiling at once never write the same file.
+  # A move that loses to another server's leaves that server's copy, which is the same bridge.
   $dll = Join-Path $PSScriptRoot ("bridge-${scriptHash}-" + (Get-Item -LiteralPath $interop).LastWriteTimeUtc.Ticks + ".dll")
   if (-not (Test-Path -LiteralPath $dll)) {
-    Add-Type -ReferencedAssemblies $interop, "System.Web.Extensions" -OutputAssembly $dll -OutputType Library -TypeDefinition @'
+    $compiled = "$dll.$PID.tmp"
+    Add-Type -ReferencedAssemblies $interop, "System.Web.Extensions" -OutputAssembly $compiled -OutputType Library -TypeDefinition @'
 ${BRIDGE_SOURCE}
 '@
+    try { [IO.File]::Move($compiled, $dll) } catch { Remove-Item -LiteralPath $compiled -ErrorAction SilentlyContinue }
   }
   Add-Type -Path $dll
   [CadsenseSolidWorks.Bridge]::Run($Job)
