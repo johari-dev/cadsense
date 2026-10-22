@@ -42,6 +42,9 @@ import { CadFilePrompt } from "./CadFilePrompt";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
+import { useOpenInFileManager } from "../components/chat/OpenInExplorerButton";
+import { toastManager } from "../components/ui/toast";
+import { resolvePathLinkTarget } from "../path-links";
 import "./CadPanel.css";
 import {
   EMPTY_CAD_PANEL_REVIEW,
@@ -435,6 +438,7 @@ export function CadPanel({
     ? commentState.value.captureViews
     : EMPTY_CAPTURE_VIEWS;
   const renderer = useRef<CadSceneRenderer | null>(null);
+  const openPath = useOpenInFileManager();
   const reviewKey = scopedThreadKey(threadRef);
   const { commentsOpen, selection, historicalView, savedCurrent, localFraming, localView } =
     useCadCommentReviewStore((state) => state.sessions[reviewKey] ?? EMPTY_CAD_PANEL_REVIEW);
@@ -604,11 +608,37 @@ export function CadPanel({
     }));
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
+  const shownRootId = view?.rootId ?? data?.unavailableRootId ?? null;
+  const shownElementId = project.cad?.roots.find((root) => root.rootId === shownRootId)?.elementId;
+  // A local CAD project's catalog names each root by its file's path in the project folder.
+  const shownFile = project.localCadSource
+    ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
+    : undefined;
   // The header row: the scene picker and, for a local CAD file, its Sync button.
   const scenePicker = !compact && (
     <>
       <CadScenePicker
         documentUrl={project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined}
+        openFile={
+          shownFile
+            ? {
+                action: "Open file",
+                onOpen: () =>
+                  void openPath(
+                    project.environmentId,
+                    resolvePathLinkTarget(shownFile, project.workspaceRoot),
+                    false,
+                  ).then((opened) => {
+                    if (!opened)
+                      toastManager.add({
+                        type: "error",
+                        title: `Could not open ${shownFile}`,
+                        description: "Check that the file is still in the project folder.",
+                      });
+                  }),
+              }
+            : undefined
+        }
         scenes={roots.map((root) => {
           const name =
             project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
@@ -622,7 +652,7 @@ export function CadPanel({
               : name,
           };
         })}
-        selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
+        selectedId={shownRootId}
         disabled={locked || !!historicalView}
         onSelect={(id) => {
           const root = roots.find((root) => root.rootId === id);
@@ -640,7 +670,7 @@ export function CadPanel({
       />
       <CadLocalSyncButton
         project={project}
-        rootId={view?.rootId ?? data?.unavailableRootId ?? null}
+        rootId={shownRootId}
         disabled={!!runBlocker || !!data?.agentControlling || !!historicalView}
       />
     </>
