@@ -103,6 +103,17 @@ const browser = await chromium.launch({
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// The panel heading opens the shown CAD file with its default app, which the server would launch
+// on this machine. So the app's request for it is kept here and never reaches the server.
+const openRequests: string[] = [];
+await page.routeWebSocket(/./, (ws) => {
+  const server = ws.connectToServer();
+  ws.onMessage((message) => {
+    if (typeof message === "string" && message.includes('"shell.openInFileManager"'))
+      openRequests.push(message);
+    else server.send(message);
+  });
+});
 const pageErrors: string[] = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
 let shots = 0;
@@ -121,9 +132,10 @@ const run = async (name: string, action: (page: Page) => Promise<unknown>) => {
 };
 const panel = page.getByRole("region", { name: "CAD panel" });
 // The model's name and its Sync button sit in the right panel's header, outside the CAD panel.
-// A local file is the only model, so its name is a heading rather than a scene picker.
+// A local file is the only model, so its name is a heading rather than a scene picker, and the
+// heading is a button that opens the file.
 const syncButton = page.getByRole("button", { name: "Sync", exact: true });
-const sceneTitle = syncButton.locator("xpath=ancestor::div[.//h2][1]//h2");
+const sceneTitle = page.getByRole("button", { name: stepName, exact: true });
 // The right panel opens on the CAD view. Opens it unless it is already open.
 const openRightPanel = async (page: Page) => {
   const toggle = page.getByRole("button", { name: /^Toggle right panel/ });
@@ -255,6 +267,15 @@ try {
     await page.waitForTimeout(5000);
     threadUrl = page.url();
     return { title: (await sceneTitle.innerText()).trim(), components: componentCount() };
+  });
+  // Like the Onshape link, the heading opens the CAD file it names, here with its default app.
+  await run("open-file", async (page) => {
+    await sceneTitle.click();
+    const request = await waitFor("the request to open the file", () => openRequests[0]);
+    const { payload } = JSON.parse(request) as { payload: { cwd: string; reveal?: boolean } };
+    if (payload.cwd !== NodePath.join(folder, stepName) || payload.reveal !== false)
+      throw new Error(`Asked to open ${request}`);
+    return { payload };
   });
   await run("re-exported-and-synced", async (page) => {
     // A new export of the same model: different bytes, same structure.
