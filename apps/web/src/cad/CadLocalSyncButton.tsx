@@ -8,9 +8,9 @@ import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
 
 /**
- * Re-imports the local CAD file shown in the panel after it was re-exported, or the project's
- * default file when nothing has imported yet. A SolidWorks file converts with SolidWorks again, so
- * the label and tooltip say so. Renders nothing for Onshape projects.
+ * Re-imports the local CAD file shown in the panel after it was re-exported, in the configuration
+ * shown, or the project's default file when nothing has imported yet. A SolidWorks file converts
+ * with SolidWorks again, so the label and tooltip say so. Renders nothing for Onshape projects.
  */
 export function CadLocalSyncButton({
   project,
@@ -46,7 +46,11 @@ export function CadLocalSyncButton({
                 input: {
                   projectId: project.id,
                   kind: "sync",
-                  root: { elementId, kind: "assembly", configuration: "default" },
+                  root: {
+                    elementId,
+                    kind: "assembly",
+                    configuration: root?.configuration ?? "default",
+                  },
                 },
               })
             }

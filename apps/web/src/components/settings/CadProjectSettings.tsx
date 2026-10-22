@@ -122,6 +122,11 @@ export function CadProjectSettings({
   const locked =
     runActive || pending || !!operation || project.onshapeSource?.managedWorkspaceReady === false;
   const selected = cad?.catalog?.roots.find((root) => root.elementId === elementId);
+  // Onshape roots and SolidWorks files have configurations. STEP and IGES files do not.
+  const configurable = !local || (selected !== undefined && isSolidWorksFile(selected.name));
+  /** The catalog's name for a root: the workspace-relative path, for a local file. */
+  const rootName = (rootElementId: string) =>
+    cad?.catalog?.roots.find((root) => root.elementId === rootElementId)?.name;
   const remoteLocked = locked || !enabled || throttled;
   const perform = async (action: () => Promise<AtomCommandResult<unknown, unknown>>) => {
     if (pendingRef.current) return;
@@ -246,9 +251,9 @@ export function CadProjectSettings({
             </p>
             <div
               className={
-                local
-                  ? "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
-                  : "grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                configurable
+                  ? "grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                  : "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
               }
             >
               <div className="space-y-1.5">
@@ -272,7 +277,7 @@ export function CadProjectSettings({
                   </SelectPopup>
                 </Select>
               </div>
-              {local ? null : (
+              {configurable ? (
                 <label className="space-y-1.5 text-sm font-medium">
                   Configuration
                   <Input
@@ -283,7 +288,7 @@ export function CadProjectSettings({
                     placeholder="default"
                   />
                 </label>
-              )}
+              ) : null}
               <Button
                 disabled={remoteLocked || !selected}
                 onClick={() => {
@@ -291,7 +296,7 @@ export function CadProjectSettings({
                     sync({
                       elementId: selected.elementId,
                       kind: selected.kind,
-                      configuration: configuration || "default",
+                      configuration: configurable ? configuration || "default" : "default",
                     });
                 }}
               >
@@ -312,17 +317,20 @@ export function CadProjectSettings({
           >
             <div className="min-w-0 space-y-1">
               <p className="break-words text-sm font-medium">
-                {cad.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
+                {rootName(root.elementId) ??
                   (root.kind === "assembly" ? "Assembly" : "Part Studio")}
-                {local && cad.catalog?.sourceElement?.elementId === root.elementId ? (
+                {/* The linked file, in the configuration the project imports it in. */}
+                {local &&
+                cad.catalog?.sourceElement?.elementId === root.elementId &&
+                root.configuration === "default" ? (
                   <span className="ml-2 text-xs font-normal text-muted-foreground">Default</span>
                 ) : null}
               </p>
-              {local ? null : (
+              {!local || isSolidWorksFile(rootName(root.elementId) ?? "") ? (
                 <p className="break-all text-xs text-muted-foreground">
                   Configuration: {root.configuration}
                 </p>
-              )}
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 {root.current
                   ? `${copy.synced} ${timestamp(root.current.createdAt)} · ${size(root.current.assetBytes + root.current.manifestBytes)}`

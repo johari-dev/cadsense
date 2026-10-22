@@ -17,7 +17,9 @@ const invalid = () => new CadViewError({ reason: "invalid-operation" });
  * The root a thread opens when it has no saved view: the project's linked Onshape element or
  * chosen local CAD file, else its only root. The panel and agent tools share this so an agent
  * always sees what the user sees. An Onshape link without a configuration stores "", which syncs
- * as Onshape's "default".
+ * as Onshape's "default". A local file links in "default", the configuration it was saved in, as
+ * the project imports it. Its other SolidWorks configurations are roots of their own, chosen in
+ * the panel.
  */
 export const defaultCadRoot = <
   R extends { readonly elementId: string; readonly configuration: string },

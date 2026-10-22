@@ -155,7 +155,9 @@ const noSolidWorksLayer = withSolidWorks(
  * same arguments and job folder and writes the same result, a dm1 export for any file. A file
  * named `Hold...` waits for `control/release` and ignores cancel. Like the real bridge, it attaches
  * to a running SolidWorks or starts one that Cadsense then owns (its pid is in `control/solidworks`),
- * and quit mode stops that one. Every run appends to `control/log`.
+ * and quit mode stops that one. Every run appends to `control/log`, and every conversion request to
+ * `control/requests`. Each file has the configurations Default (active) and Large, and one part of
+ * Alloy Steel weighing 0.25 kg, keyed by name and configuration and left out when skipped.
  */
 const SCRIPTED_BRIDGE = `
 const fs = require("node:fs");
@@ -176,6 +178,7 @@ if (request.mode === "quit") {
   process.exit(0);
 }
 const name = path.basename(request.file.split("\\\\").join("/"));
+fs.appendFileSync(path.join(control, "requests"), JSON.stringify(request) + "\\n");
 log("start " + name + " owned=" + request.ownedPid);
 let pid = running();
 let owned = pid !== 0 && pid === request.ownedPid;
@@ -195,21 +198,29 @@ if (name.startsWith("Hold"))
     Atomics.wait(pause, 0, 0, 50);
 // The suite removed its folder while this bridge waited (a test failed): leave nothing behind.
 if (!fs.existsSync(control)) process.exit(0);
-const key = crypto.createHash("sha256").update(name).digest("hex");
+const configurations = ["Default", "Large"];
+const configuration =
+  (request.configuration ?? "default") === "default" ? "Default" : request.configuration;
+const write = (result) =>
+  fs.writeFileSync(path.join(job, "result.json"), JSON.stringify({ pid, owned, ...result }));
+if (!configurations.includes(configuration)) {
+  write({ ok: false, reason: "no-configuration", detail: configuration, names: configurations });
+  log("exit " + name);
+  process.exit(0);
+}
+const key = crypto.createHash("sha256").update(name + "|" + configuration).digest("hex");
+const skipped = request.skip.includes(key);
 fs.mkdirSync(path.join(job, "out"), { recursive: true });
-fs.copyFileSync(${JSON.stringify(FIXTURE)}, path.join(job, "out", "0.step"));
-const root = { name, kind: "part", configuration: "Default", suppressed: false, visible: true };
-fs.writeFileSync(
-  path.join(job, "result.json"),
-  JSON.stringify({
-    ok: true,
-    pid,
-    owned,
-    warnings: [],
-    root: { ...root, transform: null, key, children: [] },
-    parts: { [key]: { name, step: "out\\\\0.step" } },
-  }),
-);
+if (!skipped) fs.copyFileSync(${JSON.stringify(FIXTURE)}, path.join(job, "out", "0.step"));
+const root = { name, kind: "part", configuration, suppressed: false, visible: true };
+write({
+  ok: true,
+  warnings: [],
+  root: { ...root, transform: null, key, children: [] },
+  parts: skipped
+    ? {}
+    : { [key]: { name, step: "out\\\\0.step", material: "Alloy Steel", massKg: 0.25 } },
+});
 log("exit " + name);
 `;
 /** The scripted bridge's folder: its job folders and `control`. Set when the suite's layer builds. */
@@ -260,6 +271,18 @@ const scriptedLog = () => {
 };
 const scriptedJobs = () =>
   NodeFS.readdirSync(scriptedRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
+const decodeScriptedRequest = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ configuration: Schema.String, skip: Schema.Array(Schema.String) }),
+  ),
+);
+/** The conversion requests the scripted bridge received, oldest first. */
+const scriptedRequests = () => {
+  const file = NodePath.join(scriptedRoot, "control/requests");
+  return NodeFS.existsSync(file)
+    ? NodeFS.readFileSync(file, "utf8").trim().split("\n").map((line) => decodeScriptedRequest(line))
+    : [];
+};
 /** Waits up to 20 seconds for the scripted bridge to log `line`. */
 const scriptedLogged = Effect.fn(function* (line: string) {
   for (let attempt = 0; !scriptedLog().includes(line); attempt++) {
@@ -407,6 +430,63 @@ const makeFolder = Effect.fn(function* () {
   return root;
 });
 
+const decodeGltf = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      accessors: Schema.Array(
+        Schema.Struct({ bufferView: Schema.Number, count: Schema.Number, type: Schema.String }),
+      ),
+      bufferViews: Schema.Array(Schema.Struct({ byteOffset: Schema.Number })),
+      meshes: Schema.Array(
+        Schema.Struct({
+          primitives: Schema.Array(
+            Schema.Struct({
+              attributes: Schema.Struct({ POSITION: Schema.Number }),
+              indices: Schema.Number,
+            }),
+          ),
+        }),
+      ),
+    }),
+  ),
+);
+/**
+ * The volume a part's closed mesh encloses, in cubic meters, summed over its triangles by the
+ * divergence theorem. Reads the GLB a local import stores: float positions, uint32 indices.
+ */
+const meshVolume = (glb: Uint8Array) => {
+  const jsonLength = new DataView(glb.buffer, glb.byteOffset).getUint32(12, true);
+  const gltf = decodeGltf(new TextDecoder().decode(glb.subarray(20, 20 + jsonLength)));
+  // A copy: a Buffer's `slice` is a view, whose `buffer` is the whole pool.
+  const bin = new Uint8Array(glb.subarray(28 + jsonLength));
+  const read = <T>(index: number, make: (buffer: ArrayBuffer) => T) => {
+    const accessor = gltf.accessors[index]!;
+    const start = gltf.bufferViews[accessor.bufferView]!.byteOffset;
+    return make(
+      bin.slice(start, start + accessor.count * (accessor.type === "VEC3" ? 12 : 4)).buffer,
+    );
+  };
+  let volume = 0;
+  for (const primitive of gltf.meshes.flatMap((mesh) => mesh.primitives)) {
+    const p = read(primitive.attributes.POSITION, (buffer) => new Float32Array(buffer));
+    const index = read(primitive.indices, (buffer) => new Uint32Array(buffer));
+    for (let i = 0; i < index.length; i += 3) {
+      const [a, b, c] = [index[i]! * 3, index[i + 1]! * 3, index[i + 2]! * 3];
+      volume +=
+        (p[a]! * (p[b + 1]! * p[c + 2]! - p[b + 2]! * p[c + 1]!) -
+          p[a + 1]! * (p[b]! * p[c + 2]! - p[b + 2]! * p[c]!) +
+          p[a + 2]! * (p[b]! * p[c + 1]! - p[b + 1]! * p[c]!)) /
+        6;
+    }
+  }
+  return Math.abs(volume);
+};
+/** Densities in kg/m³ from the SolidWorks Materials library, for the materials samples use. */
+const LIBRARY_DENSITY: Readonly<Record<string, number>> = {
+  "Alloy Steel": 7700,
+  "Plain Carbon Steel": 7800,
+};
+
 const getProject = Effect.fn(function* (projectId: ProjectId) {
   const query = yield* ProjectionSnapshotQuery;
   return Option.getOrThrow(yield* query.getProjectShellById(projectId));
@@ -437,13 +517,18 @@ const catalogRoot = (project: OrchestrationProjectShell, name: string) => {
   return root!;
 };
 
-const sync = Effect.fn(function* (project: OrchestrationProjectShell, name: string) {
+/** Syncs the catalog file `name` in `configuration`, as project settings and the panel do. */
+const sync = Effect.fn(function* (
+  project: OrchestrationProjectShell,
+  name: string,
+  configuration = "default",
+) {
   const operations = yield* CadUserOperations;
   const root = catalogRoot(project, name);
   const { operationId } = yield* operations.start({
     projectId: project.id,
     kind: "sync",
-    root: { elementId: root.elementId, kind: root.kind, configuration: "default" },
+    root: { elementId: root.elementId, kind: root.kind, configuration },
   });
   return yield* settle(project.id, operationId);
 });
@@ -984,14 +1069,18 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
   // Live: opens real SolidWorks files in the SolidWorks installed on this machine or its Windows
   // host. Set CADSENSE_SOLIDWORKS_DIR (a folder holding an assembly and the files it uses, such as
   // samples/learn/Mouse under the SolidWorks public documents), CADSENSE_SOLIDWORKS_ASSEMBLY (its
-  // name there), and optionally CADSENSE_SOLIDWORKS_EMPTY_PART (a part with only sketches) and
+  // name there), and optionally CADSENSE_SOLIDWORKS_EMPTY_PART (a part with only sketches),
   // CADSENSE_SOLIDWORKS_VIRTUAL_ASSEMBLY (an assembly with virtual components, such as
-  // samples/tutorial/api/assemsubassems.sldasm). SolidWorks quits afterwards unless it was running.
+  // samples/tutorial/api/assemsubassems.sldasm), and CADSENSE_SOLIDWORKS_CONFIGURATION (another
+  // configuration of the assembly, whose parts have materials: NPD-16 for
+  // samples/tutorial/smartcomponents/pillow_block.sldasm). SolidWorks quits afterwards unless it
+  // was running.
   const live = {
     dir: process.env.CADSENSE_SOLIDWORKS_DIR,
     assembly: process.env.CADSENSE_SOLIDWORKS_ASSEMBLY,
     emptyPart: process.env.CADSENSE_SOLIDWORKS_EMPTY_PART,
     virtualAssembly: process.env.CADSENSE_SOLIDWORKS_VIRTUAL_ASSEMBLY,
+    configuration: process.env.CADSENSE_SOLIDWORKS_CONFIGURATION,
   };
   const skipLive = !live.dir || !live.assembly;
 
@@ -1086,6 +1175,15 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
             (part) =>
               next.assets.find((asset) => asset.geometryKey === part.geometryKey)?.sha256 ===
               manifest.assets.find((asset) => asset.geometryKey === part.geometryKey)?.sha256,
+          ),
+        );
+        // The parts SolidWorks skipped keep their names, materials, and masses.
+        assert.deepStrictEqual(
+          kept.map((part) => part.metadata),
+          kept.map(
+            (part) =>
+              manifest.parts.find((previous) => previous.geometryKey === part.geometryKey)
+                ?.metadata,
           ),
         );
       }).pipe(Effect.scoped),
@@ -1239,12 +1337,16 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         const { service: first, stop: stopFirst } = yield* server();
         const { service: second, stop: stopSecond } = yield* server();
         const assembly = yield* first
-          .exportParts({ files: [live.assembly!, ...files].map(read), skip: [] })
+          .exportParts({
+            files: [live.assembly!, ...files].map(read),
+            skip: [],
+            configuration: "default",
+          })
           .pipe(Effect.forkChild);
         // A bridge creates `out` once it holds the lock.
         const a = yield* jobFor(live.assembly!, (job) => inJob(job, "out"));
         const single = yield* second
-          .exportParts({ files: [read(part!)], skip: [] })
+          .exportParts({ files: [read(part!)], skip: [], configuration: "default" })
           .pipe(Effect.forkChild);
         const b = yield* jobFor(part!, () => true);
         // The second bridge gets the lock only after the first wrote its result and exited. Read
@@ -1314,6 +1416,107 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         assert.isAtLeast(manifest.parts.length, 1);
       }).pipe(Effect.scoped),
     5 * 60_000,
+  );
+
+  it.effect.skipIf(skipLive || !live.configuration)(
+    "converts a real assembly in a chosen configuration, with each part's material and mass",
+    () =>
+      Effect.gen(function* () {
+        const snapshots = yield* CadSnapshotStore;
+        const { root } = yield* makeLiveFolder();
+        const projectId = ProjectId.make("local-cad-solidworks-live-configuration");
+        yield* (yield* LocalCadProjects).create({
+          projectId,
+          title: "Configured",
+          workspaceRoot: root,
+          filePath: live.assembly!,
+        });
+        const first = yield* settle(projectId);
+        assert.strictEqual(
+          first.cad?.lastOutcome?.status,
+          "succeeded",
+          first.cad?.lastOutcome?.reason ?? undefined,
+        );
+        const active = first.cad!.roots[0]!;
+        const activeManifest = yield* snapshots.load(active.current!.snapshotId);
+
+        /**
+         * A part has a mass exactly when it has a material (no sample overrides one), in kg: its
+         * material's density times the volume of the mesh exported in this configuration.
+         */
+        const checkMaterials = Effect.fn(function* (manifest: typeof activeManifest) {
+          const withMaterial = manifest.parts.filter((part) => part.metadata?.material);
+          const without = manifest.parts.filter((part) => !part.metadata?.material);
+          assert.isNotEmpty(withMaterial);
+          assert.isNotEmpty(without);
+          assert.deepStrictEqual(
+            without.map((part) => part.metadata?.massKg),
+            without.map(() => undefined),
+          );
+          let measured = 0;
+          for (const part of withMaterial) {
+            const { name, material, massKg } = part.metadata!;
+            assert.isAbove(massKg ?? 0, 0, name);
+            const density = LIBRARY_DENSITY[material?.displayName ?? ""];
+            if (density === undefined) continue;
+            const asset = manifest.assets.find((entry) => entry.geometryKey === part.geometryKey);
+            const volume = meshVolume(
+              yield* snapshots.readAsset(manifest.snapshotId, asset!.sha256),
+            );
+            assert.approximately(massKg!, density * volume, 0.02 * density * volume, name);
+            measured++;
+          }
+          assert.isAbove(measured, 0, "No part uses a material with a known density");
+        });
+        yield* checkMaterials(activeManifest);
+
+        // Another configuration is a root of its own. Its components use other part
+        // configurations, each measured in its own.
+        const calls = bridgeCalls.length;
+        const configured = yield* sync(first, live.assembly!, live.configuration!);
+        assert.strictEqual(
+          configured.cad?.lastOutcome?.status,
+          "succeeded",
+          configured.cad?.lastOutcome?.reason ?? undefined,
+        );
+        const configuredRoot = configured.cad!.roots.find(
+          (entry) => entry.configuration === live.configuration,
+        );
+        assert.isDefined(configuredRoot);
+        assert.notStrictEqual(configuredRoot!.rootId, active.rootId);
+        assert.strictEqual(
+          configured.cad!.roots.find((entry) => entry.rootId === active.rootId)?.current
+            ?.snapshotId,
+          activeManifest.snapshotId,
+        );
+        const manifest = yield* snapshots.load(configuredRoot!.current!.snapshotId);
+        assert.strictEqual(manifest.root.configuration, live.configuration);
+        const partConfigurations = (parts: typeof manifest.parts) =>
+          parts.map((part) => `${part.metadata?.name} ${part.source.configuration}`).sort();
+        assert.notDeepEqual(
+          partConfigurations(manifest.parts),
+          partConfigurations(activeManifest.parts),
+        );
+        yield* checkMaterials(manifest);
+        assert.strictEqual(bridgeCalls.length, calls + 1);
+
+        // The panel's Sync button syncs a root in its own configuration: unchanged files reuse it.
+        const again = yield* sync(configured, live.assembly!, configuredRoot!.configuration);
+        assert.strictEqual(
+          again.cad!.roots.find((entry) => entry.rootId === configuredRoot!.rootId)?.current
+            ?.snapshotId,
+          manifest.snapshotId,
+        );
+        assert.strictEqual(bridgeCalls.length, calls + 1);
+
+        // A configuration the assembly does not have fails, naming the file and configuration.
+        const missing = yield* sync(again, live.assembly!, "No such configuration");
+        assert.strictEqual(missing.cad?.lastOutcome?.status, "failed");
+        assert.include(missing.cad?.lastOutcome?.reason ?? "", live.assembly!);
+        assert.include(missing.cad?.lastOutcome?.reason ?? "", '"No such configuration"');
+        assert.include(missing.cad?.lastOutcome?.reason ?? "", live.configuration!);
+      }).pipe(Effect.scoped),
+    10 * 60_000,
   );
 
   it.effect.skipIf(skipLive || !live.emptyPart)(
@@ -1402,9 +1605,16 @@ it.layer(scriptedLayer, { timeout: 120_000, excludeTestServices: true })(
   "local CAD projects with a scripted SolidWorks bridge",
   (it) => {
     const reset = () => {
-      for (const name of ["log", "release", "solidworks"])
+      for (const name of ["log", "requests", "release", "solidworks"])
         NodeFS.rmSync(NodePath.join(scriptedRoot, "control", name), { force: true });
     };
+    /** Waits for the SolidWorks the jobs started to quit, after the last job, and its folders to go. */
+    const idle = Effect.fn(function* () {
+      for (let attempt = 0; scriptedLog().at(-1) !== "quit 4242" || scriptedJobs().length > 0; ) {
+        if (++attempt > 400) return yield* Effect.die("SolidWorks never went idle");
+        yield* Effect.sleep("50 millis");
+      }
+    });
     const create = Effect.fn(function* (projectId: ProjectId, name: string) {
       yield* (yield* LocalCadProjects).create({
         projectId,
@@ -1512,6 +1722,115 @@ it.layer(scriptedLayer, { timeout: 120_000, excludeTestServices: true })(
       }).pipe(Effect.scoped),
     );
 
+    it.effect("imports a SolidWorks file in each chosen configuration as a root of its own", () =>
+      Effect.gen(function* () {
+        reset();
+        const snapshots = yield* CadSnapshotStore;
+        const projectId = ProjectId.make("local-cad-scripted-configuration");
+        const root = yield* makePartFolder("Pillow.SLDPRT");
+        NodeFS.copyFileSync(FIXTURE, NodePath.join(root, "pillow.step"));
+        yield* (yield* LocalCadProjects).create({
+          projectId,
+          title: "Pillow",
+          workspaceRoot: root,
+          filePath: "Pillow.SLDPRT",
+        });
+        const first = yield* settle(projectId);
+        assert.strictEqual(
+          first.cad?.lastOutcome?.status,
+          "succeeded",
+          first.cad?.lastOutcome?.reason ?? undefined,
+        );
+        // "default" opens the configuration the file was saved in, under the root ID local files
+        // had before configurations, so existing snapshots and comments keep their root.
+        const active = first.cad!.roots[0]!;
+        assert.strictEqual(active.configuration, "default");
+        assert.strictEqual(
+          active.rootId,
+          "427242f1a237f4993aac13a4424ba39872120031fb5b7783c04fd3efb2a11d3e",
+        );
+        assert.strictEqual(scriptedRequests()[0]?.configuration, "default");
+        const activeManifest = yield* snapshots.load(active.current!.snapshotId);
+        assert.strictEqual(activeManifest.parts[0]!.source.configuration, "Default");
+        assert.deepStrictEqual(activeManifest.parts[0]!.metadata?.material, {
+          displayName: "Alloy Steel",
+        });
+        assert.strictEqual(activeManifest.parts[0]!.metadata?.massKg, 0.25);
+
+        // Another configuration of the same, unchanged file is a root of its own, which
+        // SolidWorks converts. The default root keeps its snapshot.
+        const large = yield* sync(first, "Pillow.SLDPRT", "Large");
+        assert.strictEqual(
+          large.cad?.lastOutcome?.status,
+          "succeeded",
+          large.cad?.lastOutcome?.reason ?? undefined,
+        );
+        assert.lengthOf(large.cad!.roots, 2);
+        const largeRoot = large.cad!.roots.find((entry) => entry.configuration === "Large");
+        assert.isDefined(largeRoot);
+        assert.notStrictEqual(largeRoot!.rootId, active.rootId);
+        assert.strictEqual(largeRoot!.elementId, active.elementId);
+        assert.strictEqual(
+          large.cad!.roots.find((entry) => entry.rootId === active.rootId)?.current?.snapshotId,
+          active.current!.snapshotId,
+        );
+        assert.deepStrictEqual(scriptedRequests()[1], { configuration: "Large", skip: [] });
+        const largeManifest = yield* snapshots.load(largeRoot!.current!.snapshotId);
+        assert.strictEqual(largeManifest.root.configuration, "Large");
+        assert.strictEqual(largeManifest.parts[0]!.source.configuration, "Large");
+
+        // Synced again in its configuration, as the panel's Sync button does, unchanged files
+        // reuse that root's snapshot without SolidWorks.
+        const again = yield* sync(large, "Pillow.SLDPRT", largeRoot!.configuration);
+        assert.strictEqual(
+          again.cad!.roots.find((entry) => entry.rootId === largeRoot!.rootId)?.current?.snapshotId,
+          largeManifest.snapshotId,
+        );
+        assert.lengthOf(scriptedRequests(), 2);
+
+        // A new revision skips the part the latest snapshot has, which keeps its material and mass.
+        NodeFS.writeFileSync(
+          NodePath.join(root, "Pillow.SLDPRT"),
+          solidWorksFile({ "Contents/Config-0": "part, saved again" }),
+        );
+        const changed = yield* sync(again, "Pillow.SLDPRT", "Large");
+        const changedRoot = changed.cad!.roots.find((entry) => entry.rootId === largeRoot!.rootId);
+        const changedManifest = yield* snapshots.load(changedRoot!.current!.snapshotId);
+        assert.notStrictEqual(
+          changedManifest.root.microversionId,
+          largeManifest.root.microversionId,
+        );
+        assert.deepStrictEqual(scriptedRequests()[2], {
+          configuration: "Large",
+          skip: [largeManifest.parts[0]!.source.partId],
+        });
+        assert.deepStrictEqual(
+          changedManifest.parts[0]!.metadata,
+          largeManifest.parts[0]!.metadata,
+        );
+
+        // A configuration the file does not have fails, naming the file and the configuration.
+        const missing = yield* sync(changed, "Pillow.SLDPRT", "Small");
+        assert.strictEqual(missing.cad?.lastOutcome?.status, "failed");
+        assert.strictEqual(
+          missing.cad?.lastOutcome?.reason,
+          'Pillow.SLDPRT has no configuration named "Small". Its configurations are Default, Large. Existing imported CAD is unchanged.',
+        );
+
+        // STEP and IGES files have no configurations.
+        const step = catalogRoot(missing, "pillow.step");
+        const rejected = yield* Effect.flip(
+          (yield* CadUserOperations).start({
+            projectId,
+            kind: "sync",
+            root: { elementId: step.elementId, kind: step.kind, configuration: "Large" },
+          }),
+        );
+        assert.strictEqual(rejected.reason, "invalid-root");
+        yield* idle();
+      }).pipe(Effect.scoped),
+    );
+
     it.effect("keeps a stopping server's job folder until its bridge exits", () =>
       Effect.gen(function* () {
         reset();
@@ -1529,6 +1848,7 @@ it.layer(scriptedLayer, { timeout: 120_000, excludeTestServices: true })(
           .exportParts({
             files: [{ path: "Hold.SLDPRT", bytes: solidWorksFile({ "Contents/Config-0": "p" }) }],
             skip: [],
+            configuration: "default",
           })
           .pipe(Effect.forkChild);
         yield* scriptedLogged("start Hold.SLDPRT owned=0");

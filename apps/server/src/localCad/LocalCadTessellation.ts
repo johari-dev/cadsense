@@ -48,6 +48,7 @@ export class LocalCadImportError extends Schema.TaggedErrorClass<LocalCadImportE
       "solidworks-file-open",
       "solidworks-failed",
       "solidworks-timeout",
+      "solidworks-no-configuration",
     ]),
     /**
      * File names: those an assembly uses that are not in the folder (`missing-files`), or those
@@ -56,6 +57,17 @@ export class LocalCadImportError extends Schema.TaggedErrorClass<LocalCadImportE
     missing: Schema.optionalKey(Schema.Array(Schema.String)),
     /** What SolidWorks reported, for `solidworks-failed`. */
     detail: Schema.optionalKey(Schema.String),
+    /**
+     * For `solidworks-no-configuration`: the file, the configuration asked for, and the
+     * configurations the file has.
+     */
+    configuration: Schema.optionalKey(
+      Schema.Struct({
+        file: Schema.String,
+        requested: Schema.String,
+        available: Schema.Array(Schema.String),
+      }),
+    ),
   },
 ) {}
 

@@ -46,7 +46,7 @@ with content-derived 24-hex IDs, so those consumers work unchanged:
 | `documentId`     | hash of the project ID                                       |
 | `elementId`      | hash of the workspace-relative file path (one root per file) |
 | `microversionId` | hash of the file bytes                                       |
-| `configuration`  | `default`                                                    |
+| `configuration`  | `default`, or a SolidWorks configuration chosen in settings  |
 
 The catalog lists one root per CAD file, named by its relative path. Each occt mesh becomes one part
 occurrence. Occurrence paths use the STEP product names, with `#2`, `#3` for repeated siblings (skipping
@@ -100,12 +100,15 @@ the Windows host's PowerShell through interop and stages files under the Windows
 3. Copy them, flat, into a job folder under `%TEMP%\cadsense-solidworks`. SolidWorks only ever
    opens these copies, read-only, so it cannot touch the project folder, and it finds each
    reference beside the assembly.
-4. In SolidWorks, open the copy, hide its window, resolve lightweight components, and walk the
-   component tree: names, referenced configurations, suppression, visibility, and transforms (which
+4. In SolidWorks, open the copy, hide its window, show the chosen configuration (see
+   [Configurations](#configurations)), resolve lightweight components, and walk the component
+   tree: names, referenced configurations, suppression, visibility, and transforms (which
    SolidWorks gives relative to the root assembly). Each part used, in each configuration, is
    exported once to STEP AP214 from memory, which also covers 3D Interconnect inserts and virtual
-   components that have no file of their own. Parts the latest snapshot already has, keyed by
-   file hash and configuration, are skipped.
+   components that have no file of their own. Its material and mass are read in that
+   configuration too (see [Materials and mass](#materials-and-mass)). Parts the latest snapshot
+   of the same root already has, keyed by file hash and configuration, are skipped, and keep the
+   metadata that snapshot gave them.
 5. Back in the server, occt tessellates each part's STEP (two at a time) at the usual tolerances,
    and each part's bodies merge into one geometry. Every component becomes one part node placed by
    its SolidWorks transform, so the tree matches the SolidWorks feature tree, `cad_diff` sees real
@@ -166,6 +169,45 @@ each later job.
   have no display data, and exporting their parts crashes SolidWorks. Hiding the window right after
   opening works, so a user's open SolidWorks shows the window for a moment at most.
 
+### Configurations
+
+A SolidWorks file opens in the configuration it was saved in, which Cadsense calls `default`. The
+project imports its linked file that way, and a new thread opens that root. Project settings shows
+the Configuration field when a SolidWorks file is chosen (never for STEP or IGES). A name typed
+there, exactly as SolidWorks spells it, opens that configuration instead: the bridge checks it is
+one of the file's own, then shows it before the walk and the exports.
+
+Each configuration is a root of its own, with its own root ID, snapshots, rollback, and comments.
+The `default` root ID is the one local files had before configurations, so existing snapshots keep
+their root. Reuse stays within a root: unchanged files reuse that configuration's latest snapshot,
+and part keys already include each component's configuration. The CAD panel names two roots of one
+file `file · configuration`, and its Sync button syncs the shown root in its own configuration.
+
+- A configuration the file does not have fails, naming the file, the configuration, and up to
+  five of the file's configurations. Nothing falls back to the saved configuration.
+- `default` always means the saved configuration, even in a file with a configuration named
+  `default`.
+- A sync of a STEP or IGES file in any configuration but `default` is rejected (`invalid-root`).
+
+### Materials and mass
+
+For each part it exports, the bridge reads the material assigned in the configuration its
+component uses (`PartDoc.GetMaterialPropertyName2`) into `metadata.material.displayName`, and the
+mass of that configuration (`ModelDocExtension.CreateMassProperty`, system units, so kilograms)
+into `metadata.massKg`. `cad_hierarchy` and `cad_find_parts` read them as they read Onshape's.
+
+SolidWorks gives every part a mass, even one with no material: it then uses a default density, or
+whatever density an old file stored. That mass is a guess, and a missing `massKg` means unknown,
+not zero. So the rule is:
+
+- A part with a material gets its mass.
+- A part with no material gets a mass only if the user overrode it in Mass Properties.
+- Any other part has no `massKg`, even when SolidWorks shows one. In the tutorial samples,
+  `bearing.sldprt` stores a steel density but no material, so it has no mass.
+
+A mass that is not a finite, non-negative number is dropped. A failed read leaves the part without
+material or mass rather than failing the conversion.
+
 ### Failure modes
 
 | Failure                                                | Result                                                              |
@@ -188,6 +230,8 @@ each later job.
 | The server stops while a bridge runs                   | Marker written; folder kept until the bridge exits (2-minute wait)  |
 | A restarted or second Cadsense converts meanwhile      | Its bridge waits for `bridge.lock` until the earlier bridge exits   |
 | Unchanged files synced again                           | The latest snapshot is reused; SolidWorks does not start            |
+| A configuration the file does not have                 | Fails naming the file, the configuration, and the file's own        |
+| A part with no material and no mass override           | No `massKg`: the mass SolidWorks shows comes from a guessed density |
 | One part of an assembly changed                        | New revision; only that part is exported and tessellated again      |
 | Server killed mid-conversion                           | A SolidWorks Cadsense started and the job folder may stay behind    |
 
@@ -196,7 +240,9 @@ each later job.
 - Meshes come back in world coordinates, so moving a part between exports reads as
   `geometry-changed` in `cad_diff`, not `moved`. Both outdate comments the same way. SolidWorks
   imports place parts by their component transforms instead, so moves read as moves there.
-- Mass, materials, and hidden flags are not read from STEP. Part colors are.
+- Mass, materials, and hidden flags are not read from STEP. Part colors are. SolidWorks files
+  carry materials and known masses (see [Materials and mass](#materials-and-mass)). Their parts
+  reused from a snapshot converted before materials were read keep no material until they change.
 - SolidWorks files need SolidWorks on the machine running the Cadsense server (or its Windows host,
   for WSL). Component appearance overrides set in an assembly, and assembly-level features such as
   cuts, are not carried over: each part looks as it does in its own file. Other native formats
@@ -209,10 +255,15 @@ each later job.
 `LocalCadProjects.test.ts` runs the real orchestration engine, projections, snapshot store,
 `CadUserOperations`, and occt worker against `testFixtures/dm1-id-214.stp` (CAx-IF test model, see
 `testFixtures/README.md`) in a temporary folder. Generated SolidWorks containers cover missing files,
-pre-2015 assemblies, and a machine without SolidWorks. With `CADSENSE_SOLIDWORKS_DIR` and
-`CADSENSE_SOLIDWORKS_ASSEMBLY` (and optionally `CADSENSE_SOLIDWORKS_EMPTY_PART`) set, it also drives
-the real SolidWorks: a conversion, an unchanged sync, a changed part re-exported alone, a missing
-part, and a part with only sketches.
+pre-2015 assemblies, and a machine without SolidWorks. A scripted bridge covers configurations as
+roots, a missing configuration, and material and mass carried over a skipped part. With
+`CADSENSE_SOLIDWORKS_DIR` and `CADSENSE_SOLIDWORKS_ASSEMBLY` (and optionally
+`CADSENSE_SOLIDWORKS_EMPTY_PART` and `CADSENSE_SOLIDWORKS_CONFIGURATION`) set, it also drives the
+real SolidWorks: a conversion, an unchanged sync, a changed part re-exported alone with every
+other part's metadata kept, a missing part, a part with only sketches, and another configuration.
+Each part's mass is checked against its material's density times its mesh's volume.
+`samples/tutorial/smartcomponents/pillow_block.sldasm` with `NPD-16` has both materials and
+configurations. `LocalCadDraft.test.ts` covers how the manifest maps material and mass.
 
 `apps/server/scripts/local-cad-project-e2e.ts` runs the dev app on a fresh data directory and drives
 headless Chromium through the dialog, the first import, the CAD panel, a re-export with Sync, and

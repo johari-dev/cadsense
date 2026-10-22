@@ -74,6 +74,11 @@ export interface LocalCadImportInput {
   readonly workspaceRoot: string;
   /** Workspace-relative path of the file to import. */
   readonly filePath: string;
+  /**
+   * A SolidWorks file's configuration, or "default" for the one it was saved in. Each
+   * configuration is a root of its own. STEP and IGES files only have "default".
+   */
+  readonly configuration: string;
 }
 
 export type LocalCadImportFailure =
@@ -472,9 +477,10 @@ export const make = Effect.gen(function* () {
   });
 
   /**
-   * Converts a SolidWorks file with the local SolidWorks. Unchanged files reuse the latest
-   * snapshot without starting SolidWorks. Otherwise SolidWorks exports only the parts the latest
-   * snapshot lacks, and every other part keeps its geometry.
+   * Converts a SolidWorks file with the local SolidWorks, in the root's configuration. The latest
+   * snapshot of the same root, so the same configuration, is what gets reused: unchanged files
+   * reuse it whole without starting SolidWorks. Otherwise SolidWorks exports only the parts it
+   * lacks, and every other part keeps its geometry, material, and mass.
    */
   const solidWorksDraft = Effect.fn("LocalCadImport.solidWorksDraft")(function* (
     context: CadSnapshotContext,
@@ -493,6 +499,7 @@ export const make = Effect.gen(function* () {
     const exported = yield* solidWorks.exportParts({
       files: files.map((file) => ({ path: path.basename(file.path), bytes: file.bytes })),
       skip: [...reusable.keys()],
+      configuration: context.root.configuration,
     });
     for (const warning of exported.warnings)
       yield* Effect.logWarning("SolidWorks import warning", { warning });
@@ -511,7 +518,18 @@ export const make = Effect.gen(function* () {
               : Effect.succeed(null),
           ),
           Effect.map((mesh) => {
-            geometry.set(key, mesh ? { kind: "mesh", name: part.name, mesh } : { kind: "empty" });
+            geometry.set(
+              key,
+              mesh
+                ? {
+                    kind: "mesh",
+                    name: part.name,
+                    mesh,
+                    material: part.material,
+                    massKg: part.massKg,
+                  }
+                : { kind: "empty" },
+            );
           }),
         ),
       { concurrency: 2, discard: true },
@@ -538,7 +556,7 @@ export const make = Effect.gen(function* () {
     );
     const bytes = files[0]!.bytes;
     const root: CadSnapshotRoot = {
-      ...localCadRootIdentity(input.projectId, file.relativePath),
+      ...localCadRootIdentity(input.projectId, file.relativePath, input.configuration),
       kind: "assembly",
       microversionId: localCadFilesMicroversionId(files),
       tessellationProfile: LOCAL_CAD_TESSELLATION_PROFILE,

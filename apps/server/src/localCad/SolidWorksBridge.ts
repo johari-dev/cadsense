@@ -52,10 +52,16 @@ const decodeResult = Schema.decodeUnknownEffect(
         root: SolidWorksNode,
         parts: Schema.Record(
           Schema.String,
-          Schema.Struct({ name: Schema.String, step: Schema.String }),
+          Schema.Struct({
+            name: Schema.String,
+            step: Schema.String,
+            material: Schema.NullOr(Schema.String),
+            massKg: Schema.NullOr(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+          }),
         ),
         warnings: Schema.Array(Schema.String),
       }),
+      // For `no-configuration`, `detail` is the configuration asked for and `names` the file's own.
       Schema.Struct({
         ok: Schema.Literal(false),
         pid: Schema.Number,
@@ -64,6 +70,7 @@ const decodeResult = Schema.decodeUnknownEffect(
           "not-installed",
           "same-title-open",
           "open-failed",
+          "no-configuration",
           "cancelled",
           "failed",
         ]),
@@ -74,10 +81,20 @@ const decodeResult = Schema.decodeUnknownEffect(
   ),
 );
 
+/** One exported part: its STEP, and what SolidWorks knows of it in the exported configuration. */
+export interface SolidWorksPart {
+  readonly name: string;
+  readonly step: Uint8Array;
+  /** The assigned material's name, or null when the part has none. */
+  readonly material: string | null;
+  /** Kilograms, from the material or a user's mass override. Null when unknown. */
+  readonly massKg: number | null;
+}
+
 export interface SolidWorksExport {
   readonly root: SolidWorksNode;
-  /** The STEP export of every part that was not skipped, by key. */
-  readonly parts: ReadonlyMap<string, { readonly name: string; readonly step: Uint8Array }>;
+  /** Every part that was not skipped, by key. */
+  readonly parts: ReadonlyMap<string, SolidWorksPart>;
   readonly warnings: readonly string[];
 }
 
@@ -86,6 +103,8 @@ export interface SolidWorksExportInput {
   readonly files: readonly { readonly path: string; readonly bytes: Uint8Array }[];
   /** Part keys whose geometry the caller already has, so SolidWorks does not export them. */
   readonly skip: readonly string[];
+  /** The picked file's configuration to open. "default" opens the one it was saved in. */
+  readonly configuration: string;
 }
 
 /** Opens SolidWorks files in the local SolidWorks. See LocalCad.md, SolidWorks files. */
@@ -93,8 +112,9 @@ export class SolidWorks extends Context.Service<
   SolidWorks,
   {
     /**
-     * Copies the files into a job folder, opens the picked one there read-only, and returns its
-     * component tree with a STEP export of each part. Never writes to the project folder.
+     * Copies the files into a job folder, opens the picked one there read-only in the requested
+     * configuration, and returns its component tree with each part's STEP export, material, and
+     * known mass. Never writes to the project folder.
      */
     readonly exportParts: (
       input: SolidWorksExportInput,
@@ -277,6 +297,31 @@ namespace CadsenseSolidWorks {
       return Sha(source + "|" + configuration);
     }
 
+    // The part's material in this configuration, or null when none is assigned.
+    static string Material(ModelDoc2 model, string configuration) {
+      var part = model as PartDoc;
+      if (part == null) return null;
+      try {
+        string database;
+        var name = part.GetMaterialPropertyName2(configuration, out database);
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+      } catch (Exception) { return null; }
+    }
+
+    // The shown configuration's mass in kg, or null when it is unknown. SolidWorks gives every
+    // part a mass, from a default density when no material is assigned. That is a guess, so a
+    // mass counts only with a material or with a mass the user typed in (an override).
+    static object MassKg(ModelDoc2 model, string material) {
+      try {
+        var mass = model.Extension.CreateMassProperty();
+        if (mass == null) return null;
+        mass.UseSystemUnits = true;
+        if (material == null && !mass.OverrideMass) return null;
+        var kg = mass.Mass;
+        return double.IsNaN(kg) || double.IsInfinity(kg) || kg < 0 ? null : (object)kg;
+      } catch (Exception) { return null; }
+    }
+
     static void Export(ModelDoc2 model, string key, string configuration) {
       if (skip.Contains(key) || parts.ContainsKey(key)) return;
       CheckCancel();
@@ -285,9 +330,15 @@ namespace CadsenseSolidWorks {
       var step = Path.Combine("out", parts.Count + ".step");
       int errors = 0, warns = 0;
       bool saved = model.Extension.SaveAs(Path.Combine(job, step), 0, SaveSilentCopy, null, ref errors, ref warns);
+      // Read while this configuration shows: materials and masses can differ between them.
+      var material = Material(model, configuration);
+      var massKg = MassKg(model, material);
       if (active != configuration) model.ShowConfiguration2(active);
       if (!saved) throw new BridgeFailure("failed", "SolidWorks could not export " + model.GetTitle() + " (error " + errors + ").");
-      parts[key] = new Dictionary<string, object> { { "name", Path.GetFileNameWithoutExtension(model.GetPathName()) }, { "step", step } };
+      parts[key] = new Dictionary<string, object> {
+        { "name", Path.GetFileNameWithoutExtension(model.GetPathName()) }, { "step", step },
+        { "material", material }, { "massKg", massKg },
+      };
     }
 
     static Dictionary<string, object> Node(string name, string kind, string configuration, bool suppressed, bool visible, double[] transform, string key, List<object> children) {
@@ -355,6 +406,7 @@ namespace CadsenseSolidWorks {
       int ownedPid = Convert.ToInt32(request["ownedPid"]);
       if ((string)request["mode"] == "quit") { Quit(ownedPid); return; }
       var file = Path.Combine(input, (string)request["file"]);
+      var requested = (string)request["configuration"];
       skip = new HashSet<string>(((System.Collections.ArrayList)request["skip"]).Cast<string>());
       Directory.CreateDirectory(Path.Combine(job, "out"));
       foreach (var copy in Directory.GetFiles(input, "*", SearchOption.AllDirectories)) FileSha(copy);
@@ -403,6 +455,14 @@ namespace CadsenseSolidWorks {
         // exporting its parts crashes SolidWorks.
         doc.Visible = false;
 
+        // "default" keeps the configuration the file was saved in. Any other name must be one of
+        // the file's own, exactly, and shows before the walk and the exports.
+        if (requested != "default") {
+          var names = ((object[])doc.GetConfigurationNames() ?? new object[0]).Cast<string>().ToList();
+          if (!names.Contains(requested)) throw new BridgeFailure("no-configuration", requested, names);
+          if (((Configuration)doc.GetActiveConfiguration()).Name != requested && !doc.ShowConfiguration2(requested))
+            throw new BridgeFailure("failed", "SolidWorks could not show the configuration " + requested + ".");
+        }
         var configuration = ((Configuration)doc.GetActiveConfiguration()).Name;
         Dictionary<string, object> root;
         if (assembly) {
@@ -484,6 +544,7 @@ const encodeRequest = Schema.encodeEffect(
     Schema.Struct({
       mode: Schema.Literals(["convert", "quit"]),
       file: Schema.String,
+      configuration: Schema.String,
       skip: Schema.Array(Schema.String),
       ownedPid: Schema.Number,
     }),
@@ -647,6 +708,7 @@ export const make = (options: SolidWorksOptions = {}) =>
           {
             mode: "convert",
             file: input.files[0]!.path.split("/").join("\\"),
+            configuration: input.configuration,
             skip: input.skip,
             ownedPid,
           },
@@ -667,18 +729,30 @@ export const make = (options: SolidWorksOptions = {}) =>
         );
         ownedPid = result.owned ? result.pid : 0;
         if (!result.ok)
-          return yield* result.reason === "not-installed"
-            ? unavailable()
-            : result.reason === "same-title-open"
-              ? new LocalCadImportError({
-                  reason: "solidworks-file-open",
-                  missing: result.names ?? [],
-                })
-              : failed(result.detail);
-        const parts = new Map<string, { name: string; step: Uint8Array }>();
+          switch (result.reason) {
+            case "not-installed":
+              return yield* unavailable();
+            case "same-title-open":
+              return yield* new LocalCadImportError({
+                reason: "solidworks-file-open",
+                missing: result.names ?? [],
+              });
+            case "no-configuration":
+              return yield* new LocalCadImportError({
+                reason: "solidworks-no-configuration",
+                configuration: {
+                  file: input.files[0]!.path,
+                  requested: result.detail,
+                  available: result.names ?? [],
+                },
+              });
+            default:
+              return yield* failed(result.detail);
+          }
+        const parts = new Map<string, SolidWorksPart>();
         for (const [key, part] of Object.entries(result.parts))
           parts.set(key, {
-            name: part.name,
+            ...part,
             step: yield* Effect.tryPromise({
               try: () => NodeFSP.readFile(NodePath.join(job.folder, ...part.step.split("\\"))),
               catch: () => failed(`SolidWorks did not export ${part.name}.`),
@@ -713,7 +787,12 @@ export const make = (options: SolidWorksOptions = {}) =>
       Effect.suspend(() => {
         if (ownedPid === 0) return Effect.void;
         const folder = NodePath.join(resolved.serverRoot, NodeCrypto.randomUUID());
-        return stage(resolved, folder, { mode: "quit", file: "", skip: [], ownedPid }, []).pipe(
+        return stage(
+          resolved,
+          folder,
+          { mode: "quit", file: "", configuration: "default", skip: [], ownedPid },
+          [],
+        ).pipe(
           Effect.andThen(runBridge(resolved, folder)),
           // Quit mode writes a result only when it fails.
           Effect.andThen(

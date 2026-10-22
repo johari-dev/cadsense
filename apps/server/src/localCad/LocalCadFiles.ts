@@ -58,15 +58,24 @@ export const localCadFilesMicroversionId = (
         ),
       );
 
-/** The identity fields `snapshotRootId` hashes, for one file in one project. See LocalCad.md. */
-export const localCadRootIdentity = (projectId: ProjectId, filePath: string) => {
+/**
+ * The identity fields `snapshotRootId` hashes, for one file in one configuration of one project.
+ * "default" is the configuration the file was saved in, and the only one STEP and IGES files
+ * have, so their root IDs are the ones local files had before SolidWorks configurations. See
+ * LocalCad.md.
+ */
+export const localCadRootIdentity = (
+  projectId: ProjectId,
+  filePath: string,
+  configuration: string,
+) => {
   const documentId = id24(`local-cad-project:${projectId}`);
   return {
     host: LOCAL_CAD_HOST,
     documentId: OnshapeDocumentId.make(documentId),
     originalRevision: { kind: "w", id: OnshapeWorkspaceId.make(documentId) },
     elementId: localCadElementId(filePath),
-    configuration: "default",
+    configuration,
   } satisfies Pick<
     CadSnapshotRoot,
     "host" | "documentId" | "originalRevision" | "elementId" | "configuration"

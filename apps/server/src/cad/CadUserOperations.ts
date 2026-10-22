@@ -4,6 +4,7 @@ import {
   LocalCadError,
   OnshapeConnectionError,
   CommandId,
+  isSolidWorksFile,
   type CadRootIdentity,
   type CadUserStartInput,
   type ProjectId,
@@ -121,6 +122,18 @@ const failureReason = (error: unknown, source: "onshape" | "local"): string => {
       case "solidworks-timeout":
         detail = "SolidWorks took more than 30 minutes to convert this file.";
         break;
+      case "solidworks-no-configuration": {
+        const asked = error.configuration;
+        const available = asked?.available ?? [];
+        detail = `${asked?.file ?? "This file"} has no configuration named "${asked?.requested ?? ""}".${
+          available.length > 0
+            ? ` Its configurations are ${available.slice(0, 5).join(", ")}${
+                available.length > 5 ? `, and ${available.length - 5} more` : ""
+              }.`
+            : ""
+        }`;
+        break;
+      }
     }
   } else if (isCadGeometryError(error) && error.reason === "too-large")
     detail = "This CAD exceeds the supported scene size. Choose a smaller assembly or part studio.";
@@ -230,12 +243,18 @@ export const make = Effect.gen(function* () {
             ? source.filePath
             : (project.cad?.catalog?.roots.find((entry) => entry.elementId === selected.elementId)
                 ?.name ?? null);
-        if (localFilePath === null || selected.kind !== "assembly")
+        // Each SolidWorks configuration is a root of its own. STEP and IGES have only "default".
+        const configuration = selected.configuration || "default";
+        if (
+          localFilePath === null ||
+          selected.kind !== "assembly" ||
+          (configuration !== "default" && !isSolidWorksFile(localFilePath))
+        )
           return yield* new CadUserOperationError({ reason: "invalid-root" });
         root = {
           ...selected,
-          configuration: "default",
-          rootId: snapshotRootId(localCadRootIdentity(project.id, localFilePath)),
+          configuration,
+          rootId: snapshotRootId(localCadRootIdentity(project.id, localFilePath, configuration)),
         };
       } else {
         const available =
@@ -309,6 +328,7 @@ export const make = Effect.gen(function* () {
                     projectId: input.projectId,
                     workspaceRoot: project.workspaceRoot,
                     filePath: localFilePath ?? source.filePath,
+                    configuration: root?.configuration ?? "default",
                   });
             // A rescan is free, so local syncs keep the file list current. Its failure is not the
             // sync's failure.

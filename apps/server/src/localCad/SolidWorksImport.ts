@@ -16,7 +16,7 @@ import {
   snapshotNodeId,
   snapshotPartStudioKey,
 } from "../onshape/OnshapeSnapshotManifest.ts";
-import type { SolidWorksNode } from "./SolidWorksBridge.ts";
+import type { SolidWorksNode, SolidWorksPart } from "./SolidWorksBridge.ts";
 import type { LocalCadMesh, Rgb } from "./LocalCadTessellation.ts";
 
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -25,10 +25,16 @@ const MAX_DEPTH = 128;
 /** A part's `partId` is its SolidWorks key: the SHA-256 of its file and configuration. */
 const PART_KEY = /^[0-9a-f]{64}$/;
 
-/** What an import has for one SolidWorks part key. */
+/**
+ * What an import has for one SolidWorks part key. A reused part keeps the metadata the latest
+ * snapshot gave it, since its key (file and configuration) also fixes its material and mass.
+ */
 export type SolidWorksPartGeometry =
   | { readonly kind: "reused"; readonly part: CadSnapshotPart }
-  | { readonly kind: "mesh"; readonly name: string; readonly mesh: LocalCadMesh }
+  | ({ readonly kind: "mesh"; readonly mesh: LocalCadMesh } & Pick<
+      SolidWorksPart,
+      "name" | "material" | "massKg"
+    >)
   /** A part with no bodies, such as one holding only sketches. It is left out of the tree. */
   | { readonly kind: "empty" };
 
@@ -201,7 +207,9 @@ export function buildSolidWorksDraft(
                 opacity: 255,
               }
             : null,
-          material: null,
+          material: found.material === null ? null : { displayName: found.material },
+          // Absent when unknown: a missing massKg means unknown, not zero.
+          ...(found.massKg === null ? {} : { massKg: found.massKg }),
         },
       });
       dependencies.set(snapshotPartStudioKey(studio), studio);
