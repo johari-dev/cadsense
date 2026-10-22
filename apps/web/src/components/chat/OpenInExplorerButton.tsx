@@ -8,6 +8,33 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
+/**
+ * Opens a path from an environment, or reveals it with `reveal`. A folder opens in the file manager
+ * and a file opens in its default app. The desktop app's own shell goes first, and the environment's
+ * server is the fallback for paths only it can reach, such as a WSL backend's. Resolves false when
+ * neither could open it.
+ */
+export function useOpenInFileManager() {
+  const openInExplorer = useAtomCommand(shellEnvironment.openInFileManager, {
+    reportFailure: false,
+  });
+  return useCallback(
+    async (environmentId: EnvironmentId, path: string, reveal: boolean) => {
+      const nativeOpen = window.desktopBridge?.openInFileManager;
+      if (environmentId === PRIMARY_LOCAL_ENVIRONMENT_ID && nativeOpen) {
+        const opened = await nativeOpen({ cwd: path, reveal });
+        if (opened) return true;
+      }
+      const result = await openInExplorer({
+        environmentId,
+        input: { cwd: path, reveal },
+      });
+      return result._tag !== "Failure";
+    },
+    [openInExplorer],
+  );
+}
+
 export const OpenInExplorerButton = memo(function OpenInExplorerButton({
   environmentId,
   path,
@@ -17,29 +44,18 @@ export const OpenInExplorerButton = memo(function OpenInExplorerButton({
   path: string | null;
   reveal?: boolean;
 }) {
-  const openInExplorer = useAtomCommand(shellEnvironment.openInFileManager, {
-    reportFailure: false,
-  });
+  const open = useOpenInFileManager();
 
   const onOpen = useCallback(async () => {
     if (!path) return;
-    const nativeOpen = window.desktopBridge?.openInFileManager;
-    if (environmentId === PRIMARY_LOCAL_ENVIRONMENT_ID && nativeOpen) {
-      const opened = await nativeOpen({ cwd: path, reveal });
-      if (opened) return;
-    }
-    const result = await openInExplorer({
-      environmentId,
-      input: { cwd: path, reveal },
-    });
-    if (result._tag === "Failure") {
+    if (!(await open(environmentId, path, reveal))) {
       toastManager.add({
         type: "error",
         title: "Unable to open Explorer",
         description: "Check that this workspace is available on this computer.",
       });
     }
-  }, [environmentId, openInExplorer, path, reveal]);
+  }, [environmentId, open, path, reveal]);
 
   return (
     <Tooltip>

@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off preferSchemaOverJson:off globalTimers:off
 /**
- * End-to-end check that an outside agent can review Onshape CAD through `cadsense mcp` with no
- * window. Runs Claude Code or Codex non-interactively against a fresh MCP data directory, then keeps
- * everything needed to judge the review under --out:
+ * End-to-end check that an outside agent can review Onshape CAD or a local CAD file through
+ * `cadsense mcp` with no window. Runs Claude Code or Codex non-interactively against a fresh MCP data
+ * directory, then keeps everything needed to judge the review under --out:
  *
  *   transcript.jsonl   the agent's event stream
  *   final-message.md   the agent's closing summary
@@ -15,6 +15,15 @@
  *
  * The credential file is JSON with `accessKeyId` and `secretKey`. The web app must be built first
  * (`pnpm --filter @cadsense/web build`) because headless Chromium loads its render page.
+ *
+ * --file <path> reviews a local CAD file instead of --url. The run copies it into a `model` folder
+ * in the agent's working directory, where the MCP server also runs, as a real client would start
+ * it, and names it in the prompt by that relative path. A file run needs no credential file and
+ * removes the Onshape key from the environment, so it also checks that local files need none:
+ *
+ *   node apps/server/scripts/cad-mcp-review-e2e.ts --agent claude --model claude-opus-5-5 \
+ *     --file apps/server/src/localCad/testFixtures/dm1-id-214.stp --prompt-file prompt.md \
+ *     --out .cadsense/mcp-e2e/local-run
  *
  * --seed-home <dir> starts from a copy of an earlier run's data directory, minus its reports. With a
  * microversion (/m/) URL that directory already holds, cad_open makes no Onshape requests, so
@@ -38,6 +47,7 @@ const { values } = NodeUtil.parseArgs({
   options: {
     agent: { type: "string" },
     url: { type: "string" },
+    file: { type: "string" },
     "prompt-file": { type: "string" },
     out: { type: "string" },
     model: { type: "string" },
@@ -48,20 +58,23 @@ const { values } = NodeUtil.parseArgs({
 const agent = values.agent;
 if (
   (agent !== "claude" && agent !== "codex") ||
-  !values.url ||
+  !values.url === !values.file ||
   !values["prompt-file"] ||
   !values.out
 )
   throw new Error(
-    "Usage: --agent claude|codex --url <url> --prompt-file <file> --out <dir> [--model <id>] [--seed-home <dir>]",
+    "Usage: --agent claude|codex --url <url> | --file <cad file> --prompt-file <file> --out <dir> [--model <id>] [--seed-home <dir>] [--follow-up]",
   );
 const credentialFile = process.env.ONSHAPE_CREDENTIAL_FILE;
-if (!credentialFile)
+if (values.url && !credentialFile)
   throw new Error("Set ONSHAPE_CREDENTIAL_FILE to a JSON file with accessKeyId and secretKey.");
-const credential = JSON.parse(NodeFS.readFileSync(credentialFile, "utf8")) as {
-  accessKeyId: string;
-  secretKey: string;
-};
+const credential =
+  values.url && credentialFile
+    ? (JSON.parse(NodeFS.readFileSync(credentialFile, "utf8")) as {
+        accessKeyId: string;
+        secretKey: string;
+      })
+    : undefined;
 
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
@@ -74,20 +87,31 @@ if (values["seed-home"]) {
 // Outside the repository, so neither agent finds this repo's AGENTS.md or skills.
 const workspace = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cadsense-mcp-e2e-"));
 const bin = NodePath.resolve(import.meta.dirname, "../src/bin.ts");
-const prompt = `${NodeFS.readFileSync(values["prompt-file"], "utf8").trim()}\n\n${values.url}`;
+// The CAD the agent is asked about: the Onshape URL, or the copied file's path relative to its cwd.
+const source = values.file
+  ? NodePath.join("model", NodePath.basename(values.file))
+  : (values.url ?? "");
+if (values.file) {
+  NodeFS.mkdirSync(NodePath.join(workspace, "model"));
+  NodeFS.copyFileSync(NodePath.resolve(values.file), NodePath.join(workspace, source));
+}
+const prompt = `${NodeFS.readFileSync(values["prompt-file"], "utf8").trim()}\n\n${source}`;
 NodeFS.writeFileSync(NodePath.join(out, "prompt.md"), `${prompt}\n`);
 
+// spawn drops undefined variables, so a file run starts with no Onshape key at all.
 const env = {
   ...process.env,
-  ONSHAPE_ACCESS_KEY: credential.accessKeyId,
-  ONSHAPE_SECRET_KEY: credential.secretKey,
+  ONSHAPE_ACCESS_KEY: credential?.accessKeyId,
+  ONSHAPE_SECRET_KEY: credential?.secretKey,
   CADSENSE_TELEMETRY_ENABLED: "false",
 };
 // This run owns the MCP server process, the way the app owns a provider turn. The agent reaches it
 // through a relay on a Unix socket: MCP clients kill their stdio servers when they exit, which can
 // cut off work the server does when a review ends (the cad_checks draft backstop). When the agent
-// exits, the run ends the server's stdin and waits for it to finish.
+// exits, the run ends the server's stdin and waits for it to finish. It runs in the agent's working
+// directory, where a client would start it, so relative file paths resolve the same way.
 const server = NodeChildProcess.spawn(process.execPath, [bin, "mcp", "--base-dir", home], {
+  cwd: workspace,
   env,
   stdio: ["pipe", "pipe", "pipe"],
 });
@@ -310,7 +334,7 @@ for (const call of calls) counts[call.name] = (counts[call.name] ?? 0) + 1;
 const summary = {
   agent,
   model: model ?? values.model ?? "default",
-  url: values.url,
+  ...(values.url ? { url: values.url } : { file: NodePath.resolve(values.file ?? "") }),
   exitCode,
   durationSeconds: Math.round(durationMs / 1000),
   toolCalls: counts,

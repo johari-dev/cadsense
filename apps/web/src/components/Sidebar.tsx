@@ -35,6 +35,7 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import {
   type ContextMenuItem,
+  hasCadSource,
   ProjectId,
   type ScopedThreadRef,
   type ResolvedKeybindingsConfig,
@@ -1236,7 +1237,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const removeCadProject = useRemoveCadProject();
   const handleRemoveProject = useCallback(
     async (member: SidebarProjectGroupMember) => {
-      if (member.onshapeSource) {
+      // CAD projects are removed through CAD storage, which keeps their threads for a restore.
+      if (hasCadSource(member)) {
         const previousLocation = router.state.location.href;
         const removesActiveThread = sidebarThreads.some(
           (thread) =>
@@ -1257,7 +1259,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not remove Onshape project",
+              title: member.onshapeSource
+                ? "Could not remove Onshape project"
+                : "Could not remove local CAD project",
               description: "Stop active runs and CAD operations, then try again.",
             }),
           );

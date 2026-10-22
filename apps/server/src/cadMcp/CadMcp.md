@@ -1,14 +1,16 @@
 # Cadsense MCP
 
-`cadsense mcp` lets an agent that Cadsense did not launch review Onshape CAD. It is a stdio MCP
-server that needs no window: Claude Code, Codex, or any other MCP client can open an Onshape tab,
-inspect it, and leave the same verified comments the desktop app shows.
+`cadsense mcp` lets an agent that Cadsense did not launch review CAD from Onshape or from a CAD file
+on the same machine. It is a stdio MCP server that needs no window: Claude Code, Codex, or any other
+MCP client can open an Onshape tab or a local STEP or IGES file, inspect it, and leave the same
+verified comments the desktop app shows.
 
 ## Set up
 
-You need Node 24, a checkout with dependencies installed, the web app built
-(`pnpm --filter @cadsense/web build`), and an Onshape API key from
-<https://dev-portal.onshape.com/keys> that can read documents. The first capture downloads Playwright's
+You need Node 24, a checkout with dependencies installed, and the web app built
+(`pnpm --filter @cadsense/web build`). Onshape also needs an API key from
+<https://dev-portal.onshape.com/keys> that can read documents. Local files need no key, so for them
+leave out the two `-e` options and the `env` line below. The first capture downloads Playwright's
 headless Chromium (about 110 MB) unless `CADSENSE_CHROMIUM_PATH` points at a Chromium binary.
 
 Claude Code:
@@ -30,8 +32,8 @@ env = { ONSHAPE_ACCESS_KEY = "...", ONSHAPE_SECRET_KEY = "..." }
 default_tools_approval_mode = "approve"
 ```
 
-Then ask for a review with the Onshape tab URL. Unattended runs work the same way:
-`claude -p "Review my intake: <url>" --allowedTools mcp__cadsense` or `codex exec "..."`.
+Then ask for a review with the Onshape tab URL or the file's path. Unattended runs work the same
+way: `claude -p "Review my intake: <url or path>" --allowedTools mcp__cadsense` or `codex exec "..."`.
 
 ## How it works
 
@@ -40,11 +42,28 @@ Then ask for a review with the Onshape tab URL. Unattended runs work the same wa
   `--base-dir`. Do not point it at the desktop app's directory while the app is running.
 - `initialize` and `tools/list` are answered before the backend module graph loads, so a slow machine
   does not trip Codex's 10 second startup limit. Tool calls wait for the backend.
-- `cad_open` verifies the key once per host and process as the connection `Cadsense MCP`, reuses the
-  project for that Onshape source, and runs discover and sync. An unchanged sync costs one Onshape
-  request. It returns `importing` after 45 seconds so clients with a 60 second tool limit can call
-  again. Each opened review is a new chat with a synthetic turn ID (`mcp-<uuid>`), which scopes the CAD
-  activation, captures, and comments like a provider turn.
+- `cad_open` takes exactly one of `url` and `file`, plus an optional `title`.
+- With `url`, it verifies the key once per host and process as the connection `Cadsense MCP`, reuses
+  the project for that Onshape source, and runs discover and sync. An unchanged sync costs one Onshape
+  request.
+- With `file`, it opens a [local CAD project](../localCad/LocalCad.md) and needs no key. A relative
+  path resolves against the server's working directory, which MCP clients set to their own. The
+  project folder is `folder` if given, else the file's own directory, and must contain the file.
+  `folder` is for an assembly whose files sit in sibling directories. The folder's active project is
+  reused; if it links a different file, `cad_open` links this one the way the CAD panel's file prompt
+  does (`localCad.projects.setFile`). Otherwise it creates the project the way the Local CAD file
+  dialog does (`localCad.projects.create`). Both start the import. When the file's bytes match its
+  current snapshot, nothing is imported, in this process or a later one.
+- Either way, `cad_open` returns `importing` after 45 seconds so clients with a 60 second tool limit
+  can call again. The next call joins the running import instead of starting another, and reports its
+  failure reason if it failed. Each opened review is a new chat with a synthetic turn ID
+  (`mcp-<uuid>`), which scopes the CAD activation, captures, and comments like a provider turn. A
+  review stays on the snapshot it opened, so after a re-export or a switch to another file in the same
+  folder, `cad_open` closes it and opens a new one.
+- A missing file or folder, an unsupported extension, a file outside the folder, or a failed import
+  returns a tool error with a `reason` (`file-not-found`, `folder-not-found`, `unsupported-file`,
+  `outside-folder`, `import-failed`) and `details` that name the path. Nothing is created before the
+  path checks pass.
 - A microversion URL (`/m/`) names CAD that cannot change. When the data directory already holds that
   microversion of the element, `cad_open` opens it with no Onshape requests at all: no key
   verification and no sync.
@@ -55,12 +74,13 @@ Then ask for a review with the Onshape tab URL. Unattended runs work the same wa
   stream and passes each event into the page, which fetches jobs and uploads PNGs over the ticketed
   `/api/cad-render` routes. It starts on the first `cad_open` and restarts after a crash.
 - After each publication the review is written to `reports/<chat id>/` in the data directory:
-  `index.html`, `comments.json`, and the numbered inspection image for each verified location.
+  `index.html`, `comments.json`, and the numbered inspection image for each verified location. A
+  local review's report links the file with a `file://` URL.
 
 ## Limits
 
-- One review is open at a time. Opening another URL ends the previous activation; its comments and
-  report stay on disk.
+- One review is open at a time. Opening another URL or file ends the previous activation; its
+  comments and report stay on disk.
 - Subagents in one client share the review's view, so parallel view changes can hit revision
   conflicts.
 - Without a GPU, Chromium renders with SwiftShader. On a 577-part assembly that took about 1.6 s per
@@ -70,12 +90,25 @@ Then ask for a review with the Onshape tab URL. Unattended runs work the same wa
 - The `cad_checks` draft backstop runs when a review closes, which over MCP means when the client
   ends the session. Codex and Claude Code usually kill the server right after closing its stdin, so
   the backstop may not finish publishing. In the app it runs at every turn end.
+- Local files have the [local CAD limits](../localCad/LocalCad.md#limits): STEP and IGES only (export
+  other formats to STEP), no mass or materials, and parts that move between exports read as changed
+  geometry.
+- Checking whether a local file changed reads the whole file once per `cad_open`. Files over the
+  512 MiB import limit are not read; their import fails with that reason.
+- A second `file` in a folder whose import is still running is refused as `busy` until that import
+  ends.
 - It is not published to npm yet. Run it from a checkout.
 
 ## Verify
 
+`CadMcpReviews.test.ts` runs `cad_open` with local files against the real orchestration engine,
+`LocalCadProjects`, `CadUserOperations`, and occt import, with every Onshape service failing if
+called. It covers relative paths, the folder input, reuse of an unchanged file, a re-export and a
+switch to another file, path errors, a failed import, and an import that outlasts the call.
+
 `apps/server/scripts/cad-mcp-review-e2e.ts` runs Claude Code or Codex against a fresh data directory
 and keeps the transcript, the final message, the MCP log, the report, and a summary of tool calls.
+`--file <path>` reviews a local CAD file in place of `--url`, with no Onshape key in the environment.
 The script starts the MCP server itself and gives the agent a relay to it, so the server still
 closes the review in order after the agent exits, as an app turn would. `--seed-home <dir>` starts
 from a copy of an earlier run's data directory; with a microversion URL it holds, runs make no
@@ -98,6 +131,8 @@ inspection change on the exact views and pixels an agent used.
 ```sh
 ONSHAPE_CREDENTIAL_FILE=key.json node apps/server/scripts/cad-mcp-review-e2e.ts \
   --agent claude --url <onshape tab url> --prompt-file prompt.md --out .cadsense/mcp-e2e/run
+node apps/server/scripts/cad-mcp-review-e2e.ts --agent claude --file part.step \
+  --prompt-file prompt.md --out .cadsense/mcp-e2e/local-run
 ```
 
 Use the prompts in [the review evaluation](../cad/CadReviewEvaluation.md) and judge the results the

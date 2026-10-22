@@ -34,6 +34,25 @@ any failure reason above a **Pick a file** button:
 Either way `localCad.projects.setFile` links the file, absolute or workspace-relative, and imports
 it. A plain folder project becomes a local CAD project this way.
 
+### Removing and restoring
+
+Removing a local CAD project, from the sidebar or project settings, goes through CAD storage
+(`cadStorage.run`), the same as an Onshape project:
+
+1. The dialog asks whether to delete the imported CAD (the project's snapshots). It never offers to
+   delete the folder, which belongs to the user. The decider rejects `deleteWorkspace` for any
+   project without an Onshape source.
+2. The project leaves the sidebar. Its threads, captures, and comments stay. Imported CAD that the
+   user deletes goes right away, after the project's open viewers close.
+3. Settings > CAD storage lists the removed project. It can delete the kept CAD later, or restore
+   the project. Restore refuses while another active project uses the folder. A project restored
+   without its CAD shows the file prompt, so the file can be imported again.
+
+`project.delete` rejects a local CAD project, as it rejects a ready Onshape project, so removal is
+the only way to take one out of the sidebar. The `project.onshape.remove`, `.cleanup.request`,
+`.cleanup.complete`, and `.restore` commands and the `project.onshape.storage-set` event keep their
+names because events are persisted.
+
 ## How it maps onto the Onshape snapshot model
 
 Everything after import (CAD panel, agent tools, comments, `cad_diff`, retention) reads the same
@@ -76,7 +95,11 @@ and cancelling terminates the worker.
 | Folder already used by a folder project               | That project gets the CAD source                             |
 | Folder used by an Onshape project                     | `onshape-project`                                            |
 | Agent run or CAD operation active                     | `busy`                                                       |
-| Local CAD project deleted                             | Its viewers close and its snapshots are removed right away   |
+| `project.delete` on a local CAD project               | Rejected; it is removed through CAD storage                  |
+| Removal or cleanup asks to delete the folder          | Rejected; only an Onshape managed workspace can be deleted   |
+| Removed with its imported CAD kept                    | Snapshots kept until restore, or a later delete in storage   |
+| Removed with its imported CAD deleted                 | Its viewers close and its snapshots are removed right away   |
+| Restore while another project uses the folder         | Rejected until that project is removed                       |
 
 ## SolidWorks files
 
@@ -266,13 +289,14 @@ Each part's mass is checked against its material's density times its mesh's volu
 configurations. `LocalCadDraft.test.ts` covers how the manifest maps material and mass.
 
 `apps/server/scripts/local-cad-project-e2e.ts` runs the dev app on a fresh data directory and drives
-headless Chromium through the dialog, the first import, the CAD panel, a re-export with Sync, and
-project settings. With `--ask` and `--model` it also sends a prompt to a real agent. With
-`--solidworks` it converts real SolidWorks files, one project folder per case, including a part
-converted while a user's SolidWorks session is open and must stay open. It keeps a screenshot per
-step, the dev log, and `summary.json` under `--out`. It starts from a corrupt file so the panel's
-file prompt has to recover, through the browser file menu. The dev server runs under `node --watch`,
-whose workers post their own messages on the parent port; only this run covers that.
+headless Chromium through the dialog, the first import, the CAD panel and its heading's Open file,
+a re-export with Sync, project settings, and a removal from the sidebar that keeps the imported
+CAD, then a restore from CAD storage. With `--ask` and `--model` it also sends a prompt to a real
+agent. With `--solidworks` it converts real SolidWorks files, one project folder per case,
+including a part converted while a user's SolidWorks session is open and must stay open. It keeps a
+screenshot per step, the dev log, and `summary.json` under `--out`. It starts from a corrupt file so
+the panel's file prompt has to recover, through the browser file menu. The dev server runs under
+`node --watch`, whose workers post their own messages on the parent port; only this run covers that.
 
 `apps/desktop/scripts/local-cad-file-picker-e2e.mjs` covers the native dialog in the dev desktop
 app. It stubs Electron's `dialog.showOpenDialog` in the main process, records the options it was

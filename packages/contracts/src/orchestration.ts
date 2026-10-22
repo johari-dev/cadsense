@@ -1079,6 +1079,8 @@ const InternalOrchestrationCommand = Schema.Union([
   CadCommentReviewCommand,
   CadCommentsOutdateCommand,
   CadReviewLearningRemoveCommand,
+  // The `project.onshape.*` storage commands and their `project.onshape.storage-set` event keep
+  // their names because events are persisted. They remove and restore local CAD projects too.
   Schema.Struct({
     type: Schema.Literal("project.onshape.remove"),
     commandId: CommandId,
@@ -1187,6 +1189,7 @@ export const ProjectCadStateSetPayload = Schema.Struct({
   cad: CadProjectState,
   updatedAt: IsoDateTime,
 });
+/** Removal state of an Onshape or local CAD project. The name predates local CAD projects. */
 export const ProjectOnshapeStorageSetPayload = Schema.Struct({
   ...ProjectCadStateSetPayload.fields,
   deletedAt: Schema.NullOr(IsoDateTime),

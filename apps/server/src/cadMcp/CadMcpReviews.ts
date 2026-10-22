@@ -2,6 +2,8 @@ import {
   CAD_TOOL_INPUTS,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  LOCAL_CAD_FILE_EXTENSIONS,
+  LocalCadError,
   onshapeProjectSourceIdentity,
   ProjectId,
   ThreadId,
@@ -10,6 +12,7 @@ import {
   type OnshapeConnectionSummary,
   type OnshapeProjectSource,
 } from "@cadsense/contracts";
+import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -27,7 +30,15 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadRenderBroker } from "../cad/CadRenderBroker.ts";
 import { CadUserOperations } from "../cad/CadUserOperations.ts";
 import { CadViewing } from "../cad/CadViewing.ts";
+import { defaultCadRoot } from "../cad/CadViewState.ts";
 import { ServerConfig } from "../config.ts";
+import {
+  localCadElementId,
+  localCadMicroversionId,
+  MAX_LOCAL_CAD_FILE_BYTES,
+  resolveLocalCadFile,
+} from "../localCad/LocalCadFiles.ts";
+import { LocalCadProjects } from "../localCad/LocalCadProjects.ts";
 import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
 import { OnshapeProjects } from "../onshape/OnshapeProjects.ts";
 import * as OnshapeSourceUrl from "../onshape/OnshapeSourceUrl.ts";
@@ -41,6 +52,7 @@ import {
   type CadProviderTools,
 } from "../provider/CadProviderTools.ts";
 import { getAutoBootstrapDefaultModelSelection } from "../serverRuntimeStartup.ts";
+import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import type { CadMcpRenderHost } from "./CadMcpRenderHost.ts";
 import { writeCadMcpReport } from "./CadMcpReport.ts";
 import type { CadMcpToolResult } from "./CadMcpStdio.ts";
@@ -74,6 +86,22 @@ const describeConnectionError = (error: OnshapeConnectionError) => {
   }
 };
 
+/** Says what to fix when a local CAD file cannot be opened, naming the paths cad_open resolved. */
+const describeLocalCadError = (error: LocalCadError, paths: { file: string; folder: string }) => {
+  switch (error.reason) {
+    case "file-not-found":
+      return `No CAD file at ${paths.file}. Pass an absolute path, or one relative to your working directory.`;
+    case "folder-not-found":
+      return `No folder at ${paths.folder}.`;
+    case "outside-folder":
+      return `${paths.file} is not inside ${paths.folder}. Pass a folder that contains the file, or leave folder out to use the file's own folder.`;
+    case "unsupported-file":
+      return `Cadsense opens ${LOCAL_CAD_FILE_EXTENSIONS.join(", ")} files. Export a STEP file from the CAD program and pass that.`;
+    default:
+      return error.message;
+  }
+};
+
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const textResult = (value: unknown, isError = false): CadMcpToolResult => ({
   isError,
@@ -83,6 +111,8 @@ const textResult = (value: unknown, isError = false): CadMcpToolResult => ({
 
 interface Review {
   readonly projectId: ProjectId;
+  /** The snapshot the review opened on. A newer one opens a new review. */
+  readonly snapshotId: string | null;
   readonly threadId: ThreadId;
   readonly turnId: TurnId;
   readonly tools: CadProviderTools;
@@ -128,31 +158,63 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
   readonly apiKey: Option.Option<OnshapeApiKey>;
   readonly renderHost: CadMcpRenderHost;
   readonly clientName: () => string;
+  /** How long cad_open waits on an import before it answers "importing". Defaults to 45 s. */
+  readonly importWaitMs?: number;
 }) {
   const connections = yield* OnshapeConnections;
   const onshapeProjects = yield* OnshapeProjects;
+  const localCadProjects = yield* LocalCadProjects;
   const operations = yield* CadUserOperations;
   const engine = yield* OrchestrationEngineService;
   const query = yield* ProjectionSnapshotQuery;
   const broker = yield* CadRenderBroker;
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const workspacePaths = yield* WorkspacePaths;
   const config = yield* ServerConfig;
   const owner = yield* Scope.Scope;
   // Provided to activations and reports created later, outside this constructor.
   const context = yield* Effect.context<
-    CadViewing | ServerConfig | Path.Path | FileSystem.FileSystem | SqlClient.SqlClient
+    | CadViewing
+    | ServerConfig
+    | Path.Path
+    | FileSystem.FileSystem
+    | SqlClient.SqlClient
+    | WorkspacePaths
   >();
   const gate = yield* Semaphore.make(1);
   const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
   const fail = (reason: string, details: string) => new CadMcpOpenError({ reason, details });
+  const importWaitMs = options.importWaitMs ?? IMPORT_WAIT_MS;
 
   const verified = new Map<string, OnshapeConnectionSummary>();
-  // The CAD operation this process started for each project and still waits on.
+  // The CAD operation this process started or joined for each project, and still waits on.
   const started = new Map<ProjectId, { kind: "discover" | "sync"; operationId: string }>();
   const discovered = new Set<ProjectId>();
   const synced = new Set<ProjectId>();
   let current: Review | null = null;
+
+  const startOperation = (input: Parameters<typeof operations.start>[0]) =>
+    operations.start(input).pipe(
+      Effect.mapError((error) =>
+        fail(
+          "import-failed",
+          error.reason === "throttled"
+            ? "Onshape asked Cadsense to slow down. Try again later."
+            : `The CAD import could not start (${error.reason}).`,
+        ),
+      ),
+      Effect.tap(({ operationId }) =>
+        Effect.sync(() => started.set(input.projectId, { kind: input.kind, operationId })),
+      ),
+    );
+
+  // Warm the renderer while the CAD downloads or imports; failures surface again on the first capture.
+  const warmRenderer = options.renderHost.ensure.pipe(
+    Effect.catch((error) => Effect.logWarning("CAD render host did not start", error)),
+    Effect.forkIn(owner),
+  );
 
   /** One verification request per host per process keeps the stored key equal to the env key. */
   const connectionFor = Effect.fn("CadMcpReviews.connectionFor")(function* (host: string) {
@@ -248,21 +310,7 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
     projectId: ProjectId,
     source: OnshapeProjectSource & { readonly elementId: string },
   ) {
-    const start = (input: Parameters<typeof operations.start>[0]) =>
-      operations.start(input).pipe(
-        Effect.mapError((error) =>
-          fail(
-            "import-failed",
-            error.reason === "throttled"
-              ? "Onshape asked Cadsense to slow down. Try again later."
-              : `The CAD import could not start (${error.reason}).`,
-          ),
-        ),
-        Effect.tap(({ operationId }) =>
-          Effect.sync(() => started.set(projectId, { kind: input.kind, operationId })),
-        ),
-      );
-    const deadline = (yield* Clock.currentTimeMillis) + IMPORT_WAIT_MS;
+    const deadline = (yield* Clock.currentTimeMillis) + importWaitMs;
     while (true) {
       const project = yield* query.getProjectShellById(projectId);
       if (Option.isNone(project))
@@ -284,7 +332,7 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
       if (synced.has(projectId)) return true;
       const root = cad?.catalog?.roots.find((entry) => entry.elementId === source.elementId);
       if (root) {
-        yield* start({
+        yield* startOperation({
           projectId,
           kind: "sync",
           root: { elementId: root.elementId, kind: root.kind, configuration: source.configuration },
@@ -296,8 +344,128 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
           "unsupported-element",
           "This Onshape tab is not an assembly or part studio Cadsense can open. Open an assembly or part studio tab and use its URL.",
         );
-      yield* start({ projectId, kind: "discover" });
+      yield* startOperation({ projectId, kind: "discover" });
     }
+  });
+
+  /**
+   * The project for a local CAD file's folder, with that file linked: the folder's active project
+   * as is, the same project relinked with `setFile`, or a new one from `create`.
+   */
+  const localProjectFor = Effect.fn("CadMcpReviews.localProjectFor")(function* (
+    workspaceRoot: string,
+    filePath: string,
+    title: string,
+  ) {
+    const folder = normalizeProjectPathForComparison(workspaceRoot);
+    const existing = (yield* query.getCommandReadModel()).projects.find(
+      (project) =>
+        project.deletedAt === null &&
+        normalizeProjectPathForComparison(project.workspaceRoot) === folder,
+    );
+    if (existing?.localCadSource?.filePath === filePath) return existing.id;
+    const linked = existing
+      ? yield* localCadProjects.setFile({ projectId: existing.id, filePath })
+      : yield* localCadProjects.create({
+          projectId: ProjectId.make(yield* uuid),
+          title,
+          workspaceRoot,
+          filePath,
+        });
+    return linked.projectId;
+  });
+
+  /**
+   * Waits for a local file's import. A file whose bytes match its current snapshot needs none, so
+   * reopening an unchanged file costs one read. An import already running for the file, such as
+   * the one linking it started, is joined and its failure reported. Returns false if still
+   * importing at the deadline.
+   */
+  const importLocalFile = Effect.fn("CadMcpReviews.importLocalFile")(function* (
+    projectId: ProjectId,
+    filePath: string,
+    microversionId: string | null,
+  ) {
+    const elementId = localCadElementId(filePath);
+    const deadline = (yield* Clock.currentTimeMillis) + importWaitMs;
+    while (true) {
+      const project = yield* query.getProjectShellById(projectId);
+      if (Option.isNone(project))
+        return yield* fail("project-missing", "The review project was removed.");
+      const cad = project.value.cad;
+      const operation = cad?.operation;
+      if (operation) {
+        if (operation.kind === "sync" && operation.root?.elementId === elementId)
+          started.set(projectId, { kind: "sync", operationId: operation.operationId });
+        if ((yield* Clock.currentTimeMillis) >= deadline) return false;
+        yield* Effect.sleep("1 second");
+        continue;
+      }
+      const root = cad?.roots.find((entry) => entry.elementId === elementId);
+      const pending = started.get(projectId);
+      if (pending && root?.lastOutcome?.operationId === pending.operationId) {
+        started.delete(projectId);
+        if (root.lastOutcome.status !== "succeeded")
+          return yield* fail("import-failed", root.lastOutcome.reason ?? "The CAD import failed.");
+        return true;
+      }
+      if (microversionId !== null && root?.current?.microversionId === microversionId) return true;
+      yield* startOperation({
+        projectId,
+        kind: "sync",
+        root: { elementId, kind: "assembly", configuration: "default" },
+      });
+    }
+  });
+
+  /**
+   * Opens a CAD file on this machine as a folder project, the way the app's Local CAD file dialog
+   * does. Needs no Onshape key. Relative paths resolve against this process's working directory,
+   * which MCP clients set to their own.
+   */
+  const openLocalFile = Effect.fn("CadMcpReviews.openLocalFile")(function* (request: {
+    readonly file: string;
+    readonly folder: string | undefined;
+    readonly title: string | undefined;
+  }) {
+    const file = path.resolve(request.file);
+    const folder = path.resolve(request.folder ?? path.dirname(file));
+    const problem = (error: LocalCadError) =>
+      fail(error.reason, describeLocalCadError(error, { file, folder }));
+    const resolved = yield* Effect.gen(function* () {
+      // A missing default folder means the file is missing too.
+      const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(folder).pipe(
+        Effect.mapError(
+          () =>
+            new LocalCadError({
+              reason: request.folder === undefined ? "file-not-found" : "folder-not-found",
+            }),
+        ),
+      );
+      const found = yield* resolveLocalCadFile({ workspaceRoot, filePath: file });
+      // A file over the import limit is not read here; its import fails with the limit's reason.
+      const microversionId =
+        found.byteLength > MAX_LOCAL_CAD_FILE_BYTES
+          ? null
+          : localCadMicroversionId(
+              yield* fileSystem
+                .readFile(found.absolutePath)
+                .pipe(Effect.mapError(() => new LocalCadError({ reason: "file-not-found" }))),
+            );
+      return { workspaceRoot, filePath: found.relativePath, microversionId };
+    }).pipe(Effect.provide(context), Effect.mapError(problem));
+    const title = request.title ?? path.basename(file);
+    yield* warmRenderer;
+    const projectId = yield* localProjectFor(resolved.workspaceRoot, resolved.filePath, title).pipe(
+      Effect.catchTag("LocalCadError", (error) => Effect.fail(problem(error))),
+    );
+    if (!(yield* importLocalFile(projectId, resolved.filePath, resolved.microversionId)))
+      return null;
+    const sourceUrl = yield* path.toFileUrl(file).pipe(
+      Effect.map((url) => url.href),
+      Effect.orElseSucceed(() => file),
+    );
+    return { projectId, title, sourceUrl };
   });
 
   const writeReport = (review: Review) =>
@@ -319,12 +487,25 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
     yield* Effect.logInfo("CAD MCP review closed", { threadId: review.threadId });
   });
 
+  /**
+   * The open review of the project, or a new one. A review stays on the snapshot it opened, so a
+   * newer import (a re-exported or relinked local file) closes it and opens another. An Onshape
+   * project syncs once per process, so its review is kept.
+   */
   const reviewFor = Effect.fn("CadMcpReviews.reviewFor")(function* (
     projectId: ProjectId,
     title: string,
     sourceUrl: string,
   ) {
-    if (current?.projectId === projectId) return current;
+    // The root a new review opens, by the rule CadViewing applies to a chat with no saved view.
+    const project = yield* query.getProjectShellById(projectId);
+    const snapshotId = Option.isSome(project)
+      ? (defaultCadRoot(
+          project.value,
+          project.value.cad?.roots.filter((root) => root.current !== null) ?? [],
+        )?.current?.snapshotId ?? null)
+      : null;
+    if (current?.projectId === projectId && current.snapshotId === snapshotId) return current;
     if (current) yield* closeReview(current);
     current = null;
     const threadId = ThreadId.make(yield* uuid);
@@ -347,6 +528,7 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
     );
     const review: Review = {
       projectId,
+      snapshotId,
       threadId,
       turnId: TurnId.make(`mcp-${yield* uuid}`),
       tools,
@@ -359,12 +541,11 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
     return review;
   });
 
-  const open = Effect.fn("CadMcpReviews.open")(function* (input: unknown) {
-    const request = yield* decodeOpenInput(input).pipe(
-      Effect.mapError(() =>
-        fail("invalid-input", "Pass {url} with the Onshape tab URL, and optionally {title}."),
-      ),
-    );
+  /** Opens an Onshape tab's element, verifying the key unless the data directory already has it. */
+  const openOnshape = Effect.fn("CadMcpReviews.openOnshape")(function* (request: {
+    readonly url: string;
+    readonly title: string | undefined;
+  }) {
     const host = yield* Effect.try({
       try: () => new URL(request.url).origin,
       catch: () => fail("invalid-url", "The url is not a valid Onshape URL."),
@@ -392,19 +573,37 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
         "The URL opens a document, not a tab. Open the assembly or part studio tab and use its URL, which ends in /e/<elementId>.",
       );
     const title = request.title ?? "Onshape review";
-    // Warm the renderer while the CAD downloads; failures surface again on the first capture.
-    yield* options.renderHost.ensure.pipe(
-      Effect.catch((error) => Effect.logWarning("CAD render host did not start", error)),
-      Effect.forkIn(owner),
-    );
+    yield* warmRenderer;
     const projectId = yield* projectFor(source, request.url, title);
-    if (!(yield* importRoot(projectId, { ...source, elementId })))
+    if (!(yield* importRoot(projectId, { ...source, elementId }))) return null;
+    return { projectId, title, sourceUrl: request.url };
+  });
+
+  const open = Effect.fn("CadMcpReviews.open")(function* (input: unknown) {
+    const invalid = fail(
+      "invalid-input",
+      "Pass {url} with the Onshape tab URL, or {file} with the path of a local CAD file, and optionally {title}. {folder} only goes with {file}.",
+    );
+    const { url, file, folder, title } = yield* decodeOpenInput(input).pipe(
+      Effect.mapError(() => invalid),
+    );
+    const request =
+      file !== undefined && url === undefined
+        ? ({ kind: "local", file, folder, title } as const)
+        : url !== undefined && file === undefined && folder === undefined
+          ? ({ kind: "onshape", url, title } as const)
+          : yield* invalid;
+    const opened =
+      request.kind === "local" ? yield* openLocalFile(request) : yield* openOnshape(request);
+    if (opened === null)
       return {
         status: "importing",
         details:
-          "Still downloading this CAD. Call cad_open again with the same url to keep waiting.",
+          request.kind === "local"
+            ? "Still importing this file. Call cad_open again with the same file to keep waiting."
+            : "Still downloading this CAD. Call cad_open again with the same url to keep waiting.",
       };
-    const review = yield* reviewFor(projectId, title, request.url);
+    const review = yield* reviewFor(opened.projectId, opened.title, opened.sourceUrl);
     const delivery = yield* review.tools.invoke(null, review.turnId, "cad_context", {});
     const reportPath = yield* writeReport(review);
     return {
@@ -425,7 +624,7 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
       return textResult(
         {
           reason: "no-review",
-          details: "No review is open. Call cad_open with the Onshape URL first.",
+          details: "No review is open. Call cad_open with the Onshape URL or the CAD file first.",
         },
         true,
       );

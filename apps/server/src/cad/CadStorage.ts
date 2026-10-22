@@ -1,6 +1,7 @@
 import {
   CadUserOperationError,
   CommandId,
+  hasCadSource,
   type CadStorageInput,
   type CadStorageEntry,
   type ProjectId,
@@ -14,10 +15,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { forkParked } from "../serverActivation.ts";
 import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocator.ts";
 import { CadProjectQuiescence } from "./CadUserOperations.ts";
-import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadPanel } from "./CadPanel.ts";
 
@@ -49,7 +48,7 @@ export const make = Effect.gen(function* () {
   const projectFor = Effect.fn("CadStorage.projectFor")(function* (projectId: ProjectId) {
     const model = yield* read;
     const project = model.projects.find(
-      (project) => project.id === projectId && project.onshapeSource,
+      (project) => project.id === projectId && hasCadSource(project),
     );
     if (!project) return yield* new CadUserOperationError({ reason: "not-found" });
     return project;
@@ -141,9 +140,11 @@ export const make = Effect.gen(function* () {
         if (input.kind === "restore") {
           if (project.cad.storage.cleanupPending)
             return yield* new CadUserOperationError({ reason: "busy" });
-          yield* allocator
-            .provision({ projectId: project.id, workspaceRoot: project.workspaceRoot })
-            .pipe(Effect.mapError(failed));
+          // A local CAD project's folder is the user's, so only Onshape has a workspace to recreate.
+          if (project.onshapeSource)
+            yield* allocator
+              .provision({ projectId: project.id, workspaceRoot: project.workspaceRoot })
+              .pipe(Effect.mapError(failed));
           yield* dispatch({
             type: "project.onshape.restore",
             projectId: project.id,
@@ -175,6 +176,7 @@ export const make = Effect.gen(function* () {
                 projectId: project.id,
                 title: project.title,
                 workspaceRoot: project.workspaceRoot,
+                source: project.onshapeSource ? ("onshape" as const) : ("local" as const),
                 ...storage,
                 byteLength:
                   project.cad?.roots.reduce(
@@ -203,30 +205,6 @@ export const make = Effect.gen(function* () {
         ),
       );
     }),
-  );
-  // A local CAD project is deleted like any folder project, with no storage choice to honor, so its
-  // snapshots go with it. Its viewers are released first, because a pinned snapshot can't be removed.
-  // Anything left behind is pruned at the next start.
-  const deletions = yield* engine.subscribeDomainEvents;
-  yield* forkParked(
-    Stream.fromSubscription(deletions).pipe(
-      Stream.runForEach((event) =>
-        Effect.gen(function* () {
-          if (event.type !== "project.deleted") return;
-          const project = (yield* read).projects.find(
-            (item) => item.id === event.payload.projectId,
-          );
-          if (!project?.localCadSource) return;
-          yield* panel.releaseProject(project.id);
-          yield* pruneCadSnapshots(project.id).pipe(
-            Effect.provideService(CadSnapshotStore, store),
-            Effect.provideService(ProjectionSnapshotQuery, query),
-          );
-        }).pipe(
-          Effect.catch(() => Effect.logWarning("Deleted local CAD cleanup is pending a restart.")),
-        ),
-      ),
-    ),
   );
   return CadStorage.of({ run, watch });
 });

@@ -21,9 +21,10 @@ const McpEnv = Config.all({
 });
 
 /**
- * `cadsense mcp`: a stdio MCP server that reviews Onshape CAD with no window. It runs the regular
- * backend on a random loopback port with its own data directory (`~/.cadsense-mcp` by default),
- * locked with a per-process credential, and renders captures in headless Chromium.
+ * `cadsense mcp`: a stdio MCP server that reviews Onshape CAD or CAD files on this machine with no
+ * window. It runs the regular backend on a random loopback port with its own data directory
+ * (`~/.cadsense-mcp` by default), locked with a per-process credential, and renders captures in
+ * headless Chromium. Only Onshape needs the API key; local files open without it.
  *
  * Only light modules load before the stdio server starts. The backend loads next, so `initialize`
  * answers quickly even on a slow machine; Codex drops servers that take over 10 seconds.
@@ -96,7 +97,7 @@ const runCadMcp = Effect.fn("runCadMcp")(function* (flags: {
 
 export const cadMcpCommand = Command.make("mcp", { baseDir: baseDirFlag }).pipe(
   Command.withDescription(
-    "Run a stdio MCP server that reviews Onshape CAD without a window. Reads ONSHAPE_ACCESS_KEY and ONSHAPE_SECRET_KEY.",
+    "Run a stdio MCP server that reviews Onshape CAD or CAD files on this machine without a window. Reads ONSHAPE_ACCESS_KEY and ONSHAPE_SECRET_KEY for Onshape.",
   ),
   Command.withHandler(runCadMcp),
 );

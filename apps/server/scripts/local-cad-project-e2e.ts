@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off preferSchemaOverJson:off globalTimers:off globalFetch:off
 /**
  * End-to-end check of local CAD projects through the real app. Starts the dev server and web app on
- * a fresh data directory, then drives headless Chromium through the whole flow and keeps the
- * evidence under --out:
+ * a fresh data directory, then drives headless Chromium through the whole flow, ending with removing
+ * the project from the sidebar and restoring it from CAD storage, and keeps the evidence under --out:
  *
  *   bracket-rig/         the project folder: the STEP file, an older export, and a corrupt file
  *   NN-*.png             a screenshot after each step
@@ -201,6 +201,17 @@ const browser = await chromium.launch({
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// The panel heading opens the shown CAD file with its default app, which the server would launch
+// on this machine. So the app's request for it is kept here and never reaches the server.
+const openRequests: string[] = [];
+await page.routeWebSocket(/./, (ws) => {
+  const server = ws.connectToServer();
+  ws.onMessage((message) => {
+    if (typeof message === "string" && message.includes('"shell.openInFileManager"'))
+      openRequests.push(message);
+    else server.send(message);
+  });
+});
 const pageErrors: string[] = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
 let shots = 0;
@@ -219,9 +230,10 @@ const run = async (name: string, action: (page: Page) => Promise<unknown>) => {
 };
 const panel = page.getByRole("region", { name: "CAD panel" });
 // The model's name and its Sync button sit in the right panel's header, outside the CAD panel.
-// A local file is the only model, so its name is a heading rather than a scene picker.
+// A local file is the only model, so its name is a heading rather than a scene picker, and the
+// heading is a button that opens the file.
 const syncButton = page.getByRole("button", { name: "Sync", exact: true });
-const sceneTitle = syncButton.locator("xpath=ancestor::div[.//h2][1]//h2");
+const sceneTitle = page.getByRole("button", { name: stepName, exact: true });
 // The right panel opens on the CAD view. Opens it unless it is already open.
 const openRightPanel = async (page: Page) => {
   const toggle = page.getByRole("button", { name: /^Toggle right panel/ });
@@ -280,6 +292,17 @@ const componentCount = () => {
   if (!newest) return 0;
   return (JSON.parse(NodeFS.readFileSync(newest, "utf8")) as { nodes: unknown[] }).nodes.length;
 };
+// The chat whose CAD panel shows the model. Removal and restore come back to it.
+let threadUrl = url;
+const projectRow = page
+  .locator('[data-sidebar="menu-button"]')
+  .filter({ hasText: NodePath.basename(folder) })
+  .first();
+const removalDialog = page.getByRole("alertdialog");
+const retainedEntry = page.locator("article").filter({ hasText: NodePath.basename(folder) });
+// Every file in the project folder, so removal and restore can show they left it alone.
+const folderFiles = () =>
+  NodeFS.readdirSync(folder, { recursive: true, encoding: "utf8" }).toSorted();
 
 try {
   await run("add-project", async (page) => {
@@ -340,7 +363,17 @@ try {
     await page.getByRole("menuitem", { name: stepName }).click();
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
+    threadUrl = page.url();
     return { title: (await sceneTitle.innerText()).trim(), components: componentCount() };
+  });
+  // Like the Onshape link, the heading opens the CAD file it names, here with its default app.
+  await run("open-file", async (page) => {
+    await sceneTitle.click();
+    const request = await waitFor("the request to open the file", () => openRequests[0]);
+    const { payload } = JSON.parse(request) as { payload: { cwd: string; reveal?: boolean } };
+    if (payload.cwd !== NodePath.join(folder, stepName) || payload.reveal !== false)
+      throw new Error(`Asked to open ${request}`);
+    return { payload };
   });
   await run("re-exported-and-synced", async (page) => {
     // A new export of the same model: different bytes, same structure.
@@ -597,6 +630,71 @@ try {
       });
     }
   }
+  // Removing the project from the sidebar while its chat is open keeps the chat and, here, the
+  // imported CAD, then opens CAD storage. The folder is the user's, so nothing offers to delete it.
+  await run("remove-dialog", async (page) => {
+    await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await openRightPanel(page);
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await projectRow.click({ button: "right" });
+    // The browser's context menu is a list of plain buttons, added last.
+    await page.getByRole("button", { name: "Remove", exact: true }).last().click();
+    await removalDialog.waitFor();
+    const checkbox = removalDialog.getByRole("checkbox");
+    if ((await checkbox.count()) !== 1) throw new Error("The dialog offers more than imported CAD");
+    await removalDialog.getByText("Delete imported CAD data").click();
+    if ((await checkbox.getAttribute("aria-checked")) !== "false")
+      throw new Error("Could not choose to keep the imported CAD");
+    return { dialog: (await removalDialog.innerText()).split("\n").filter(Boolean) };
+  });
+  const kept = { manifests: 0, files: [] as string[] };
+  await run("removed-opens-cad-storage", async (page) => {
+    kept.manifests = manifests().length;
+    kept.files = folderFiles();
+    await removalDialog.getByRole("button", { name: "Remove project" }).click();
+    await page.waitForURL(/\/settings\/cad-storage$/, { timeout: 60_000 });
+    await retainedEntry.waitFor({ timeout: 30_000 });
+    if (manifests().length !== kept.manifests) throw new Error("Removal deleted the kept CAD");
+    if (folderFiles().join() !== kept.files.join()) throw new Error("Removal changed the folder");
+    // Deleting the retained data later offers the imported CAD only.
+    await retainedEntry.getByRole("button", { name: "Delete retained data" }).click();
+    await removalDialog.waitFor();
+    const cleanup = (await removalDialog.innerText()).split("\n").filter(Boolean);
+    if ((await removalDialog.getByRole("checkbox").count()) !== 1)
+      throw new Error("Deleting retained data offers more than imported CAD");
+    await removalDialog.getByRole("button", { name: "Cancel" }).click();
+    await removalDialog.waitFor({ state: "detached" });
+    return {
+      url: page.url(),
+      entry: (await retainedEntry.innerText()).split("\n").filter(Boolean),
+      cleanup,
+      manifests: kept.manifests,
+    };
+  });
+  // Settings pages show their own navigation, so the project list is checked from the chat.
+  await run("thread-link-while-removed", async (page) => {
+    await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await page.waitForTimeout(3000);
+    if (await projectRow.isVisible()) throw new Error("The removed project is still listed");
+    return {
+      url: page.url(),
+      chat: (await page.locator("main").first().innerText()).slice(0, 200),
+    };
+  });
+  await run("restored", async (page) => {
+    await page.goto(new URL("settings/cad-storage", url).href, { waitUntil: "networkidle" });
+    await retainedEntry.getByRole("button", { name: "Restore project" }).click();
+    await retainedEntry.waitFor({ state: "detached", timeout: 60_000 });
+    await page.goto(threadUrl, { waitUntil: "networkidle" });
+    await projectRow.waitFor();
+    await openRightPanel(page);
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await page.waitForTimeout(5000);
+    // The kept snapshot came back with the project, so nothing was imported again.
+    if (manifests().length !== kept.manifests) throw new Error("Restore imported the file again");
+    if (folderFiles().join() !== kept.files.join()) throw new Error("Restore changed the folder");
+    return { url: page.url(), title: (await sceneTitle.innerText()).trim() };
+  });
   const { ask, model } = values;
   if (ask !== undefined && model !== undefined)
     await run("agent-answer", async (page) => {

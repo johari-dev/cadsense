@@ -11,8 +11,9 @@ export const pruneCadSnapshots = Effect.fn("pruneCadSnapshots")(function* (proje
   const stored = yield* store.list();
   const model = yield* query.getCommandReadModel();
   const protectedIds = model.projects
-    // A deleted local CAD project has no retain-or-delete choice to honor (Onshape removal records
-    // one in `cad.storage`), and its file is still on disk, so its snapshots are garbage.
+    // Removal records the user's keep-or-delete choice in `cad.storage`, and a removed project keeps
+    // what it chose. A deleted local CAD project without that record was deleted outright, which
+    // only older event logs hold (`project.delete` now refuses one), so its snapshots are garbage.
     .filter((project) => !(project.localCadSource && project.deletedAt && !project.cad?.storage))
     .flatMap(
       (project) =>
