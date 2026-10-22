@@ -1,4 +1,5 @@
 import {
+  hasCadSource,
   type ApprovalRequestId,
   type ChatFileAttachment,
   DEFAULT_MODEL,
@@ -365,6 +366,9 @@ const PreviewPanel = lazy(() =>
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const CadPanel = lazy(() =>
   import("../cad/CadPanel").then((module) => ({ default: module.CadPanel })),
+);
+const CadFilePrompt = lazy(() =>
+  import("../cad/CadFilePrompt").then((module) => ({ default: module.CadFilePrompt })),
 );
 const CadAutoPreview = lazy(() =>
   import("../cad/CadAutoPreview").then((module) => ({ default: module.CadAutoPreview })),
@@ -1092,7 +1096,9 @@ function ChatViewContent(props: ChatViewProps) {
       }),
     [agentSessionLive, threadActivities],
   );
-  const cadAvailable = !!activeProject?.onshapeSource && activeProject.cad?.enabled !== false;
+  // Every project offers CAD unless it is turned off. Without a linked file, the panel asks for one.
+  const cadAvailable = !!activeProject && activeProject.cad?.enabled !== false;
+  const cadLinked = cadAvailable && hasCadSource(activeProject);
   // The browser page Browser shows: the one last opened in the panel, else the
   // thread's active page, else any page. Null when the thread has no pages.
   const browserTabId =
@@ -3871,7 +3877,7 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelContent = activeThreadRef ? (
     rightPanelSection === "cad" && activeProject ? (
       <Suspense fallback={null}>
-        {cadAvailable && isServerThread ? (
+        {cadLinked && isServerThread ? (
           <CadPanel
             key={activeThreadKey}
             project={activeProject}
@@ -3879,6 +3885,8 @@ function ChatViewContent(props: ChatViewProps) {
             fullscreen={rightPanelMaximized}
             titleSlot={cadTitleSlot}
           />
+        ) : cadAvailable && isServerThread ? (
+          <CadFilePrompt project={activeProject} />
         ) : (
           <div className="p-4 text-sm text-muted-foreground">
             {cadAvailable
@@ -4223,7 +4231,7 @@ function ChatViewContent(props: ChatViewProps) {
                 bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
               />
             ) : null}
-            {activeThreadRef && activeProject && cadAvailable && isServerThread ? (
+            {activeThreadRef && activeProject && cadLinked && isServerThread ? (
               <Suspense fallback={null}>
                 <CadAutoPreview
                   key={activeThreadKey}

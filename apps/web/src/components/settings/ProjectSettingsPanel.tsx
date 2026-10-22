@@ -12,7 +12,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
-import type { ModelSelection, ProviderDriverKind } from "@cadsense/contracts";
+import { hasCadSource, type ModelSelection, type ProviderDriverKind } from "@cadsense/contracts";
 import { createModelSelection } from "@cadsense/shared/model";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 import { FolderOpenIcon, GearSixIcon as SettingsIcon, TrashIcon as Trash2Icon } from "~/lib/icons";
@@ -78,7 +78,7 @@ export function ProjectSettingsPage({ projectKey: selectedProjectKey }: { projec
     previousProject.current = project;
     if (!project && previous && projectKey(previous) === selectedProjectKey) {
       void navigate({
-        to: previous.onshapeSource ? "/settings/cad-storage" : "/",
+        to: hasCadSource(previous) ? "/settings/cad-storage" : "/",
         replace: true,
       });
     }
@@ -131,7 +131,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const threads = useThreadShells();
   const cadRunActive = isCadProjectRunActive(project, threads);
-  const cadBusy = !!project.onshapeSource && (cadRunActive || !!project.cad?.operation);
+  const cadBusy = hasCadSource(project) && (cadRunActive || !!project.cad?.operation);
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const openInFileManager = useAtomCommand(shellEnvironment.openInFileManager, {
@@ -194,7 +194,8 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   const removeCadProject = useRemoveCadProject();
   const removeProject = useCallback(async () => {
     if (cadBusy) return;
-    if (project.onshapeSource) {
+    // CAD projects are removed through CAD storage, which keeps their threads for a restore.
+    if (hasCadSource(project)) {
       const result = await removeCadProject(project);
       if (result?._tag === "Failure") reportFailure("Failed to remove project", result);
       return;
@@ -307,12 +308,10 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
         </SettingsSection>
 
         {project.onshapeSource && (
+          <OnshapeProjectSettings project={project} source={project.onshapeSource} busy={cadBusy} />
+        )}
+        {hasCadSource(project) && (
           <>
-            <OnshapeProjectSettings
-              project={project}
-              source={project.onshapeSource}
-              busy={cadBusy}
-            />
             <CadProjectSettings project={project} runActive={cadRunActive} />
             <CadReviewLearnings project={project} />
           </>
@@ -377,7 +376,9 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
             description={
               project.onshapeSource
                 ? "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files."
-                : "Deletes this project's threads without touching its files."
+                : project.localCadSource
+                  ? "Preserves threads and captures. Choose whether to delete imported CAD. Files in the folder are not touched."
+                  : "Deletes this project's threads without touching its files."
             }
             control={
               <Button

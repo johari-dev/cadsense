@@ -78,6 +78,8 @@ import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
+import * as LocalCadImport from "./localCad/LocalCadImport.ts";
+import * as LocalCadProjects from "./localCad/LocalCadProjects.ts";
 import * as CadStorage from "./cad/CadStorage.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
 import * as CadRenderLifecycle from "./cad/CadRenderLifecycle.ts";
@@ -257,10 +259,10 @@ const OnshapeLayerLive = OnshapeProjects.layer.pipe(
 
 const CadSnapshotStoreLayerLive = CadSnapshotStore.layer.pipe(Layer.provide(PersistenceLayerLive));
 
-const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
-  Layer.provideMerge(CadSnapshotStoreLayerLive),
-  Layer.provideMerge(OnshapeCadRoots.layer),
-);
+const CadAcquisitionLayerLive = Layer.mergeAll(
+  OnshapeSnapshotAcquisition.layer,
+  LocalCadImport.layer.pipe(Layer.provide(WorkspacePaths.layer)),
+).pipe(Layer.provideMerge(CadSnapshotStoreLayerLive), Layer.provideMerge(OnshapeCadRoots.layer));
 const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadViewing.layer),
   Layer.provideMerge(CadComments.layer),
@@ -272,7 +274,10 @@ const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
 );
 const AgentRuntimeLayerLive = Layer.mergeAll(
-  CadUserOperations.layer,
+  LocalCadProjects.layer.pipe(
+    Layer.provideMerge(CadUserOperations.layer),
+    Layer.provide(WorkspacePaths.layer),
+  ),
   CadStorage.layer,
   CadPresentation.reactorLayer,
   CadRenderLifecycle.layer,

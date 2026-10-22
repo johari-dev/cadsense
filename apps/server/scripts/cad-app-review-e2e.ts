@@ -6,7 +6,7 @@
  * what only the app does, such as the cad_checks follow-up (see "The follow-up" in
  * src/cad/CadChecks.md).
  *
- * It copies a data directory that already holds one synced Onshape project (an e2e run's `home`, or
+ * It copies a data directory that already holds one synced CAD project (an e2e run's `home`, or
  * .cadsense/gap/seed-home), starts the backend on the copy, opens a chat on that project, sends one
  * turn, waits for it to end, and keeps under --out:
  *
@@ -20,6 +20,10 @@
  *     --provider codex --model gpt-6-luna --effort medium --prompt-file prompt.md --out <dir> \
  *     [--codex-home <dir>] [--timeout-minutes 40]
  *
+ * For a local CAD file, pass --folder <dir> --file <path in it> instead of --home. The folder is
+ * copied to <out>/folder, a fresh data directory gets a local CAD project for it, and the review
+ * starts once the import finishes.
+ *
  * --codex-home sets the Codex instance's CODEX_HOME, for a model provider configured there. The web
  * app must be built first (`pnpm --filter @cadsense/web build`) because Chromium loads its render
  * page.
@@ -32,7 +36,9 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  hasCadSource,
   MessageId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
   type OrchestrationThread,
@@ -50,6 +56,7 @@ import { HttpServer } from "effect/unstable/http";
 import { makeCadMcpRenderHost } from "../src/cadMcp/CadMcpRenderHost.ts";
 import { writeCadMcpReport } from "../src/cadMcp/CadMcpReport.ts";
 import { resolveServerConfig } from "../src/cli/config.ts";
+import { LocalCadProjects } from "../src/localCad/LocalCadProjects.ts";
 import * as ServerConfig from "../src/config.ts";
 import { OrchestrationEngineService } from "../src/orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -60,6 +67,8 @@ import { ServerRuntimeStartup } from "../src/serverRuntimeStartup.ts";
 const { values } = NodeUtil.parseArgs({
   options: {
     home: { type: "string" },
+    folder: { type: "string" },
+    file: { type: "string" },
     provider: { type: "string" },
     model: { type: "string" },
     effort: { type: "string" },
@@ -72,21 +81,27 @@ const { values } = NodeUtil.parseArgs({
 const provider = values.provider;
 if (
   (provider !== "codex" && provider !== "claudeAgent") ||
-  !values.home ||
+  !values.home === !(values.folder && values.file) ||
   !values.model ||
   !values["prompt-file"] ||
   !values.out
 )
   throw new Error(
-    "Usage: --home <data dir> --provider codex|claudeAgent --model <id> --prompt-file <file> --out <dir> [--effort <level>] [--codex-home <dir>] [--timeout-minutes <n>]",
+    "Usage: --home <data dir> | --folder <dir> --file <path in it>, --provider codex|claudeAgent --model <id> --prompt-file <file> --out <dir> [--effort <level>] [--codex-home <dir>] [--timeout-minutes <n>]",
   );
 
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
 const home = NodePath.join(out, "home");
+const folder = values.folder ? NodePath.join(out, "folder") : undefined;
 NodeFS.mkdirSync(out, { recursive: true });
-NodeFS.cpSync(NodePath.resolve(values.home), home, { recursive: true });
-NodeFS.rmSync(NodePath.join(home, "reports"), { recursive: true, force: true });
+if (values.home) {
+  NodeFS.cpSync(NodePath.resolve(values.home), home, { recursive: true });
+  NodeFS.rmSync(NodePath.join(home, "reports"), { recursive: true, force: true });
+} else {
+  NodeFS.mkdirSync(home);
+  NodeFS.cpSync(NodePath.resolve(values.folder!), folder!, { recursive: true });
+}
 if (values["codex-home"]) {
   const settingsPath = NodePath.join(home, "userdata", "settings.json");
   const settings = NodeFS.existsSync(settingsPath)
@@ -120,12 +135,30 @@ const run = Effect.gen(function* () {
   const renderHost = yield* makeCadMcpRenderHost(`http://127.0.0.1:${http.address.port}`);
   yield* renderHost.ensure;
 
+  if (folder) {
+    const { projectId } = yield* (yield* LocalCadProjects).create({
+      projectId: ProjectId.make(yield* uuid),
+      title: NodePath.basename(NodePath.resolve(values.folder!)),
+      workspaceRoot: folder,
+      filePath: values.file!,
+    });
+    // The import runs as a CAD operation. It has finished once the project has none.
+    for (;;) {
+      yield* Effect.sleep("2 seconds");
+      const cad = Option.getOrUndefined(yield* query.getProjectShellById(projectId))?.cad;
+      if (cad && !cad.operation) {
+        if (!cad.roots.some((root) => root.current))
+          return yield* Effect.die(`The import failed: ${cad.lastOutcome?.reason ?? "no reason"}`);
+        break;
+      }
+    }
+  }
   const projects = (yield* query.getCommandReadModel()).projects.filter(
-    (project) => project.deletedAt === null && project.onshapeSource !== undefined,
+    (project) => project.deletedAt === null && hasCadSource(project),
   );
   const project = projects[0];
   if (projects.length !== 1 || !project)
-    return yield* Effect.die(`Expected one Onshape project, found ${projects.length}.`);
+    return yield* Effect.die(`Expected one CAD project, found ${projects.length}.`);
   const modelSelection = createModelSelection(
     ProviderInstanceId.make(provider),
     values.model!,

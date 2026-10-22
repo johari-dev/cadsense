@@ -14,6 +14,10 @@ function createBrowserLocalApi(): LocalApi {
         if (!window.desktopBridge) return null;
         return window.desktopBridge.pickFolder(options);
       },
+      pickFile: async (options) => {
+        if (!window.desktopBridge) return null;
+        return window.desktopBridge.pickFile(options);
+      },
       confirm: async (message, options?: ConfirmDialogOptions) => {
         return requestConfirmDialog(message, options) ?? false;
       },

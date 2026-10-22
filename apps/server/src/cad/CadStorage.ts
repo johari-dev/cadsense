@@ -1,6 +1,7 @@
 import {
   CadUserOperationError,
   CommandId,
+  hasCadSource,
   type CadStorageInput,
   type CadStorageEntry,
   type ProjectId,
@@ -47,7 +48,7 @@ export const make = Effect.gen(function* () {
   const projectFor = Effect.fn("CadStorage.projectFor")(function* (projectId: ProjectId) {
     const model = yield* read;
     const project = model.projects.find(
-      (project) => project.id === projectId && project.onshapeSource,
+      (project) => project.id === projectId && hasCadSource(project),
     );
     if (!project) return yield* new CadUserOperationError({ reason: "not-found" });
     return project;
@@ -139,9 +140,11 @@ export const make = Effect.gen(function* () {
         if (input.kind === "restore") {
           if (project.cad.storage.cleanupPending)
             return yield* new CadUserOperationError({ reason: "busy" });
-          yield* allocator
-            .provision({ projectId: project.id, workspaceRoot: project.workspaceRoot })
-            .pipe(Effect.mapError(failed));
+          // A local CAD project's folder is the user's, so only Onshape has a workspace to recreate.
+          if (project.onshapeSource)
+            yield* allocator
+              .provision({ projectId: project.id, workspaceRoot: project.workspaceRoot })
+              .pipe(Effect.mapError(failed));
           yield* dispatch({
             type: "project.onshape.restore",
             projectId: project.id,
@@ -173,6 +176,7 @@ export const make = Effect.gen(function* () {
                 projectId: project.id,
                 title: project.title,
                 workspaceRoot: project.workspaceRoot,
+                source: project.onshapeSource ? ("onshape" as const) : ("local" as const),
                 ...storage,
                 byteLength:
                   project.cad?.roots.reduce(

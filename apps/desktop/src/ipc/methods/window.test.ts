@@ -17,7 +17,12 @@ import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
-import { getLocalEnvironmentBootstraps, getWindowFullscreenState, pickFolder } from "./window.ts";
+import {
+  getLocalEnvironmentBootstraps,
+  getWindowFullscreenState,
+  pickFile,
+  pickFolder,
+} from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "wsl.exe",
@@ -152,16 +157,20 @@ describe("getWindowFullscreenState", () => {
   });
 });
 
-// Runs the folder picker with the dialog answering `picked`. `primaryRunsInWsl` is the backend
-// configuration's decision about where the primary backend runs (tested in its own suite).
+// Runs the folder picker, or the file picker with `file`, with the dialog answering `picked`.
+// `primaryRunsInWsl` is the backend configuration's decision about where the primary backend
+// runs (tested in its own suite).
 const runPickFolder = (input: {
   readonly primaryRunsInWsl: boolean;
   readonly picked: string | null;
   readonly options?: Parameters<typeof pickFolder.handler>[0];
+  readonly file?: boolean;
 }) => {
   const dialogCalls: ElectronDialog.ElectronDialogPickFolderInput[] = [];
   return Effect.gen(function* () {
-    const result = yield* pickFolder.handler(input.options);
+    const result = input.file
+      ? yield* pickFile.handler(input.options)
+      : yield* pickFolder.handler(input.options);
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     return {
       result,
@@ -176,6 +185,10 @@ const runPickFolder = (input: {
           pickFolder: (call) => {
             dialogCalls.push(call);
             return Effect.succeed(Option.fromNullishOr(input.picked));
+          },
+          pickFiles: (call) => {
+            dialogCalls.push(call);
+            return Effect.succeed(input.picked === null ? [] : [input.picked]);
           },
         }),
         Layer.mock(ElectronWindow.ElectronWindow)({
@@ -273,6 +286,30 @@ describe("pickFolder", () => {
         options: { targetEnvironmentId: "wsl:Ubuntu" },
       });
       assert.equal(result, "/tmp/cad");
+    }),
+  );
+
+  it.effect("returns the Linux path of a picked file when the primary backend runs in WSL", () =>
+    Effect.gen(function* () {
+      const { result, defaultPath } = yield* runPickFolder({
+        primaryRunsInWsl: true,
+        picked: "\\\\wsl.localhost\\Ubuntu\\tmp\\cad\\robot.step",
+        options: { initialPath: "~/" },
+        file: true,
+      });
+      assert.equal(result, "/tmp/cad/robot.step");
+      assert.deepEqual(defaultPath, Option.some("\\\\wsl.localhost\\Ubuntu\\home\\aadi\\"));
+    }),
+  );
+
+  it.effect("returns a picked file's Windows path when the primary backend runs on Windows", () =>
+    Effect.gen(function* () {
+      const { result } = yield* runPickFolder({
+        primaryRunsInWsl: false,
+        picked: "C:\\cad\\robot.step",
+        file: true,
+      });
+      assert.equal(result, "C:\\cad\\robot.step");
     }),
   );
 
