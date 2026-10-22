@@ -280,7 +280,10 @@ const decodeScriptedRequest = Schema.decodeUnknownSync(
 const scriptedRequests = () => {
   const file = NodePath.join(scriptedRoot, "control/requests");
   return NodeFS.existsSync(file)
-    ? NodeFS.readFileSync(file, "utf8").trim().split("\n").map((line) => decodeScriptedRequest(line))
+    ? NodeFS.readFileSync(file, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => decodeScriptedRequest(line))
     : [];
 };
 /** Waits up to 20 seconds for the scripted bridge to log `line`. */
@@ -1104,10 +1107,42 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     return { root, uses: files };
   });
 
+  /**
+   * What SolidWorks was doing when a live test started. `restored` waits until it is that way again:
+   * a SolidWorks Cadsense started quits in the background once the job is over, so a test that ends
+   * without waiting hands the next one a SolidWorks that is still quitting.
+   */
+  const solidWorksAsFound = Effect.fn(function* () {
+    const host = yield* SolidWorksBridge.detectSolidWorksHost;
+    assert.isNotNull(host);
+    // tasklist sits in System32, three levels above WindowsPowerShell\v1.0\powershell.exe.
+    const tasklist = NodePath.join(host!.powershell, "../../../tasklist.exe");
+    const running = () =>
+      NodeChildProcess.execFileSync(tasklist, ["/FI", "IMAGENAME eq SLDWORKS.exe", "/NH"])
+        .toString()
+        .includes("SLDWORKS.exe");
+    const jobs = () =>
+      NodeFS.readdirSync(host!.serverRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
+    const wasRunning = running();
+    const before = new Set(jobs());
+    const restored = Effect.gen(function* () {
+      for (
+        let attempt = 0;
+        running() !== wasRunning || jobs().some((job) => !before.has(job));
+        attempt++
+      ) {
+        if (attempt > 120) return yield* Effect.die("SolidWorks was not left as it was found");
+        yield* Effect.sleep("1 second");
+      }
+    });
+    return { host: host!, running, jobs, wasRunning, before, restored };
+  });
+
   it.effect.skipIf(skipLive)(
     "converts a real assembly with SolidWorks, then re-exports only what changed",
     () =>
       Effect.gen(function* () {
+        const found = yield* solidWorksAsFound();
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const snapshots = yield* CadSnapshotStore;
@@ -1186,6 +1221,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
                 ?.metadata,
           ),
         );
+        yield* found.restored;
       }).pipe(Effect.scoped),
     10 * 60_000,
   );
@@ -1224,18 +1260,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     "cancels a SolidWorks conversion and leaves SolidWorks as it found it",
     () =>
       Effect.gen(function* () {
-        const host = yield* SolidWorksBridge.detectSolidWorksHost;
-        assert.isNotNull(host);
-        // tasklist sits in System32, three levels above WindowsPowerShell\v1.0\powershell.exe.
-        const tasklist = NodePath.join(host!.powershell, "../../../tasklist.exe");
-        const running = () =>
-          NodeChildProcess.execFileSync(tasklist, ["/FI", "IMAGENAME eq SLDWORKS.exe", "/NH"])
-            .toString()
-            .includes("SLDWORKS.exe");
-        const jobs = () =>
-          NodeFS.readdirSync(host!.serverRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
-        const wasRunning = running();
-        const before = new Set(jobs());
+        const { jobs, before, restored } = yield* solidWorksAsFound();
         const { root } = yield* makeLiveFolder();
         const projectId = ProjectId.make("local-cad-solidworks-live-cancel");
         yield* (yield* LocalCadProjects).create({
@@ -1256,14 +1281,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         assert.strictEqual(cancelled.cad?.lastOutcome?.status, "cancelled");
         // A SolidWorks that Cadsense started quits once the slot is idle, just after the job, and
         // takes its hold on the job's files with it.
-        for (
-          let attempt = 0;
-          running() !== wasRunning || jobs().some((job) => !before.has(job));
-          attempt++
-        ) {
-          if (attempt > 120) return yield* Effect.die("SolidWorks was not left as it was found");
-          yield* Effect.sleep("1 second");
-        }
+        yield* restored;
       }).pipe(Effect.scoped),
     5 * 60_000,
   );
@@ -1272,22 +1290,12 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     "runs one SolidWorks bridge at a time across Cadsense servers",
     () =>
       Effect.gen(function* () {
-        const host = yield* SolidWorksBridge.detectSolidWorksHost;
-        assert.isNotNull(host);
-        const tasklist = NodePath.join(host!.powershell, "../../../tasklist.exe");
-        const running = () =>
-          NodeChildProcess.execFileSync(tasklist, ["/FI", "IMAGENAME eq SLDWORKS.exe", "/NH"])
-            .toString()
-            .includes("SLDWORKS.exe");
-        const jobs = () =>
-          NodeFS.readdirSync(host!.serverRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name));
-        const wasRunning = running();
-        const before = new Set(jobs());
+        const { host, running, jobs, wasRunning, before } = yield* solidWorksAsFound();
         const decodeRequest = Schema.decodeUnknownOption(
           Schema.fromJsonString(Schema.Struct({ file: Schema.String })),
         );
         const inJob = (job: string, name: string) =>
-          NodeFS.existsSync(NodePath.join(host!.serverRoot, job, name));
+          NodeFS.existsSync(NodePath.join(host.serverRoot, job, name));
         /** Waits for the new job folder whose request opens `file` to satisfy `ready`. */
         const jobFor = Effect.fn(function* (file: string, ready: (job: string) => boolean) {
           for (let attempt = 0; ; attempt++) {
@@ -1298,7 +1306,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
                 Option.getOrUndefined(
                   decodeRequest(
                     NodeFS.readFileSync(
-                      NodePath.join(host!.serverRoot, job, "request.json"),
+                      NodePath.join(host.serverRoot, job, "request.json"),
                       "utf8",
                     ),
                   ),
@@ -1385,6 +1393,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     "converts a real assembly with virtual components",
     () =>
       Effect.gen(function* () {
+        const found = yield* solidWorksAsFound();
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const source = live.virtualAssembly!;
@@ -1414,6 +1423,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
           project.cad!.roots[0]!.current!.snapshotId,
         );
         assert.isAtLeast(manifest.parts.length, 1);
+        yield* found.restored;
       }).pipe(Effect.scoped),
     5 * 60_000,
   );
@@ -1422,6 +1432,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     "converts a real assembly in a chosen configuration, with each part's material and mass",
     () =>
       Effect.gen(function* () {
+        const found = yield* solidWorksAsFound();
         const snapshots = yield* CadSnapshotStore;
         const { root } = yield* makeLiveFolder();
         const projectId = ProjectId.make("local-cad-solidworks-live-configuration");
@@ -1515,6 +1526,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         assert.include(missing.cad?.lastOutcome?.reason ?? "", live.assembly!);
         assert.include(missing.cad?.lastOutcome?.reason ?? "", '"No such configuration"');
         assert.include(missing.cad?.lastOutcome?.reason ?? "", live.configuration!);
+        yield* found.restored;
       }).pipe(Effect.scoped),
     10 * 60_000,
   );
