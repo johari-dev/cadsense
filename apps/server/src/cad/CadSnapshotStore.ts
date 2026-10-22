@@ -385,8 +385,9 @@ export const make = Effect.gen(function* () {
           catch: () => failure("corrupt"),
         });
         if (Option.isSome(database)) {
+          // Comment snapshots of kept threads in projects whose CAD is kept, as in retention.
           const durable =
-            yield* database.value`SELECT c.snapshot_id FROM projection_cad_comments c JOIN projection_threads t ON t.thread_id=c.thread_id JOIN projection_projects p ON p.project_id=t.project_id WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL`.pipe(
+            yield* database.value`SELECT c.snapshot_id FROM projection_cad_comments c JOIN projection_threads t ON t.thread_id=c.thread_id JOIN projection_projects p ON p.project_id=t.project_id WHERE t.deleted_at IS NULL AND (p.deleted_at IS NULL OR json_extract(p.cad_json, '$.storage.deleteCad') = 0)`.pipe(
               Effect.mapError(() => failure("unavailable")),
             );
           for (const row of durable)
