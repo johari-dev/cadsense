@@ -280,7 +280,7 @@ export const make = Effect.gen(function* () {
       }
     }
     const operationId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(failed));
-    return yield* Effect.uninterruptibleMask((restore) =>
+    return yield* Effect.uninterruptible(
       Effect.gen(function* () {
         yield* engine
           .dispatch({
@@ -366,6 +366,9 @@ export const make = Effect.gen(function* () {
           }
           completed = true;
         }).pipe(
+          // Only the work is cancellable. The fiber starts uninterruptible, so the outcome handler
+          // below is in place even when a cancel lands before the fiber's first step.
+          Effect.interruptible,
           Effect.onExit((exit) =>
             Effect.gen(function* () {
               jobs.delete(operationId);
@@ -426,7 +429,7 @@ export const make = Effect.gen(function* () {
           ),
           Effect.catchCause(() => Effect.void),
         );
-        const fiber = yield* Effect.forkIn(restore(work), scope);
+        const fiber = yield* Effect.forkIn(work, scope, { uninterruptible: true });
         jobs.set(operationId, { projectId: input.projectId, fiber });
         yield* Deferred.succeed(ready, undefined);
         return { operationId };
