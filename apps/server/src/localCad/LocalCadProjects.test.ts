@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -698,6 +699,106 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
       assert.strictEqual(reimported.cad?.lastOutcome?.status, "succeeded");
       assert.strictEqual((yield* owned(projectId)).length, 1);
     }).pipe(Effect.scoped),
+  );
+
+  // A comment keeps the snapshot it was made on after later imports move current and rollback past
+  // it. Removal that keeps the imported CAD keeps that snapshot too, so a restored project can still
+  // open the comment's model. Deleting the retained CAD later takes it with the rest.
+  it.effect(
+    "keeps a removed project's comment snapshots with its kept CAD, and deletes them with it",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const snapshots = yield* CadSnapshotStore;
+        const storage = yield* CadStorage.CadStorage;
+        const engineService = yield* OrchestrationEngineService;
+        const root = yield* makeFolder();
+        const projectId = ProjectId.make("local-cad-retain-comment");
+        const threadId = ThreadId.make("local-cad-retain-comment-thread");
+        yield* (yield* LocalCadProjects).create({
+          projectId,
+          title: "Bracket",
+          workspaceRoot: root,
+          filePath: "models/dm1.step",
+        });
+        const first = yield* settle(projectId);
+        const original = yield* snapshots.load(first.cad!.roots[0]!.current!.snapshotId);
+        // The chat whose agent published the comment.
+        yield* setAgentRun(projectId, threadId, "running");
+        yield* setAgentRun(projectId, threadId, "ready");
+        const descriptor = cadCommentModelDescriptor(original);
+        yield* engineService.dispatch({
+          type: "thread.cad.comments.commit",
+          commandId: CommandId.make("local-cad-retain-comment-commit"),
+          threadId,
+          expectedCatalogVersion: 0,
+          proposals: [],
+          receipts: [],
+          comments: [
+            {
+              id: "local-cad-retain-comment-1",
+              threadId,
+              rootId: original.rootId,
+              snapshotId: original.snapshotId,
+              modelKey: NodeCrypto.createHash("sha256").update(descriptor).digest("hex"),
+              modelDescriptor: descriptor,
+              title: "Check this bolt",
+              body: "The bolt is too short.",
+              severity: "concern",
+              category: "assembly",
+              targets: [
+                {
+                  kind: "part",
+                  label: "Bolt",
+                  occurrenceId: original.nodes.find((node) => node.kind === "part")!.id,
+                  preciseLocationLimitation: "Whole part finding",
+                },
+              ],
+              link: null,
+              state: "open",
+              version: 0,
+              number: 1,
+              createdAt: DateTime.formatIso(yield* DateTime.now),
+              turnId: TurnId.make("local-cad-retain-comment-turn"),
+              outdated: null,
+              proposal: null,
+            },
+          ],
+        });
+        // Two re-exports move current and rollback past the commented snapshot.
+        const file = path.join(root, "models/dm1.step");
+        const text = yield* fs.readFileString(file);
+        yield* fs.writeFileString(file, text.replace("FILE_NAME(", "FILE_NAME( /* B */ "));
+        const second = yield* sync(first, "models/dm1.step");
+        yield* fs.writeFileString(file, text.replace("FILE_NAME(", "FILE_NAME( /* C */ "));
+        const third = yield* sync(second, "models/dm1.step");
+        assert.isFalse(
+          third.cad!.roots.some(
+            (root) =>
+              root.current?.snapshotId === original.snapshotId ||
+              root.rollback?.snapshotId === original.snapshotId,
+          ),
+        );
+        yield* pruneCadSnapshots(projectId);
+        assert.include(yield* owned(projectId), original.snapshotId);
+
+        yield* storage.run({ kind: "remove", projectId, deleteCad: false, deleteWorkspace: false });
+        // Pruning, as at the next start, keeps what removal kept, comment snapshots included.
+        yield* pruneCadSnapshots();
+        assert.include(yield* owned(projectId), original.snapshotId);
+
+        // Deleting the retained CAD takes the comment's snapshot too.
+        const entry = yield* retained(projectId);
+        yield* storage.run({
+          kind: "cleanup",
+          projectId,
+          removedAt: entry.removedAt,
+          deleteCad: true,
+          deleteWorkspace: false,
+        });
+        assert.deepStrictEqual(yield* owned(projectId), []);
+      }).pipe(Effect.scoped),
   );
 
   // Nothing deletes the folder or deletes the project outright, and a removed project comes back
