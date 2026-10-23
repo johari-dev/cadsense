@@ -225,7 +225,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           cwd: process.cwd(),
           environment: processEnv,
         }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
-        refresh: snapshot.refresh,
+        afterLogin: Effect.void,
       });
 
       return {

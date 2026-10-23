@@ -388,7 +388,7 @@ export const startCodexAppServerClient = Effect.fn("startCodexAppServerClient")(
     },
   });
   yield* client.notify("initialized", undefined);
-  return { client, initialize };
+  return { client, initialize, child };
 });
 
 export class CodexSignInError extends Data.TaggedError("CodexSignInError")<{
@@ -404,7 +404,7 @@ export class CodexSignInError extends Data.TaggedError("CodexSignInError")<{
 export const beginCodexChatGptSignIn = Effect.fn("beginCodexChatGptSignIn")(function* (
   input: CodexAppServerLaunch,
 ) {
-  const { client } = yield* startCodexAppServerClient(input);
+  const { client, child } = yield* startCodexAppServerClient(input);
   const completed = yield* Deferred.make<CodexSchema.V2AccountLoginCompletedNotification>();
   yield* client.handleServerNotification("account/login/completed", (notification) =>
     Deferred.succeed(completed, notification).pipe(Effect.asVoid),
@@ -413,20 +413,30 @@ export const beginCodexChatGptSignIn = Effect.fn("beginCodexChatGptSignIn")(func
   if (response.type !== "chatgpt") {
     return yield* new CodexSignInError({ message: "Codex did not start a ChatGPT login." });
   }
-  return {
-    authUrl: response.authUrl,
-    finished: Deferred.await(completed).pipe(
-      Effect.flatMap((notification) =>
-        notification.success
-          ? Effect.void
-          : Effect.fail(
-              new CodexSignInError({
-                message: notification.error ?? "The ChatGPT login did not finish.",
-              }),
-            ),
+  const loginCompleted = Deferred.await(completed).pipe(
+    Effect.flatMap((notification) =>
+      notification.success
+        ? Effect.void
+        : Effect.fail(
+            new CodexSignInError({
+              message: notification.error ?? "The ChatGPT login did not finish.",
+            }),
+          ),
+    ),
+  );
+  // The OAuth callback server lives in app-server; if the process dies, the
+  // login can never complete.
+  const processExited = child.exitCode.pipe(
+    Effect.mapError(() => new CodexSignInError({ message: "Codex stopped during the login." })),
+    Effect.flatMap((exitCode) =>
+      Effect.fail(
+        new CodexSignInError({
+          message: `Codex stopped during the login (exit code ${Number(exitCode)}).`,
+        }),
       ),
     ),
-  };
+  );
+  return { authUrl: response.authUrl, finished: Effect.raceFirst(loginCompleted, processExited) };
 });
 
 const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (

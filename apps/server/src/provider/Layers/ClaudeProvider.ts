@@ -582,26 +582,38 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   ];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
+  const authMetadata = capabilities
+    ? (claudeAuthMetadata({
+        subscriptionType: capabilities.subscriptionType,
+        authMethod: capabilities.tokenSource,
+      }) ?? apiProviderAuthMetadata(capabilities.apiProvider))
+    : undefined;
+
+  // Initialization can fail, or succeed with no credentials at all, when the
+  // CLI is signed out. Ask the CLI in both cases so onboarding can offer
+  // sign-in instead of treating Claude as ready.
+  if (
+    (!capabilities || authMetadata === undefined) &&
+    (yield* isClaudeSignedOut(claudeSettings, resolvedEnvironment))
+  ) {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      skills,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Claude is not signed in. Run `claude auth login` and try again.",
+      },
+    });
+  }
+
   if (!capabilities) {
-    // A failed initialization is most often a signed-out CLI; say so when the
-    // CLI confirms it, so onboarding can offer sign-in.
-    if (yield* isClaudeSignedOut(claudeSettings, resolvedEnvironment)) {
-      return buildServerProvider({
-        presentation: CLAUDE_PRESENTATION,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        slashCommands: dedupedSlashCommands,
-        skills,
-        probe: {
-          installed: true,
-          version: parsedVersion,
-          status: "error",
-          auth: { status: "unauthenticated" },
-          message: "Claude is not signed in. Run `claude auth login` and try again.",
-        },
-      });
-    }
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -619,11 +631,6 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const authMetadata =
-    claudeAuthMetadata({
-      subscriptionType: capabilities.subscriptionType,
-      authMethod: capabilities.tokenSource,
-    }) ?? apiProviderAuthMetadata(capabilities.apiProvider);
   return buildServerProvider({
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,

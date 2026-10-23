@@ -31,8 +31,9 @@ export interface ProviderSignInStart<E> {
 
 /**
  * A started sign-in, as returned to the registry. `finished` settles when the
- * login ends: it succeeds after the snapshot refresh and fails when the login
- * fails, times out, or is cancelled by a newer attempt or a rebuild.
+ * login ends: it succeeds after `afterLogin` and fails when the login fails,
+ * times out, or is cancelled by a newer attempt or a rebuild. The registry
+ * refreshes the snapshot after success.
  */
 export interface ProviderSignInHandle {
   readonly authUrl: string | null;
@@ -42,14 +43,14 @@ export interface ProviderSignInHandle {
 /**
  * `begin` starts the provider's login inside the attempt's scope, so any
  * child process it spawns lives until the login finishes. A new attempt
- * cancels the previous one. After a successful login, `refresh` re-probes the
- * instance so its snapshot shows the new auth status.
+ * cancels the previous one. `afterLogin` runs after a successful login, for
+ * driver cleanup such as dropping a cached auth probe.
  */
 export const makeProviderSignIn = Effect.fn("makeProviderSignIn")(function* <E>(input: {
   readonly instanceId: ProviderInstanceId;
   readonly providerLabel: string;
   readonly begin: Effect.Effect<ProviderSignInStart<E>, E, Scope.Scope>;
-  readonly refresh: Effect.Effect<unknown>;
+  readonly afterLogin: Effect.Effect<void>;
 }) {
   const instanceScope = yield* Effect.scope;
   const gate = yield* Semaphore.make(1);
@@ -72,7 +73,7 @@ export const makeProviderSignIn = Effect.fn("makeProviderSignIn")(function* <E>(
         const start = yield* input.begin.pipe(Effect.timeout(BEGIN_TIMEOUT));
         yield* Deferred.succeed(started, start.authUrl);
         yield* start.finished.pipe(Effect.timeout(SIGN_IN_TIMEOUT));
-        yield* input.refresh;
+        yield* input.afterLogin;
       }).pipe(
         Effect.scoped,
         // Failing an already-settled Deferred is a no-op, so `started` keeps

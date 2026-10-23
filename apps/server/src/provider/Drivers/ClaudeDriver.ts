@@ -238,10 +238,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           Effect.provideService(Path.Path, path),
         ),
         // The capabilities probe carries auth metadata and is cached; drop it
-        // so the refresh sees the new login.
-        refresh: Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
-          Effect.andThen(snapshot.refresh),
-        ),
+        // so the registry's refresh sees the new login.
+        afterLogin: Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey),
       });
 
       return {

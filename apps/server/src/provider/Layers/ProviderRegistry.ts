@@ -522,7 +522,15 @@ export const ProviderRegistryLive = Layer.effect(
       yield* setIfCurrent(state("running", "Waiting for the browser sign-in.", null));
       yield* handle.finished.pipe(
         Effect.matchEffect({
-          onSuccess: () => setIfCurrent(null),
+          // Refresh here, not in the driver, so the new snapshot is in place
+          // before the terminal state lands; the UI reads both together.
+          onSuccess: () =>
+            refreshInstance(instanceId).pipe(
+              Effect.andThen(DateTime.now),
+              Effect.flatMap((now) =>
+                setIfCurrent(state("succeeded", "Signed in.", DateTime.formatIso(now))),
+              ),
+            ),
           onFailure: (error) =>
             Effect.flatMap(DateTime.now, (now) =>
               setIfCurrent(state("failed", error.reason, DateTime.formatIso(now))),

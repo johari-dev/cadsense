@@ -504,13 +504,18 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );
-        yield* pointInstanceAtBinary(instanceId, binaryPath);
+        if (!(yield* pointInstanceAtBinary(instanceId, binaryPath))) {
+          return yield* fail("The Codex instance changed during the install.");
+        }
         // The registry rebuilds the instance from settings in the background;
         // the new instance probes the binary on its own.
         yield* providerRegistry.getProviders.pipe(
           Effect.map((providers) =>
             providers.some(
-              (candidate) => candidate.instanceId === instanceId && candidate.installed,
+              (candidate) =>
+                candidate.instanceId === instanceId &&
+                candidate.driver === CODEX_DRIVER &&
+                candidate.installed,
             ),
           ),
           Effect.repeat({
@@ -563,17 +568,16 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
    * `providerInstances` entry wins over the legacy `providers.codex` mirror,
    * matching how the instance registry reads them. The patch is built inside
    * the settings write lock, so a concurrent settings edit is not lost.
+   * Resolves false when the instance stopped being a Codex instance.
    */
-  const pointInstanceAtBinary = (instanceId: ProviderInstanceId, binaryPath: string) =>
-    serverSettings
+  const pointInstanceAtBinary = (instanceId: ProviderInstanceId, binaryPath: string) => {
+    let patched = false;
+    return serverSettings
       .updateSettings((settings): ServerSettingsPatch => {
+        patched = isCodexInstanceTarget(settings, instanceId);
+        if (!patched) return {};
         const explicit = settings.providerInstances[instanceId];
-        if (explicit === undefined) {
-          return isCodexInstanceTarget(settings, instanceId)
-            ? { providers: { codex: { binaryPath } } }
-            : {};
-        }
-        if (explicit.driver !== CODEX_DRIVER) return {};
+        if (explicit === undefined) return { providers: { codex: { binaryPath } } };
         const config =
           typeof explicit.config === "object" && explicit.config !== null ? explicit.config : {};
         return {
@@ -583,7 +587,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           },
         };
       })
-      .pipe(Effect.asVoid);
+      .pipe(Effect.map(() => patched));
+  };
 
   return ProviderMaintenanceRunner.of({
     updateProvider,

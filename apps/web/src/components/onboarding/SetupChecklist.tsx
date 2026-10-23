@@ -142,18 +142,24 @@ export function SetupChecklist() {
     if (isReady) setSignIn(null);
   }, [isReady]);
 
-  // A failed or cancelled login shows up as this attempt's `signInState`.
-  const failedSignIn =
+  // This attempt ends with a terminal `signInState`. A failed login, or a
+  // login whose refreshed snapshot still is not ready, stops the wait and
+  // shows why; a ready snapshot is handled by `isReady` above.
+  const attemptRow =
     signIn === null
       ? undefined
       : rows.find(
           (row) =>
             row.instanceId === signIn.instanceId &&
-            row.snapshot?.signInState?.startedAt === signIn.startedAt &&
-            row.snapshot.signInState.status === "failed",
-        )?.snapshot?.signInState;
+            row.snapshot?.signInState?.startedAt === signIn.startedAt,
+        );
+  const attemptState = attemptRow?.snapshot?.signInState;
   const signInFailure =
-    failedSignIn === undefined ? undefined : (failedSignIn.message ?? "Sign-in did not finish.");
+    attemptState?.status === "failed"
+      ? (attemptState.message ?? "Sign-in did not finish.")
+      : attemptState?.status === "succeeded" && attemptRow?.status.kind !== "ready"
+        ? (attemptRow?.snapshot?.message ?? "Signed in, but the assistant is not ready yet.")
+        : undefined;
   useEffect(() => {
     if (signInFailure === undefined) return;
     setSignIn(null);
