@@ -13,6 +13,8 @@ export const CLIENT_REQUEST_METHODS = {
   "turn/interrupt": "turn/interrupt",
   "model/list": "model/list",
   "config/mcpServer/reload": "config/mcpServer/reload",
+  "account/login/start": "account/login/start",
+  "account/login/cancel": "account/login/cancel",
   "feedback/upload": "feedback/upload",
   "account/read": "account/read",
 } as const;
@@ -65,6 +67,7 @@ export const SERVER_NOTIFICATION_METHODS = {
   "thread/realtime/closed": "thread/realtime/closed",
   "windows/worldWritableWarning": "windows/worldWritableWarning",
   "windowsSandbox/setupCompleted": "windowsSandbox/setupCompleted",
+  "account/login/completed": "account/login/completed",
 } as const;
 
 export type ClientRequestMethod = keyof typeof CLIENT_REQUEST_METHODS;
@@ -82,6 +85,8 @@ export interface ClientRequestParamsByMethod {
   readonly "turn/interrupt": CodexSchema.V2TurnInterruptParams;
   readonly "model/list": CodexSchema.V2ModelListParams;
   readonly "config/mcpServer/reload": undefined;
+  readonly "account/login/start": CodexSchema.V2LoginAccountParams;
+  readonly "account/login/cancel": CodexSchema.V2CancelLoginAccountParams;
   readonly "feedback/upload": CodexSchema.V2FeedbackUploadParams;
   readonly "account/read": CodexSchema.V2GetAccountParams;
 }
@@ -96,6 +101,8 @@ export interface ClientRequestResponsesByMethod {
   readonly "turn/interrupt": CodexSchema.V2TurnInterruptResponse;
   readonly "model/list": CodexSchema.V2ModelListResponse;
   readonly "config/mcpServer/reload": CodexSchema.V2McpServerRefreshResponse;
+  readonly "account/login/start": CodexSchema.V2LoginAccountResponse;
+  readonly "account/login/cancel": CodexSchema.V2CancelLoginAccountResponse;
   readonly "feedback/upload": CodexSchema.V2FeedbackUploadResponse;
   readonly "account/read": CodexSchema.V2GetAccountResponse;
 }
@@ -155,6 +162,7 @@ export interface ServerNotificationParamsByMethod {
   readonly "thread/realtime/closed": CodexSchema.V2ThreadRealtimeClosedNotification;
   readonly "windows/worldWritableWarning": CodexSchema.V2WindowsWorldWritableWarningNotification;
   readonly "windowsSandbox/setupCompleted": CodexSchema.V2WindowsSandboxSetupCompletedNotification;
+  readonly "account/login/completed": CodexSchema.V2AccountLoginCompletedNotification;
 }
 
 export const CLIENT_REQUEST_PARAMS = {
@@ -167,6 +175,8 @@ export const CLIENT_REQUEST_PARAMS = {
   "turn/interrupt": CodexSchema.V2TurnInterruptParams,
   "model/list": CodexSchema.V2ModelListParams,
   "config/mcpServer/reload": undefined,
+  "account/login/start": CodexSchema.V2LoginAccountParams,
+  "account/login/cancel": CodexSchema.V2CancelLoginAccountParams,
   "feedback/upload": CodexSchema.V2FeedbackUploadParams,
   "account/read": CodexSchema.V2GetAccountParams,
 } as const;
@@ -181,6 +191,8 @@ export const CLIENT_REQUEST_RESPONSES = {
   "turn/interrupt": CodexSchema.V2TurnInterruptResponse,
   "model/list": CodexSchema.V2ModelListResponse,
   "config/mcpServer/reload": CodexSchema.V2McpServerRefreshResponse,
+  "account/login/start": CodexSchema.V2LoginAccountResponse,
+  "account/login/cancel": CodexSchema.V2CancelLoginAccountResponse,
   "feedback/upload": CodexSchema.V2FeedbackUploadResponse,
   "account/read": CodexSchema.V2GetAccountResponse,
 } as const;
@@ -240,4 +252,5 @@ export const SERVER_NOTIFICATION_PARAMS = {
   "thread/realtime/closed": CodexSchema.V2ThreadRealtimeClosedNotification,
   "windows/worldWritableWarning": CodexSchema.V2WindowsWorldWritableWarningNotification,
   "windowsSandbox/setupCompleted": CodexSchema.V2WindowsSandboxSetupCompletedNotification,
+  "account/login/completed": CodexSchema.V2AccountLoginCompletedNotification,
 } as const;

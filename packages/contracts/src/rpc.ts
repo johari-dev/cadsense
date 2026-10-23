@@ -131,6 +131,9 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerProviderSignInError,
+  ServerProviderSignInInput,
+  ServerProviderSignInResult,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -219,6 +222,8 @@ export const WS_METHODS = {
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
   serverUpdateProvider: "server.updateProvider",
+  serverInstallProvider: "server.installProvider",
+  serverSignInProvider: "server.signInProvider",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
@@ -284,6 +289,20 @@ export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvide
   payload: ServerProviderUpdateInput,
   success: ServerProviderUpdatedPayload,
   error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
+});
+
+// Installs a missing provider CLI into the app's data folder. Progress is
+// published on the provider snapshot's `installState`.
+export const WsServerInstallProviderRpc = Rpc.make(WS_METHODS.serverInstallProvider, {
+  payload: ServerProviderUpdateInput,
+  success: ServerProviderUpdatedPayload,
+  error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
+});
+
+export const WsServerSignInProviderRpc = Rpc.make(WS_METHODS.serverSignInProvider, {
+  payload: ServerProviderSignInInput,
+  success: ServerProviderSignInResult,
+  error: Schema.Union([ServerProviderSignInError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -719,6 +738,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
+  WsServerInstallProviderRpc,
+  WsServerSignInProviderRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,

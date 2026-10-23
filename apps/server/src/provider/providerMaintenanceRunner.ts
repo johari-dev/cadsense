@@ -6,7 +6,10 @@ import {
   type ServerProvider,
   type ServerProviderUpdatedPayload,
   type ServerProviderUpdateState,
+  type ServerSettings,
+  type ServerSettingsPatch,
 } from "@cadsense/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@cadsense/shared/hostProcess";
 import { resolveSpawnCommand } from "@cadsense/shared/shell";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -14,13 +17,20 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { ServerConfig } from "../config.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { CodexInstallError, codexReleaseFor, installCodex } from "./codexInstaller.ts";
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
 import { makeProviderMaintenanceCommandCoordinator } from "./providerMaintenanceCommandCoordinator.ts";
 import { enrichProviderSnapshotWithVersionAdvisory } from "./providerMaintenance.ts";
@@ -28,6 +38,15 @@ import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
+const CODEX_DRIVER = ProviderDriverKind.make("codex");
+
+/** True when `instanceId` names a Codex instance: an explicit Codex entry, or the default slot. */
+function isCodexInstanceTarget(settings: ServerSettings, instanceId: ProviderInstanceId): boolean {
+  const explicit = settings.providerInstances[instanceId];
+  return explicit !== undefined
+    ? explicit.driver === CODEX_DRIVER
+    : instanceId === defaultInstanceIdForDriver(CODEX_DRIVER);
+}
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
 
@@ -49,6 +68,16 @@ export interface ProviderMaintenanceRunnerShape {
           readonly instanceId?: ProviderInstanceId | undefined;
         },
   ) => Effect.Effect<ServerProviderUpdatedPayload, ServerProviderUpdateError>;
+  /**
+   * Install a missing provider CLI into the app's data folder and point the
+   * instance at it. Only Codex is supported. Progress is published on the
+   * snapshot's `installState`; the effect finishes once the rebuilt instance
+   * reports the CLI as installed, or the install fails.
+   */
+  readonly installProvider: (target: {
+    readonly provider: ProviderDriverKind;
+    readonly instanceId?: ProviderInstanceId | undefined;
+  }) => Effect.Effect<ServerProviderUpdatedPayload, ServerProviderUpdateError>;
 }
 
 export class ProviderMaintenanceRunner extends Context.Service<
@@ -199,6 +228,11 @@ function makeUpdateState(input: {
 
 export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const providerRegistry = yield* ProviderRegistry;
+  const serverSettings = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
+  const path = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const runnerScope = yield* Effect.scope;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const runMaintenanceCommand = (command: string, args: ReadonlyArray<string>) =>
@@ -417,8 +451,148 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       );
   });
 
+  const installProvider: ProviderMaintenanceRunnerShape["installProvider"] = Effect.fn(
+    "ProviderMaintenanceRunner.installProvider",
+  )(function* (target) {
+    const provider = target.provider;
+    const instanceId = target.instanceId ?? defaultInstanceIdForDriver(provider);
+    const fail = (reason: string) => new ServerProviderUpdateError({ provider, reason });
+    if (provider !== CODEX_DRIVER) {
+      return yield* fail("Cadsense can only install Codex for you.");
+    }
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError(() => fail("Could not read Cadsense settings.")),
+    );
+    if (!isCodexInstanceTarget(settings, instanceId)) {
+      return yield* fail("This provider instance is not a Codex instance.");
+    }
+    const platform = yield* HostProcessPlatform;
+    const release = codexReleaseFor(platform, yield* HostProcessArchitecture);
+    if (release === null) {
+      return yield* fail("OpenAI does not publish Codex for this computer.");
+    }
+
+    const setInstallState = (state: ServerProviderUpdateState) =>
+      providerRegistry.setProviderMaintenanceActionState({ instanceId, action: "install", state });
+    const runInstall = Effect.gen(function* () {
+      const startedAt = yield* nowIso;
+      const running = (progress: { completedBytes: number; totalBytes: number }) =>
+        setInstallState({
+          ...makeUpdateState({
+            status: "running",
+            startedAt,
+            finishedAt: null,
+            message: "Installing Codex.",
+          }),
+          progress,
+        }).pipe(Effect.asVoid);
+      const finish = (status: "succeeded" | "failed", message: string) =>
+        Effect.flatMap(nowIso, (finishedAt) =>
+          setInstallState(makeUpdateState({ status, startedAt, finishedAt, message })),
+        ).pipe(Effect.map((providers) => ({ providers })));
+
+      yield* running({ completedBytes: 0, totalBytes: release.bytes });
+      return yield* Effect.gen(function* () {
+        const binaryPath = yield* installCodex({
+          toolsDir: path.join(serverConfig.baseDir, "tools"),
+          release,
+          platform,
+          onProgress: running,
+        }).pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        );
+        if (!(yield* pointInstanceAtBinary(instanceId, binaryPath))) {
+          return yield* fail("The Codex instance changed during the install.");
+        }
+        // The registry rebuilds the instance from settings in the background;
+        // the new instance probes the binary on its own.
+        yield* providerRegistry.getProviders.pipe(
+          Effect.map((providers) =>
+            providers.some(
+              (candidate) =>
+                candidate.instanceId === instanceId &&
+                candidate.driver === CODEX_DRIVER &&
+                candidate.installed,
+            ),
+          ),
+          Effect.repeat({
+            until: (installed) => installed,
+            schedule: Schedule.spaced("250 millis"),
+          }),
+          Effect.timeoutOrElse({
+            duration: "60 seconds",
+            orElse: () =>
+              Effect.fail(fail("Codex was installed, but Cadsense could not start it.")),
+          }),
+        );
+        return yield* finish("succeeded", "Codex installed.");
+      }).pipe(
+        Effect.catchCause((cause) => {
+          const failure = Cause.squash(cause);
+          return Effect.logWarning("Provider install failed", {
+            provider,
+            cause: Cause.pretty(cause),
+          }).pipe(
+            Effect.andThen(
+              finish(
+                "failed",
+                isServerProviderUpdateError(failure)
+                  ? failure.reason
+                  : failure instanceof CodexInstallError
+                    ? failure.message
+                    : "Could not install Codex.",
+              ),
+            ),
+          );
+        }),
+      );
+    });
+
+    // Fork into the runner's scope so a closed browser tab does not
+    // interrupt a half-finished download.
+    const install = yield* commandCoordinator
+      .withCommandLock({
+        targetKey: `instance:${instanceId}`,
+        lockKey: "codex-install",
+        run: runInstall,
+      })
+      .pipe(Effect.forkIn(runnerScope));
+    return yield* Fiber.join(install);
+  });
+
+  /**
+   * Store `binaryPath` on the instance's config. An explicit
+   * `providerInstances` entry wins over the legacy `providers.codex` mirror,
+   * matching how the instance registry reads them. The patch is built inside
+   * the settings write lock, so a concurrent settings edit is not lost.
+   * Resolves false when the instance stopped being a Codex instance.
+   */
+  const pointInstanceAtBinary = (instanceId: ProviderInstanceId, binaryPath: string) => {
+    let patched = false;
+    return serverSettings
+      .updateSettings((settings): ServerSettingsPatch => {
+        patched = isCodexInstanceTarget(settings, instanceId);
+        if (!patched) return {};
+        const explicit = settings.providerInstances[instanceId];
+        if (explicit === undefined) return { providers: { codex: { binaryPath } } };
+        const config =
+          typeof explicit.config === "object" && explicit.config !== null ? explicit.config : {};
+        return {
+          providerInstances: {
+            ...settings.providerInstances,
+            [instanceId]: { ...explicit, config: { ...config, binaryPath } },
+          },
+        };
+      })
+      .pipe(Effect.map(() => patched));
+  };
+
   return ProviderMaintenanceRunner.of({
     updateProvider,
+    installProvider,
   });
 });
 
