@@ -213,6 +213,9 @@ export const ServerProvider = Schema.Struct({
   updateState: Schema.optionalKey(ServerProviderUpdateState),
   // Progress of a one-click install started from onboarding.
   installState: Schema.optionalKey(ServerProviderUpdateState),
+  // The latest browser sign-in started from the app, so a failed login can
+  // be shown instead of waiting forever.
+  signInState: Schema.optionalKey(ServerProviderUpdateState),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
@@ -607,11 +610,13 @@ export type ServerProviderSignInInput = typeof ServerProviderSignInInput.Type;
 
 /**
  * A started sign-in. The client opens `authUrl` when it is set; otherwise the
- * provider's own CLI opens the browser. Completion arrives as a provider
- * snapshot whose auth status changes.
+ * provider's own CLI opens the browser. Success arrives as a provider snapshot
+ * whose auth status changes; failure as a `signInState` whose `startedAt`
+ * matches this result.
  */
 export const ServerProviderSignInResult = Schema.Struct({
   authUrl: Schema.NullOr(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
 });
 export type ServerProviderSignInResult = typeof ServerProviderSignInResult.Type;
 

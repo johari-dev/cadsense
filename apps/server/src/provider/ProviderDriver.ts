@@ -34,6 +34,7 @@ import type * as Scope from "effect/Scope";
 import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
 import type { ProviderAdapterShape } from "./Services/ProviderAdapter.ts";
+import type { ProviderSignInHandle } from "./providerSignIn.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
 /**
@@ -74,11 +75,12 @@ export interface ProviderInstance {
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
   /**
    * Start a browser sign-in. Resolves once the login has started, with the
-   * URL the client should open (null when the CLI opens the browser itself).
-   * The instance refreshes its snapshot when the login finishes. Absent for
-   * drivers that cannot sign in from the app.
+   * URL the client should open (null when the CLI opens the browser itself)
+   * and an effect that settles when the login ends. The instance refreshes
+   * its snapshot after a successful login. Absent for drivers that cannot
+   * sign in from the app.
    */
-  readonly signIn?: Effect.Effect<{ readonly authUrl: string | null }, ServerProviderSignInError>;
+  readonly signIn?: Effect.Effect<ProviderSignInHandle, ServerProviderSignInError>;
 }
 
 export interface ProviderContinuationIdentity {

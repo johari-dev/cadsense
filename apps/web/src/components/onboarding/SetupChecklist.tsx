@@ -1,7 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   defaultInstanceIdForDriver,
+  isProviderAvailable,
   ProviderDriverKind,
+  type ProviderInstanceId,
   type ServerProvider,
 } from "@cadsense/contracts";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -93,7 +95,21 @@ function assistantStatus(snapshot: ServerProvider | undefined): AssistantStatus 
 
 interface SignInAttempt {
   readonly assistant: Assistant;
+  readonly instanceId: ProviderInstanceId;
   readonly authUrl: string | null;
+  /** Matches the snapshot's `signInState.startedAt` for this attempt. */
+  readonly startedAt: string;
+}
+
+/** Any enabled assistant that can take a turn, including custom instances. */
+function findReadyProvider(providers: ReadonlyArray<ServerProvider>) {
+  return providers.find(
+    (provider) =>
+      provider.enabled &&
+      isProviderAvailable(provider) &&
+      provider.installed &&
+      provider.status === "ready",
+  );
 }
 
 export function SetupChecklist() {
@@ -108,19 +124,41 @@ export function SetupChecklist() {
   const [signIn, setSignIn] = useState<SignInAttempt | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const rows = ASSISTANTS.map((assistant) => {
+  // One row per built-in assistant, for its default instance. Before the
+  // first snapshot arrives every row shows as checking; after that a default
+  // slot that is not configured gets no row.
+  const rows = ASSISTANTS.flatMap((assistant) => {
     const instanceId = defaultInstanceIdForDriver(assistant.driver);
     const snapshot = providers.find((provider) => provider.instanceId === instanceId);
-    return { assistant, instanceId, status: assistantStatus(snapshot) };
+    if (snapshot === undefined && providers.length > 0) return [];
+    return [{ assistant, instanceId, snapshot, status: assistantStatus(snapshot) }];
   });
-  const ready = rows.find((row) => row.status.kind === "ready");
+  const readyProvider = findReadyProvider(providers);
   const busy = rows.find((row) => row.status.kind === "installing");
 
   // A finished sign-in shows up as a ready snapshot; drop the waiting row then.
-  const isReady = ready !== undefined;
+  const isReady = readyProvider !== undefined;
   useEffect(() => {
     if (isReady) setSignIn(null);
   }, [isReady]);
+
+  // A failed or cancelled login shows up as this attempt's `signInState`.
+  const failedSignIn =
+    signIn === null
+      ? undefined
+      : rows.find(
+          (row) =>
+            row.instanceId === signIn.instanceId &&
+            row.snapshot?.signInState?.startedAt === signIn.startedAt &&
+            row.snapshot.signInState.status === "failed",
+        )?.snapshot?.signInState;
+  const signInFailure =
+    failedSignIn === undefined ? undefined : (failedSignIn.message ?? "Sign-in did not finish.");
+  useEffect(() => {
+    if (signInFailure === undefined) return;
+    setSignIn(null);
+    setActionError(`${signInFailure} Try again.`);
+  }, [signInFailure]);
 
   const install = useCallback(
     async (row: (typeof rows)[number]) => {
@@ -150,8 +188,8 @@ export function SetupChecklist() {
         setActionError(`Could not start ${row.assistant.label} sign-in. Try again.`);
         return;
       }
-      const { authUrl } = result.value;
-      setSignIn({ assistant: row.assistant, authUrl });
+      const { authUrl, startedAt } = result.value;
+      setSignIn({ assistant: row.assistant, instanceId: row.instanceId, authUrl, startedAt });
       if (authUrl !== null) void readLocalApi()?.shell.openExternal(authUrl);
     },
     [environmentId, signInProvider],
@@ -164,6 +202,13 @@ export function SetupChecklist() {
   const recommended =
     rows.find((row) => row.status.kind === "signedOut")?.assistant.driver ?? ASSISTANTS[0].driver;
   const scanning = rows.every((row) => row.status.kind === "checking");
+  const readyLabel =
+    readyProvider === undefined
+      ? null
+      : (ASSISTANTS.find((assistant) => assistant.driver === readyProvider.driver)?.label ??
+        readyProvider.displayName ??
+        readyProvider.driver);
+  const readyAccount = readyProvider?.auth.email ?? readyProvider?.auth.label ?? null;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -177,17 +222,17 @@ export function SetupChecklist() {
           <ol className="mt-6 divide-y border-y">
             <ChecklistStep
               index={1}
-              status={ready ? "done" : "active"}
+              status={readyLabel ? "done" : "active"}
               title="Connect an assistant"
               detail={
-                ready
-                  ? `Using ${ready.assistant.label}${ready.status.kind === "ready" && ready.status.account ? ` with ${ready.status.account}` : ""}.`
+                readyLabel
+                  ? `Using ${readyLabel}${readyAccount ? ` with ${readyAccount}` : ""}.`
                   : scanning
                     ? "Looking for Codex and Claude on this computer…"
                     : "Pick one to continue."
               }
             >
-              {ready || scanning ? null : (
+              {readyLabel || scanning ? null : (
                 <div className="mt-3 ml-7 flex flex-col gap-1">
                   {signIn !== null ? (
                     <WaitingRow attempt={signIn} onCancel={() => setSignIn(null)} />
@@ -220,11 +265,11 @@ export function SetupChecklist() {
             </ChecklistStep>
             <ChecklistStep
               index={2}
-              status={ready ? "active" : "locked"}
+              status={readyLabel ? "active" : "locked"}
               title="Add a project"
               detail="An Onshape document or a folder of CAD files"
               action={
-                ready ? (
+                readyLabel ? (
                   <Button size="sm" onClick={openAddProject}>
                     <PlusIcon />
                     Add project

@@ -6,6 +6,8 @@ import {
   type ServerProvider,
   type ServerProviderUpdatedPayload,
   type ServerProviderUpdateState,
+  type ServerSettings,
+  type ServerSettingsPatch,
 } from "@cadsense/contracts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@cadsense/shared/hostProcess";
 import { resolveSpawnCommand } from "@cadsense/shared/shell";
@@ -37,6 +39,14 @@ import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
+
+/** True when `instanceId` names a Codex instance: an explicit Codex entry, or the default slot. */
+function isCodexInstanceTarget(settings: ServerSettings, instanceId: ProviderInstanceId): boolean {
+  const explicit = settings.providerInstances[instanceId];
+  return explicit !== undefined
+    ? explicit.driver === CODEX_DRIVER
+    : instanceId === defaultInstanceIdForDriver(CODEX_DRIVER);
+}
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
 
@@ -450,6 +460,12 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
     if (provider !== CODEX_DRIVER) {
       return yield* fail("Cadsense can only install Codex for you.");
     }
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError(() => fail("Could not read Cadsense settings.")),
+    );
+    if (!isCodexInstanceTarget(settings, instanceId)) {
+      return yield* fail("This provider instance is not a Codex instance.");
+    }
     const platform = yield* HostProcessPlatform;
     const release = codexReleaseFor(platform, yield* HostProcessArchitecture);
     if (release === null) {
@@ -545,32 +561,29 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   /**
    * Store `binaryPath` on the instance's config. An explicit
    * `providerInstances` entry wins over the legacy `providers.codex` mirror,
-   * matching how the instance registry reads them.
+   * matching how the instance registry reads them. The patch is built inside
+   * the settings write lock, so a concurrent settings edit is not lost.
    */
-  const pointInstanceAtBinary = Effect.fn("ProviderMaintenanceRunner.pointInstanceAtBinary")(
-    function* (instanceId: ProviderInstanceId, binaryPath: string) {
-      const settings = yield* serverSettings.getSettings;
-      const explicit = settings.providerInstances[instanceId];
-      if (explicit !== undefined) {
+  const pointInstanceAtBinary = (instanceId: ProviderInstanceId, binaryPath: string) =>
+    serverSettings
+      .updateSettings((settings): ServerSettingsPatch => {
+        const explicit = settings.providerInstances[instanceId];
+        if (explicit === undefined) {
+          return isCodexInstanceTarget(settings, instanceId)
+            ? { providers: { codex: { binaryPath } } }
+            : {};
+        }
+        if (explicit.driver !== CODEX_DRIVER) return {};
         const config =
           typeof explicit.config === "object" && explicit.config !== null ? explicit.config : {};
-        yield* serverSettings.updateSettings({
+        return {
           providerInstances: {
             ...settings.providerInstances,
             [instanceId]: { ...explicit, config: { ...config, binaryPath } },
           },
-        });
-        return;
-      }
-      if (instanceId !== defaultInstanceIdForDriver(CODEX_DRIVER)) {
-        return yield* new ServerProviderUpdateError({
-          provider: CODEX_DRIVER,
-          reason: "This Codex instance has no settings to update.",
-        });
-      }
-      yield* serverSettings.updateSettings({ providers: { codex: { binaryPath } } });
-    },
-  );
+        };
+      })
+      .pipe(Effect.asVoid);
 
   return ProviderMaintenanceRunner.of({
     updateProvider,

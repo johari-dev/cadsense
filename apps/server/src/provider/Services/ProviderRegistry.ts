@@ -19,7 +19,7 @@ import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
-export type ProviderMaintenanceActionKind = "update" | "install";
+export type ProviderMaintenanceActionKind = "update" | "install" | "signIn";
 
 export interface ProviderRegistryShape {
   /**
@@ -60,8 +60,9 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ProviderMaintenanceCapabilities>;
 
   /**
-   * Start a browser sign-in for one instance. Fails when the instance is
-   * unknown or its driver cannot sign in from the app.
+   * Start a browser sign-in for one instance and track it on the snapshot's
+   * `signInState` until it ends. Fails when the instance is unknown or its
+   * driver cannot sign in from the app.
    */
   readonly signInInstance: (
     instanceId: ProviderInstanceId,
@@ -69,8 +70,9 @@ export interface ProviderRegistryShape {
 
   /**
    * Apply volatile maintenance-action state to one configured instance.
-   * This state is never persisted to disk. Update actions are projected onto
-   * `ServerProvider.updateState` and install actions onto `installState`.
+   * This state is never persisted to disk. Update, install, and sign-in
+   * actions are projected onto `updateState`, `installState`, and
+   * `signInState`.
    */
   readonly setProviderMaintenanceActionState: (input: {
     readonly instanceId: ProviderInstanceId;

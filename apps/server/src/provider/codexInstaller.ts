@@ -168,10 +168,26 @@ export const installCodex = Effect.fn("installCodex")(
       return { stdout: stdout.text, exitCode: Number(exitCode) };
     }, Effect.scoped);
 
+    const reportsVersion = (executablePath: string) =>
+      runCommand(executablePath, ["--version"]).pipe(
+        Effect.timeout("90 seconds"),
+        Effect.map(
+          (result) =>
+            result.exitCode === 0 && result.stdout.trim() === `codex-cli ${release.version}`,
+        ),
+        Effect.orElseSucceed(() => false),
+      );
+
     const completed = yield* fs
       .readFileString(path.join(destination, COMPLETE_MARKER))
       .pipe(Effect.flatMap(decodeRecord), Effect.option);
-    if (Option.isSome(completed) && completed.value.sha256 === release.sha256) {
+    // Reuse only an install that still runs: antivirus can quarantine the
+    // executable while the marker stays behind.
+    if (
+      Option.isSome(completed) &&
+      completed.value.sha256 === release.sha256 &&
+      (yield* reportsVersion(path.join(destination, entrypoint)))
+    ) {
       return path.join(destination, entrypoint);
     }
 
@@ -243,10 +259,7 @@ export const installCodex = Effect.fn("installCodex")(
       return yield* fail("The downloaded Codex package does not match the expected release.");
     }
 
-    const version = yield* runCommand(path.join(packageDir, entrypoint), ["--version"]).pipe(
-      Effect.timeout("90 seconds"),
-    );
-    if (version.exitCode !== 0 || version.stdout.trim() !== `codex-cli ${release.version}`) {
+    if (!(yield* reportsVersion(path.join(packageDir, entrypoint)))) {
       return yield* fail("The downloaded Codex reports the wrong version.");
     }
 

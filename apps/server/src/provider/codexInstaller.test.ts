@@ -10,6 +10,7 @@
  * 6. The extracted executable reports a different version.
  * 7. A completed install already exists. It is reused without a download.
  * 8. An incomplete folder from an earlier attempt exists. A fresh install replaces it.
+ * 8b. A completed install lost its executable (antivirus quarantine). A fresh install repairs it.
  * 9. A good install reports progress up to the full size and returns a path inside the install folder.
  */
 import * as NodeChildProcess from "node:child_process";
@@ -172,6 +173,24 @@ describe("installCodex", () => {
 
       const http = serve(() => new Response(bytes));
       const executablePath = yield* run({ toolsDir, release: releaseFor(bytes), http: http.layer });
+      assert.strictEqual(http.requests(), 1);
+      assert.strictEqual(
+        NodeChildProcess.execFileSync(executablePath).toString().trim(),
+        `codex-cli ${VERSION}`,
+      );
+    }),
+  );
+
+  it.live("repairs a completed install whose executable was removed", () =>
+    Effect.gen(function* () {
+      const bytes = buildPackage();
+      const toolsDir = makeToolsDir();
+      const release = releaseFor(bytes);
+      const first = yield* run({ toolsDir, release, http: serve(() => new Response(bytes)).layer });
+      NodeFS.rmSync(first);
+
+      const http = serve(() => new Response(bytes));
+      const executablePath = yield* run({ toolsDir, release, http: http.layer });
       assert.strictEqual(http.requests(), 1);
       assert.strictEqual(
         NodeChildProcess.execFileSync(executablePath).toString().trim(),

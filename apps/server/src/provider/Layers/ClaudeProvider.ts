@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@cadsense/shared/model";
@@ -388,6 +389,33 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 
+const ClaudeAuthStatus = Schema.Struct({ loggedIn: Schema.Boolean });
+const decodeClaudeAuthStatus = Schema.decodeUnknownOption(Schema.fromJsonString(ClaudeAuthStatus));
+
+/**
+ * True only when `claude auth status` reports no login. Any other outcome
+ * (old CLI, unparseable output, timeout) is treated as unknown, not signed out.
+ */
+const isClaudeSignedOut = Effect.fn("isClaudeSignedOut")(function* (
+  claudeSettings: ClaudeSettings,
+  environment?: NodeJS.ProcessEnv,
+) {
+  const result = yield* runClaudeCommand(
+    claudeSettings,
+    ["auth", "status", "--json"],
+    environment,
+  ).pipe(
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.orElseSucceed(() => Option.none()),
+  );
+  return Option.isSome(result)
+    ? Option.match(decodeClaudeAuthStatus(result.value.stdout.trim()), {
+        onNone: () => false,
+        onSome: (status) => !status.loggedIn,
+      })
+    : false;
+});
+
 export class ClaudeSignInError extends Data.TaggedError("ClaudeSignInError")<{
   readonly message: string;
 }> {}
@@ -555,6 +583,25 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
   if (!capabilities) {
+    // A failed initialization is most often a signed-out CLI; say so when the
+    // CLI confirms it, so onboarding can offer sign-in.
+    if (yield* isClaudeSignedOut(claudeSettings, resolvedEnvironment)) {
+      return buildServerProvider({
+        presentation: CLAUDE_PRESENTATION,
+        enabled: claudeSettings.enabled,
+        checkedAt,
+        models,
+        slashCommands: dedupedSlashCommands,
+        skills,
+        probe: {
+          installed: true,
+          version: parsedVersion,
+          status: "error",
+          auth: { status: "unauthenticated" },
+          message: "Claude is not signed in. Run `claude auth login` and try again.",
+        },
+      });
+    }
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,

@@ -14,6 +14,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -26,6 +27,16 @@ export interface ProviderSignInStart<E> {
   readonly authUrl: string | null;
   /** Waits until the login finishes. Fails when the provider reports a failed login. */
   readonly finished: Effect.Effect<void, E>;
+}
+
+/**
+ * A started sign-in, as returned to the registry. `finished` settles when the
+ * login ends: it succeeds after the snapshot refresh and fails when the login
+ * fails, times out, or is cancelled by a newer attempt or a rebuild.
+ */
+export interface ProviderSignInHandle {
+  readonly authUrl: string | null;
+  readonly finished: Effect.Effect<void, ServerProviderSignInError>;
 }
 
 /**
@@ -43,6 +54,12 @@ export const makeProviderSignIn = Effect.fn("makeProviderSignIn")(function* <E>(
   const instanceScope = yield* Effect.scope;
   const gate = yield* Semaphore.make(1);
   const currentAttempt = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined);
+  const signInError = (reason: string, cause?: unknown) =>
+    new ServerProviderSignInError({
+      instanceId: input.instanceId,
+      reason,
+      ...(cause === undefined ? {} : { cause }),
+    });
 
   return gate.withPermit(
     Effect.gen(function* () {
@@ -50,6 +67,7 @@ export const makeProviderSignIn = Effect.fn("makeProviderSignIn")(function* <E>(
       if (previous !== undefined) yield* Fiber.interrupt(previous);
 
       const started = yield* Deferred.make<string | null, ServerProviderSignInError>();
+      const outcome = yield* Deferred.make<void, ServerProviderSignInError>();
       const attempt = yield* Effect.gen(function* () {
         const start = yield* input.begin.pipe(Effect.timeout(BEGIN_TIMEOUT));
         yield* Deferred.succeed(started, start.authUrl);
@@ -57,35 +75,55 @@ export const makeProviderSignIn = Effect.fn("makeProviderSignIn")(function* <E>(
         yield* input.refresh;
       }).pipe(
         Effect.scoped,
-        // Settle `started` on every failure, including interruption by a
-        // rebuild, so the RPC waiting on it never hangs. Failing an
-        // already-settled Deferred is a no-op.
-        Effect.onExit((exit) =>
-          Exit.isSuccess(exit)
-            ? Effect.void
-            : Deferred.fail(
-                started,
-                new ServerProviderSignInError({
-                  instanceId: input.instanceId,
-                  reason: `Could not start ${input.providerLabel} sign-in.`,
-                  cause: Cause.squash(exit.cause),
-                }),
-              ).pipe(
-                Effect.andThen(
-                  Cause.hasInterruptsOnly(exit.cause)
-                    ? Effect.void
-                    : Effect.logWarning("Provider sign-in failed", {
-                        instanceId: input.instanceId,
-                        cause: Cause.pretty(exit.cause),
-                      }),
-                ),
-              ),
-        ),
+        // Failing an already-settled Deferred is a no-op, so `started` keeps
+        // its URL when only the later login fails.
+        Effect.onExit((exit) => {
+          if (Exit.isSuccess(exit)) return Deferred.succeed(outcome, undefined);
+          const interrupted = Cause.hasInterruptsOnly(exit.cause);
+          const error = signInError(
+            interrupted
+              ? `${input.providerLabel} sign-in was cancelled.`
+              : `${input.providerLabel} sign-in did not finish.`,
+            Cause.squash(exit.cause),
+          );
+          return Deferred.fail(started, error).pipe(
+            Effect.andThen(Deferred.fail(outcome, error)),
+            Effect.andThen(
+              interrupted
+                ? Effect.void
+                : Effect.logWarning("Provider sign-in failed", {
+                    instanceId: input.instanceId,
+                    cause: Cause.pretty(exit.cause),
+                  }),
+            ),
+          );
+        }),
         Effect.ignoreCause,
         Effect.forkIn(instanceScope),
       );
       yield* Ref.set(currentAttempt, attempt);
-      return { authUrl: yield* Deferred.await(started) };
+
+      // A fiber forked into a scope that is already closing (an instance
+      // rebuild) is interrupted before `onExit` runs, so each wait also
+      // watches the fiber itself instead of trusting the Deferred alone.
+      const awaitUnlessStopped = <A>(deferred: Deferred.Deferred<A, ServerProviderSignInError>) =>
+        Effect.raceFirst(
+          Deferred.await(deferred),
+          Fiber.await(attempt).pipe(
+            Effect.andThen(Deferred.poll(deferred)),
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(signInError(`${input.providerLabel} sign-in was cancelled.`)),
+                onSome: (settled) => settled,
+              }),
+            ),
+          ),
+        );
+      return {
+        authUrl: yield* awaitUnlessStopped(started),
+        finished: awaitUnlessStopped(outcome),
+      } satisfies ProviderSignInHandle;
     }),
   );
 });

@@ -37,6 +37,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
+import * as DateTime from "effect/DateTime";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
@@ -286,6 +287,8 @@ export const ProviderRegistryLive = Layer.effect(
     const liveSubsRef = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ProviderInstance>>(
       new Map(),
     );
+    const signInAttemptsRef = yield* Ref.make<ReadonlyMap<ProviderInstanceId, number>>(new Map());
+    const registryScope = yield* Effect.scope;
     // Serialize `syncLiveSources` so a rapid burst of reconciles doesn't
     // interleave two passes clobbering each other's fiber bookkeeping.
     const syncSemaphore = yield* Semaphore.make(1);
@@ -322,12 +325,14 @@ export const ProviderRegistryLive = Layer.effect(
       const {
         updateState: _updateState,
         installState: _installState,
+        signInState: _signInState,
         ...providerWithoutActionStates
       } = provider;
       return {
         ...providerWithoutActionStates,
         ...(actions?.update ? { updateState: actions.update } : {}),
         ...(actions?.install ? { installState: actions.install } : {}),
+        ...(actions?.signIn ? { signInState: actions.signIn } : {}),
       };
     });
 
@@ -491,7 +496,41 @@ export const ProviderRegistryLive = Layer.effect(
           reason: "This provider cannot sign in from Cadsense.",
         });
       }
-      return yield* instance.signIn;
+      const handle = yield* instance.signIn;
+      const startedAt = DateTime.formatIso(yield* DateTime.now);
+      // Only the newest attempt may write the state; an older one that ends
+      // late (cancelled by the newer one) must not overwrite it.
+      const attempt = yield* Ref.modify(signInAttemptsRef, (previous) => {
+        const next = new Map(previous);
+        const count = (previous.get(instanceId) ?? 0) + 1;
+        next.set(instanceId, count);
+        return [count, next] as const;
+      });
+      const setIfCurrent = (state: ServerProviderUpdateState | null) =>
+        Ref.get(signInAttemptsRef).pipe(
+          Effect.flatMap((attempts) =>
+            attempts.get(instanceId) === attempt
+              ? setProviderMaintenanceActionState({ instanceId, action: "signIn", state })
+              : Effect.void,
+          ),
+        );
+      const state = (
+        status: ServerProviderUpdateState["status"],
+        message: string,
+        finishedAt: string | null,
+      ): ServerProviderUpdateState => ({ status, startedAt, finishedAt, message, output: null });
+      yield* setIfCurrent(state("running", "Waiting for the browser sign-in.", null));
+      yield* handle.finished.pipe(
+        Effect.matchEffect({
+          onSuccess: () => setIfCurrent(null),
+          onFailure: (error) =>
+            Effect.flatMap(DateTime.now, (now) =>
+              setIfCurrent(state("failed", error.reason, DateTime.formatIso(now))),
+            ),
+        }),
+        Effect.forkIn(registryScope),
+      );
+      return { authUrl: handle.authUrl, startedAt };
     });
 
     const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
