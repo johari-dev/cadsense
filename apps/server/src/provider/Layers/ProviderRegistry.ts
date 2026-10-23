@@ -526,10 +526,26 @@ export const ProviderRegistryLive = Layer.effect(
           // before the terminal state lands; the UI reads both together.
           onSuccess: () =>
             refreshInstance(instanceId).pipe(
-              Effect.andThen(DateTime.now),
-              Effect.flatMap((now) =>
-                setIfCurrent(state("succeeded", "Signed in.", DateTime.formatIso(now))),
-              ),
+              // A refresh that dies must still end the attempt, or the UI
+              // waits forever. Shutdown interruption passes through.
+              Effect.matchCauseEffect({
+                onFailure: (cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.flatMap(DateTime.now, (now) =>
+                        setIfCurrent(
+                          state(
+                            "failed",
+                            "Signed in, but Cadsense could not check the assistant.",
+                            DateTime.formatIso(now),
+                          ),
+                        ),
+                      ),
+                onSuccess: () =>
+                  Effect.flatMap(DateTime.now, (now) =>
+                    setIfCurrent(state("succeeded", "Signed in.", DateTime.formatIso(now))),
+                  ),
+              }),
             ),
           onFailure: (error) =>
             Effect.flatMap(DateTime.now, (now) =>

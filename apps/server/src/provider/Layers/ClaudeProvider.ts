@@ -393,10 +393,10 @@ const ClaudeAuthStatus = Schema.Struct({ loggedIn: Schema.Boolean });
 const decodeClaudeAuthStatus = Schema.decodeUnknownOption(Schema.fromJsonString(ClaudeAuthStatus));
 
 /**
- * True only when `claude auth status` reports no login. Any other outcome
- * (old CLI, unparseable output, timeout) is treated as unknown, not signed out.
+ * What `claude auth status` says about the login. Anything other than a
+ * parseable answer (old CLI, unparseable output, timeout) is "unknown".
  */
-const isClaudeSignedOut = Effect.fn("isClaudeSignedOut")(function* (
+const readClaudeLogin = Effect.fn("readClaudeLogin")(function* (
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
 ) {
@@ -408,12 +408,11 @@ const isClaudeSignedOut = Effect.fn("isClaudeSignedOut")(function* (
     Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
     Effect.orElseSucceed(() => Option.none()),
   );
-  return Option.isSome(result)
-    ? Option.match(decodeClaudeAuthStatus(result.value.stdout.trim()), {
-        onNone: () => false,
-        onSome: (status) => !status.loggedIn,
-      })
-    : false;
+  if (Option.isNone(result)) return "unknown" as const;
+  return Option.match(decodeClaudeAuthStatus(result.value.stdout.trim()), {
+    onNone: () => "unknown" as const,
+    onSome: (status) => (status.loggedIn ? ("signedIn" as const) : ("signedOut" as const)),
+  });
 });
 
 export class ClaudeSignInError extends Data.TaggedError("ClaudeSignInError")<{
@@ -591,11 +590,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   // Initialization can fail, or succeed with no credentials at all, when the
   // CLI is signed out. Ask the CLI in both cases so onboarding can offer
-  // sign-in instead of treating Claude as ready.
-  if (
-    (!capabilities || authMetadata === undefined) &&
-    (yield* isClaudeSignedOut(claudeSettings, resolvedEnvironment))
-  ) {
+  // sign-in instead of treating Claude as ready. Without credentials from
+  // initialization, only a confirmed login counts as ready.
+  const login =
+    capabilities && authMetadata !== undefined
+      ? ("signedIn" as const)
+      : yield* readClaudeLogin(claudeSettings, resolvedEnvironment);
+  if (login === "signedOut") {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -613,7 +614,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  if (!capabilities) {
+  if (!capabilities || login === "unknown") {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,

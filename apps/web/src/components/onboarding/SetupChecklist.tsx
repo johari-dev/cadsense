@@ -144,22 +144,23 @@ export function SetupChecklist() {
 
   // This attempt ends with a terminal `signInState`. A failed login, or a
   // login whose refreshed snapshot still is not ready, stops the wait and
-  // shows why; a ready snapshot is handled by `isReady` above.
+  // shows why; a ready snapshot is handled by `isReady` above. A newer
+  // attempt (another window) cancels this one, so stop waiting for it too.
   const attemptRow =
-    signIn === null
-      ? undefined
-      : rows.find(
-          (row) =>
-            row.instanceId === signIn.instanceId &&
-            row.snapshot?.signInState?.startedAt === signIn.startedAt,
-        );
+    signIn === null ? undefined : rows.find((row) => row.instanceId === signIn.instanceId);
   const attemptState = attemptRow?.snapshot?.signInState;
   const signInFailure =
-    attemptState?.status === "failed"
-      ? (attemptState.message ?? "Sign-in did not finish.")
-      : attemptState?.status === "succeeded" && attemptRow?.status.kind !== "ready"
-        ? (attemptRow?.snapshot?.message ?? "Signed in, but the assistant is not ready yet.")
-        : undefined;
+    signIn === null || attemptState === undefined || attemptState.startedAt === null
+      ? undefined
+      : attemptState.startedAt > signIn.startedAt
+        ? "Sign-in was started again in another window."
+        : attemptState.startedAt !== signIn.startedAt
+          ? undefined
+          : attemptState.status === "failed"
+            ? (attemptState.message ?? "Sign-in did not finish.")
+            : attemptState.status === "succeeded" && attemptRow?.status.kind !== "ready"
+              ? (attemptRow?.snapshot?.message ?? "Signed in, but the assistant is not ready yet.")
+              : undefined;
   useEffect(() => {
     if (signInFailure === undefined) return;
     setSignIn(null);
