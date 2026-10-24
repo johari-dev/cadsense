@@ -32,7 +32,11 @@ const SCALE = 10_000;
 
 export interface CamOperation {
   readonly kind: "pocket" | "bore" | "cutout" | "profile";
-  readonly label: string;
+  /** Short operation name and detail for the operations table, e.g. "Bore" and "Ø.210". */
+  readonly name: string;
+  readonly detail: string;
+  /** Features this operation cuts: one per hole for bores, otherwise one. */
+  readonly count: number;
   /** Closed tool-centre loops, cut in order, each repeated for every pass. */
   readonly paths: readonly (readonly Vec2[])[];
   readonly depth: number;
@@ -135,7 +139,9 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
     const passes = passesFor(depth);
     operations.push({
       kind: "pocket",
-      label: `Pocket ${fmt(depth)} deep`,
+      name: "Pocket",
+      detail: `${fmt(depth)} deep`,
+      count: 1,
       paths: rings,
       depth,
       passes,
@@ -164,7 +170,9 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
     const passes = passesFor(bore.depth);
     operations.push({
       kind: "bore",
-      label: `Bore ${bore.paths.length}× Ø${fmt(bore.diameter)}`,
+      name: "Bore",
+      detail: `Ø${fmt(bore.diameter)}`,
+      count: bore.paths.length,
       paths: bore.paths,
       depth: bore.depth,
       passes,
@@ -186,7 +194,9 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
     const passes = passesFor(depth);
     operations.push({
       kind: "cutout",
-      label: `Cut out ${cutouts.length > 1 ? `opening ${i + 1}` : "the opening"}`,
+      name: "Contour",
+      detail: cutouts.length > 1 ? `opening ${i + 1}` : "",
+      count: 1,
       paths,
       depth,
       passes,
@@ -205,7 +215,10 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
   );
   operations.push({
     kind: "profile",
-    label: `Profile with ${settings.tabs} tab${settings.tabs === 1 ? "" : "s"}`,
+    name: "Profile",
+    detail:
+      settings.tabs === 0 ? "no tabs" : `${settings.tabs} tab${settings.tabs === 1 ? "" : "s"}`,
+    count: 1,
     paths: profile,
     depth,
     passes,
