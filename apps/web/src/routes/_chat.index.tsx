@@ -1,12 +1,12 @@
 import { scopeProjectRef } from "@cadsense/client-runtime/environment";
 import { createFileRoute } from "@tanstack/react-router";
-import { CubeIcon, PlusIcon, ArrowCounterClockwiseIcon as RotateCcwIcon } from "~/lib/icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowCounterClockwiseIcon as RotateCcwIcon } from "~/lib/icons";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { openCommandPalette } from "../commandPaletteBus";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
+import { SetupChecklist } from "../components/onboarding/SetupChecklist";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import {
   useAllEnvironmentShellsBootstrapped,
@@ -21,7 +21,7 @@ function ChatIndexRouteView() {
 /**
  * Landing on the index route drops straight into a draft thread for the most
  * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
+ * end. Falls back to the setup checklist when no project exists yet.
  */
 function IndexDraftLanding() {
   const projects = useProjects();
@@ -78,7 +78,7 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  return <NoProjectsHero />;
+  return <SetupChecklist />;
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
@@ -98,42 +98,6 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
           </div>
         </EmptyHeader>
       </Empty>
-    </SidebarInset>
-  );
-}
-
-function NoProjectsHero() {
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
-
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-        <Empty className="flex-1">
-          <div className="w-full max-w-xl px-8 py-12">
-            <div className="mx-auto mb-7 flex size-24 items-center justify-center rounded border border-primary/30 bg-primary/5 text-primary">
-              <CubeIcon size={58} weight="duotone" />
-            </div>
-            <p className="mb-3 text-center text-[11px] font-medium uppercase tracking-[0.22em] text-primary">
-              Cadsense / Design workspace
-            </p>
-            <EmptyHeader className="max-w-none">
-              <EmptyTitle className="text-foreground text-2xl sm:text-3xl">
-                A place to think in 3D.
-              </EmptyTitle>
-              <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Bring in your project to explore assemblies, review details, and work through design
-                changes with an agent.
-              </EmptyDescription>
-              <div className="mt-6 flex justify-center">
-                <Button size="sm" onClick={openAddProject}>
-                  <PlusIcon className="size-4" />
-                  Create your workspace
-                </Button>
-              </div>
-            </EmptyHeader>
-          </div>
-        </Empty>
-      </div>
     </SidebarInset>
   );
 }

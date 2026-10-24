@@ -23,6 +23,8 @@ const GITHUB_API_BASE =
   "https://api.github.com/repos/openai/codex/contents/codex-rs/app-server-protocol";
 
 const CLIENT_REQUEST_METHODS = new Set([
+  "account/login/cancel",
+  "account/login/start",
   "account/read",
   "config/mcpServer/reload",
   "feedback/upload",
@@ -43,6 +45,7 @@ const SERVER_REQUEST_METHODS = new Set([
   "mcpServer/elicitation/request",
 ]);
 const SERVER_NOTIFICATION_METHODS = new Set([
+  "account/login/completed",
   "configWarning",
   "deprecationNotice",
   "error",

@@ -25,6 +25,7 @@ import type {
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
+  ServerProviderSignInError,
 } from "@cadsense/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -33,6 +34,7 @@ import type * as Scope from "effect/Scope";
 import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
 import type { ProviderAdapterShape } from "./Services/ProviderAdapter.ts";
+import type { ProviderSignInHandle } from "./providerSignIn.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 
 /**
@@ -71,6 +73,14 @@ export interface ProviderInstance {
   readonly snapshot: ServerProviderShape;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
+  /**
+   * Start a browser sign-in. Resolves once the login has started, with the
+   * URL the client should open (null when the CLI opens the browser itself)
+   * and an effect that settles when the login ends. The instance refreshes
+   * its snapshot after a successful login. Absent for drivers that cannot
+   * sign in from the app.
+   */
+  readonly signIn?: Effect.Effect<ProviderSignInHandle, ServerProviderSignInError>;
 }
 
 export interface ProviderContinuationIdentity {

@@ -169,6 +169,10 @@ export const ServerProviderUpdateState = Schema.Struct({
   finishedAt: Schema.NullOr(IsoDateTime),
   message: Schema.NullOr(TrimmedNonEmptyString),
   output: Schema.NullOr(Schema.String.check(Schema.isMaxLength(10_000))),
+  // Set by actions that download something, such as a managed install.
+  progress: Schema.optionalKey(
+    Schema.Struct({ completedBytes: NonNegativeInt, totalBytes: NonNegativeInt }),
+  ),
 });
 export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type;
 
@@ -207,6 +211,11 @@ export const ServerProvider = Schema.Struct({
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
+  // Progress of a one-click install started from onboarding.
+  installState: Schema.optionalKey(ServerProviderUpdateState),
+  // The latest browser sign-in started from the app, so a failed login can
+  // be shown instead of waiting forever.
+  signInState: Schema.optionalKey(ServerProviderUpdateState),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
@@ -593,6 +602,36 @@ export const ServerProviderUpdateInput = Schema.Struct({
   instanceId: Schema.optionalKey(ProviderInstanceId),
 });
 export type ServerProviderUpdateInput = typeof ServerProviderUpdateInput.Type;
+
+export const ServerProviderSignInInput = Schema.Struct({
+  instanceId: ProviderInstanceId,
+});
+export type ServerProviderSignInInput = typeof ServerProviderSignInInput.Type;
+
+/**
+ * A started sign-in. The client opens `authUrl` when it is set; otherwise the
+ * provider's own CLI opens the browser. Success arrives as a provider snapshot
+ * whose auth status changes; failure as a `signInState` whose `startedAt`
+ * matches this result.
+ */
+export const ServerProviderSignInResult = Schema.Struct({
+  authUrl: Schema.NullOr(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+});
+export type ServerProviderSignInResult = typeof ServerProviderSignInResult.Type;
+
+export class ServerProviderSignInError extends Schema.TaggedErrorClass<ServerProviderSignInError>()(
+  "ServerProviderSignInError",
+  {
+    instanceId: ProviderInstanceId,
+    reason: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Sign-in failed for ${this.instanceId}: ${this.reason}`;
+  }
+}
 
 export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerProviderUpdateError>()(
   "ServerProviderUpdateError",

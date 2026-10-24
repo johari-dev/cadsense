@@ -3,12 +3,15 @@ import {
   type ModelCapabilities,
   type ServerProviderSlashCommand,
 } from "@cadsense/contracts";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@cadsense/shared/model";
 import { resolveSpawnCommand } from "@cadsense/shared/shell";
@@ -386,6 +389,73 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 
+const ClaudeAuthStatus = Schema.Struct({ loggedIn: Schema.Boolean });
+const decodeClaudeAuthStatus = Schema.decodeUnknownOption(Schema.fromJsonString(ClaudeAuthStatus));
+
+/**
+ * What `claude auth status` says about the login. Anything other than a
+ * parseable answer (old CLI, unparseable output, timeout) is "unknown".
+ */
+const readClaudeLogin = Effect.fn("readClaudeLogin")(function* (
+  claudeSettings: ClaudeSettings,
+  environment?: NodeJS.ProcessEnv,
+) {
+  const result = yield* runClaudeCommand(
+    claudeSettings,
+    ["auth", "status", "--json"],
+    environment,
+  ).pipe(
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.orElseSucceed(() => Option.none()),
+  );
+  if (Option.isNone(result)) return "unknown" as const;
+  return Option.match(decodeClaudeAuthStatus(result.value.stdout.trim()), {
+    onNone: () => "unknown" as const,
+    onSome: (status) => (status.loggedIn ? ("signedIn" as const) : ("signedOut" as const)),
+  });
+});
+
+export class ClaudeSignInError extends Data.TaggedError("ClaudeSignInError")<{
+  readonly message: string;
+}> {}
+
+/**
+ * Start `claude auth login`. The CLI opens the browser itself and listens for
+ * the OAuth callback, so the process stays alive in the caller's scope until
+ * it exits. A zero exit code means the login succeeded.
+ */
+export const beginClaudeSignIn = Effect.fn("beginClaudeSignIn")(function* (
+  claudeSettings: ClaudeSettings,
+  environment?: NodeJS.ProcessEnv,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const spawnCommand = yield* resolveSpawnCommand(
+    claudeSettings.binaryPath,
+    ["auth", "login", "--claudeai"],
+    { env: claudeEnvironment },
+  );
+  const child = yield* spawner.spawn(
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      env: claudeEnvironment,
+      shell: spawnCommand.shell,
+    }),
+  );
+  return {
+    authUrl: null,
+    finished: Effect.all(
+      [child.stdout.pipe(Stream.runDrain), child.stderr.pipe(Stream.runDrain), child.exitCode],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.flatMap(([, , exitCode]) =>
+        Number(exitCode) === 0
+          ? Effect.void
+          : Effect.fail(new ClaudeSignInError({ message: "Claude sign-in did not finish." })),
+      ),
+    ),
+  };
+});
+
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
   claudeSettings: ClaudeSettings,
   resolveCapabilities?: (
@@ -511,7 +581,40 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   ];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
-  if (!capabilities) {
+  const authMetadata = capabilities
+    ? (claudeAuthMetadata({
+        subscriptionType: capabilities.subscriptionType,
+        authMethod: capabilities.tokenSource,
+      }) ?? apiProviderAuthMetadata(capabilities.apiProvider))
+    : undefined;
+
+  // Initialization can fail, or succeed with no credentials at all, when the
+  // CLI is signed out. Ask the CLI in both cases so onboarding can offer
+  // sign-in instead of treating Claude as ready. Without credentials from
+  // initialization, only a confirmed login counts as ready.
+  const login =
+    capabilities && authMetadata !== undefined
+      ? ("signedIn" as const)
+      : yield* readClaudeLogin(claudeSettings, resolvedEnvironment);
+  if (login === "signedOut") {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      skills,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Claude is not signed in. Run `claude auth login` and try again.",
+      },
+    });
+  }
+
+  if (!capabilities || login === "unknown") {
     return buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
@@ -529,11 +632,6 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const authMetadata =
-    claudeAuthMetadata({
-      subscriptionType: capabilities.subscriptionType,
-      authMethod: capabilities.tokenSource,
-    }) ?? apiProviderAuthMetadata(capabilities.apiProvider);
   return buildServerProvider({
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,

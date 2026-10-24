@@ -305,6 +305,15 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    installProvider: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:install-provider",
+      tag: WS_METHODS.serverInstallProvider,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
+    signInProvider: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:sign-in-provider",
+      tag: WS_METHODS.serverSignInProvider,
+    }),
     upsertKeybinding: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:upsert-keybinding",
       tag: WS_METHODS.serverUpsertKeybinding,

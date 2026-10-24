@@ -286,6 +286,12 @@ export const V1InitializeResponse__AbsolutePathBuf = Schema.String.annotate({
   identifier: "V1InitializeResponse__AbsolutePathBuf",
 });
 
+export type V2CancelLoginAccountResponse__CancelLoginAccountStatus = "canceled" | "notFound";
+export const V2CancelLoginAccountResponse__CancelLoginAccountStatus = Schema.Literals([
+  "canceled",
+  "notFound",
+]).annotate({ identifier: "V2CancelLoginAccountResponse__CancelLoginAccountStatus" });
+
 export type V2ConfigWarningNotification__TextPosition = {
   readonly column: number;
   readonly line: number;
@@ -957,6 +963,11 @@ export const V2ItemStartedNotification__WebSearchAction = Schema.Union(
   ],
   { mode: "oneOf" },
 ).annotate({ identifier: "V2ItemStartedNotification__WebSearchAction" });
+
+export type V2LoginAccountParams__LoginAppBrand = "codex" | "chatgpt";
+export const V2LoginAccountParams__LoginAppBrand = Schema.Literals(["codex", "chatgpt"]).annotate({
+  identifier: "V2LoginAccountParams__LoginAppBrand",
+});
 
 export type V2ModelListResponse__ModelAvailabilityNux = { readonly message: string };
 export const V2ModelListResponse__ModelAvailabilityNux = Schema.Struct({
@@ -11055,6 +11066,17 @@ export const V1InitializeResponse = Schema.Struct({
   userAgent: Schema.String,
 }).annotate({ title: "InitializeResponse" });
 
+export type V2AccountLoginCompletedNotification = {
+  readonly error?: string | null;
+  readonly loginId?: string | null;
+  readonly success: boolean;
+};
+export const V2AccountLoginCompletedNotification = Schema.Struct({
+  error: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+  loginId: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+  success: Schema.Boolean,
+}).annotate({ title: "AccountLoginCompletedNotification" });
+
 export type V2AgentMessageDeltaNotification = {
   readonly delta: string;
   readonly itemId: string;
@@ -11067,6 +11089,18 @@ export const V2AgentMessageDeltaNotification = Schema.Struct({
   threadId: Schema.String,
   turnId: Schema.String,
 }).annotate({ title: "AgentMessageDeltaNotification" });
+
+export type V2CancelLoginAccountParams = { readonly loginId: string };
+export const V2CancelLoginAccountParams = Schema.Struct({ loginId: Schema.String }).annotate({
+  title: "CancelLoginAccountParams",
+});
+
+export type V2CancelLoginAccountResponse = {
+  readonly status: V2CancelLoginAccountResponse__CancelLoginAccountStatus;
+};
+export const V2CancelLoginAccountResponse = Schema.Struct({
+  status: V2CancelLoginAccountResponse__CancelLoginAccountStatus,
+}).annotate({ title: "CancelLoginAccountResponse" });
 
 export type V2CommandExecutionOutputDeltaNotification = {
   readonly delta: string;
@@ -11202,6 +11236,103 @@ export const V2ItemStartedNotification = Schema.Struct({
   threadId: Schema.String,
   turnId: Schema.String,
 }).annotate({ title: "ItemStartedNotification" });
+
+export type V2LoginAccountParams =
+  | { readonly apiKey: string; readonly type: "apiKey" }
+  | {
+      readonly appBrand?: V2LoginAccountParams__LoginAppBrand | null;
+      readonly codexStreamlinedLogin?: boolean;
+      readonly type: "chatgpt";
+      readonly useHostedLoginSuccessPage?: boolean;
+    }
+  | { readonly type: "chatgptDeviceCode" }
+  | {
+      readonly accessToken: string;
+      readonly chatgptAccountId: string;
+      readonly chatgptPlanType?: string | null;
+      readonly type: "chatgptAuthTokens";
+    }
+  | { readonly apiKey: string; readonly region: string; readonly type: "amazonBedrock" };
+export const V2LoginAccountParams = Schema.Union(
+  [
+    Schema.Struct({
+      apiKey: Schema.String,
+      type: Schema.Literal("apiKey").annotate({ title: "ApiKeyv2::LoginAccountParamsType" }),
+    }).annotate({ title: "ApiKeyv2::LoginAccountParams" }),
+    Schema.Struct({
+      appBrand: Schema.optionalKey(
+        Schema.Union([V2LoginAccountParams__LoginAppBrand, Schema.Null]),
+      ),
+      codexStreamlinedLogin: Schema.optionalKey(Schema.Boolean),
+      type: Schema.Literal("chatgpt").annotate({ title: "Chatgptv2::LoginAccountParamsType" }),
+      useHostedLoginSuccessPage: Schema.optionalKey(Schema.Boolean),
+    }).annotate({ title: "Chatgptv2::LoginAccountParams" }),
+    Schema.Struct({
+      type: Schema.Literal("chatgptDeviceCode").annotate({
+        title: "ChatgptDeviceCodev2::LoginAccountParamsType",
+      }),
+    }).annotate({ title: "ChatgptDeviceCodev2::LoginAccountParams" }),
+    Schema.Struct({
+      accessToken: Schema.String,
+      chatgptAccountId: Schema.String,
+      chatgptPlanType: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      type: Schema.Literal("chatgptAuthTokens").annotate({
+        title: "ChatgptAuthTokensv2::LoginAccountParamsType",
+      }),
+    }).annotate({ title: "ChatgptAuthTokensv2::LoginAccountParams" }),
+    Schema.Struct({
+      apiKey: Schema.String,
+      region: Schema.String,
+      type: Schema.Literal("amazonBedrock").annotate({
+        title: "AmazonBedrockv2::LoginAccountParamsType",
+      }),
+    }).annotate({ title: "AmazonBedrockv2::LoginAccountParams" }),
+  ],
+  { mode: "oneOf" },
+).annotate({ title: "LoginAccountParams" });
+
+export type V2LoginAccountResponse =
+  | { readonly type: "apiKey" }
+  | { readonly authUrl: string; readonly loginId: string; readonly type: "chatgpt" }
+  | {
+      readonly loginId: string;
+      readonly type: "chatgptDeviceCode";
+      readonly userCode: string;
+      readonly verificationUrl: string;
+    }
+  | { readonly type: "chatgptAuthTokens" }
+  | { readonly type: "amazonBedrock" };
+export const V2LoginAccountResponse = Schema.Union(
+  [
+    Schema.Struct({
+      type: Schema.Literal("apiKey").annotate({ title: "ApiKeyv2::LoginAccountResponseType" }),
+    }).annotate({ title: "ApiKeyv2::LoginAccountResponse" }),
+    Schema.Struct({
+      authUrl: Schema.String,
+      loginId: Schema.String,
+      type: Schema.Literal("chatgpt").annotate({ title: "Chatgptv2::LoginAccountResponseType" }),
+    }).annotate({ title: "Chatgptv2::LoginAccountResponse" }),
+    Schema.Struct({
+      loginId: Schema.String,
+      type: Schema.Literal("chatgptDeviceCode").annotate({
+        title: "ChatgptDeviceCodev2::LoginAccountResponseType",
+      }),
+      userCode: Schema.String,
+      verificationUrl: Schema.String,
+    }).annotate({ title: "ChatgptDeviceCodev2::LoginAccountResponse" }),
+    Schema.Struct({
+      type: Schema.Literal("chatgptAuthTokens").annotate({
+        title: "ChatgptAuthTokensv2::LoginAccountResponseType",
+      }),
+    }).annotate({ title: "ChatgptAuthTokensv2::LoginAccountResponse" }),
+    Schema.Struct({
+      type: Schema.Literal("amazonBedrock").annotate({
+        title: "AmazonBedrockv2::LoginAccountResponseType",
+      }),
+    }).annotate({ title: "AmazonBedrockv2::LoginAccountResponse" }),
+  ],
+  { mode: "oneOf" },
+).annotate({ title: "LoginAccountResponse" });
 
 export type V2McpServerOauthLoginCompletedNotification = {
   readonly error?: string | null;
