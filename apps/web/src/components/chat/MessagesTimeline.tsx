@@ -1034,7 +1034,13 @@ function CadDrawingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "cad
   const { threadRef } = use(TimelineRowCtx);
   if (!threadRef) return null;
   return (
-    <CadPartDrawings id={row.id} createdAt={row.createdAt} card={row.card} threadRef={threadRef} />
+    <CadPartDrawings
+      id={row.id}
+      createdAt={row.createdAt}
+      card={row.card}
+      threadRef={threadRef}
+      mode={row.mode}
+    />
   );
 }
 

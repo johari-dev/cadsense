@@ -1,5 +1,5 @@
 import { CadFindPartsInput } from "./cadFindParts.ts";
-import { CadPartDrawingInput } from "./cadDrawing.ts";
+import { CadPartDrawingInput, CadPlateCamInput } from "./cadDrawing.ts";
 import {
   CadCommentCategory,
   CadCommentSeverity,
@@ -308,4 +308,5 @@ export const CAD_TOOL_INPUTS = {
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
   cad_part_drawing: CadPartDrawingInput,
+  cad_plate_cam: CadPlateCamInput,
 } as const;

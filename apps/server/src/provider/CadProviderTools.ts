@@ -79,7 +79,9 @@ const descriptions = {
   cad_capture:
     "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-* errors are rendering failures, not CAD being off: follow their details to recover.",
   cad_part_drawing:
-    "Open print-ready shop drawings (a shop sheet, formal drawing, or traveler per part) for parts the user wants made. Shop drawings are for tubing, shafts (round and hex), and other parts cut from stock. Input: {snapshotId, occurrenceIds:[id], title?}. Pass part occurrence IDs from cad_find_parts or cad_hierarchy, or one assembly occurrence to draw every part under it that needs a drawing. For an assembly, bought parts (fasteners, bearings, motors, vendor parts) are skipped, plates are counted as router (CNC) parts, and printed parts as printer parts; notDrawn reports those counts. Parts named one by one are always drawn. Each sheet carries the part's quantity across the assembly. Use it when the user asks for a part drawing, shop drawing, fab sheet, or print. It changes no view state.",
+    "Open print-ready shop drawings (a shop sheet, formal drawing, or traveler per part) for parts the user wants made. Shop drawings are for tubing, shafts (round and hex), and other parts cut from stock. Input: {snapshotId, occurrenceIds:[id], title?}. Pass part occurrence IDs from cad_find_parts or cad_hierarchy, or one assembly occurrence to draw every part under it that needs a drawing. For an assembly, bought parts (fasteners, bearings, motors, vendor parts) are skipped, plates are counted as router parts (open them with cad_plate_cam), and printed parts as printer parts; notDrawn reports those counts. Parts named one by one are always drawn. Each sheet carries the part's quantity across the assembly. Use it when the user asks for a part drawing, shop drawing, fab sheet, or print. It changes no view state.",
+  cad_plate_cam:
+    "Open router CAM for plates: flat parts cut from sheet on a CNC router. Input: {snapshotId, occurrenceIds:[id], title?}, part occurrence IDs or one assembly occurrence to take every plate under it; parts that are not plates are left out. The user's CAM panel shows tool paths for holes, pockets, cutouts, and the outside profile with tabs, a cut-time estimate, and a DXF export. Use it when the user asks to CNC, route, or cut plates, or for a DXF. Tubing and shafts need cad_part_drawing instead. It changes no view state.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
 
 /** Tools that change no view, comment, or evidence state. MCP clients receive this as readOnlyHint. */
@@ -181,6 +183,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return yield* tools.capture(input);
     case "cad_part_drawing":
       return { result: yield* tools.partDrawing(input) };
+    case "cad_plate_cam":
+      return { result: yield* tools.plateCam(input) };
     default:
       return yield* new CadViewError({ reason: "capability-unavailable" });
   }

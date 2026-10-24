@@ -25,7 +25,7 @@ export interface PartMesh {
   readonly triangles: Uint32Array;
 }
 
-interface Edge {
+export interface Edge {
   readonly a: number;
   readonly b: number;
   readonly faces: number[];

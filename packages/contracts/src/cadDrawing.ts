@@ -24,3 +24,8 @@ export const CadPartDrawingCard = Schema.Struct({
 });
 export type CadPartDrawingCard = typeof CadPartDrawingCard.Type;
 export const CAD_PART_DRAWING_ACTIVITY = "cad.drawing.opened";
+
+/** Opens router CAM for plates, or for every plate under an assembly; same input as drawings. */
+export const CadPlateCamInput = CadPartDrawingInput;
+/** The chat card for plates the agent opened in CAM; `sheets` lists the plates. */
+export const CAD_PLATE_CAM_ACTIVITY = "cad.cam.opened";

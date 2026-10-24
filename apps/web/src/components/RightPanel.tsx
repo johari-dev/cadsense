@@ -41,6 +41,7 @@ const SECTION_LABEL = {
   cad: "CAD",
   files: "Files",
   drawing: "Part drawing",
+  cam: "CAM",
   agents: "Agents",
   browser: "Browser",
 } as const satisfies Record<RightPanelSection, string>;

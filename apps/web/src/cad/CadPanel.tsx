@@ -177,6 +177,13 @@ export function CadScene({
         .openDrawing(threadRef, { snapshotId: view.snapshotId, occurrenceIds, title }),
     [threadRef, view.snapshotId],
   );
+  const openCam = useCallback(
+    (occurrenceIds: string[], title: string) =>
+      useRightPanelStore
+        .getState()
+        .openCam(threadRef, { snapshotId: view.snapshotId, occurrenceIds, title }),
+    [threadRef, view.snapshotId],
+  );
   const partAt = (event: { clientX: number; clientY: number; currentTarget: HTMLElement }) => {
     const box = event.currentTarget.getBoundingClientRect();
     const id =
@@ -499,6 +506,7 @@ export function CadScene({
               onChange={onChange}
               belowRevisionNotice={commentsCard.historical}
               onOpenDrawing={openDrawing}
+              onOpenCam={openCam}
             />
           )}
           {picking && (

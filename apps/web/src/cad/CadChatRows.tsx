@@ -9,6 +9,7 @@ import {
   WarningCircleIcon as CircleAlertIcon,
   ChatIcon as MessageSquareIcon,
   PartDrawingIcon,
+  RouterIcon,
 } from "~/lib/icons";
 import { useEffect, useMemo } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
@@ -236,18 +237,24 @@ export function CadPartDrawings({
   createdAt,
   card,
   threadRef,
+  mode = "drawing",
 }: {
   id: string;
   createdAt: string;
   card: CadPartDrawingCard;
   threadRef: ScopedThreadRef;
+  /** Shop drawings open the Part drawing panel; CAM opens the plates in the CAM panel. */
+  mode?: "drawing" | "cam";
 }) {
-  const open = () =>
-    useRightPanelStore.getState().openDrawing(threadRef, {
+  const open = () => {
+    const target = {
       snapshotId: card.snapshotId,
       occurrenceIds: [...card.occurrenceIds],
       title: card.title,
-    });
+    };
+    if (mode === "cam") useRightPanelStore.getState().openCam(threadRef, target);
+    else useRightPanelStore.getState().openDrawing(threadRef, target);
+  };
   useEffect(() => {
     if (autoOpenedDrawings.has(id)) return;
     autoOpenedDrawings.add(id);
@@ -256,22 +263,31 @@ export function CadPartDrawings({
   }, [id]);
   const listed = card.sheets.slice(0, MAX_LISTED_COMMENTS);
   return (
-    <div className="text-sm leading-relaxed" data-testid="cad-part-drawing-card">
+    <div
+      className="text-sm leading-relaxed"
+      data-testid={mode === "cam" ? "cad-plate-cam-card" : "cad-part-drawing-card"}
+    >
       <div className="flex min-h-6 items-center gap-1.5 px-0.5">
         <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-          <PartDrawingIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+          {mode === "cam" ? (
+            <RouterIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+          ) : (
+            <PartDrawingIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+          )}
         </span>
         <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-          {card.sheets.length === 1
-            ? `Part drawing: ${card.title}`
-            : `${card.sheets.length} part drawings: ${card.title}`}
+          {mode === "cam"
+            ? `CAM: ${card.sheets.length === 1 ? card.title : `${card.sheets.length} plates`}`
+            : card.sheets.length === 1
+              ? `Part drawing: ${card.title}`
+              : `${card.sheets.length} part drawings: ${card.title}`}
         </span>
         <button
           type="button"
           className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
           onClick={open}
         >
-          Open drawing
+          {mode === "cam" ? "Open CAM" : "Open drawing"}
         </button>
       </div>
       {listed.map((sheet) => (

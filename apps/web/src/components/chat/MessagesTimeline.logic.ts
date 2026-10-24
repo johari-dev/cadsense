@@ -205,6 +205,8 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       card: CadPartDrawingCard;
+      /** Shop drawings, or router CAM for plates. */
+      mode: "drawing" | "cam";
     }
   | {
       kind: "work";
@@ -756,7 +758,10 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.cadComments !== undefined) {
         continue;
       }
-      if (entry.kind === "work" && entry.entry.cadDrawing !== undefined) {
+      if (
+        entry.kind === "work" &&
+        (entry.entry.cadDrawing !== undefined || entry.entry.cadCam !== undefined)
+      ) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
@@ -1003,12 +1008,17 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (timelineEntry.kind === "work" && timelineEntry.entry.cadDrawing !== undefined) {
+    const shopCard =
+      timelineEntry.kind === "work"
+        ? (timelineEntry.entry.cadDrawing ?? timelineEntry.entry.cadCam)
+        : undefined;
+    if (timelineEntry.kind === "work" && shopCard) {
       nextRows.push({
         kind: "cad-drawing",
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
-        card: timelineEntry.entry.cadDrawing,
+        card: shopCard,
+        mode: timelineEntry.entry.cadCam ? "cam" : "drawing",
       });
       continue;
     }
@@ -1046,6 +1056,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.kind !== "work" ||
           nextEntry.entry.cadComments !== undefined ||
           nextEntry.entry.cadDrawing !== undefined ||
+          nextEntry.entry.cadCam !== undefined ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
