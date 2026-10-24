@@ -3,7 +3,17 @@
 // (main at e9b277e6f), medium effort, three runs per model, only the model changed. Runs were graded
 // blind against the eight-problem answer key with the rubric in apps/server/src/cad/CadReviewEvaluation.md.
 // Each bar is the mean problems found per run: solid for the known problems, amber for credible extras.
-const runs = [
+interface Run {
+  readonly model: string;
+  readonly provider: "claude" | "codex";
+  /** Known problems found in each of the three runs, out of eight. */
+  readonly scores: readonly number[];
+  /** Mean problems found per run, known plus credible extras. */
+  readonly total: number;
+  readonly note?: string;
+}
+
+const runs: readonly Run[] = [
   { model: "Claude Opus 5.5", provider: "claude", scores: [8, 8, 8], total: 12.0 },
   { model: "GPT 6.1 Sol", provider: "codex", scores: [8, 8, 8], total: 11.7 },
   { model: "Claude Fable 5.1", provider: "claude", scores: [8, 8, 7], total: 11.3 },
@@ -11,7 +21,7 @@ const runs = [
   { model: "Claude Sonnet 5.5", provider: "claude", scores: [8, 8, 8], total: 8.7 },
   { model: "GPT 6 Astra", provider: "codex", scores: [8, 8, 8], total: 8.0 },
   { model: "GPT 6 Luna", provider: "codex", scores: [8, 8, 8], total: 8.0, note: "free tier" },
-] as const;
+];
 
 const results = runs
   .map((run) => {
