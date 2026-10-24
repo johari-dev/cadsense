@@ -1,0 +1,139 @@
+---
+// Bar chart of the October 24 model sweep: the same disc-transfer prompt on the same Cadsense build
+// (main at e9b277e6f), medium effort, three runs per model, only the model changed. Runs were graded
+// blind against the eight-problem answer key with the rubric in apps/server/src/cad/CadReviewEvaluation.md.
+// Each bar is the mean problems found per run: solid for the known problems, amber for credible extras.
+const runs = [
+  { model: "Claude Opus 5.5", provider: "claude", scores: [8, 8, 8], total: 12.0 },
+  { model: "GPT 6.1 Sol", provider: "codex", scores: [8, 8, 8], total: 11.7 },
+  { model: "Claude Fable 5.1", provider: "claude", scores: [8, 8, 7], total: 11.3 },
+  { model: "Claude Haiku 5.5", provider: "claude", scores: [8, 8, 8], total: 9.3 },
+  { model: "Claude Sonnet 5.5", provider: "claude", scores: [8, 8, 8], total: 8.7 },
+  { model: "GPT 6 Astra", provider: "codex", scores: [8, 8, 8], total: 8.0 },
+  { model: "GPT 6 Luna", provider: "codex", scores: [8, 8, 8], total: 8.0, note: "free tier" },
+] as const;
+
+const results = runs
+  .map((run) => {
+    const known = run.scores.reduce((sum, value) => sum + value, 0) / run.scores.length;
+    return { ...run, known, extra: run.total - known };
+  })
+  .sort((a, b) => b.total - a.total);
+
+const domain = 12;
+const pct = (value: number) => `${(value / domain) * 100}%`;
+---
+
+<figure class="chart">
+  <div class="rows">
+    {
+      results.map((row) => (
+        <div class="row">
+          <div class="label">
+            <span class="name">{row.model}</span>
+            {row.note && <span class="meta">{row.note}</span>}
+          </div>
+          <div class="track" role="img" aria-label={`${row.model}: ${row.total.toFixed(1)} problems found per run, ${row.known.toFixed(1)} known and ${row.extra.toFixed(1)} extra`}>
+            <span class={`known ${row.provider}`} style={`width:${pct(row.known)}`} />
+            <span class="extra" style={`left:${pct(row.known)};width:${pct(row.extra)}`} />
+          </div>
+          <span class="value">{row.total.toFixed(1)}</span>
+        </div>
+      ))
+    }
+  </div>
+  <figcaption>
+    Solid is the eight known problems the model found, amber is credible extras beyond the key.
+  </figcaption>
+</figure>
+
+<style>
+  .chart {
+    max-width: var(--measure);
+    margin: 32px auto;
+  }
+
+  .rows {
+    display: grid;
+    gap: 10px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr) 52px;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .label {
+    display: grid;
+    gap: 2px;
+  }
+
+  .name {
+    font: 500 15px var(--font-sans);
+    color: var(--text);
+  }
+
+  .meta {
+    font: 11.5px var(--font-mono);
+    color: var(--text-dim);
+  }
+
+  .track {
+    position: relative;
+    height: 26px;
+  }
+
+  .track > span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+  }
+
+  .known {
+    border-radius: 3px 0 0 3px;
+  }
+
+  .known.claude {
+    background: #d97757;
+  }
+
+  .known.codex {
+    background: #e2e2e2;
+  }
+
+  .extra {
+    border-radius: 0 3px 3px 0;
+    background: var(--marker);
+    opacity: 0.9;
+  }
+
+  .value {
+    font: 600 14px var(--font-mono);
+    color: var(--text);
+    text-align: right;
+  }
+
+  figcaption {
+    margin-top: 16px;
+    font: 15px/1.6 var(--font-sans);
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 520px) {
+    .row {
+      grid-template-columns: 120px minmax(0, 1fr) 40px;
+      gap: 8px;
+    }
+
+    .name {
+      font-size: 13px;
+    }
+
+    .value {
+      font-size: 13px;
+    }
+  }
+</style>

@@ -1,0 +1,142 @@
+---
+// A small Claude Code / Codex switch for the post. While it's on screen, the highlight glides to the
+// other provider every few seconds and the model list underneath crossfades. Only transform and
+// opacity transition, and nothing moves between switches. Readers who prefer reduced motion see
+// Claude Code selected and still.
+const providers = [
+  { key: "claude", name: "Claude Code", icon: "/harnesses/claude-ai-icon.svg", models: "Opus 5.5 · Sonnet 5.5 · Haiku 5.5" },
+  { key: "codex", name: "Codex", icon: "/harnesses/openai_dark.svg", models: "GPT 6.1 Sol · GPT 6.0 Astra · GPT 6.0 Luna" },
+] as const;
+---
+
+<div class="switch" data-provider-switch data-active="claude" role="img" aria-label="Reviews run on Claude Code or Codex">
+  <div class="track">
+    <span class="thumb" aria-hidden="true"></span>
+    {
+      providers.map((provider) => (
+        <span class="option" data-key={provider.key}>
+          <img src={provider.icon} alt="" width="18" height="18" />
+          {provider.name}
+        </span>
+      ))
+    }
+  </div>
+  <div class="models" aria-hidden="true">
+    {providers.map((provider) => <span data-key={provider.key}>{provider.models}</span>)}
+  </div>
+</div>
+
+<script>
+  const SWITCH_EVERY_MS = 3200;
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-provider-switch]")) {
+    if (reduceMotion) continue;
+    let timer: number | undefined;
+    const flip = () => {
+      root.dataset.active = root.dataset.active === "claude" ? "codex" : "claude";
+    };
+    new IntersectionObserver(([entry]) => {
+      window.clearInterval(timer);
+      timer = entry?.isIntersecting ? window.setInterval(flip, SWITCH_EVERY_MS) : undefined;
+    }).observe(root);
+  }
+</script>
+
+<style>
+  .switch {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    padding: 34px 16px 30px;
+    background: var(--chrome);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .track {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 4px;
+    background: #0b0b0b;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+
+  .thumb {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    transition: transform 520ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  [data-active="codex"] .thumb {
+    transform: translateX(100%);
+  }
+
+  .option {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 132px;
+    padding: 9px 18px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-dim);
+    transition: color 360ms ease;
+  }
+
+  [data-active="claude"] .option[data-key="claude"],
+  [data-active="codex"] .option[data-key="codex"] {
+    color: var(--text);
+  }
+
+  .option img {
+    width: 18px;
+    height: 18px;
+    opacity: 0.55;
+    transition: opacity 360ms ease;
+  }
+
+  [data-active="claude"] .option[data-key="claude"] img,
+  [data-active="codex"] .option[data-key="codex"] img {
+    opacity: 1;
+  }
+
+  .models {
+    display: grid;
+    font: 12.5px var(--font-mono);
+    color: var(--text-muted);
+  }
+
+  .models span {
+    grid-area: 1 / 1;
+    text-align: center;
+    opacity: 0;
+    transform: translateY(4px);
+    transition:
+      opacity 360ms ease,
+      transform 360ms ease;
+  }
+
+  [data-active="claude"] .models span[data-key="claude"],
+  [data-active="codex"] .models span[data-key="codex"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (max-width: 420px) {
+    .option {
+      min-width: 0;
+      padding: 9px 14px;
+    }
+  }
+</style>
