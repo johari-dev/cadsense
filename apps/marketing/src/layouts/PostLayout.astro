@@ -2,6 +2,7 @@
 // Standalone layout for long-form blog posts. It skips the marketing Layout on purpose: that
 // layout still carries T3 Code's nav, stats, and links. Colors and type follow the app redesign
 // (IBM Plex, flat neutrals). Set `draft` while editor notes remain so search engines skip the page.
+import Analytics from "@vercel/analytics/astro";
 
 interface Props {
   readonly title: string;
@@ -32,6 +33,7 @@ const { title, description, image, draft = false } = Astro.props;
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <Analytics />
   </head>
   <body>
     <header class="post-nav">

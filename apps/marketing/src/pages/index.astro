@@ -2,6 +2,8 @@
 // Placeholder home page until the real marketing site exists: the app's spinning loading mark, the
 // Cadsense wordmark from the pitch deck, and a coming-soon line. Standalone on purpose; the shared
 // Layout still carries T3 Code's nav and links.
+import Analytics from "@vercel/analytics/astro";
+
 const title = "Cadsense";
 const description = "Automated CAD review. Marketing site coming soon.";
 ---
@@ -23,6 +25,7 @@ const description = "Automated CAD review. Marketing site coming soon.";
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700&display=swap"
       rel="stylesheet"
     />
+    <Analytics />
   </head>
   <body>
     <main>

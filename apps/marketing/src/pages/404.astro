@@ -1,6 +1,8 @@
 ---
 // Not-found page. Standalone like the home page, in the app's colors and IBM Plex type (the same
 // tokens as PostLayout). The still logo links home.
+import Analytics from "@vercel/analytics/astro";
+
 const title = "Page not found · Cadsense";
 ---
 
@@ -17,6 +19,7 @@ const title = "Page not found · Cadsense";
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <Analytics />
   </head>
   <body>
     <main>
