@@ -47,7 +47,7 @@ import {
   isVideoAttachment,
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { CadFilmstrip, CadPublishedComments } from "../../cad/CadChatRows";
+import { CadFilmstrip, CadPartDrawings, CadPublishedComments } from "../../cad/CadChatRows";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
   RobotIcon as BotIcon,
@@ -976,6 +976,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "work" ||
                   row.kind === "cad-filmstrip" ||
                   row.kind === "cad-comments" ||
+                  row.kind === "cad-drawing" ||
                   row.kind === "work-live" ||
                   row.kind === "work-toggle" ||
                   row.kind === "turn-plan"
@@ -996,6 +997,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "cad-filmstrip" ? <CadFilmstripTimelineRow row={row} /> : null}
       {row.kind === "cad-comments" ? <CadCommentsTimelineRow row={row} /> : null}
+      {row.kind === "cad-drawing" ? <CadDrawingTimelineRow row={row} /> : null}
       {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
@@ -1026,6 +1028,14 @@ function CadCommentsTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "ca
   const { threadRef } = use(TimelineRowCtx);
   if (!threadRef) return null;
   return <CadPublishedComments card={row.card} threadRef={threadRef} />;
+}
+
+function CadDrawingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "cad-drawing" }> }) {
+  const { threadRef } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return (
+    <CadPartDrawings id={row.id} createdAt={row.createdAt} card={row.card} threadRef={threadRef} />
+  );
 }
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {

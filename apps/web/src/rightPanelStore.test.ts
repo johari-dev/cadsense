@@ -64,7 +64,7 @@ describe("rightPanelStore", () => {
 });
 
 describe("resolveRightPanelSection", () => {
-  const available = { cad: true, files: true, agents: false, browser: false };
+  const available = { cad: true, files: true, drawing: false, agents: false, browser: false };
 
   it("shows the picked section while it is available", () => {
     expect(resolveRightPanelSection("files", available)).toBe("files");
@@ -78,7 +78,13 @@ describe("resolveRightPanelSection", () => {
 
   it("shows nothing when no section is available", () => {
     expect(
-      resolveRightPanelSection("cad", { cad: false, files: false, agents: false, browser: false }),
+      resolveRightPanelSection("cad", {
+        cad: false,
+        files: false,
+        drawing: false,
+        agents: false,
+        browser: false,
+      }),
     ).toBeNull();
   });
 });
