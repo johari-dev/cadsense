@@ -78,6 +78,7 @@ export function CadViewChanges({
   onChange,
   belowRevisionNotice,
   onOpenDrawing,
+  onOpenCam,
 }: {
   manifest: CadSnapshotManifest;
   view: CadViewState;
@@ -88,6 +89,8 @@ export function CadViewChanges({
   belowRevisionNotice: boolean;
   /** Opens a part drawing for parts, or a packet for an assembly. */
   onOpenDrawing?: (occurrenceIds: string[], title: string) => void;
+  /** Opens router CAM for a plate, or for the plates in an assembly. */
+  onOpenCam?: (occurrenceIds: string[], title: string) => void;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
   const partCount = useMemo(
@@ -231,6 +234,7 @@ export function CadViewChanges({
               onChange={onChange}
               fullHeight
               {...(onOpenDrawing ? { onOpenDrawing } : {})}
+              {...(onOpenCam ? { onOpenCam } : {})}
             />
           ) : changeCount === 0 ? (
             <p className="p-3 text-xs text-muted-foreground">

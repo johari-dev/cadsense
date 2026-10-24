@@ -25,7 +25,7 @@ export interface PartMesh {
   readonly triangles: Uint32Array;
 }
 
-interface Edge {
+export interface Edge {
   readonly a: number;
   readonly b: number;
   readonly faces: number[];
@@ -295,7 +295,10 @@ const classifyShape = (
       bins[(degree + 359) % 360]! + bins[degree % 360]! + bins[(degree + 1) % 360]!;
     for (let offset = 0; offset < 60 && side > 0; offset++) {
       const flats = [0, 1, 2, 3, 4, 5].map((k) => around(offset + 60 * k) / side);
-      if (flats.every((share) => share > 0.04) && flats.reduce((sum, share) => sum + share, 0) > 0.5)
+      if (
+        flats.every((share) => share > 0.04) &&
+        flats.reduce((sum, share) => sum + share, 0) > 0.5
+      )
         return { kind: "hex", flats: sw, length: su };
     }
   }
@@ -375,7 +378,9 @@ const findCircles = (
     const flat = points.every((p) => Math.abs(dot(sub(p, center), normal)) < radius * 0.002);
     // Evenly spaced points too: a rounded hex end has every point on one circle, but its flats
     // are long chords between short arc segments.
-    const segments = points.map((p, k) => length(sub(points[(k + 1) % points.length]!, p))).sort((a, b) => a - b);
+    const segments = points
+      .map((p, k) => length(sub(points[(k + 1) % points.length]!, p)))
+      .sort((a, b) => a - b);
     const even = segments.at(-1)! <= 2.5 * segments[Math.floor(segments.length / 2)]!;
     const round = even && radii.every((r) => Math.abs(r - radius) < radius * 0.005);
     if (!flat || !round) continue;

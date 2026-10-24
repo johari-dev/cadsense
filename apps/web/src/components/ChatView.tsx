@@ -373,6 +373,9 @@ const CadFilePrompt = lazy(() =>
 const CadDrawingPanel = lazy(() =>
   import("../cad/drawing/CadDrawingPanel").then((module) => ({ default: module.CadDrawingPanel })),
 );
+const CadCamPanel = lazy(() =>
+  import("../cad/cam/CadCamPanel").then((module) => ({ default: module.CadCamPanel })),
+);
 const CadAutoPreview = lazy(() =>
   import("../cad/CadAutoPreview").then((module) => ({ default: module.CadAutoPreview })),
 );
@@ -1114,6 +1117,7 @@ function ChatViewContent(props: ChatViewProps) {
     cad: cadAvailable,
     files: activeProject !== null,
     drawing: cadAvailable && !!rightPanelState.drawing,
+    cam: cadAvailable && !!rightPanelState.cam,
     agents: agentPanelModel.hasAgents,
     browser: browserTabId !== null && isPreviewSupportedInRuntime(),
   };
@@ -3905,6 +3909,14 @@ function ChatViewContent(props: ChatViewProps) {
           key={`${activeThreadKey}:${rightPanelState.drawing.requestId}`}
           threadRef={activeThreadRef}
           drawing={rightPanelState.drawing}
+        />
+      </Suspense>
+    ) : rightPanelSection === "cam" && rightPanelState.cam && isServerThread ? (
+      <Suspense fallback={null}>
+        <CadCamPanel
+          key={`${activeThreadKey}:cam:${rightPanelState.cam.requestId}`}
+          threadRef={activeThreadRef}
+          cam={rightPanelState.cam}
         />
       </Suspense>
     ) : rightPanelSection === "browser" ? (

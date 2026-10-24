@@ -5,6 +5,7 @@ import { isBackgroundTaskActivity } from "@cadsense/client-runtime/state/subagen
 import {
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
   CAD_PART_DRAWING_ACTIVITY,
+  CAD_PLATE_CAM_ACTIVITY,
   CadPartDrawingCard,
   CadCaptureCard,
   CadCommentsPublishedCard,
@@ -53,6 +54,8 @@ export interface WorkLogEntry {
   cadComments?: CadCommentsPublishedCard;
   /** Part drawings the agent opened with cad_part_drawing. */
   cadDrawing?: CadPartDrawingCard;
+  /** Plates the agent opened in CAM with cad_plate_cam. */
+  cadCam?: CadPartDrawingCard;
   id: string;
   createdAt: string;
   turnId?: TurnId | null;
@@ -976,6 +979,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (activity.kind === CAD_PART_DRAWING_ACTIVITY) {
     const drawing = decodeCadPartDrawing(activity.payload);
     if (Option.isSome(drawing)) entry.cadDrawing = drawing.value;
+  }
+  if (activity.kind === CAD_PLATE_CAM_ACTIVITY) {
+    const cam = decodeCadPartDrawing(activity.payload);
+    if (Option.isSome(cam)) entry.cadCam = cam.value;
   }
   if (activity.kind === CAD_COMMENTS_PUBLISHED_ACTIVITY) {
     const comments = decodeCadCommentsPublished(activity.payload);
