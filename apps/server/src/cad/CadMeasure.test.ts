@@ -274,6 +274,7 @@ it.effect("registers the typed provider tool and dispatches a measurement", () =
       findParts: unused,
       capture: unused,
       updateView: unused,
+      partDrawing: unused,
       measure: (value: unknown) => measureCad(snapshot, state, value, unused),
     };
     const delivered = yield* invokeCadTool(tools, "cad_measure", input);
