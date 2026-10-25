@@ -769,6 +769,29 @@ const isLong = (view: DrawingView) => (view.max[0] - view.min[0]) / (view.max[1]
 const truncate = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
+/** Up to `lines` lines of at most `max` characters, broken between words; "…" if more is left. */
+const wrapWords = (text: string, max: number, lines: number) => {
+  const out: string[] = [];
+  let rest = text;
+  while (rest && out.length < lines) {
+    if (rest.length <= max) {
+      out.push(rest);
+      rest = "";
+      break;
+    }
+    const cut = rest.lastIndexOf(" ", max);
+    const at = cut > max / 2 ? cut : max;
+    out.push(rest.slice(0, at));
+    rest = rest.slice(at).trimStart();
+  }
+  if (rest) {
+    const last = out.at(-1)!;
+    const room = last.lastIndexOf(" ", max - 1);
+    out[out.length - 1] = `${room > max / 2 ? last.slice(0, room) : last.slice(0, max - 1)}…`;
+  }
+  return out;
+};
+
 const ThirdAngleSymbol = ({ x, y }: { x: number; y: number }) => (
   <g stroke={INK} strokeWidth={0.008} fill="none">
     <path d={`M${x} ${y - 0.12}L${x + 0.3} ${y - 0.2}L${x + 0.3} ${y + 0.2}L${x} ${y + 0.12}Z`} />
@@ -933,9 +956,21 @@ export const TravelerSheet = ({ data }: { data: SheetData }) => {
             <Label x={4.9} y={y + titleAt} size={0.14} anchor="start" weight={700}>
               {op.title}
             </Label>
-            <Label x={4.9} y={y + titleAt + 0.22} size={0.11} anchor="start">
-              {truncate(op.detail, 52)}
-            </Label>
+            {wrapWords(
+              op.detail,
+              mini ? 56 : 76,
+              1 + Math.max(0, Math.floor((rowH - titleAt - 0.32) / 0.14)),
+            ).map((line, k) => (
+              <Label
+                key={line}
+                x={4.9}
+                y={y + titleAt + 0.22 + k * 0.14}
+                size={0.11}
+                anchor="start"
+              >
+                {line}
+              </Label>
+            ))}
             {mini && <ViewGraphic placed={mini} highlight={highlight} strokeScale={0.7} />}
             <rect
               x={9.75}
