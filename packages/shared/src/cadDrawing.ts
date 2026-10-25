@@ -97,21 +97,23 @@ export const resolveDrawingSheets = (
 };
 
 // Bought parts never get a drawing. A part number always means bought: vendor and McMaster
-// numbers, pack sizes, and vendor spacer naming ("x 2\" WD)", "Acetal"). A gearbox family is bought unless the
-// name says it mounts one. Otherwise the last hardware or made-part word decides, the way names
-// read: "Pillow Block Bearing" is a bearing, "Bearing Block" a block, "Motor Mount Plate" a plate.
-// Shafts and tubes cut from vendor stock name neither, so they are made.
+// numbers, pack sizes, vendor spacer naming ("x 2\" WD)", "Acetal"), and motor output shafts
+// ("Vortex Shaft"). A gearbox family is bought unless the name says it mounts one. Otherwise the
+// last hardware or made-part word decides, the way names read: "Pillow Block Bearing" is a
+// bearing, "Bearing Block" a block, "Motor Mount Plate" a plate. Qualifiers after a dash or comma,
+// a side ("Motor Side"), or in parentheses do not count. Shafts and tubes cut from vendor stock
+// are made.
 const PART_NUMBER =
-  /\b(?:WCP|217|am|TTB|SDS|VEX)-\d{3,}|\bREV-\d{2}-\d{4}|\(\d+-pack\)|\bWD\)|\bacetal\b|\bNFS-|\borigin cube\b/i;
+  /\b(?:WCP|217|am|TTB|SDS|VEX)-\d{3,}|\bREV-\d{2}-\d{4}|\(\d+-pack\)|\bWD\)|\bacetal\b|\bNFS-|\borigin cube\b|\b(?:vortex|falcon|kraken|neo)\w* shafts?\b/i;
 // McMaster numbers ("91251A540"), not alloy tempers ("6061T6") or year codes ("2024R1").
 const MCMASTER =
-  /(?:^|[\s_])(?!20\d\d|6061|6063|7075|5052|6082|3003)\d{4,5}[A-Z]\d{1,4}(?=[\s_]|$)/;
+  /(?:^|[\s_(,-])(?!20\d\d|6061|6063|7075|5052|6082|3003)\d{4,5}[A-Z]\d{1,4}(?=[\s_),-]|$)/;
 const GEARBOX_FAMILY = /\b(?:max|ultra|versa)planetary\b/i;
 const MOUNTS = /\b(?:mounts?|brackets?|adapters?)\b/i;
 const HARDWARE =
-  "[SBF]HCS|\\w*bearings?|\\w*screws?|\\w*bolts?|\\w*nuts?|\\w*washers?|\\w*rivets?|motors?|falcon\\w*|kraken\\w*|neo\\w*|vortex|sprockets?|pulleys?|belts?|chains?|collars?|couplers?|encoders?|spark\\w*|talon\\w*|hubs?|gears?|gearbox(?:es)?|\\w*wheels?|battery|batteries|radio|roborio|limelight|pigeon\\w*|cancoder|mk\\d\\w*|bushings?|pinions?|clevis|power distribution|switch(?:es)?|breakers?|wires?|grommets?|inserts?|springs?|magnets?|tread|heat sinks?|shims?|signal light";
+  "[SBF]HCS|\\w*bearings?|\\w*screws?|\\w*bolts?|\\w*nuts?|\\w*washers?|\\w*rivets?|motors?|falcon\\w*|kraken\\w*|neo\\w*|vortex|sprockets?|pulleys?|belts?|chains?|collars?|couplers?|encoders?|spark\\w*|talon\\w*|hubs?|gears?|gearbox(?:es)?|\\w*wheels?|battery|batteries|radio|roborio|limelight|pigeon\\w*|cancoder|mk\\d\\w*|bushings?|pinions?|clevis|power distribution|switch(?:es)?|breakers?|wires?|grommets?|inserts?|springs?|magnets?|tread|heat sinks?|shims?|signal light|(?<!\\.)\\d{2,3}t|\\d{2}dp";
 const MADE =
-  "plates?|mounts?|brackets?|trays?|guards?|blocks?|tensioners?|holders?|retainers?|clamps?|housings?|cases?|covers?|guides?|arms?|spacers?|gussets?|bellypan";
+  "plates?|mounts?|brackets?|trays?|guards?|blocks?|tensioners?|holders?|retainers?|clamps?|housings?|cases?|covers?|guides?|arms?|spacers?|gussets?|bellypan|shafts?|tubes?|axles?|weights?";
 const KEYWORD = new RegExp(
   `(?<!\\w)(?:(?<made>${MADE})|(?<hardware>${HARDWARE}))\\d*(?!\\w)`,
   "gi",
@@ -122,8 +124,14 @@ export const isBoughtPart = (name: string) => {
   const words = name.replace(/_/g, " ");
   if (PART_NUMBER.test(words) || MCMASTER.test(name)) return true;
   if (GEARBOX_FAMILY.test(words) && !MOUNTS.test(words)) return true;
-  // Parentheses hold sizes and fits ("(#25, MAXSpline Bore)"), not what the part is.
-  const last = [...words.replace(/\([^)]*\)/g, " ").matchAll(KEYWORD)].at(-1);
+  // Parentheses hold sizes and fits ("(#25, MAXSpline Bore)"), and what follows a dash or comma or
+  // names a side ("Gearbox Plate - Bearing Side", "Plate, Motor", "Arm Plate Motor Side") only
+  // says where the part goes; none of them say what the part is.
+  const head = words
+    .replace(/\([^)]*\)/g, " ")
+    .split(/\s[-–]\s|,/)[0]!
+    .replace(/\b\S+\s+side\b/gi, " ");
+  const last = [...head.matchAll(KEYWORD)].at(-1);
   return last?.groups?.hardware !== undefined;
 };
 
