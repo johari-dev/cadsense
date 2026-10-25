@@ -73,6 +73,8 @@ export interface Countersink {
   readonly diameter: number;
   /** Included angle in degrees. */
   readonly angle: number;
+  /** Centre of the hole's rim where the cone starts. */
+  readonly rim: Vec3;
 }
 
 export interface Hole {
@@ -327,9 +329,25 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
   // Closed edges that wander off a plane on round stock are cross holes or flats the hole
   // finder could not read. Both passes can find the same one. A countersink's rim on a round
   // surface is one too, but its hole already prints it.
+  // Each cone runs out from its rim, back up the drill for the entry, on down it for the far one.
   const sunk = holes.flatMap((hole) =>
-    [hole.countersink, hole.farCountersink].flatMap((sink) =>
-      sink ? [{ axis: hole.entry, direction: hole.direction, radius: sink.diameter / 2 }] : [],
+    (
+      [
+        [hole.countersink, scale(hole.direction, -1)],
+        [hole.farCountersink, hole.direction],
+      ] as const
+    ).flatMap(([sink, outward]) =>
+      sink
+        ? [
+            {
+              rim: sink.rim,
+              outward,
+              radius: sink.diameter / 2,
+              depth:
+                (sink.diameter / 2 - hole.diameter / 2) / Math.tan((sink.angle * Math.PI) / 360),
+            },
+          ]
+        : [],
     ),
   );
   const strays: Vec3[] = [];
@@ -338,9 +356,11 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
     ...creasePass.nonPlanar,
     ...circles.filter((loop) => !loop.planar && !found.rims.has(loop)).map((loop) => loop.center),
   ]) {
-    const onSink = sunk.some(({ axis, direction, radius }) => {
-      const offset = sub(loop, axis);
-      return length(sub(offset, scale(direction, dot(offset, direction)))) < radius;
+    const onSink = sunk.some(({ rim, outward, radius, depth }) => {
+      const offset = sub(loop, rim);
+      const up = dot(offset, outward);
+      const slack = 0.01 * METERS_PER_INCH;
+      return up > -slack && up < depth + slack && length(sub(offset, scale(outward, up))) < radius;
     });
     if (!onSink && !strays.some((other) => length(sub(other, loop)) < diag * 1e-3))
       strays.push(loop);
@@ -980,9 +1000,13 @@ const fitCircle = (points: readonly Vec3[], origin: Vec3, normal: Vec3) => {
 const COUNTERSINK_MIN = 0.04 * METERS_PER_INCH;
 
 /** The countersink a cone makes between two radii `depth` apart, or null for an edge break. */
-const sinkBetween = (outer: number, inner: number, depth: number): Countersink | null =>
+const sinkBetween = (outer: number, inner: number, depth: number, rim: Vec3): Countersink | null =>
   outer - inner > COUNTERSINK_MIN && depth > 0
-    ? { diameter: 2 * outer, angle: (2 * Math.atan((outer - inner) / depth) * 180) / Math.PI }
+    ? {
+        diameter: 2 * outer,
+        angle: (2 * Math.atan((outer - inner) / depth) * 180) / Math.PI,
+        rim,
+      }
     : null;
 
 /** True when a ray from `origin` along `direction` leaves the part without touching a face. */
@@ -1061,7 +1085,7 @@ const findHoles = (
       diameter: 2 * size.radius * (size.outline === "hex" ? Math.cos(Math.PI / 6) : 1),
       hex: size.outline === "hex",
       depth: null,
-      countersink: rim ? sinkBetween(entry.radius, rim.radius, start) : null,
+      countersink: rim ? sinkBetween(entry.radius, rim.radius, start, rim.center) : null,
       farCountersink: null,
       bothWalls: false,
       entry: entry.center,
@@ -1107,7 +1131,8 @@ const findHoles = (
       const cone = exit && exit !== far ? along(far, exit, direction) : null;
       found.push({
         ...hole,
-        farCountersink: exit && cone !== null ? sinkBetween(exit.radius, far.radius, cone) : null,
+        farCountersink:
+          exit && cone !== null ? sinkBetween(exit.radius, far.radius, cone, far.center) : null,
       });
       continue;
     }
@@ -1130,7 +1155,7 @@ const findHoles = (
       ...hole,
       farCountersink:
         flare && flare.radius - far.radius > COUNTERSINK_MIN
-          ? { diameter: 2 * flare.radius, angle: flare.angle }
+          ? { diameter: 2 * flare.radius, angle: flare.angle, rim: far.center }
           : null,
     });
   }
