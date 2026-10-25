@@ -8,7 +8,13 @@ import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import { useRightPanelStore, type RightPanelDrawing } from "../../rightPanelStore";
 import { routeCounts, useCadSnapshotAssets, useShopRoutes } from "../useCadSnapshotAssets";
-import { projectView, viewSpecs, type DrawingView, type PartAnalysis } from "./analysis";
+import {
+  MAX_ANALYZED_TRIANGLES,
+  projectView,
+  viewSpecs,
+  type DrawingView,
+  type PartAnalysis,
+} from "./analysis";
 import { resolveDrawingSheets, type DrawingSheetEntry } from "./drawingModel";
 import { SHEET_H, SHEET_W } from "./sheetKit";
 import { VARIANTS, describePart, type SheetData, type VariantKey } from "./sheets";
@@ -20,7 +26,6 @@ import {
   type Units,
 } from "./shopKnowledge";
 
-const MAX_TRIANGLES = 150_000;
 const SHEET_STYLE = {
   "--sheet-font": '"Inter", "Helvetica Neue", Arial, sans-serif',
 } as CSSProperties;
@@ -153,7 +158,8 @@ export function CadDrawingPanel({
   const ready = entry ? prepared[entry.sha256] : undefined;
 
   useEffect(() => {
-    if (!entry || !analyze || prepared[entry.sha256] || entry.triangles > MAX_TRIANGLES) return;
+    if (!entry || !analyze || prepared[entry.sha256] || entry.triangles > MAX_ANALYZED_TRIANGLES)
+      return;
     let live = true;
     // Let the "Drawing" state paint before the main thread is busy.
     const timer = setTimeout(() => {
@@ -178,7 +184,7 @@ export function CadDrawingPanel({
     if (!analyze) return;
     const all = await Promise.all(
       sheets
-        .filter((sheet) => sheet.triangles <= MAX_TRIANGLES)
+        .filter((sheet) => sheet.triangles <= MAX_ANALYZED_TRIANGLES)
         .map(async (sheet) =>
           buildSheet(
             sheet,
@@ -307,7 +313,7 @@ export function CadDrawingPanel({
             </svg>
           ) : (
             <div className="flex aspect-[11/8.5] w-full items-center justify-center text-sm text-muted-foreground">
-              {entry && entry.triangles > MAX_TRIANGLES
+              {entry && entry.triangles > MAX_ANALYZED_TRIANGLES
                 ? "This part is too detailed to draw yet."
                 : "Drawing…"}
             </div>

@@ -8,7 +8,7 @@ import { Button } from "../../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../lib/utils";
 import { useRightPanelStore, type RightPanelDrawing } from "../../rightPanelStore";
-import type { Vec2 } from "../drawing/analysis";
+import { MAX_ANALYZED_TRIANGLES, type Vec2 } from "../drawing/analysis";
 import { resolveDrawingSheets } from "../drawing/drawingModel";
 import { routeCounts, useCadSnapshotAssets, useShopRoutes } from "../useCadSnapshotAssets";
 import { downloadText, plateDxf } from "./dxf";
@@ -39,7 +39,10 @@ export function CadCamPanel({
   );
   const [index, setIndex] = useState(0);
   const [settings, setSettings] = useState<CamSettings>(DEFAULT_CAM);
-  const [plates, setPlates] = useState<Record<string, PlateGeometry | "not-a-plate">>({});
+  // Per plate: its geometry, or why there is none. One bad mesh must not hide the other plates.
+  const [plates, setPlates] = useState<
+    Record<string, PlateGeometry | "not-a-plate" | "too-detailed" | { readonly error: string }>
+  >({});
 
   const candidates = useMemo(
     () => (manifest ? resolveDrawingSheets(manifest, cam.occurrenceIds) : []),
@@ -61,28 +64,25 @@ export function CadCamPanel({
   );
   const entry = parts[Math.min(index, Math.max(0, parts.length - 1))] ?? null;
   const plate = entry ? plates[entry.sha256] : undefined;
-  const plan = useMemo(
-    () => (plate && plate !== "not-a-plate" ? planPlate(plate, settings) : null),
-    [plate, settings],
-  );
+  const ready = plate && typeof plate === "object" && "outline" in plate ? plate : null;
+  const plan = useMemo(() => (ready ? planPlate(ready, settings) : null), [ready, settings]);
 
   useEffect(() => {
     if (!entry || !analyze || plates[entry.sha256]) return;
+    const sha256 = entry.sha256;
+    if (entry.triangles > MAX_ANALYZED_TRIANGLES) {
+      setPlates((current) => ({ ...current, [sha256]: "too-detailed" }));
+      return;
+    }
     let live = true;
-    analyze(entry.sha256)
-      .then(
-        (part) =>
-          live &&
-          setPlates((current) => ({
-            ...current,
-            [entry.sha256]: plateGeometry(part) ?? "not-a-plate",
-          })),
-      )
-      .catch((cause: unknown) => live && setError(String(cause)));
+    analyze(sha256)
+      .then((part) => plateGeometry(part) ?? ("not-a-plate" as const))
+      .catch((cause: unknown) => ({ error: String(cause) }))
+      .then((result) => live && setPlates((current) => ({ ...current, [sha256]: result })));
     return () => {
       live = false;
     };
-  }, [entry, analyze, plates, setError]);
+  }, [entry, analyze, plates]);
 
   const openDrawing = () =>
     useRightPanelStore.getState().openDrawing(threadRef, {
@@ -113,7 +113,6 @@ export function CadCamPanel({
     );
   }
 
-  const ready = plate && plate !== "not-a-plate" ? plate : null;
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="cad-cam-panel">
       <div className="flex shrink-0 items-center gap-3 px-3.5 pt-3 pb-2.5">
@@ -221,8 +220,20 @@ export function CadCamPanel({
               Make part drawing
             </Button>
           </div>
+        ) : plate === "too-detailed" ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            This plate is too detailed to plan yet.
+          </p>
+        ) : plate && "error" in plate ? (
+          <p className="p-4 text-sm text-destructive">Could not read this plate: {plate.error}</p>
         ) : ready && plan ? (
-          <CutPlan key={entry?.sha256} plate={ready} plan={plan} tool={settings.tool} />
+          // Settings change the operations, so a new plan starts with no selection or playback.
+          <CutPlan
+            key={`${entry?.sha256}:${JSON.stringify(settings)}`}
+            plate={ready}
+            plan={plan}
+            tool={settings.tool}
+          />
         ) : (
           <div className="flex aspect-[4/3] items-center justify-center text-sm text-muted-foreground">
             Planning…
@@ -517,8 +528,8 @@ const PlatePreview = ({
 }) => {
   const margin = 0.35;
   const lengths = useMemo(() => operations.map((op) => op.paths.map(pathLength)), [operations]);
-  const d = (path: readonly Vec2[]) =>
-    `M${path.map(([x, y]) => `${x.toFixed(4)} ${(-y).toFixed(4)}`).join("L")}Z`;
+  // Playback re-renders every frame; the path strings only change with the plan.
+  const pathData = useMemo(() => operations.map((op) => op.paths.map(svgPath)), [operations]);
 
   // During playback: how far along the current operation's paths the tool has travelled.
   let toolPoint: Vec2 | null = null;
@@ -549,7 +560,7 @@ const PlatePreview = ({
         data-testid="cad-cam-preview"
       >
         <path
-          d={d(plate.outline)}
+          d={svgPath(plate.outline)}
           fill="#1f2326"
           stroke="rgb(252 252 252 / 0.55)"
           strokeWidth={0.015}
@@ -564,7 +575,7 @@ const PlatePreview = ({
                 r={feature.diameter / 2}
               />
             ) : (
-              <path key={i} d={d(feature.polygon)} />
+              <path key={i} d={svgPath(feature.polygon)} />
             ),
           )}
         </g>
@@ -581,7 +592,7 @@ const PlatePreview = ({
           let budget = progress?.op === i ? cutTo : Infinity;
           return (
             <g key={i} fill="none" stroke={stroke} strokeWidth={width} opacity={opacity}>
-              {op.paths.map((path, k) => {
+              {pathData[i]!.map((data, k) => {
                 const length = lengths[i]![k]!;
                 const drawn = Math.max(0, Math.min(length, budget));
                 budget -= length;
@@ -589,7 +600,7 @@ const PlatePreview = ({
                 return (
                   <path
                     key={k}
-                    d={d(path)}
+                    d={data}
                     strokeLinejoin="round"
                     strokeDasharray={drawn < length ? `${drawn} ${length}` : undefined}
                   />
@@ -626,6 +637,10 @@ const PlatePreview = ({
     </div>
   );
 };
+
+/** A closed SVG path in plate inches, y flipped so the plate reads upright. */
+const svgPath = (path: readonly Vec2[]) =>
+  `M${path.map(([x, y]) => `${x.toFixed(4)} ${(-y).toFixed(4)}`).join("L")}Z`;
 
 const pathLength = (path: readonly Vec2[]) =>
   path.reduce(
@@ -681,20 +696,27 @@ const NumberInput = ({
   min?: number;
   unit?: string;
   onChange: (value: number) => void;
-}) => (
-  <span className={cn(inputClass, "flex w-[5.5rem] items-center gap-1 focus-within:border-ring")}>
-    <input
-      aria-label={label}
-      className="w-full min-w-0 bg-transparent font-mono text-foreground tabular-nums outline-none"
-      type="number"
-      step={step}
-      min={min}
-      value={value}
-      onChange={(e) => {
-        const next = Number(e.target.value);
-        if (Number.isFinite(next) && next >= min) onChange(next);
-      }}
-    />
-    {unit && <span className="shrink-0 text-[11px] text-muted-foreground">{unit}</span>}
-  </span>
-);
+}) => {
+  // What is typed, so values on the way to a valid one ("", "1" on the way to "120") stay in the
+  // field. Only valid values reach onChange; leaving the field shows the last valid value.
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <span className={cn(inputClass, "flex w-[5.5rem] items-center gap-1 focus-within:border-ring")}>
+      <input
+        aria-label={label}
+        className="w-full min-w-0 bg-transparent font-mono text-foreground tabular-nums outline-none"
+        type="number"
+        step={step}
+        min={min}
+        value={draft ?? value}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          const next = Number(e.target.value);
+          if (e.target.value !== "" && Number.isFinite(next) && next >= min) onChange(next);
+        }}
+        onBlur={() => setDraft(null)}
+      />
+      {unit && <span className="shrink-0 text-[11px] text-muted-foreground">{unit}</span>}
+    </span>
+  );
+};

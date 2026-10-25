@@ -17,6 +17,7 @@ import {
 } from "./drawing/drawingModel";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
+const NO_ROUTES: Readonly<Record<string, ShopRoute>> = {};
 
 // Meshes and their analysis are content-addressed, so they stay cached for the session.
 const assetBySha = new Map<string, Promise<ArrayBuffer>>();
@@ -85,7 +86,13 @@ export const useCadSnapshotAssets = (threadRef: ScopedThreadRef, snapshotId: str
     };
   }, [fetchFromScene, manifest]);
 
-  return { manifest, error, setError, fetchAsset, analyze };
+  return {
+    manifest,
+    error: error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null),
+    setError,
+    fetchAsset,
+    analyze,
+  };
 };
 
 /**
@@ -114,7 +121,8 @@ export const useShopRoutes = (
       live = false;
     };
   }, [enabled, fetchAsset, candidates, onError]);
-  return enabled ? routes : null;
+  if (!enabled) return null;
+  return candidates.length === 0 ? NO_ROUTES : routes;
 };
 
 /** Part instances per route among the candidates, for "not drawn" and "not cut" notes. */
