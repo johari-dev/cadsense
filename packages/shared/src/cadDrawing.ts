@@ -12,14 +12,17 @@ export interface DrawingSheetEntry {
   /** Instances inside the selection (the whole assembly for a single part). */
   readonly qty: number;
   readonly triangles: number;
+  /** Picked by its own occurrence, not found under an assembly: kept whatever its route. */
+  readonly named: boolean;
 }
 
 export const partName = (node: Pick<CadSnapshotNode, "name">) => node.name.replace(/ <\d+>$/, "");
 
 /**
  * Candidate sheets for a selection. A part occurrence draws that part with its assembly-wide
- * quantity. An assembly occurrence offers every part under it that is not bought, counted inside
- * the assembly; callers keep the ones `shopRoute` sends to a drawing.
+ * quantity. An assembly occurrence offers every part under it that is not bought, counted once
+ * across all the selected assemblies however they overlap; callers keep the named parts and the
+ * ones `shopRoute` sends to them.
  */
 export const resolveDrawingSheets = (
   manifest: CadSnapshotManifest,
@@ -29,7 +32,9 @@ export const resolveDrawingSheets = (
   const children = new Map<string, CadSnapshotNode[]>();
   for (const node of manifest.nodes) {
     if (node.parentId === null) continue;
-    children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]);
+    const siblings = children.get(node.parentId);
+    if (siblings) siblings.push(node);
+    else children.set(node.parentId, [node]);
   }
   const partsUnder = (id: string): CadSnapshotNode[] => {
     const node = nodes.get(id);
@@ -50,38 +55,64 @@ export const resolveDrawingSheets = (
   );
   const assets = new Map(manifest.assets.map((asset) => [asset.geometryKey, asset]));
   const metadata = new Map(manifest.parts.map((part) => [part.geometryKey, part]));
-  const entries = new Map<string, DrawingSheetEntry>();
-  for (const id of occurrenceIds) {
+  // Part occurrences under the selected assemblies, each counted once even when the selection
+  // names an assembly twice or one inside another.
+  const named = new Map<string, CadSnapshotNode>();
+  const grouped = new Map<string, CadSnapshotNode>();
+  const examples = new Map<string, CadSnapshotNode>();
+  for (const id of new Set(occurrenceIds)) {
     const node = nodes.get(id);
     if (!node) continue;
-    const single = node.kind === "part";
-    const parts = partsUnder(id).filter((part) => single || !isBoughtPart(partName(part)));
-    for (const [geometryKey, qty] of counts(parts)) {
-      const asset = assets.get(geometryKey);
-      const part = metadata.get(geometryKey);
-      if (!asset || !part) continue;
-      const example = parts.find((candidate) => candidate.sourcePartKey === geometryKey)!;
-      const existing = entries.get(geometryKey);
-      entries.set(geometryKey, {
-        geometryKey,
-        sha256: asset.sha256,
-        name: part.metadata?.name.replace(/ <\d+>$/, "") ?? partName(example),
-        material: part.metadata?.material?.displayName ?? "",
-        partId: part.source.partId,
-        qty: single ? (wholeAssembly.get(geometryKey) ?? qty) : (existing?.qty ?? 0) + qty,
-        triangles: asset.complexity?.triangles ?? 0,
-      });
+    if (node.kind === "part") {
+      if (!node.suppressed && node.sourcePartKey) named.set(node.sourcePartKey, node);
+      continue;
     }
+    for (const part of partsUnder(id)) {
+      if (isBoughtPart(partName(part))) continue;
+      grouped.set(part.id, part);
+      if (part.sourcePartKey && !examples.has(part.sourcePartKey))
+        examples.set(part.sourcePartKey, part);
+    }
+  }
+  const groupCounts = counts([...grouped.values()]);
+  const entries = new Map<string, DrawingSheetEntry>();
+  for (const geometryKey of new Set([...groupCounts.keys(), ...named.keys()])) {
+    const asset = assets.get(geometryKey);
+    const part = metadata.get(geometryKey);
+    if (!asset || !part) continue;
+    const example = named.get(geometryKey) ?? examples.get(geometryKey)!;
+    const isNamed = named.has(geometryKey);
+    entries.set(geometryKey, {
+      geometryKey,
+      sha256: asset.sha256,
+      name: part.metadata?.name.replace(/ <\d+>$/, "") ?? partName(example),
+      material: part.metadata?.material?.displayName ?? "",
+      partId: part.source.partId,
+      qty: isNamed ? (wholeAssembly.get(geometryKey) ?? 1) : groupCounts.get(geometryKey)!,
+      triangles: asset.complexity?.triangles ?? 0,
+      named: isNamed,
+    });
   }
   return [...entries.values()].sort((a, b) => a.name.localeCompare(b.name));
 };
 
-// Bought parts never get a drawing: vendor part numbers, pack sizes, vendor spacer naming
-// ("x 2\" WD)"), and common hardware. Shafts and tubes cut from vendor stock are not listed.
-const BOUGHT_PART =
-  /\b(WCP|217|am|REV|TTB|SDS|VEX)-\d|\(\d+-pack\)|\bWD\)|\bacetal\b|\b[SBF]HCS\b|NFS-|origin cube|bearing|screw|bolt|nut\b|washer|rivet|motor|falcon|kraken|neo\b|vortex|maxplanetary|sprocket|pulley|belt|chain|collar|coupler|encoder|spark|talon|hub\b|gear|wheel|battery|radio|roborio|limelight|pigeon|cancoder|mk4|bushing|pinion|clevis|power distribution/i;
+// Bought parts never get a drawing. Vendor signals always mean bought: vendor and McMaster part
+// numbers, pack sizes, vendor spacer naming ("x 2\" WD)"), gearbox families, and the tooth count
+// or chain size that names a sprocket, gear, or pulley ("64t", "#25"). Common hardware and
+// electronics words, matched as whole words, mean bought unless the name also says what was made
+// ("Motor Mount Plate", "Bearing Block", "Battery Tray"). Shafts and tubes cut from vendor stock
+// are not listed.
+const VENDOR_PART =
+  /\b(?:WCP|217|am|REV|TTB|SDS|VEX)-\d|\b\d{4,5}[A-Z]\d{1,4}\b|\(\d+-pack\)|\bWD\)|\bNFS-|#(?:25|35)\b|\b(?:\d{2,3}t|maxplanetary|ultraplanetary|versaplanetary|origin cube)\b/i;
+const HARDWARE =
+  /\b(?:acetal|[SBF]HCS|bearings?|screws?|bolts?|nuts?|washers?|rivets?|motors?|falcon|kraken|neo|vortex|sprockets?|pulleys?|belts?|chains?|collars?|couplers?|encoders?|spark(?: ?max)?|talon|hubs?|gears?|wheels?|battery|batteries|radio|roborio|limelight|pigeon|cancoder|mk4i?|bushings?|pinions?|clevis|power distribution|switch|breaker|wires?|grommets?|inserts?|springs?|magnets?|tread|heat sink|shims?|signal light)\d*\b/i;
+const MADE_PART = /\b(?:plates?|mounts?|brackets?|trays?|guards?|blocks?|tensioners?)\b/i;
 
-export const isBoughtPart = (name: string) => BOUGHT_PART.test(name);
+export const isBoughtPart = (name: string) => {
+  // Underscores separate words in exported names ("Brass Insert_94459A230").
+  const words = name.replace(/_/g, " ");
+  return VENDOR_PART.test(words) || (HARDWARE.test(words) && !MADE_PART.test(words));
+};
 
 /**
  * Where a made part goes in the shop. Tubing, shafts, and other stock parts get a drawing;
@@ -118,15 +149,20 @@ export const glbExtents = (bytes: Uint8Array): [number, number, number] | null =
   }
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
-  for (const mesh of json.meshes ?? [])
-    for (const primitive of mesh.primitives ?? []) {
-      const accessor = json.accessors?.[primitive.attributes?.POSITION ?? -1];
-      if (!accessor?.min || !accessor.max) continue;
-      for (let k = 0; k < 3; k++) {
-        min[k] = Math.min(min[k]!, accessor.min[k]!);
-        max[k] = Math.max(max[k]!, accessor.max[k]!);
+  // The JSON is untrusted: anything not shaped like glTF bounds means no bounds.
+  try {
+    for (const mesh of json.meshes ?? [])
+      for (const primitive of mesh.primitives ?? []) {
+        const accessor = json.accessors?.[primitive.attributes?.POSITION ?? -1];
+        if (!accessor?.min || !accessor.max) continue;
+        for (let k = 0; k < 3; k++) {
+          min[k] = Math.min(min[k]!, accessor.min[k]!);
+          max[k] = Math.max(max[k]!, accessor.max[k]!);
+        }
       }
-    }
-  if (!Number.isFinite(min[0]!)) return null;
-  return [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!];
+  } catch {
+    return null;
+  }
+  const extents = [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!] as const;
+  return extents.every((size) => Number.isFinite(size) && size >= 0) ? [...extents] : null;
 };
