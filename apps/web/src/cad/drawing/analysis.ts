@@ -1210,11 +1210,20 @@ const groupHoles = (holes: readonly Hole[], shape: Shape, frame: PartFrame): Hol
     countersink ? `|${name}${inches(countersink.diameter)}x${countersink.angle.toFixed(0)}` : "";
   for (const hole of holes) {
     // Which face a countersink is on depends on which way the hole is drilled, so countersunk
-    // holes drilled opposite ways are separate callouts. Axial shaft holes stay together: the
-    // pair at both ends is one BOTH ENDS callout.
+    // holes drilled opposite ways are separate callouts. Not when both ends are sunk alike (BOTH
+    // SIDES reads the same either way), and not for the hole on a shaft's own axis: the pair at
+    // both ends is one BOTH ENDS callout.
+    const onAxis =
+      isShaft(shape) &&
+      isAlong(hole.direction, frame.u) &&
+      Math.hypot(
+        dot(hole.entry, frame.v) - (frame.min[1] + frame.max[1]) / 2,
+        dot(hole.entry, frame.w) - (frame.min[2] + frame.max[2]) / 2,
+      ) <
+        hole.diameter / 2;
+    const symmetric = sink("", hole.countersink) === sink("", hole.farCountersink);
     const facing =
-      (hole.countersink || hole.farCountersink) &&
-      !(isShaft(shape) && isAlong(hole.direction, frame.u))
+      (hole.countersink || hole.farCountersink) && !symmetric && !onAxis
         ? `|${hole.direction.map((x) => Math.round(x * 1000)).join(",")}`
         : "";
     const key = `${hole.hex ? "hex" : ""}${inches(hole.diameter)}|${hole.depth === null ? "thru" : inches(hole.depth)}${hole.bothWalls ? "|2w" : ""}${sink("csk", hole.countersink)}${sink("far", hole.farCountersink)}${facing}`;

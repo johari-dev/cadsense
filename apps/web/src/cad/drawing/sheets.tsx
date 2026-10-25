@@ -486,17 +486,22 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
       <Label x={2.6} y={6.62} size={0.1} anchor="start" weight={700}>
         HOW TO MAKE IT
       </Label>
-      {data.operations.map((op, i) => (
-        <Label
-          key={i}
-          x={2.6 + Math.floor(i / opRows) * 4.1}
-          y={6.9 + (i % opRows) * opStep}
-          size={Math.min(0.12, opStep * 0.45)}
-          anchor="start"
-        >
-          {`${i + 1}. ${op.title}: ${op.detail}`}
-        </Label>
-      ))}
+      {data.operations.map((op, i) => {
+        const text = `${i + 1}. ${op.title}: ${op.detail}`;
+        // A long step shrinks to fit its 4.1" column instead of running into the next one.
+        const fit = 3.95 / (text.length * 0.56);
+        return (
+          <Label
+            key={i}
+            x={2.6 + Math.floor(i / opRows) * 4.1}
+            y={6.9 + (i % opRows) * opStep}
+            size={Math.max(0.07, Math.min(0.12, opStep * 0.45, fit))}
+            anchor="start"
+          >
+            {text}
+          </Label>
+        );
+      })}
       {data.notes && (
         <Label x={2.6} y={8.12} size={0.11} anchor="start" fill={ACCENT}>
           NOTE: {data.notes}

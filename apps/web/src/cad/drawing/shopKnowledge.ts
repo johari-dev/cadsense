@@ -415,16 +415,16 @@ export const operationsFor = (
     const sinkText = (countersink: Countersink) =>
       `countersink Ø${measure(countersink.diameter, units)} × ${countersink.angle.toFixed(0)}°`;
     const { countersink: entry, farCountersink: exit } = group;
-    // With a countersink where the drill comes out, both are placed by the face they are on,
-    // named as the views show it, so the step and the callouts agree.
+    // Each countersink is placed by the face it is on, named as the views show it, so the step
+    // and the callouts agree and holes sunk from opposite faces get different steps.
     const direction = group.holes[0]!.direction;
     const entryFace = faceName(part, [-direction[0], -direction[1], -direction[2]]);
     const exitFace = faceName(part, direction);
     const sink =
       entry && exit && sinkText(entry) === sinkText(exit)
         ? `, ${sinkText(entry)} both sides`
-        : exit && entryFace && exitFace
-          ? `${entry ? `, ${sinkText(entry)} on the ${entryFace}` : ""}, ${sinkText(exit)} on the ${exitFace}`
+        : (!entry || entryFace) && (!exit || exitFace) && !group.bothEnds
+          ? `${entry ? `, ${sinkText(entry)} on the ${entryFace}` : ""}${exit ? `, ${sinkText(exit)} on the ${exitFace}` : ""}`
           : `${entry ? `, ${sinkText(entry)}` : ""}${exit ? `, ${sinkText(exit)} on the far side` : ""}`;
     ops.push({
       machine,
