@@ -54,13 +54,25 @@ export interface CamPlan {
   readonly warnings: readonly string[];
 }
 
-// Positively oriented, so a negative offset always shrinks the shape. Round joins trace the arc
-// the tool sweeps around outside corners.
-const offset = (polygon: readonly Vec2[], by: number): Vec2[][] => {
-  const path = polygon.map(([x, y]) => ({ X: Math.round(x * SCALE), Y: Math.round(y * SCALE) }));
-  if (!ClipperLib.Clipper.Orientation(path)) path.reverse();
+// The region inside `polygon` and outside its `holes`. The outline is positively oriented and the
+// holes negatively, so a negative offset always shrinks the region. Round joins trace the arc the
+// tool sweeps around outside corners.
+const offset = (
+  polygon: readonly Vec2[],
+  by: number,
+  holes: readonly (readonly Vec2[])[] = [],
+): Vec2[][] => {
+  const toPath = (points: readonly Vec2[], positive: boolean) => {
+    const path = points.map(([x, y]) => ({ X: Math.round(x * SCALE), Y: Math.round(y * SCALE) }));
+    if (ClipperLib.Clipper.Orientation(path) !== positive) path.reverse();
+    return path;
+  };
   const clipper = new ClipperLib.ClipperOffset(2, 0.0005 * SCALE);
-  clipper.AddPath(path, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+  clipper.AddPaths(
+    [toPath(polygon, true), ...holes.map((hole) => toPath(hole, false))],
+    ClipperLib.JoinType.jtRound,
+    ClipperLib.EndType.etClosedPolygon,
+  );
   const out: ClipperLib.Paths = [];
   clipper.Execute(out, by * SCALE);
   return out.map((result) => result.map((p) => [p.X / SCALE, p.Y / SCALE] as Vec2));
@@ -119,14 +131,14 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
   const warnings: string[] = [...plate.warnings];
   const drill = new Map<string, { diameter: number; count: number }>();
 
-  // Pockets first: each clears its floor in rings from the wall inward.
+  // Pockets first: each clears its floor in rings from the wall inward, around any islands.
   const pockets = plate.features.filter(
     (f): f is Extract<PlateFeature, { kind: "pocket" }> => f.kind === "pocket",
   );
   pockets.forEach((pocket, i) => {
     const rings: Vec2[][] = [];
     for (let inset = r; ; inset += settings.tool * STEPOVER) {
-      const ring = offset(pocket.polygon, -inset);
+      const ring = offset(pocket.polygon, -inset, pocket.islands);
       if (ring.length === 0) break;
       rings.push(...ring);
       if (rings.length > 400) break;
@@ -150,18 +162,20 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
     });
   });
 
-  // Holes: helical bores when wider than the tool, otherwise a drill list.
+  // Holes: helical bores when wider than the tool, otherwise a drill list. A bore groups holes of
+  // one size and depth; a hole at the bottom of a counterbore is shallower than one from the top.
   const bores = new Map<string, { diameter: number; depth: number; paths: Vec2[][] }>();
   for (const hole of plate.features.filter(
     (f): f is Extract<PlateFeature, { kind: "hole" }> => f.kind === "hole",
   )) {
-    const key = hole.diameter.toFixed(3);
     if (hole.diameter < settings.tool * 1.1) {
+      const key = hole.diameter.toFixed(3);
       const entry = drill.get(key) ?? { diameter: hole.diameter, count: 0 };
       drill.set(key, { ...entry, count: entry.count + 1 });
       continue;
     }
     const depth = hole.top - hole.bottom + BREAKTHROUGH;
+    const key = `${hole.diameter.toFixed(3)}|${depth.toFixed(3)}`;
     const entry = bores.get(key) ?? { diameter: hole.diameter, depth, paths: [] };
     entry.paths.push(circle(hole.center, hole.diameter / 2 - r));
     bores.set(key, entry);
