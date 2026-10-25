@@ -55,7 +55,6 @@ import {
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import {
-  glbExtents,
   partName,
   resolveDrawingSheets,
   shopRoute,
@@ -523,37 +522,41 @@ export const make = Effect.gen(function* () {
               const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
               const unknown = request.occurrenceIds.filter((id) => {
                 const node = nodes.get(id);
-                return (
-                  !node || node.suppressed || (node.kind !== "part" && node.kind !== "assembly")
-                );
+                return !node || node.suppressed || node.kind === "unsupported";
               });
               if (unknown.length > 0)
                 return yield* new CadViewError({
                   reason: "invalid-operation",
-                  details: `occurrenceIds must be unsuppressed part or assembly occurrences from cad_hierarchy or cad_find_parts: ${unknown.join(", ")}`,
+                  details: `occurrenceIds must be unsuppressed part, assembly, or Part Studio occurrences from cad_hierarchy or cad_find_parts: ${unknown.join(", ")}`,
                 });
               const candidates = resolveDrawingSheets(snapshot, request.occurrenceIds);
               // Parts named one by one are drawn as asked. An assembly draws only the parts the shop
-              // draws: plates go to the router and printed parts to the printer.
-              const isGroup = request.occurrenceIds.some((id) => nodes.get(id)?.kind !== "part");
-              const routed = yield* Effect.forEach(candidates, (candidate) =>
-                initialized.binding.readAsset(candidate.sha256).pipe(
-                  Effect.map((bytes) => ({
-                    candidate,
-                    route: shopRoute(candidate.material, glbExtents(bytes)),
-                  })),
-                  Effect.mapError(unavailable),
-                ),
+              // draws: plates go to the router and printed parts to the printer. Only those parts'
+              // meshes are read, for their bounds, and the bounds are cached across calls.
+              const { binding } = initialized;
+              const bounds = yield* loadCadBounds(
+                snapshot,
+                (sha256: string) => binding.readAsset(sha256).pipe(Effect.mapError(unavailable)),
+                boundsCache,
+                new Set(candidates.filter((c) => !c.named).map((c) => c.geometryKey)),
               );
+              const routed = candidates.map((candidate) => {
+                const box = bounds.get(candidate.geometryKey);
+                const route: ShopRoute | "named" = candidate.named
+                  ? "named"
+                  : shopRoute(
+                      candidate.material,
+                      box ? box.max.map((max, k) => max - box.min[k]!) : null,
+                    );
+                return { candidate, route };
+              });
               const sheets = routed
-                .filter((entry) => !isGroup || entry.route === "drawing")
+                .filter((entry) => entry.route === "named" || entry.route === "drawing")
                 .map((entry) => entry.candidate);
               const skippedQty = (route: ShopRoute) =>
-                isGroup
-                  ? routed
-                      .filter((entry) => entry.route === route)
-                      .reduce((sum, entry) => sum + entry.candidate.qty, 0)
-                  : 0;
+                routed
+                  .filter((entry) => entry.route === route)
+                  .reduce((sum, entry) => sum + entry.candidate.qty, 0);
               const skipped = { cnc: skippedQty("cnc"), print: skippedQty("print") };
               if (sheets.length === 0)
                 return yield* new CadViewError({
