@@ -96,22 +96,35 @@ export const resolveDrawingSheets = (
   return [...entries.values()].sort((a, b) => a.name.localeCompare(b.name));
 };
 
-// Bought parts never get a drawing. Vendor signals always mean bought: vendor and McMaster part
-// numbers, pack sizes, vendor spacer naming ("x 2\" WD)"), gearbox families, and the tooth count
-// or chain size that names a sprocket, gear, or pulley ("64t", "#25"). Common hardware and
-// electronics words, matched as whole words, mean bought unless the name also says what was made
-// ("Motor Mount Plate", "Bearing Block", "Battery Tray"). Shafts and tubes cut from vendor stock
-// are not listed.
-const VENDOR_PART =
-  /\b(?:WCP|217|am|REV|TTB|SDS|VEX)-\d|\b\d{4,5}[A-Z]\d{1,4}\b|\(\d+-pack\)|\bWD\)|\bNFS-|#(?:25|35)\b|\b(?:\d{2,3}t|maxplanetary|ultraplanetary|versaplanetary|origin cube)\b/i;
+// Bought parts never get a drawing. A part number always means bought: vendor and McMaster
+// numbers, pack sizes, and vendor spacer naming ("x 2\" WD)", "Acetal"). A gearbox family is bought unless the
+// name says it mounts one. Otherwise the last hardware or made-part word decides, the way names
+// read: "Pillow Block Bearing" is a bearing, "Bearing Block" a block, "Motor Mount Plate" a plate.
+// Shafts and tubes cut from vendor stock name neither, so they are made.
+const PART_NUMBER =
+  /\b(?:WCP|217|am|TTB|SDS|VEX)-\d{3,}|\bREV-\d{2}-\d{4}|\(\d+-pack\)|\bWD\)|\bacetal\b|\bNFS-|\borigin cube\b/i;
+// McMaster numbers ("91251A540"), not alloy tempers ("6061T6") or year codes ("2024R1").
+const MCMASTER =
+  /(?:^|[\s_])(?!20\d\d|6061|6063|7075|5052|6082|3003)\d{4,5}[A-Z]\d{1,4}(?=[\s_]|$)/;
+const GEARBOX_FAMILY = /\b(?:max|ultra|versa)planetary\b/i;
+const MOUNTS = /\b(?:mounts?|brackets?|adapters?)\b/i;
 const HARDWARE =
-  /\b(?:acetal|[SBF]HCS|bearings?|screws?|bolts?|nuts?|washers?|rivets?|motors?|falcon|kraken|neo|vortex|sprockets?|pulleys?|belts?|chains?|collars?|couplers?|encoders?|spark(?: ?max)?|talon|hubs?|gears?|wheels?|battery|batteries|radio|roborio|limelight|pigeon|cancoder|mk4i?|bushings?|pinions?|clevis|power distribution|switch|breaker|wires?|grommets?|inserts?|springs?|magnets?|tread|heat sink|shims?|signal light)\d*\b/i;
-const MADE_PART = /\b(?:plates?|mounts?|brackets?|trays?|guards?|blocks?|tensioners?)\b/i;
+  "[SBF]HCS|\\w*bearings?|\\w*screws?|\\w*bolts?|\\w*nuts?|\\w*washers?|\\w*rivets?|motors?|falcon\\w*|kraken\\w*|neo\\w*|vortex|sprockets?|pulleys?|belts?|chains?|collars?|couplers?|encoders?|spark\\w*|talon\\w*|hubs?|gears?|gearbox(?:es)?|\\w*wheels?|battery|batteries|radio|roborio|limelight|pigeon\\w*|cancoder|mk\\d\\w*|bushings?|pinions?|clevis|power distribution|switch(?:es)?|breakers?|wires?|grommets?|inserts?|springs?|magnets?|tread|heat sinks?|shims?|signal light";
+const MADE =
+  "plates?|mounts?|brackets?|trays?|guards?|blocks?|tensioners?|holders?|retainers?|clamps?|housings?|cases?|covers?|guides?|arms?|spacers?|gussets?|bellypan";
+const KEYWORD = new RegExp(
+  `(?<!\\w)(?:(?<made>${MADE})|(?<hardware>${HARDWARE}))\\d*(?!\\w)`,
+  "gi",
+);
 
 export const isBoughtPart = (name: string) => {
   // Underscores separate words in exported names ("Brass Insert_94459A230").
   const words = name.replace(/_/g, " ");
-  return VENDOR_PART.test(words) || (HARDWARE.test(words) && !MADE_PART.test(words));
+  if (PART_NUMBER.test(words) || MCMASTER.test(name)) return true;
+  if (GEARBOX_FAMILY.test(words) && !MOUNTS.test(words)) return true;
+  // Parentheses hold sizes and fits ("(#25, MAXSpline Bore)"), not what the part is.
+  const last = [...words.replace(/\([^)]*\)/g, " ").matchAll(KEYWORD)].at(-1);
+  return last?.groups?.hardware !== undefined;
 };
 
 /**
