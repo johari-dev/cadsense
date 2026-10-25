@@ -1,6 +1,14 @@
 // Shop rules of thumb an agent would apply to a part:
 // what a hole diameter probably means, which stock to cut from, and in what order to make it.
-import { METERS_PER_INCH, isAlong, isShaft, type HoleGroup, type PartAnalysis } from "./analysis";
+import {
+  METERS_PER_INCH,
+  isAlong,
+  isShaft,
+  type Countersink,
+  type HoleGroup,
+  type PartAnalysis,
+  type Vec3,
+} from "./analysis";
 
 export type Units = "in" | "mm";
 
@@ -141,12 +149,16 @@ const HOLE_RULES: readonly HoleRule[] = [
 // Hex bores are broached to the shaft's nominal size; the model carries a little clearance.
 const STANDARD_HEX_IN = [0.25, 0.375, 0.5, 0.625, 0.75, 1.125];
 
-/** "1/2"" for a hex bore near a stock hex size, else its modeled across-flats size. */
-const hexSize = (flats: number) => {
+/**
+ * "1/2"" for a hex bore near a stock hex size (sold in inches), else its modeled across-flats
+ * size in the sheet's units.
+ */
+const hexSize = (flats: number, units: Units) => {
   const nominal = STANDARD_HEX_IN.find(
     (size) => flats / METERS_PER_INCH - size > -0.002 && flats / METERS_PER_INCH - size < 0.012,
   );
-  return nominal ? formatFraction(nominal * METERS_PER_INCH) : `${formatInch(flats)}"`;
+  if (nominal) return formatFraction(nominal * METERS_PER_INCH);
+  return units === "mm" ? measure(flats, units) : `${formatInch(flats)}"`;
 };
 
 /**
@@ -157,12 +169,13 @@ const hexSize = (flats: number) => {
 export const holeReadings = (group: HoleGroup, units: Units): HoleReading[] => {
   const diameter = `Ø${formatLength(group.diameter, units)}`;
   if (group.hex) {
-    const size = hexSize(group.diameter);
+    const size = hexSize(group.diameter, units);
     return [
       {
         id: "hex",
         label: `${size} hex broach`,
-        callout: `${size.replace('"', "")} HEX`,
+        // Inch drawings drop the inch mark; a millimeter drawing keeps it on an inch size.
+        callout: `${units === "in" ? size.replace('"', "") : size} HEX`,
         drill: `Ø${measure(group.diameter, units)}, broach ${size} hex`,
         tap: null,
       },
@@ -199,15 +212,39 @@ export const holeReadings = (group: HoleGroup, units: Units): HoleReading[] => {
   ];
 };
 
-/** Callout text for a hole group, e.g. "10-32 UNF ↧.50 BOTH ENDS". */
-export const holeCallout = (group: HoleGroup, reading: HoleReading, units: Units) => {
+/**
+ * Callout text for a hole group, e.g. "10-32 UNF ↧.50 BOTH ENDS". `toward` is the direction to
+ * the viewer of the view the callout sits in; a countersink on the side away from the viewer
+ * says FAR SIDE. Without a view, sides are named from where the drill enters.
+ */
+export const holeCallout = (
+  group: HoleGroup,
+  reading: HoleReading,
+  units: Units,
+  toward?: Vec3,
+) => {
   const count = group.bothEnds ? "" : group.holes.length > 1 ? `${group.holes.length}X ` : "";
   const depth = group.depth === null ? "THRU" : `↧${formatLength(group.depth, units, 2)}`;
-  const sink = group.countersink
-    ? ` ⌵Ø${formatLength(group.countersink.diameter, units)}×${group.countersink.angle.toFixed(0)}°`
-    : "";
+  const sink = (countersink: Countersink) =>
+    `⌵Ø${formatLength(countersink.diameter, units)}×${countersink.angle.toFixed(0)}°`;
+  const { countersink: entry, farCountersink: exit } = group;
+  // The drill enters on the viewer's side when it travels away from the viewer.
+  const direction = group.holes[0]?.direction;
+  const entryNear =
+    !toward || !direction
+      ? true
+      : direction[0] * toward[0] + direction[1] * toward[1] + direction[2] * toward[2] < 0;
+  const sinks =
+    entry && exit && sink(entry) === sink(exit)
+      ? ` ${sink(entry)} BOTH SIDES`
+      : [
+          ...(entry ? [`${sink(entry)}${entryNear ? "" : " FAR SIDE"}`] : []),
+          ...(exit ? [`${sink(exit)}${entryNear ? " FAR SIDE" : ""}`] : []),
+        ]
+          .map((text) => ` ${text}`)
+          .join("");
   const where = group.bothEnds ? " BOTH ENDS" : "";
-  return `${count}${reading.callout} ${depth}${sink}${where}`;
+  return `${count}${reading.callout} ${depth}${sinks}${where}`;
 };
 
 const STANDARD_ROUND_IN = [
@@ -343,7 +380,13 @@ export const operationsFor = (
   }
   for (const group of part.holes) {
     const reading = readingFor(group);
-    if (part.shape.kind === "plate" && group.depth === null && !reading.tap && !group.countersink)
+    if (
+      part.shape.kind === "plate" &&
+      group.depth === null &&
+      !reading.tap &&
+      !group.countersink &&
+      !group.farCountersink
+    )
       continue;
     // Holes down a shaft's axis go on the lathe; cross holes go on the mill.
     const axial = group.holes.every((hole) => isAlong(hole.direction, part.frame.u));
@@ -356,9 +399,10 @@ export const operationsFor = (
         : part.shape.kind === "tube"
           ? "Drill press"
           : "Mill";
+    // Both walls only when one drilling pass crosses a void and comes out the far wall.
     const depth =
       group.depth === null
-        ? part.shape.kind === "tube"
+        ? group.bothWalls
           ? "through both walls"
           : "through"
         : `${measure(group.depth, units, 2)} deep`;
@@ -367,9 +411,13 @@ export const operationsFor = (
       : group.holes.length > 1
         ? `, ${group.holes.length} places`
         : "";
-    const sink = group.countersink
-      ? `, countersink Ø${measure(group.countersink.diameter, units)} × ${group.countersink.angle.toFixed(0)}°`
-      : "";
+    const sinkText = (countersink: Countersink) =>
+      `countersink Ø${measure(countersink.diameter, units)} × ${countersink.angle.toFixed(0)}°`;
+    const { countersink: entry, farCountersink: exit } = group;
+    const sink =
+      entry && exit && sinkText(entry) === sinkText(exit)
+        ? `, ${sinkText(entry)} both sides`
+        : `${entry ? `, ${sinkText(entry)}` : ""}${exit ? `, ${sinkText(exit)} on the far side` : ""}`;
     ops.push({
       machine,
       title:

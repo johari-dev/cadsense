@@ -54,6 +54,25 @@ export interface CircleLoop {
    * the side of the loop that cylinder runs to along `normal`: 1 or -1. Otherwise 0.
    */
   readonly shaftSide: number;
+  /** The loop edges an inside surface (a hole or bore wall), not the outside of the part. */
+  readonly inside: boolean;
+  /**
+   * Along `normal`, the way the faces off the hole wall point: 1 or -1, 0 when they disagree. At
+   * the far end of a hole, a bottom (drill point, flat, step down) points back up the hole; an
+   * exit face or a far countersink points on.
+   */
+  readonly cap: number;
+  /**
+   * A cone widening from the loop (a chamfer or countersink): the way it points along `normal`,
+   * its outer radius, and its included angle.
+   */
+  readonly flare: { readonly side: number; readonly radius: number; readonly angle: number } | null;
+}
+
+export interface Countersink {
+  readonly diameter: number;
+  /** Included angle in degrees. */
+  readonly angle: number;
 }
 
 export interface Hole {
@@ -64,7 +83,11 @@ export interface Hole {
   /** Null means the hole runs through the part. */
   readonly depth: number | null;
   /** Countersink at the entry, when the entry cone is more than an edge break. */
-  readonly countersink: { readonly diameter: number; readonly angle: number } | null;
+  readonly countersink: Countersink | null;
+  /** Countersink where a through hole comes out. */
+  readonly farCountersink: Countersink | null;
+  /** Two walls drilled in one pass on one axis (both walls of a tube, across a bore). */
+  readonly bothWalls: boolean;
   readonly entry: Vec3;
   /** Direction the drill travels, into the material. */
   readonly direction: Vec3;
@@ -75,7 +98,9 @@ export interface HoleGroup {
   readonly diameter: number;
   readonly hex: boolean;
   readonly depth: number | null;
-  readonly countersink: Hole["countersink"];
+  readonly countersink: Countersink | null;
+  readonly farCountersink: Countersink | null;
+  readonly bothWalls: boolean;
   readonly holes: readonly Hole[];
   /** Two opposite axial holes on a turned part. */
   readonly bothEnds: boolean;
@@ -300,16 +325,28 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
     lost.set(key, { diameter: hole.diameter, count: (lost.get(key)?.count ?? 0) + 1 });
   }
   // Closed edges that wander off a plane on round stock are cross holes or flats the hole
-  // finder could not read. Both passes can find the same one.
+  // finder could not read. Both passes can find the same one. A countersink's rim on a round
+  // surface is one too, but its hole already prints it.
+  const sunk = holes.flatMap((hole) =>
+    [hole.countersink, hole.farCountersink].flatMap((sink) =>
+      sink ? [{ axis: hole.entry, direction: hole.direction, radius: sink.diameter / 2 }] : [],
+    ),
+  );
   const strays: Vec3[] = [];
   for (const loop of [
     ...rimPass.nonPlanar,
     ...creasePass.nonPlanar,
     ...circles.filter((loop) => !loop.planar && !found.rims.has(loop)).map((loop) => loop.center),
   ]) {
-    if (!strays.some((other) => length(sub(other, loop)) < diag * 1e-3)) strays.push(loop);
+    const onSink = sunk.some(({ axis, direction, radius }) => {
+      const offset = sub(loop, axis);
+      return length(sub(offset, scale(direction, dot(offset, direction)))) < radius;
+    });
+    if (!onSink && !strays.some((other) => length(sub(other, loop)) < diag * 1e-3))
+      strays.push(loop);
   }
-  const steps = isShaft(shape) ? shaftSteps(circles, frame, shape) : [];
+  const profile = isShaft(shape) ? shaftProfile(positions, frame) : null;
+  const steps = isShaft(shape) && profile ? shaftSteps(circles, frame, shape, profile) : [];
   return {
     mesh,
     frame,
@@ -319,7 +356,18 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
     unresolved: {
       holes: [...lost.values()],
       crossFeatures: isShaft(shape) ? strays.length : 0,
-      profile: profileUnexplained(shape, steps, holes, frame, meshVolume(positions, triangles)),
+      profile:
+        profile !== null &&
+        profileUnexplained(
+          shape,
+          steps,
+          holes,
+          frame,
+          meshVolume(positions, triangles),
+          circles,
+          found.rims,
+          profile,
+        ),
     },
     triangleCount: faceCount,
     edges: [...edgeMap.values()],
@@ -477,9 +525,64 @@ const meshVolume = (positions: Float64Array, triangles: Uint32Array) => {
   return Math.abs(volume);
 };
 
+/** Where a shaft's vertices sit: distance along u from the low end, and distance from the axis. */
+const shaftProfile = (positions: Float64Array, frame: PartFrame) => {
+  const cv = (frame.min[1] + frame.max[1]) / 2;
+  const cw = (frame.min[2] + frame.max[2]) / 2;
+  const count = positions.length / 3;
+  const along = new Float64Array(count);
+  const out = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    const p = point(positions, i);
+    along[i] = dot(p, frame.u) - frame.min[0];
+    out[i] = Math.hypot(dot(p, frame.v) - cv, dot(p, frame.w) - cw);
+  }
+  return {
+    at: (loop: CircleLoop) => dot(loop.center, frame.u) - frame.min[0],
+    onAxis: (loop: CircleLoop) =>
+      isAlong(loop.normal, frame.u) &&
+      Math.hypot(dot(loop.center, frame.v) - cv, dot(loop.center, frame.w) - cw) <
+        loop.radius * 0.02,
+    /**
+     * Metal an end chamfer takes off a bar of `radius` at one end (-1 low, 1 high): a frustum
+     * from the end face's edge out to where the bar reaches full size. 0 when the end is not a
+     * plain cone.
+     */
+    endLoss: (radius: number, side: number) => {
+      let face = 0;
+      let reach = Infinity;
+      for (let i = 0; i < count; i++) {
+        const fromEnd = side < 0 ? along[i]! : frame.size[0] - along[i]!;
+        if (fromEnd < 1e-5) face = Math.max(face, out[i]!);
+        if (out[i]! > radius * 0.99) reach = Math.min(reach, fromEnd);
+      }
+      if (!Number.isFinite(reach) || face >= radius) return 0;
+      // Only a straight cone: anything sunk below the line from face to bar (a journal, a
+      // fillet) is a section the drawing has to show, not an edge break.
+      for (let i = 0; i < count; i++) {
+        const fromEnd = side < 0 ? along[i]! : frame.size[0] - along[i]!;
+        if (fromEnd <= 1e-5 || fromEnd >= reach - 1e-5) continue;
+        if (out[i]! < face + ((radius - face) * fromEnd) / reach - radius * 0.02) return 0;
+      }
+      return (
+        Math.PI * reach * (radius * radius - (radius * radius + radius * face + face * face) / 3)
+      );
+    },
+    /** True when metal stands proud of `radius` anywhere past `from` toward `side` (-1 or 1). */
+    proudBeyond: (from: number, radius: number, side: number) => {
+      for (let i = 0; i < count; i++) {
+        if ((along[i]! - from) * side > 1e-5 && out[i]! > radius * 1.01) return true;
+      }
+      return false;
+    },
+  };
+};
+
 /**
- * True when a round shaft is missing more than 5% of the metal its bar, steps, and holes leave:
- * its outline has sections the drawing does not dimension.
+ * True when a shaft's outline has sections the drawing does not dimension: an outside edge away
+ * from the ends that no step or hole accounts for (a V-groove, a taper), or round stock missing
+ * more than 1.5% of the metal its bar, end chamfers, steps, and holes leave (a filleted
+ * shoulder, a spline). Facets cost a round bar under 1%.
  */
 const profileUnexplained = (
   shape: Shape,
@@ -487,14 +590,36 @@ const profileUnexplained = (
   holes: readonly Hole[],
   frame: PartFrame,
   volume: number,
+  circles: readonly CircleLoop[],
+  rims: ReadonlySet<CircleLoop>,
+  profile: ReturnType<typeof shaftProfile>,
 ) => {
-  if (shape.kind !== "turned" && shape.kind !== "roundTube") return false;
+  if (!isShaft(shape)) return false;
+  const loose = circles.some((loop) => {
+    if (loop.outline !== "round" || !loop.planar || loop.inside || rims.has(loop)) return false;
+    if (!profile.onAxis(loop)) return false;
+    const at = profile.at(loop);
+    return (
+      profile.proudBeyond(at, loop.radius, -1) &&
+      profile.proudBeyond(at, loop.radius, 1) &&
+      !steps.some(
+        (step) => Math.abs(step.start - at) < STEP_MATCH || Math.abs(step.end - at) < STEP_MATCH,
+      )
+    );
+  });
+  if (loose) return true;
+  if (shape.kind === "hex") return false;
   const area = (diameter: number) => (Math.PI * diameter * diameter) / 4;
   const bar =
     area(shape.diameter) * shape.length -
     (shape.kind === "roundTube" ? area(shape.diameter - 2 * shape.wall) * shape.length : 0);
+  // Ends a step already reaches are counted by the step.
+  const chamfers = [-1, 1]
+    .filter((side) => steps.every((step) => (side < 0 ? step.start > 0 : step.end < shape.length)))
+    .reduce((sum, side) => sum + profile.endLoss(shape.diameter / 2, side), 0);
   const expected =
     bar -
+    chamfers -
     steps.reduce(
       (sum, step) => sum + (area(shape.diameter) - area(step.diameter)) * (step.end - step.start),
       0,
@@ -505,7 +630,7 @@ const profileUnexplained = (
       const face = hole.hex ? (Math.sqrt(3) / 2) * hole.diameter ** 2 : area(hole.diameter);
       return sum + face * (hole.depth ?? reach);
     }, 0);
-  return volume < expected - bar * 0.05;
+  return volume < expected - bar * 0.015;
 };
 
 const classifyShape = (
@@ -703,6 +828,12 @@ const findCircles = (
     let slope = 0;
     let shaftEdges = 0;
     let shaftSide = 0;
+    let insideEdges = 0;
+    let cap = 0;
+    let flares = 0;
+    let flareSide = 0;
+    let flareSlope = 0;
+    let flareRadius = 0;
     for (const key of edgeKeys) {
       const edge = edgeMap.get(key)!;
       if (edge.faces.length !== 2) continue;
@@ -720,6 +851,7 @@ const findCircles = (
           axial: dot(n, normal),
           facing: dot(n, radial),
           along: dot(sub(point(positions, opposite), center), normal),
+          reach: length(offset),
           outside: hex ? dot(offset, radial) > apothem * 1.001 : length(offset) > radius * 1.001,
         };
       };
@@ -740,10 +872,22 @@ const findCircles = (
           break;
         }
       }
+      if (first.facing < -0.5 || second.facing < -0.5) insideEdges++;
       const cylinder = [first, second].find((side) => side.facing > 0.95);
       if (cylinder) {
         shaftEdges++;
         shaftSide += Math.sign(cylinder.along);
+      }
+      // The face off the wall is the one facing most along the axis.
+      const off = Math.abs(first.axial) > Math.abs(second.axial) ? first : second;
+      if (Math.abs(off.axial) > 0.05) cap += Math.sign(off.axial);
+      for (const side of [first, second]) {
+        if (side.outside && Math.abs(side.axial) > 0.2 && Math.abs(side.axial) < 0.95) {
+          flares++;
+          flareSide += Math.sign(side.axial);
+          flareSlope += Math.abs(side.axial);
+          flareRadius = Math.max(flareRadius, side.reach);
+        }
       }
     }
     const openingNormal = openings * 2 >= edgeKeys.size ? outward : null;
@@ -762,6 +906,17 @@ const findCircles = (
       openingNormal,
       conical: openingNormal !== null && slope / openings > 0.2,
       shaftSide: shaftEdges * 2 >= edgeKeys.size ? Math.sign(shaftSide) : 0,
+      inside: insideEdges * 2 >= edgeKeys.size,
+      cap: Math.abs(cap) * 2 >= edgeKeys.size ? Math.sign(cap) : 0,
+      // A cone at half-angle a has a normal tilted a off the radial plane: |axial| = sin a.
+      flare:
+        flares * 2 >= edgeKeys.size
+          ? {
+              side: Math.sign(flareSide),
+              radius: flareRadius,
+              angle: (2 * Math.asin(flareSlope / flares) * 180) / Math.PI,
+            }
+          : null,
     });
   }
   return { loops, nonPlanar };
@@ -776,6 +931,8 @@ interface FaceSide {
   readonly facing: number;
   /** Where the face's third vertex sits along the loop axis. */
   readonly along: number;
+  /** Distance of the face's third vertex from the loop axis. */
+  readonly reach: number;
   /** The face's third vertex lies outside the loop. */
   readonly outside: boolean;
 }
@@ -818,6 +975,12 @@ const fitCircle = (points: readonly Vec3[], origin: Vec3, normal: Vec3) => {
 
 /** Edge breaks up to this radial size are left to the deburr note; larger cones are countersinks. */
 const COUNTERSINK_MIN = 0.04 * METERS_PER_INCH;
+
+/** The countersink a cone makes between two radii `depth` apart, or null for an edge break. */
+const sinkBetween = (outer: number, inner: number, depth: number): Countersink | null =>
+  outer - inner > COUNTERSINK_MIN && depth > 0
+    ? { diameter: 2 * outer, angle: (2 * Math.atan((outer - inner) / depth) * 180) / Math.PI }
+    : null;
 
 /** True when a ray from `origin` along `direction` leaves the part without touching a face. */
 const rayLeaves = (
@@ -895,13 +1058,9 @@ const findHoles = (
       diameter: 2 * size.radius * (size.outline === "hex" ? Math.cos(Math.PI / 6) : 1),
       hex: size.outline === "hex",
       depth: null,
-      countersink:
-        rim && entry.radius - rim.radius > COUNTERSINK_MIN
-          ? {
-              diameter: entry.radius * 2,
-              angle: (2 * Math.atan((entry.radius - rim.radius) / start) * 180) / Math.PI,
-            }
-          : null,
+      countersink: rim ? sinkBetween(entry.radius, rim.radius, start) : null,
+      farCountersink: null,
+      bothWalls: false,
       entry: entry.center,
       direction,
     };
@@ -934,13 +1093,43 @@ const findHoles = (
     // A through hole leaves by an opening facing on, or by the inside of its chamfer. An opening
     // facing back means the hole already broke into a void (a bore it crosses) whose edge was
     // not found; that opening starts the next stretch, so it stays free.
+    const far = best.loop;
     const leaving = (loop: CircleLoop | undefined) =>
       loop?.openingNormal && dot(loop.openingNormal, direction) > 0 ? loop : null;
-    const exit = leaving(best.loop) ?? leaving(outerOf.get(best.loop));
-    const brokeOut = best.loop.openingNormal && dot(best.loop.openingNormal, direction) < 0;
+    const exit = leaving(far) ?? leaving(outerOf.get(far));
+    const brokeOut = far.openingNormal !== null && dot(far.openingNormal, direction) < 0;
     if (exit) rims.add(exit);
-    if (!brokeOut) rims.add(best.loop);
-    found.push({ ...hole, depth: exit || brokeOut ? null : best.distance });
+    if (!brokeOut) rims.add(far);
+    if (exit || brokeOut) {
+      const cone = exit && exit !== far ? along(far, exit, direction) : null;
+      found.push({
+        ...hole,
+        farCountersink: exit && cone !== null ? sinkBetween(exit.radius, far.radius, cone) : null,
+      });
+      continue;
+    }
+    // The far loop is the bottom only when the faces past it point back up the hole (a drill
+    // point, a flat bottom, a step down). A cone widening past it is a countersink on the far
+    // side whose outer rim was not found (it lies on a round surface); then the hole is through
+    // if its axis leaves the part.
+    const onward = Math.sign(dot(far.normal, direction));
+    if (far.cap === -onward) {
+      found.push({ ...hole, depth: best.distance });
+      continue;
+    }
+    const origin = add(far.center, scale(direction, diag * 1e-4));
+    if (!rayLeaves(positions, triangles, origin, direction)) {
+      lost.push(hole);
+      continue;
+    }
+    const flare = far.flare?.side === onward ? far.flare : null;
+    found.push({
+      ...hole,
+      farCountersink:
+        flare && flare.radius - far.radius > COUNTERSINK_MIN
+          ? { diameter: 2 * flare.radius, angle: flare.angle }
+          : null,
+    });
   }
   // Ignore openings that are really the part outline (a turned part's end faces are not holes).
   const real = (hole: Hole) => hole.diameter < Math.max(...frame.size) * 0.98;
@@ -962,10 +1151,21 @@ const findHoles = (
         hole.diameter * 0.01
       );
     });
-    if (!twin) merged.push(hole);
+    if (!twin) {
+      merged.push(hole);
+      continue;
+    }
     // Keep the entry nearest the viewer side of the frame so the callout points at the outer wall.
-    else if (dot(hole.entry, hole.direction) < dot(twin.entry, twin.direction))
-      merged[merged.indexOf(twin)] = { ...hole, countersink: hole.countersink ?? twin.countersink };
+    const [near, other] =
+      dot(hole.entry, hole.direction) < dot(twin.entry, twin.direction)
+        ? [hole, twin]
+        : [twin, hole];
+    merged[merged.indexOf(twin)] = {
+      ...near,
+      countersink: near.countersink ?? other.countersink,
+      farCountersink: near.farCountersink ?? other.farCountersink,
+      bothWalls: true,
+    };
   }
   return { holes: merged, lost: lost.filter(real), rims };
 };
@@ -973,11 +1173,10 @@ const findHoles = (
 const groupHoles = (holes: readonly Hole[], shape: Shape, frame: PartFrame): HoleGroup[] => {
   const groups = new Map<string, Hole[]>();
   const inches = (meters: number) => (meters / METERS_PER_INCH).toFixed(3);
+  const sink = (name: string, countersink: Countersink | null) =>
+    countersink ? `|${name}${inches(countersink.diameter)}x${countersink.angle.toFixed(0)}` : "";
   for (const hole of holes) {
-    const sink = hole.countersink
-      ? `|csk${inches(hole.countersink.diameter)}x${hole.countersink.angle.toFixed(0)}`
-      : "";
-    const key = `${hole.hex ? "hex" : ""}${inches(hole.diameter)}|${hole.depth === null ? "thru" : inches(hole.depth)}${sink}`;
+    const key = `${hole.hex ? "hex" : ""}${inches(hole.diameter)}|${hole.depth === null ? "thru" : inches(hole.depth)}${hole.bothWalls ? "|2w" : ""}${sink("csk", hole.countersink)}${sink("far", hole.farCountersink)}`;
     groups.set(key, [...(groups.get(key) ?? []), hole]);
   }
   return [...groups].map(([key, members]) => ({
@@ -986,6 +1185,8 @@ const groupHoles = (holes: readonly Hole[], shape: Shape, frame: PartFrame): Hol
     hex: members[0]!.hex,
     depth: members[0]!.depth,
     countersink: members[0]!.countersink,
+    farCountersink: members[0]!.farCountersink,
+    bothWalls: members[0]!.bothWalls,
     holes: members,
     bothEnds:
       isShaft(shape) &&
@@ -995,36 +1196,34 @@ const groupHoles = (holes: readonly Hole[], shape: Shape, frame: PartFrame): Hol
   }));
 };
 
-/** Section ends this close to the bar's end are a chamfer's width away: snap them to the end. */
-const STEP_SNAP = 0.035 * METERS_PER_INCH;
+/** A loop this close to a step's end is that step's edge. */
+const STEP_MATCH = 0.001 * METERS_PER_INCH;
 
 /**
  * Turned-down sections of a shaft. Each runs from a loop whose outside cylinder heads up u to
- * the next loop of the same size heading back.
+ * the next loop of the same size heading back. When nothing between a section and the bar's
+ * end stands proud of it (only an end chamfer), the section runs to that end.
  */
 const shaftSteps = (
   circles: readonly CircleLoop[],
   frame: PartFrame,
   shape: Extract<Shape, { kind: "turned" | "hex" | "roundTube" }>,
+  profile: ReturnType<typeof shaftProfile>,
 ): ShaftStep[] => {
   // Round sections on hex stock can be as large as the flats; on round stock, under the OD.
   const limit = shape.kind === "hex" ? frame.size[1] / 2 : shape.diameter / 2;
-  const cv = (frame.min[1] + frame.max[1]) / 2;
-  const cw = (frame.min[2] + frame.max[2]) / 2;
   const edges = circles
     .filter(
       (loop) =>
         loop.outline === "round" &&
         loop.planar &&
         loop.shaftSide !== 0 &&
-        isAlong(loop.normal, frame.u) &&
         loop.radius < limit * 0.995 &&
-        Math.hypot(dot(loop.center, frame.v) - cv, dot(loop.center, frame.w) - cw) <
-          loop.radius * 0.02,
+        profile.onAxis(loop),
     )
     .map((loop) => ({
       radius: loop.radius,
-      at: dot(loop.center, frame.u) - frame.min[0],
+      at: profile.at(loop),
       heads: loop.shaftSide * Math.sign(dot(loop.normal, frame.u)),
     }))
     .sort((a, b) => a.at - b.at);
@@ -1040,8 +1239,8 @@ const shaftSteps = (
     if (!end) continue;
     steps.push({
       diameter: 2 * edge.radius,
-      start: edge.at < STEP_SNAP ? 0 : edge.at,
-      end: frame.size[0] - end.at < STEP_SNAP ? frame.size[0] : end.at,
+      start: profile.proudBeyond(edge.at, edge.radius, -1) ? edge.at : 0,
+      end: profile.proudBeyond(end.at, edge.radius, 1) ? end.at : frame.size[0],
     });
   }
   return steps;
