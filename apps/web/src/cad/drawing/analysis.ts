@@ -285,13 +285,13 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
     );
   }
   // Round stock looks the same from every side, so turn the frame to look straight down its
-  // first cross hole.
+  // first cross hole, from the side the drill enters (w points back up the drill).
   const crossHole = holes.find((hole) => Math.abs(dot(hole.direction, frame.u)) < 0.001);
   if ((shape.kind === "turned" || shape.kind === "roundTube") && crossHole) {
     frame = boxFrame(
       positions,
       frame.u,
-      snapToAxis(normalize(cross(crossHole.direction, frame.u))),
+      snapToAxis(normalize(cross(frame.u, crossHole.direction))),
     );
   }
   const lost = new Map<string, { diameter: number; count: number }>();
@@ -369,13 +369,16 @@ const snapToAxis = (n: Vec3): Vec3 =>
 
 /**
  * The drawing frame. Most parts are modeled square to their own axes. One modeled at an angle
- * (a tube laid on a diagonal) is boxed along the normals of its largest flat faces instead,
- * when that box is smaller. Cylinder facets are narrow strips, so they never lead.
+ * is boxed on its own axes instead, when that box is smaller: along the normals of its largest
+ * flat faces (a tube laid on a diagonal), or along the axis of round or hex stock. Cylinder
+ * facets are narrow strips, so they never lead the flat faces.
  */
 const partFrame = (positions: Float64Array, triangles: Uint32Array): PartFrame => {
   const axes = sortedFrame(positions, AXES.x, AXES.y);
   // Flat area per normal direction; opposite faces share a direction.
   const bins = new Map<string, { area: number; sum: Vec3 }>();
+  // Area-weighted spread of the normals, n nᵀ summed.
+  const spread = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   let total = 0;
   for (let t = 0; t < triangles.length; t += 3) {
     const a = point(positions, triangles[t]!);
@@ -391,33 +394,76 @@ const partFrame = (positions: Float64Array, triangles: Uint32Array): PartFrame =
     const key = unit.map((x) => Math.round(x * 1000)).join(",");
     const bin = bins.get(key) ?? { area: 0, sum: [0, 0, 0] };
     bins.set(key, { area: bin.area + area, sum: add(bin.sum, scale(unit, area)) });
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) spread[i * 3 + j]! += area * unit[i]! * unit[j]!;
   }
   const ranked = [...bins.values()].sort((p, q) => q.area - p.area);
-  const first = ranked[0];
-  if (!first || first.area < total * 0.1) return axes;
-  const a = snapToAxis(normalize(first.sum));
-  // Side faces square to the first. One along a part axis keeps the part square to its axes.
-  // Otherwise a side counts when it is large (a tube's side) or has a side square to it (a
-  // rectangle's edges); angled edges in mirrored pairs are styling, not the part's axes.
-  const square = ranked
-    .map((bin) => ({ n: normalize(bin.sum), area: bin.area }))
-    .filter((side) => side.area >= total * 0.02 && Math.abs(dot(side.n, a)) < 0.002);
-  const second =
-    square.find((side) => isPartAxis(side.n)) ??
-    square.find(
-      (side) =>
-        side.area >= total * 0.1 || square.some((other) => Math.abs(dot(other.n, side.n)) < 0.002),
-    );
-  // With one flat direction (a disc, a turned part), keep the part axis most square to it.
-  const seed =
-    second?.n ??
-    Object.values(AXES).reduce((best, axis) =>
-      Math.abs(dot(axis, a)) < Math.abs(dot(best, a)) ? axis : best,
-    );
-  const b = snapToAxis(normalize(sub(seed, scale(a, dot(seed, a)))));
-  const candidate = sortedFrame(positions, a, b);
+  // Side faces square to `a`, largest first.
+  const squareTo = (a: Vec3) =>
+    ranked
+      .map((bin) => ({ n: normalize(bin.sum), area: bin.area }))
+      .filter((side) => side.area >= total * 0.02 && Math.abs(dot(side.n, a)) < 0.002);
+  // With no side to go by, keep the part axis most square to `a`.
+  const across = (a: Vec3, seed: Vec3 | undefined) => {
+    const from =
+      seed ??
+      Object.values(AXES).reduce((best, axis) =>
+        Math.abs(dot(axis, a)) < Math.abs(dot(best, a)) ? axis : best,
+      );
+    return snapToAxis(normalize(sub(from, scale(a, dot(from, a)))));
+  };
+  const flatFrame = (): PartFrame | null => {
+    const first = ranked[0];
+    if (!first || first.area < total * 0.1) return null;
+    const a = snapToAxis(normalize(first.sum));
+    // Side faces square to the first. One along a part axis keeps the part square to its axes.
+    // Otherwise a side counts when it is large (a tube's side) or has a side square to it (a
+    // rectangle's edges); angled edges in mirrored pairs are styling, not the part's axes.
+    const square = squareTo(a);
+    const second =
+      square.find((side) => isPartAxis(side.n)) ??
+      square.find(
+        (side) =>
+          side.area >= total * 0.1 ||
+          square.some((other) => Math.abs(dot(other.n, side.n)) < 0.002),
+      );
+    return sortedFrame(positions, a, across(a, second?.n));
+  };
+
+  // Round and hex stock: the side normals all lie square to the axis and spread evenly around
+  // it, so the axis is the one direction the normals barely reach. Hex flats, when present, set
+  // the second direction.
+  const stockFrame = (): PartFrame | null => {
+    const apply = (x: Vec3): Vec3 => [
+      spread[0]! * x[0] + spread[1]! * x[1] + spread[2]! * x[2],
+      spread[3]! * x[0] + spread[4]! * x[1] + spread[5]! * x[2],
+      spread[6]! * x[0] + spread[7]! * x[1] + spread[8]! * x[2],
+    ];
+    const trace = spread[0]! + spread[4]! + spread[8]!;
+    if (trace === 0) return null;
+    // Power iteration on (trace I - spread) finds spread's smallest direction.
+    let e: Vec3 = normalize([1, 0.37, 0.21]);
+    for (let k = 0; k < 100; k++) e = normalize(sub(scale(e, trace), apply(e)));
+    const p = across(e, undefined);
+    const q = cross(e, p);
+    const least = dot(e, apply(e));
+    const pp = dot(p, apply(p));
+    const qq = dot(q, apply(q));
+    const pq = dot(p, apply(q));
+    const mean = (pp + qq) / 2;
+    const uneven = Math.hypot(pp - qq, 2 * pq);
+    if (least > mean * 0.5 || uneven > mean * 0.2) return null;
+    const a = snapToAxis(e);
+    return sortedFrame(positions, a, across(a, squareTo(a)[0]?.n));
+  };
+
   const volume = (frame: PartFrame) => frame.size[0] * frame.size[1] * frame.size[2];
-  return volume(candidate) < volume(axes) * 0.995 ? candidate : axes;
+  const candidates = [flatFrame(), stockFrame()].filter((frame) => frame !== null);
+  const best = candidates.reduce(
+    (smallest, frame) => (volume(frame) < volume(smallest) ? frame : smallest),
+    axes,
+  );
+  return volume(best) < volume(axes) * 0.995 ? best : axes;
 };
 
 /** Enclosed volume of a closed mesh. */
