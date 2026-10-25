@@ -55,6 +55,7 @@ import {
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import {
+  glbExtents,
   partName,
   resolveDrawingSheets,
   shopRoute,
@@ -355,6 +356,9 @@ export const make = Effect.gen(function* () {
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
         // cad_checks and cad_find_parts share this cache.
         const boundsCache = new Map<string, CadBounds | null>();
+        // Part mesh extents for shop routing, read the way the web panels read them so a card and
+        // its panel always route a part the same way. Keyed by mesh hash.
+        const extentsCache = new Map<string, [number, number, number] | null>();
         const checks: CadAgentTools["checks"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -532,24 +536,21 @@ export const make = Effect.gen(function* () {
               const candidates = resolveDrawingSheets(snapshot, request.occurrenceIds);
               // Parts named one by one are drawn as asked. An assembly draws only the parts the shop
               // draws: plates go to the router and printed parts to the printer. Only those parts'
-              // meshes are read, for their bounds, and the bounds are cached across calls.
-              const { binding } = initialized;
-              const bounds = yield* loadCadBounds(
-                snapshot,
-                (sha256: string) => binding.readAsset(sha256).pipe(Effect.mapError(unavailable)),
-                boundsCache,
-                new Set(candidates.filter((c) => !c.named).map((c) => c.geometryKey)),
+              // meshes are read, and their extents are cached across calls.
+              const routed = yield* Effect.forEach(candidates, (candidate) =>
+                Effect.gen(function* () {
+                  if (candidate.named) return { candidate, route: "named" as const };
+                  let extents = extentsCache.get(candidate.sha256);
+                  if (extents === undefined) {
+                    const bytes = yield* initialized.binding
+                      .readAsset(candidate.sha256)
+                      .pipe(Effect.mapError(unavailable));
+                    extents = glbExtents(bytes);
+                    extentsCache.set(candidate.sha256, extents);
+                  }
+                  return { candidate, route: shopRoute(candidate.material, extents) };
+                }),
               );
-              const routed = candidates.map((candidate) => {
-                const box = bounds.get(candidate.geometryKey);
-                const route: ShopRoute | "named" = candidate.named
-                  ? "named"
-                  : shopRoute(
-                      candidate.material,
-                      box ? box.max.map((max, k) => max - box.min[k]!) : null,
-                    );
-                return { candidate, route };
-              });
               const sheets = routed
                 .filter((entry) => entry.route === "named" || entry.route === "drawing")
                 .map((entry) => entry.candidate);

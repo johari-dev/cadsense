@@ -217,7 +217,8 @@ export function CadDrawingPanel({
     Promise.all(
       candidates.map(async (candidate) => {
         const extents = glbExtents(new Uint8Array(await fetchAsset(candidate.sha256)));
-        return [candidate.sha256, shopRoute(candidate.material, extents)] as const;
+        // By part, not mesh: two parts can share a mesh and differ in material.
+        return [candidate.geometryKey, shopRoute(candidate.material, extents)] as const;
       }),
     )
       .then((entries) => live && setRoutes(Object.fromEntries(entries)))
@@ -230,7 +231,7 @@ export function CadDrawingPanel({
     () =>
       isGroup
         ? candidates.filter(
-            (candidate) => candidate.named || routes?.[candidate.sha256] === "drawing",
+            (candidate) => candidate.named || routes?.[candidate.geometryKey] === "drawing",
           )
         : candidates,
     [isGroup, candidates, routes],
@@ -238,7 +239,7 @@ export function CadDrawingPanel({
   const skipped = useMemo(() => {
     const count = (route: ShopRoute) =>
       candidates
-        .filter((candidate) => !candidate.named && routes?.[candidate.sha256] === route)
+        .filter((candidate) => !candidate.named && routes?.[candidate.geometryKey] === route)
         .reduce((sum, candidate) => sum + candidate.qty, 0);
     return isGroup && routes ? { cnc: count("cnc"), print: count("print") } : null;
   }, [isGroup, candidates, routes]);
