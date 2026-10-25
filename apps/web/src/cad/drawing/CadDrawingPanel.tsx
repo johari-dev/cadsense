@@ -147,7 +147,7 @@ export function CadDrawingPanel({
     () =>
       isGroup
         ? candidates.filter(
-            (candidate) => candidate.named || routes?.[candidate.sha256] === "drawing",
+            (candidate) => candidate.named || routes?.[candidate.geometryKey] === "drawing",
           )
         : candidates,
     [isGroup, candidates, routes],
@@ -295,7 +295,7 @@ export function CadDrawingPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {!isGroup && entry && routes?.[entry.sha256] === "cnc" && (
+        {!isGroup && entry && routes?.[entry.geometryKey] === "cnc" && (
           <div
             className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs text-muted-foreground"
             data-testid="cad-drawing-cnc-hint"

@@ -97,7 +97,8 @@ export const useCadSnapshotAssets = (threadRef: ScopedThreadRef, snapshotId: str
 
 /**
  * Where each candidate part goes in the shop (drawing, router, printer), read from its mesh's
- * bounding box. Null until every candidate is routed, or when `enabled` is false.
+ * bounding box, keyed by geometry key. Null until every candidate is routed, or when `enabled` is
+ * false.
  */
 export const useShopRoutes = (
   candidates: readonly DrawingSheetEntry[],
@@ -112,7 +113,8 @@ export const useShopRoutes = (
     Promise.all(
       candidates.map(async (candidate) => {
         const extents = glbExtents(new Uint8Array(await fetchAsset(candidate.sha256)));
-        return [candidate.sha256, shopRoute(candidate.material, extents)] as const;
+        // By part, not mesh: two parts can share a mesh and differ in material.
+        return [candidate.geometryKey, shopRoute(candidate.material, extents)] as const;
       }),
     )
       .then((entries) => live && setRoutes(Object.fromEntries(entries)))
@@ -135,7 +137,7 @@ export const routeCounts = (
 ) => {
   const count = (route: ShopRoute) =>
     candidates
-      .filter((candidate) => !candidate.named && routes[candidate.sha256] === route)
+      .filter((candidate) => !candidate.named && routes[candidate.geometryKey] === route)
       .reduce((sum, candidate) => sum + candidate.qty, 0);
   return { drawing: count("drawing"), cnc: count("cnc"), print: count("print") };
 };

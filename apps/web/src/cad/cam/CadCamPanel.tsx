@@ -59,7 +59,11 @@ export function CadCamPanel({
   const routes = useShopRoutes(candidates, fetchAsset, isGroup, setError);
   const parts = useMemo(
     () =>
-      isGroup ? candidates.filter((candidate) => routes?.[candidate.sha256] === "cnc") : candidates,
+      isGroup
+        ? candidates.filter(
+            (candidate) => candidate.named || routes?.[candidate.geometryKey] === "cnc",
+          )
+        : candidates,
     [isGroup, candidates, routes],
   );
   const entry = parts[Math.min(index, Math.max(0, parts.length - 1))] ?? null;

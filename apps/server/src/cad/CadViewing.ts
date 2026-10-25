@@ -56,6 +56,7 @@ import {
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import {
+  glbExtents,
   partName,
   resolveDrawingSheets,
   shopRoute,
@@ -358,6 +359,9 @@ export const make = Effect.gen(function* () {
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
         // cad_checks and cad_find_parts share this cache.
         const boundsCache = new Map<string, CadBounds | null>();
+        // Part mesh extents for shop routing, read the way the web panels read them so a card and
+        // its panel always route a part the same way. Keyed by mesh hash.
+        const extentsCache = new Map<string, [number, number, number] | null>();
         const checks: CadAgentTools["checks"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -536,30 +540,25 @@ export const make = Effect.gen(function* () {
                 });
               const candidates = resolveDrawingSheets(snapshot, request.occurrenceIds);
               const isGroup = request.occurrenceIds.some((id) => nodes.get(id)?.kind !== "part");
-              // Drawings: parts named one by one are drawn as asked; an assembly keeps the parts the
-              // shop draws. CAM: only plates, whichever way they were named. Only the meshes a route
-              // needs are read, for their bounds, and the bounds are cached across calls.
-              const needsRoute = (candidate: (typeof candidates)[number]) =>
-                mode === "cam" || !candidate.named;
-              const { binding } = initialized;
-              const bounds = yield* loadCadBounds(
-                snapshot,
-                (sha256: string) => binding.readAsset(sha256).pipe(Effect.mapError(unavailable)),
-                boundsCache,
-                new Set(candidates.filter(needsRoute).map((candidate) => candidate.geometryKey)),
+              // Parts named one by one are kept as asked; an assembly keeps the parts this tool
+              // makes: drawings for stock parts, CAM for plates. Only those parts' meshes are read,
+              // and their extents are cached across calls.
+              const routed = yield* Effect.forEach(candidates, (candidate) =>
+                Effect.gen(function* () {
+                  if (candidate.named) return { candidate, route: "named" as const };
+                  let extents = extentsCache.get(candidate.sha256);
+                  if (extents === undefined) {
+                    const bytes = yield* initialized.binding
+                      .readAsset(candidate.sha256)
+                      .pipe(Effect.mapError(unavailable));
+                    extents = glbExtents(bytes);
+                    extentsCache.set(candidate.sha256, extents);
+                  }
+                  return { candidate, route: shopRoute(candidate.material, extents) };
+                }),
               );
-              const routed = candidates.map((candidate) => {
-                const box = bounds.get(candidate.geometryKey);
-                const route: ShopRoute | "named" = needsRoute(candidate)
-                  ? shopRoute(
-                      candidate.material,
-                      box ? box.max.map((max, k) => max - box.min[k]!) : null,
-                    )
-                  : "named";
-                return { candidate, route };
-              });
               const keep = (route: ShopRoute | "named") =>
-                mode === "cam" ? route === "cnc" : route === "named" || route === "drawing";
+                route === "named" || route === (mode === "cam" ? "cnc" : "drawing");
               const kept = routed
                 .filter((entry) => keep(entry.route))
                 .map((entry) => entry.candidate);
@@ -578,7 +577,7 @@ export const make = Effect.gen(function* () {
                       : `Nothing in the selection needs a drawing: bought parts are skipped, ${skipped.cnc} plate instances go to the router (cad_plate_cam), and ${skipped.print} printed part instances go to the printer.`,
                 });
               const first = nodes.get(request.occurrenceIds[0]!)!;
-              const noun = mode === "cam" ? "plates" : "parts";
+              const noun = `${mode === "cam" ? "plate" : "part"}${kept.length === 1 ? "" : "s"}`;
               const title =
                 request.title ??
                 (request.occurrenceIds.length === 1 ? partName(first) : `${kept.length} ${noun}`);
