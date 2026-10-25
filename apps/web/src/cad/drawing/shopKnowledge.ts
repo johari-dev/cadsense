@@ -244,8 +244,8 @@ export const stockFor = (part: PartAnalysis, material: string, units: Units): St
   }
   if (shape.kind === "roundTube") {
     return {
-      description: `${formatFraction(shape.diameter)} OD × ${formatInch(shape.wall)}" wall round tube, cut ${formatSize(shape.length, units)} long`,
-      note: "Square both ends after cutting",
+      description: `${formatFraction(shape.diameter)} OD × ${formatInch(shape.wall)}" wall round tube, cut ${formatSize(shape.length + METERS_PER_INCH / 16, units)} long`,
+      note: "Face both ends to length",
     };
   }
   if (shape.kind === "hex") {
