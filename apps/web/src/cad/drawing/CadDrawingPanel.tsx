@@ -204,7 +204,12 @@ export function CadDrawingPanel({
     [manifest, drawing.occurrenceIds],
   );
   useEffect(() => {
-    if (!isGroup || !fetchAsset || candidates.length === 0) return;
+    if (!isGroup || !fetchAsset) return;
+    // Nothing to sort: an empty map, so the panel says nothing needs a drawing.
+    if (candidates.length === 0) {
+      setRoutes({});
+      return;
+    }
     let live = true;
     Promise.all(
       candidates.map(async (candidate) => {
@@ -297,6 +302,10 @@ export function CadDrawingPanel({
   const updateChoices = (key: string, update: (current: PartChoices) => PartChoices) =>
     setChoices((all) => ({ ...all, [key]: update(all[key] ?? { readings: {} }) }));
 
+  if (AsyncResult.isFailure(lease))
+    return (
+      <div className="p-4 text-sm text-muted-foreground">The local CAD scene is unavailable.</div>
+    );
   if (error)
     return <div className="p-4 text-sm text-destructive">Could not draw this part: {error}</div>;
   if (!manifest || (isGroup && !routes))
