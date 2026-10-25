@@ -31,21 +31,40 @@ export interface Edge {
   readonly faces: number[];
 }
 
-/** A closed loop of crease edges whose vertices lie on one circle. */
+/**
+ * A closed loop of crease edges whose vertices lie on one circle, seen along `normal`: a round
+ * edge, or the six corners of a hex bore.
+ */
 export interface CircleLoop {
+  /** On a cross hole's rim, the rim point farthest out of the part. */
   readonly center: Vec3;
   readonly normal: Vec3;
+  /** Circle radius; through the corners for a hex. */
   readonly radius: number;
+  readonly outline: "round" | "hex";
+  /** False for a cross hole's rim, which rises and falls with the round surface it enters. */
+  readonly planar: boolean;
   readonly edgeKeys: ReadonlySet<number>;
-  /** Outward normal of the flat face around a hole opening; null when the loop is not an opening. */
+  /** Outward normal of the surface around a hole opening; null when the loop is not an opening. */
   readonly openingNormal: Vec3 | null;
+  /** The wall past the opening is a cone (a chamfer or countersink), not the hole itself. */
+  readonly conical: boolean;
+  /**
+   * When the loop edges an outside cylinder (a shaft journal, groove floor, or the bar itself),
+   * the side of the loop that cylinder runs to along `normal`: 1 or -1. Otherwise 0.
+   */
+  readonly shaftSide: number;
 }
 
 export interface Hole {
   readonly id: string;
+  /** Across flats for a hex bore. */
   readonly diameter: number;
+  readonly hex: boolean;
   /** Null means the hole runs through the part. */
   readonly depth: number | null;
+  /** Countersink at the entry, when the entry cone is more than an edge break. */
+  readonly countersink: { readonly diameter: number; readonly angle: number } | null;
   readonly entry: Vec3;
   /** Direction the drill travels, into the material. */
   readonly direction: Vec3;
@@ -54,10 +73,35 @@ export interface Hole {
 export interface HoleGroup {
   readonly key: string;
   readonly diameter: number;
+  readonly hex: boolean;
   readonly depth: number | null;
+  readonly countersink: Hole["countersink"];
   readonly holes: readonly Hole[];
   /** Two opposite axial holes on a turned part. */
   readonly bothEnds: boolean;
+}
+
+/**
+ * A section of a shaft turned smaller than the bar: a journal at an end, or a groove or neck
+ * between shoulders. `start` and `end` run along u from the frame's low end.
+ */
+export interface ShaftStep {
+  readonly diameter: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Features the mesh shows but the analysis cannot dimension. Sheets print them as warnings. */
+export interface Unresolved {
+  /** Hole openings whose bottom or exit was not found, by diameter. */
+  readonly holes: readonly { readonly diameter: number; readonly count: number }[];
+  /** Closed edges on a shaft's round surface that are not plain holes, usually cross holes. */
+  readonly crossFeatures: number;
+  /**
+   * A round shaft holds less metal than its bar, steps, and holes account for: tapers, fillets,
+   * splines, or other sections the drawing does not dimension.
+   */
+  readonly profile: boolean;
 }
 
 /** The drawing frame: u is the longest extent, w the smallest, (u, v, w) right-handed. */
@@ -73,6 +117,13 @@ export interface PartFrame {
 
 export type Shape =
   | { readonly kind: "turned"; readonly diameter: number; readonly length: number }
+  /** Round tube along u, sold by OD and wall. */
+  | {
+      readonly kind: "roundTube";
+      readonly diameter: number;
+      readonly wall: number;
+      readonly length: number;
+    }
   /** Hex shaft along u; `flats` is the across-flats size the stock is sold by. */
   | { readonly kind: "hex"; readonly flats: number; readonly length: number }
   | { readonly kind: "plate"; readonly thickness: number }
@@ -89,6 +140,9 @@ export interface PartAnalysis {
   readonly frame: PartFrame;
   readonly shape: Shape;
   readonly holes: readonly HoleGroup[];
+  /** Turned-down sections; empty unless the part is a shaft. */
+  readonly steps: readonly ShaftStep[];
+  readonly unresolved: Unresolved;
   readonly triangleCount: number;
   readonly edges: readonly Edge[];
   readonly faceNormals: Float64Array;
@@ -184,44 +238,8 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
     }
   }
 
-  // Bounding box in part axes. Onshape parts are almost always modeled square to their axes.
-  const min: [number, number, number] = [Infinity, Infinity, Infinity];
-  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < vertexCount; i++) {
-    for (let k = 0; k < 3; k++) {
-      min[k] = Math.min(min[k]!, positions[i * 3 + k]!);
-      max[k] = Math.max(max[k]!, positions[i * 3 + k]!);
-    }
-  }
-  const extents = [0, 1, 2].map((k) => max[k]! - min[k]!);
-  const order = [0, 1, 2].sort((a, b) => extents[b]! - extents[a]!);
-  const axis = (k: number): Vec3 => [k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0];
-  const u = axis(order[0]!);
-  const v = axis(order[1]!);
-  const w = cross(u, v);
-  const corners = [min, max] as const;
-  const project = (n: Vec3) => {
-    const values = corners.flatMap((x) =>
-      corners.flatMap((y) => corners.map((z) => dot([x[0], y[1], z[2]], n))),
-    );
-    return [Math.min(...values), Math.max(...values)] as const;
-  };
-  const [u0, u1] = project(u);
-  const [v0, v1] = project(v);
-  const [w0, w1] = project(w);
-  const frame: PartFrame = {
-    u,
-    v,
-    w,
-    min: [u0, v0, w0],
-    max: [u1, v1, w1],
-    size: [u1 - u0, v1 - v0, w1 - w0],
-  };
-  const diag = Math.hypot(...frame.size);
-
-  const shape = classifyShape(positions, triangles, frame);
-  // Hole rims meet their face at about 90°. Coarse holes have only 6-8 facets, so the
-  // facet seams are creases too; following only sharp edges keeps the rim a simple loop.
+  // Hole rims meet their face at about 90°. Coarse holes have few facets, so the facet
+  // seams are creases too; following only sharp edges keeps the rim a simple loop.
   const rimKeys = new Set(
     [...creaseKeys].filter((key) => {
       const edge = edgeMap.get(key)!;
@@ -231,12 +249,19 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
       );
     }),
   );
-  // Shallower rims (a drill point meeting its hole wall) only show up in the plain crease pass.
+  // Shallower rims (a drill point meeting its hole wall, a cross hole's rim at the sides of the
+  // shaft) only show up in the plain crease pass.
+  const rimPass = findCircles(positions, triangles, edgeMap, rimKeys, faceNormal, vertexCount);
+  const creasePass = findCircles(
+    positions,
+    triangles,
+    edgeMap,
+    creaseKeys,
+    faceNormal,
+    vertexCount,
+  );
   const circles: CircleLoop[] = [];
-  for (const loop of [
-    ...findCircles(positions, triangles, edgeMap, rimKeys, faceNormal, vertexCount),
-    ...findCircles(positions, triangles, edgeMap, creaseKeys, faceNormal, vertexCount),
-  ]) {
+  for (const loop of [...rimPass.loops, ...creasePass.loops]) {
     const duplicate = circles.some(
       (other) =>
         Math.abs(other.radius - loop.radius) < loop.radius * 0.005 &&
@@ -244,12 +269,61 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
     );
     if (!duplicate) circles.push(loop);
   }
-  const holes = groupHoles(findHoles(circles, frame, diag), shape, frame);
+
+  let frame = partFrame(positions, triangles);
+  const diag = Math.hypot(...frame.size);
+  const shape = classifyShape(positions, triangles, frame, circles);
+  const found = findHoles(circles, frame, diag, positions, triangles);
+  let holes = found.holes;
+  if (shape.kind === "roundTube") {
+    // The bore is the tube's inside, not a hole to drill.
+    const bore = shape.diameter - 2 * shape.wall;
+    holes = holes.filter(
+      (hole) =>
+        !(
+          hole.depth === null &&
+          isAlong(hole.direction, frame.u) &&
+          Math.abs(hole.diameter - bore) < bore * 0.005
+        ),
+    );
+  }
+  // Round stock looks the same from every side, so turn the frame to look straight down its
+  // first cross hole.
+  const crossHole = holes.find((hole) => Math.abs(dot(hole.direction, frame.u)) < 0.001);
+  if ((shape.kind === "turned" || shape.kind === "roundTube") && crossHole) {
+    frame = boxFrame(
+      positions,
+      frame.u,
+      snapToAxis(normalize(cross(crossHole.direction, frame.u))),
+    );
+  }
+  const lost = new Map<string, { diameter: number; count: number }>();
+  for (const hole of found.lost) {
+    const key = (hole.diameter / METERS_PER_INCH).toFixed(3);
+    lost.set(key, { diameter: hole.diameter, count: (lost.get(key)?.count ?? 0) + 1 });
+  }
+  // Closed edges that wander off a plane on round stock are cross holes or flats the hole
+  // finder could not read. Both passes can find the same one.
+  const strays: Vec3[] = [];
+  for (const loop of [
+    ...rimPass.nonPlanar,
+    ...creasePass.nonPlanar,
+    ...circles.filter((loop) => !loop.planar && !found.rims.has(loop)).map((loop) => loop.center),
+  ]) {
+    if (!strays.some((other) => length(sub(other, loop)) < diag * 1e-3)) strays.push(loop);
+  }
+  const steps = isShaft(shape) ? shaftSteps(circles, frame, shape) : [];
   return {
     mesh,
     frame,
     shape,
-    holes,
+    holes: groupHoles(holes, shape, frame),
+    steps,
+    unresolved: {
+      holes: [...lost.values()],
+      crossFeatures: isShaft(shape) ? strays.length : 0,
+      profile: profileUnexplained(shape, steps, holes, frame, meshVolume(positions, triangles)),
+    },
     triangleCount: faceCount,
     edges: [...edgeMap.values()],
     faceNormals,
@@ -259,22 +333,196 @@ export const analyzePart = (mesh: PartMesh): PartAnalysis => {
   };
 };
 
+const AXES = {
+  x: [1, 0, 0],
+  y: [0, 1, 0],
+  z: [0, 0, 1],
+} as const satisfies Record<string, Vec3>;
+
+/** The box around every vertex on axes u, v, and w = u × v. */
+const boxFrame = (positions: Float64Array, u: Vec3, v: Vec3): PartFrame => {
+  const w = cross(u, v);
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length / 3; i++) {
+    const p = point(positions, i);
+    const values = [dot(p, u), dot(p, v), dot(p, w)];
+    for (let k = 0; k < 3; k++) {
+      min[k] = Math.min(min[k]!, values[k]!);
+      max[k] = Math.max(max[k]!, values[k]!);
+    }
+  }
+  return { u, v, w, min, max, size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]] };
+};
+
+/** The box on two square directions, reordered so u is the longest extent and w the smallest. */
+const sortedFrame = (positions: Float64Array, a: Vec3, b: Vec3): PartFrame => {
+  const box = boxFrame(positions, a, b);
+  const axes = [box.u, box.v, box.w];
+  const order = [0, 1, 2].sort((i, j) => box.size[j]! - box.size[i]!);
+  return boxFrame(positions, axes[order[0]!]!, axes[order[1]!]!);
+};
+
+const isPartAxis = (n: Vec3) =>
+  Object.values(AXES).some((axis) => Math.abs(dot(axis, n)) > 1 - 1e-6);
+
+/** A unit direction within float noise of a part axis becomes that axis exactly. */
+const snapToAxis = (n: Vec3): Vec3 =>
+  isPartAxis(n) ? [Math.round(n[0]), Math.round(n[1]), Math.round(n[2])] : n;
+
+/**
+ * The drawing frame. Most parts are modeled square to their own axes. One modeled at an angle
+ * (a tube laid on a diagonal) is boxed along the normals of its largest flat faces instead,
+ * when that box is smaller. Cylinder facets are narrow strips, so they never lead.
+ */
+const partFrame = (positions: Float64Array, triangles: Uint32Array): PartFrame => {
+  const axes = sortedFrame(positions, AXES.x, AXES.y);
+  // Flat area per normal direction; opposite faces share a direction.
+  const bins = new Map<string, { area: number; sum: Vec3 }>();
+  let total = 0;
+  for (let t = 0; t < triangles.length; t += 3) {
+    const a = point(positions, triangles[t]!);
+    const n = cross(
+      sub(point(positions, triangles[t + 1]!), a),
+      sub(point(positions, triangles[t + 2]!), a),
+    );
+    const area = length(n) / 2;
+    if (area === 0) continue;
+    total += area;
+    const lead = [0, 1, 2].reduce((best, k) => (Math.abs(n[k]!) > Math.abs(n[best]!) ? k : best));
+    const unit = scale(n, (n[lead]! < 0 ? -1 : 1) / (2 * area));
+    const key = unit.map((x) => Math.round(x * 1000)).join(",");
+    const bin = bins.get(key) ?? { area: 0, sum: [0, 0, 0] };
+    bins.set(key, { area: bin.area + area, sum: add(bin.sum, scale(unit, area)) });
+  }
+  const ranked = [...bins.values()].sort((p, q) => q.area - p.area);
+  const first = ranked[0];
+  if (!first || first.area < total * 0.1) return axes;
+  const a = snapToAxis(normalize(first.sum));
+  // Side faces square to the first. One along a part axis keeps the part square to its axes.
+  // Otherwise a side counts when it is large (a tube's side) or has a side square to it (a
+  // rectangle's edges); angled edges in mirrored pairs are styling, not the part's axes.
+  const square = ranked
+    .map((bin) => ({ n: normalize(bin.sum), area: bin.area }))
+    .filter((side) => side.area >= total * 0.02 && Math.abs(dot(side.n, a)) < 0.002);
+  const second =
+    square.find((side) => isPartAxis(side.n)) ??
+    square.find(
+      (side) =>
+        side.area >= total * 0.1 || square.some((other) => Math.abs(dot(other.n, side.n)) < 0.002),
+    );
+  // With one flat direction (a disc, a turned part), keep the part axis most square to it.
+  const seed =
+    second?.n ??
+    Object.values(AXES).reduce((best, axis) =>
+      Math.abs(dot(axis, a)) < Math.abs(dot(best, a)) ? axis : best,
+    );
+  const b = snapToAxis(normalize(sub(seed, scale(a, dot(seed, a)))));
+  const candidate = sortedFrame(positions, a, b);
+  const volume = (frame: PartFrame) => frame.size[0] * frame.size[1] * frame.size[2];
+  return volume(candidate) < volume(axes) * 0.995 ? candidate : axes;
+};
+
+/** Enclosed volume of a closed mesh. */
+const meshVolume = (positions: Float64Array, triangles: Uint32Array) => {
+  let volume = 0;
+  for (let t = 0; t < triangles.length; t += 3) {
+    const a = point(positions, triangles[t]!);
+    volume +=
+      dot(a, cross(point(positions, triangles[t + 1]!), point(positions, triangles[t + 2]!))) / 6;
+  }
+  return Math.abs(volume);
+};
+
+/**
+ * True when a round shaft is missing more than 5% of the metal its bar, steps, and holes leave:
+ * its outline has sections the drawing does not dimension.
+ */
+const profileUnexplained = (
+  shape: Shape,
+  steps: readonly ShaftStep[],
+  holes: readonly Hole[],
+  frame: PartFrame,
+  volume: number,
+) => {
+  if (shape.kind !== "turned" && shape.kind !== "roundTube") return false;
+  const area = (diameter: number) => (Math.PI * diameter * diameter) / 4;
+  const bar =
+    area(shape.diameter) * shape.length -
+    (shape.kind === "roundTube" ? area(shape.diameter - 2 * shape.wall) * shape.length : 0);
+  const expected =
+    bar -
+    steps.reduce(
+      (sum, step) => sum + (area(shape.diameter) - area(step.diameter)) * (step.end - step.start),
+      0,
+    ) -
+    holes.reduce((sum, hole) => {
+      // Cross holes run at most across the bar.
+      const reach = isAlong(hole.direction, frame.u) ? shape.length : shape.diameter;
+      const face = hole.hex ? (Math.sqrt(3) / 2) * hole.diameter ** 2 : area(hole.diameter);
+      return sum + face * (hole.depth ?? reach);
+    }, 0);
+  return volume < expected - bar * 0.05;
+};
+
 const classifyShape = (
   positions: Float64Array,
   triangles: Uint32Array,
   frame: PartFrame,
+  circles: readonly CircleLoop[],
 ): Shape => {
   const [su, sv, sw] = frame.size;
-  // Turned about u: square cross-section in (v, w) and no vertex outside the inscribed circle.
-  const cv = (frame.min[1] + frame.max[1]) / 2;
-  const cw = (frame.min[2] + frame.max[2]) / 2;
-  let maxRadius = 0;
-  for (let i = 0; i < positions.length / 3; i++) {
-    const p = point(positions, i);
-    maxRadius = Math.max(maxRadius, Math.hypot(dot(p, frame.v) - cv, dot(p, frame.w) - cw));
-  }
-  if (Math.abs(sv - sw) / sv < 0.01 && Math.abs(2 * maxRadius - sv) / sv < 0.01) {
-    return { kind: "turned", diameter: 2 * maxRadius, length: su };
+  const volume = meshVolume(positions, triangles);
+  // Turned about u: square cross-section in (v, w) and no vertex outside the OD. The largest
+  // circle square to u is the OD; its fitted centre and radius are exact, where the box
+  // midpoint and corner vertices are off by the facets.
+  const ends = circles.filter(
+    (loop) => loop.outline === "round" && loop.planar && isAlong(loop.normal, frame.u),
+  );
+  const od = ends.reduce<CircleLoop | null>(
+    (best, loop) => (!best || loop.radius > best.radius ? loop : best),
+    null,
+  );
+  const fromAxis = (p: Vec3, center: Vec3) => {
+    const d = sub(p, center);
+    return length(sub(d, scale(frame.u, dot(d, frame.u))));
+  };
+  const boxCenter = add(
+    scale(frame.v, (frame.min[1] + frame.max[1]) / 2),
+    scale(frame.w, (frame.min[2] + frame.max[2]) / 2),
+  );
+  const farthest = (center: Vec3) => {
+    let radius = 0;
+    for (let i = 0; i < positions.length / 3; i++) {
+      radius = Math.max(radius, fromAxis(point(positions, i), center));
+    }
+    return radius;
+  };
+  // Without an OD loop that holds every vertex, fall back to the farthest vertex from the box.
+  const fitted = od && farthest(od.center) < od.radius * 1.002 ? od : null;
+  const center = fitted?.center ?? boxCenter;
+  const radius = fitted?.radius ?? farthest(boxCenter);
+  if (Math.abs(sv - sw) / sv < 0.01 && Math.abs(2 * radius - sv) / sv < 0.01) {
+    // Mostly empty inside its OD, and the material is all wall around a bore down the axis:
+    // round tube, sold by OD and wall. A turned-down or splined shaft is light too, but its
+    // volume does not match a wall.
+    const bore = ends
+      .filter(
+        (loop) =>
+          loop.openingNormal !== null &&
+          loop.radius < radius * 0.98 &&
+          fromAxis(loop.center, center) < radius * 0.01,
+      )
+      .reduce((largest, loop) => Math.max(largest, loop.radius), 0);
+    const wall = Math.PI * (radius * radius - bore * bore) * su;
+    if (
+      bore > 0 &&
+      volume < 0.6 * Math.PI * radius * radius * su &&
+      Math.abs(volume - wall) < wall * 0.1
+    ) {
+      return { kind: "roundTube", diameter: 2 * radius, wall: radius - bore, length: su };
+    }
+    return { kind: "turned", diameter: 2 * radius, length: su };
   }
   // Hex shaft along u: the side area concentrates on six flats 60° apart. Rounded hex leaves a
   // good share on its corners, so the flats need half the side area and all six must be present
@@ -308,13 +556,7 @@ const classifyShape = (
   // A disc is turned about w instead; draw it as a plate with a round outline.
   if (sw < 0.5 * METERS_PER_INCH && sw / sv < 0.25) return { kind: "plate", thickness: sw };
   // Box tube: long, and mostly empty inside its bounding box.
-  let volume = 0;
-  for (let t = 0; t < triangles.length; t += 3) {
-    const a = point(positions, triangles[t]!);
-    volume +=
-      dot(a, cross(point(positions, triangles[t + 1]!), point(positions, triangles[t + 2]!))) / 6;
-  }
-  if (su / sv > 3 && sv > 0.4 * METERS_PER_INCH && Math.abs(volume) / (su * sv * sw) < 0.6) {
+  if (su / sv > 3 && sv > 0.4 * METERS_PER_INCH && volume / (su * sv * sw) < 0.6) {
     return { kind: "tube", width: sv, height: sw, length: su };
   }
   return { kind: "block" };
@@ -327,7 +569,7 @@ const findCircles = (
   creaseKeys: ReadonlySet<number>,
   faceNormal: (f: number) => Vec3,
   vertexCount: number,
-): CircleLoop[] => {
+): { loops: CircleLoop[]; nonPlanar: Vec3[] } => {
   // Crease edges only, walked as chains through degree-two vertices.
   const neighbors = new Map<number, number[]>();
   for (const key of creaseKeys) {
@@ -337,6 +579,8 @@ const findCircles = (
   }
   const visited = new Set<number>();
   const loops: CircleLoop[] = [];
+  // Centroids of closed loops that leave their plane and are not a hole rim.
+  const nonPlanar: Vec3[] = [];
   const keyOf = (p: number, q: number) => Math.min(p, q) * vertexCount + Math.max(p, q);
   for (const start of neighbors.keys()) {
     if (visited.has(start) || neighbors.get(start)!.length !== 2) continue;
@@ -377,37 +621,121 @@ const findCircles = (
     const fit = fitCircle(points, centroid, normal);
     if (!fit) continue;
     const { center, radius } = fit;
-    const radii = points.map((p) => length(sub(p, center)));
-    const flat = points.every((p) => Math.abs(dot(sub(p, center), normal)) < radius * 0.002);
+    // Distances are measured in the loop's plane: a cross hole's rim rises and falls with the
+    // shaft it enters, but still lies on the hole's cylinder.
+    const inPlane = (p: Vec3) => {
+      const d = sub(p, center);
+      return sub(d, scale(normal, dot(d, normal)));
+    };
+    const rise = Math.max(...points.map((p) => Math.abs(dot(sub(p, center), normal))));
+    const planar = rise < radius * 0.002;
+    const onCircle = points.every((p) => Math.abs(length(inPlane(p)) - radius) < radius * 0.005);
     // Evenly spaced points too: a rounded hex end has every point on one circle, but its flats
     // are long chords between short arc segments.
     const segments = points
       .map((p, k) => length(sub(points[(k + 1) % points.length]!, p)))
       .sort((a, b) => a - b);
     const even = segments.at(-1)! <= 2.5 * segments[Math.floor(segments.length / 2)]!;
-    const round = even && radii.every((r) => Math.abs(r - radius) < radius * 0.005);
-    if (!flat || !round) continue;
+    // A polygon is not a tessellated circle: six or fewer sides, or chords that stray more than
+    // .01" from the arc. Every six-vertex loop in the FRC parts seen so far is a hex bore; real
+    // round edges have 29 or more vertices.
+    const span = 2 * Math.asin(Math.min(1, segments.at(-1)! / (2 * radius)));
+    const polygon =
+      span > (55 * Math.PI) / 180 ||
+      (span > (31 * Math.PI) / 180 && radius * (1 - Math.cos(span / 2)) > 0.01 * METERS_PER_INCH);
+    const hex = planar && onCircle && chain.length === 6 && segments.at(-1)! < segments[0]! * 1.02;
+    const round = onCircle && even && !polygon;
+    if ((!hex && !round) || (!planar && rise > radius)) {
+      if (!planar) nonPlanar.push(centroid);
+      continue;
+    }
+    const apothem = hex ? radius * Math.cos(Math.PI / 6) : radius;
     const edgeKeys = new Set(chain.map((p, i) => keyOf(p, chain[(i + 1) % chain.length]!)));
-    // An opening has a flat face, square to the loop, lying outside the circle.
-    let openingNormal: Vec3 | null = null;
+    // Read the two faces along each loop edge. An opening has the outside surface on one side,
+    // square to the axis (flat, or the round surface a cross hole enters) and outside the loop,
+    // and the hole wall on the other, facing the axis. A shaft shoulder or groove floor has the
+    // same flat face, but its wall is an outside cylinder facing away from the axis.
+    let openings = 0;
+    let outward: Vec3 | null = null;
+    let slope = 0;
+    let shaftEdges = 0;
+    let shaftSide = 0;
     for (const key of edgeKeys) {
       const edge = edgeMap.get(key)!;
-      for (const f of edge.faces) {
+      if (edge.faces.length !== 2) continue;
+      const radial = normalize(
+        inPlane(scale(add(point(positions, edge.a), point(positions, edge.b)), 0.5)),
+      );
+      const readFace = (f: number): FaceSide => {
         const n = faceNormal(f);
-        if (Math.abs(dot(n, normal)) < 0.999) continue;
         const opposite = [0, 1, 2]
           .map((k) => triangles[f * 3 + k]!)
           .find((vertex) => vertex !== edge.a && vertex !== edge.b)!;
-        const offset = sub(point(positions, opposite), center);
-        const radial = length(sub(offset, scale(normal, dot(offset, normal))));
-        if (radial > radius * 1.001) openingNormal = n;
+        const offset = inPlane(point(positions, opposite));
+        return {
+          n,
+          axial: dot(n, normal),
+          facing: dot(n, radial),
+          along: dot(sub(point(positions, opposite), center), normal),
+          outside: hex ? dot(offset, radial) > apothem * 1.001 : length(offset) > radius * 1.001,
+        };
+      };
+      const first = readFace(edge.faces[0]!);
+      const second = readFace(edge.faces[1]!);
+      for (const [surface, wall] of [
+        [first, second],
+        [second, first],
+      ] as const) {
+        if (
+          Math.abs(surface.axial) >= (planar ? 0.999 : 0.5) &&
+          surface.outside &&
+          wall.facing < -0.05
+        ) {
+          openings++;
+          slope += Math.abs(wall.axial);
+          outward ??= planar ? surface.n : scale(normal, Math.sign(surface.axial));
+          break;
+        }
       }
-      if (openingNormal) break;
+      const cylinder = [first, second].find((side) => side.facing > 0.95);
+      if (cylinder) {
+        shaftEdges++;
+        shaftSide += Math.sign(cylinder.along);
+      }
     }
-    loops.push({ center, normal, radius, edgeKeys, openingNormal });
+    const openingNormal = openings * 2 >= edgeKeys.size ? outward : null;
+    // A cross hole is measured from the rim point farthest out, where the drill first touches.
+    const top =
+      openingNormal && !planar
+        ? Math.max(...points.map((p) => dot(sub(p, center), openingNormal)))
+        : 0;
+    loops.push({
+      center: openingNormal ? add(center, scale(openingNormal, top)) : center,
+      normal,
+      radius,
+      outline: hex ? "hex" : "round",
+      planar,
+      edgeKeys,
+      openingNormal,
+      conical: openingNormal !== null && slope / openings > 0.2,
+      shaftSide: shaftEdges * 2 >= edgeKeys.size ? Math.sign(shaftSide) : 0,
+    });
   }
-  return loops;
+  return { loops, nonPlanar };
 };
+
+/** One face beside a loop edge, read against the loop's axis. */
+interface FaceSide {
+  readonly n: Vec3;
+  /** Normal along the loop axis. */
+  readonly axial: number;
+  /** Normal along the outward radius at the edge: below zero faces the axis. */
+  readonly facing: number;
+  /** Where the face's third vertex sits along the loop axis. */
+  readonly along: number;
+  /** The face's third vertex lies outside the loop. */
+  readonly outside: boolean;
+}
 
 /** Least-squares (Kasa) circle fit in the loop's plane. */
 const fitCircle = (points: readonly Vec3[], origin: Vec3, normal: Vec3) => {
@@ -445,42 +773,142 @@ const fitCircle = (points: readonly Vec3[], origin: Vec3, normal: Vec3) => {
   return { center: add(origin, add(scale(ex, cx), scale(ey, cy))), radius };
 };
 
-const findHoles = (circles: readonly CircleLoop[], frame: PartFrame, diag: number): Hole[] => {
-  const holes: Hole[] = [];
-  const used = new Set<CircleLoop>();
-  for (const entry of circles) {
-    if (!entry.openingNormal || used.has(entry)) continue;
-    const direction = scale(entry.openingNormal, -1);
-    // The nearest loop of the same radius on the same axis, inside the material, ends the hole.
+/** Edge breaks up to this radial size are left to the deburr note; larger cones are countersinks. */
+const COUNTERSINK_MIN = 0.04 * METERS_PER_INCH;
+
+/** True when a ray from `origin` along `direction` leaves the part without touching a face. */
+const rayLeaves = (
+  positions: Float64Array,
+  triangles: Uint32Array,
+  origin: Vec3,
+  direction: Vec3,
+) => {
+  // Möller-Trumbore against every triangle; only openings with no loop at their far end get here.
+  for (let t = 0; t < triangles.length; t += 3) {
+    const a = point(positions, triangles[t]!);
+    const ab = sub(point(positions, triangles[t + 1]!), a);
+    const ac = sub(point(positions, triangles[t + 2]!), a);
+    const p = cross(direction, ac);
+    const det = dot(ab, p);
+    if (Math.abs(det) < 1e-18) continue;
+    const s = sub(origin, a);
+    const bu = dot(s, p) / det;
+    if (bu < 0 || bu > 1) continue;
+    const q = cross(s, ab);
+    const bv = dot(direction, q) / det;
+    if (bv < 0 || bu + bv > 1) continue;
+    if (dot(ac, q) / det > 0) return false;
+  }
+  return true;
+};
+
+/**
+ * Holes from opening loops. A hole runs from its opening to the nearest loop of its size on its
+ * axis: another opening (through), or its bottom (blind). With no such loop, a hole is through
+ * only if its axis leaves the part untouched; otherwise it is `lost`, not guessed. `rims` holds
+ * every loop a hole used.
+ */
+const findHoles = (
+  circles: readonly CircleLoop[],
+  frame: PartFrame,
+  diag: number,
+  positions: Float64Array,
+  triangles: Uint32Array,
+) => {
+  const found: Hole[] = [];
+  const lost: Hole[] = [];
+  const rims = new Set<CircleLoop>();
+  // Distance from one loop to another along `direction`, when both sit on one axis.
+  const along = (from: CircleLoop, to: CircleLoop, direction: Vec3) => {
+    const offset = sub(to.center, from.center);
+    const distance = dot(offset, direction);
+    const off = length(sub(offset, scale(direction, distance)));
+    return off < Math.min(from.radius, to.radius) * 0.01 ? distance : null;
+  };
+  // Past a chamfer or countersink cone, the hole proper starts at the next smaller loop.
+  const innerOf = new Map<CircleLoop, CircleLoop>();
+  for (const loop of circles) {
+    if (!loop.openingNormal || !loop.conical) continue;
+    const direction = scale(loop.openingNormal, -1);
     let best: { loop: CircleLoop; distance: number } | null = null;
     for (const other of circles) {
-      if (other === entry || Math.abs(other.radius - entry.radius) > entry.radius * 0.005) continue;
-      const offset = sub(other.center, entry.center);
-      const along = dot(offset, direction);
-      const off = length(sub(offset, scale(direction, along)));
-      if (along <= diag * 1e-4 || off > entry.radius * 0.01) continue;
-      if (!best || along < best.distance) best = { loop: other, distance: along };
+      if (other.outline !== loop.outline || other.radius > loop.radius * 0.995) continue;
+      const distance = along(loop, other, direction);
+      if (distance === null || distance <= diag * 1e-4 || distance > loop.radius * 2) continue;
+      if (!best || distance < best.distance) best = { loop: other, distance };
     }
-    used.add(entry);
-    const through = best?.loop.openingNormal != null;
-    if (best && through) used.add(best.loop);
-    holes.push({
-      id: `${holes.length}`,
-      diameter: entry.radius * 2,
-      depth: through ? null : (best?.distance ?? null),
+    if (best) innerOf.set(loop, best.loop);
+  }
+  const outerOf = new Map([...innerOf].map(([outer, inner]) => [inner, outer]));
+  // Coned openings go first, so a countersunk hole is entered from its countersink.
+  for (const entry of [...circles].sort((a, b) => Number(b.conical) - Number(a.conical))) {
+    if (!entry.openingNormal || rims.has(entry)) continue;
+    const direction = scale(entry.openingNormal, -1);
+    const rim = entry.conical ? innerOf.get(entry) : entry;
+    const start = rim && rim !== entry ? along(entry, rim, direction)! : 0;
+    const size = rim ?? entry;
+    const hole: Hole = {
+      id: `${found.length + lost.length}`,
+      diameter: 2 * size.radius * (size.outline === "hex" ? Math.cos(Math.PI / 6) : 1),
+      hex: size.outline === "hex",
+      depth: null,
+      countersink:
+        rim && entry.radius - rim.radius > COUNTERSINK_MIN
+          ? {
+              diameter: entry.radius * 2,
+              angle: (2 * Math.atan((entry.radius - rim.radius) / start) * 180) / Math.PI,
+            }
+          : null,
       entry: entry.center,
       direction,
-    });
+    };
+    rims.add(entry);
+    if (!rim) {
+      lost.push(hole);
+      continue;
+    }
+    rims.add(rim);
+    let best: { loop: CircleLoop; distance: number } | null = null;
+    for (const other of circles) {
+      if (
+        other === entry ||
+        other === rim ||
+        other.outline !== rim.outline ||
+        Math.abs(other.radius - rim.radius) > rim.radius * 0.005
+      )
+        continue;
+      const distance = along(entry, other, direction);
+      if (distance === null || distance <= start + diag * 1e-4) continue;
+      if (!best || distance < best.distance) best = { loop: other, distance };
+    }
+    if (!best) {
+      // Start just inside the rim so faces in the opening's own plane do not count.
+      const origin = add(rim.center, scale(direction, diag * 1e-4));
+      if (rayLeaves(positions, triangles, origin, direction)) found.push(hole);
+      else lost.push(hole);
+      continue;
+    }
+    // A through hole leaves by an opening facing on, or by the inside of its chamfer. An opening
+    // facing back means the hole already broke into a void (a bore it crosses) whose edge was
+    // not found; that opening starts the next stretch, so it stays free.
+    const leaving = (loop: CircleLoop | undefined) =>
+      loop?.openingNormal && dot(loop.openingNormal, direction) > 0 ? loop : null;
+    const exit = leaving(best.loop) ?? leaving(outerOf.get(best.loop));
+    const brokeOut = best.loop.openingNormal && dot(best.loop.openingNormal, direction) < 0;
+    if (exit) rims.add(exit);
+    if (!brokeOut) rims.add(best.loop);
+    found.push({ ...hole, depth: exit || brokeOut ? null : best.distance });
   }
   // Ignore openings that are really the part outline (a turned part's end faces are not holes).
-  const real = holes.filter((hole) => hole.diameter < Math.max(...frame.size) * 0.98);
+  const real = (hole: Hole) => hole.diameter < Math.max(...frame.size) * 0.98;
   // Through holes on one axis (both walls of a tube) are one drilling operation.
   const merged: Hole[] = [];
-  for (const hole of real) {
+  for (const hole of found.filter(real)) {
     const twin = merged.find((other) => {
       if (
         other.depth !== null ||
         hole.depth !== null ||
+        other.hex !== hole.hex ||
         Math.abs(other.diameter - hole.diameter) > hole.diameter * 0.005
       )
         return false;
@@ -494,28 +922,86 @@ const findHoles = (circles: readonly CircleLoop[], frame: PartFrame, diag: numbe
     if (!twin) merged.push(hole);
     // Keep the entry nearest the viewer side of the frame so the callout points at the outer wall.
     else if (dot(hole.entry, hole.direction) < dot(twin.entry, twin.direction))
-      merged[merged.indexOf(twin)] = hole;
+      merged[merged.indexOf(twin)] = { ...hole, countersink: hole.countersink ?? twin.countersink };
   }
-  return merged;
+  return { holes: merged, lost: lost.filter(real), rims };
 };
 
 const groupHoles = (holes: readonly Hole[], shape: Shape, frame: PartFrame): HoleGroup[] => {
   const groups = new Map<string, Hole[]>();
+  const inches = (meters: number) => (meters / METERS_PER_INCH).toFixed(3);
   for (const hole of holes) {
-    const key = `${(hole.diameter / METERS_PER_INCH).toFixed(3)}|${hole.depth === null ? "thru" : (hole.depth / METERS_PER_INCH).toFixed(3)}`;
+    const sink = hole.countersink
+      ? `|csk${inches(hole.countersink.diameter)}x${hole.countersink.angle.toFixed(0)}`
+      : "";
+    const key = `${hole.hex ? "hex" : ""}${inches(hole.diameter)}|${hole.depth === null ? "thru" : inches(hole.depth)}${sink}`;
     groups.set(key, [...(groups.get(key) ?? []), hole]);
   }
   return [...groups].map(([key, members]) => ({
     key,
     diameter: members[0]!.diameter,
+    hex: members[0]!.hex,
     depth: members[0]!.depth,
+    countersink: members[0]!.countersink,
     holes: members,
     bothEnds:
-      (shape.kind === "turned" || shape.kind === "hex") &&
+      isShaft(shape) &&
       members.length === 2 &&
       dot(members[0]!.direction, members[1]!.direction) < -0.999 &&
       Math.abs(dot(members[0]!.direction, frame.u)) > 0.999,
   }));
+};
+
+/** Section ends this close to the bar's end are a chamfer's width away: snap them to the end. */
+const STEP_SNAP = 0.035 * METERS_PER_INCH;
+
+/**
+ * Turned-down sections of a shaft. Each runs from a loop whose outside cylinder heads up u to
+ * the next loop of the same size heading back.
+ */
+const shaftSteps = (
+  circles: readonly CircleLoop[],
+  frame: PartFrame,
+  shape: Extract<Shape, { kind: "turned" | "hex" | "roundTube" }>,
+): ShaftStep[] => {
+  // Round sections on hex stock can be as large as the flats; on round stock, under the OD.
+  const limit = shape.kind === "hex" ? frame.size[1] / 2 : shape.diameter / 2;
+  const cv = (frame.min[1] + frame.max[1]) / 2;
+  const cw = (frame.min[2] + frame.max[2]) / 2;
+  const edges = circles
+    .filter(
+      (loop) =>
+        loop.outline === "round" &&
+        loop.planar &&
+        loop.shaftSide !== 0 &&
+        isAlong(loop.normal, frame.u) &&
+        loop.radius < limit * 0.995 &&
+        Math.hypot(dot(loop.center, frame.v) - cv, dot(loop.center, frame.w) - cw) <
+          loop.radius * 0.02,
+    )
+    .map((loop) => ({
+      radius: loop.radius,
+      at: dot(loop.center, frame.u) - frame.min[0],
+      heads: loop.shaftSide * Math.sign(dot(loop.normal, frame.u)),
+    }))
+    .sort((a, b) => a.at - b.at);
+  const steps: ShaftStep[] = [];
+  for (const edge of edges) {
+    if (edge.heads <= 0) continue;
+    const end = edges.find(
+      (other) =>
+        other.at > edge.at &&
+        other.heads < 0 &&
+        Math.abs(other.radius - edge.radius) < edge.radius * 0.005,
+    );
+    if (!end) continue;
+    steps.push({
+      diameter: 2 * edge.radius,
+      start: edge.at < STEP_SNAP ? 0 : edge.at,
+      end: frame.size[0] - end.at < STEP_SNAP ? frame.size[0] : end.at,
+    });
+  }
+  return steps;
 };
 
 // ---------------------------------------------------------------------------
@@ -623,7 +1109,9 @@ export const projectView = (part: PartAnalysis, spec: ViewSpec): DrawingView => 
       }
     }
   }
-  const epsilon = span * 0.004;
+  // Depth slack of two pixels: enough for the raster's sampling error, small enough that a
+  // tube's inner wall (.063" behind its outer face) still reads as hidden on a long tube.
+  const epsilon = 2 / pxPerInch;
   const visibleAt = (x: number, y: number, z: number) => {
     const px = Math.round(toPx(x));
     const py = Math.round(toPy(y));
@@ -639,11 +1127,13 @@ export const projectView = (part: PartAnalysis, spec: ViewSpec): DrawingView => 
     return z <= farthest + epsilon;
   };
 
-  // Circles square to the view become true circles instead of polygons.
+  // Flat circles square to the view become true circles instead of polygons. Hex bores and
+  // cross hole rims keep their edges.
   const circles: ViewCircle[] = [];
   const replaced = new Set<number>();
   for (const loop of part.circles) {
-    if (Math.abs(dot(loop.normal, spec.toward)) < 0.999) continue;
+    if (loop.outline !== "round" || !loop.planar || Math.abs(dot(loop.normal, spec.toward)) < 0.999)
+      continue;
     for (const key of loop.edgeKeys) replaced.add(key);
     const cx = dot(loop.center, spec.right) * toInch;
     const cy = dot(loop.center, spec.up) * toInch;
@@ -825,6 +1315,8 @@ export const projectPoint = (spec: ViewSpec, p: Vec3): Vec2 => [
 
 export const isAlong = (a: Vec3, b: Vec3) => Math.abs(dot(a, b)) > 0.999;
 
-/** Shafts drawn along their axis: round (turned) and hex stock. */
-export const isShaft = (shape: Shape): shape is Extract<Shape, { kind: "turned" | "hex" }> =>
-  shape.kind === "turned" || shape.kind === "hex";
+/** Shafts drawn along their axis: round (turned), hex, and round tube stock. */
+export const isShaft = (
+  shape: Shape,
+): shape is Extract<Shape, { kind: "turned" | "hex" | "roundTube" }> =>
+  shape.kind === "turned" || shape.kind === "hex" || shape.kind === "roundTube";

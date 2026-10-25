@@ -137,6 +137,9 @@ importers:
       '@cadsense/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@vercel/analytics':
+        specifier: ^2.0.1
+        version: 2.0.1(react@19.2.6)
       astro:
         specifier: ^7.0.3
         version: 7.0.3(@astrojs/markdown-remark@7.2.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@24.12.4)(aws4fetch@1.0.20)(idb-keyval@6.2.1)(ioredis@5.11.0)(jiti@2.7.0)(rollup@4.61.0)(terser@5.48.0)(typescript@6.0.3)(unrun@0.2.39)(yaml@2.9.0)
@@ -2728,6 +2731,35 @@ packages:
 
   '@ungap/structured-clone@1.3.1':
     resolution: {integrity: sha512-mUFwbeTqrVgDQxFveS+df2yfap6iuP20NAKAsBt5jDEoOTDew+zwLAOilHCeQJOVSvmgCX4ogqIrA0mnyr08yQ==}
+
+  '@vercel/analytics@2.0.1':
+    resolution: {integrity: sha512-MTQG6V9qQrt1tsDeF+2Uoo5aPjqbVPys1xvnIftXSJYG2SrwXRHnqEvVoYID7BTruDz4lCd2Z7rM1BdkUehk2g==}
+    peerDependencies:
+      '@remix-run/react': ^2
+      '@sveltejs/kit': ^1 || ^2
+      next: '>= 13'
+      nuxt: '>= 3'
+      react: ^18 || ^19 || ^19.0.0-rc
+      svelte: '>= 4'
+      vue: ^3
+      vue-router: ^4
+    peerDependenciesMeta:
+      '@remix-run/react':
+        optional: true
+      '@sveltejs/kit':
+        optional: true
+      next:
+        optional: true
+      nuxt:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+      vue-router:
+        optional: true
 
   '@vercel/config@0.3.0':
     resolution: {integrity: sha512-Tf5k5y2F478oTiQcU5R8Ntix1UejE6NdduZnI7aa1XXxjCtifX1XdRS/D2uTjiQAwIL3pLa1LSAN80ABbba+TQ==}
@@ -8171,6 +8203,10 @@ snapshots:
       '@typescript/native-preview-win32-x64': 7.0.0-dev.20260604.1
 
   '@ungap/structured-clone@1.3.1': {}
+
+  '@vercel/analytics@2.0.1(react@19.2.6)':
+    optionalDependencies:
+      react: 19.2.6
 
   '@vercel/config@0.3.0':
     dependencies:

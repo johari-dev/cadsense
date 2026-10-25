@@ -56,7 +56,6 @@ import {
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import {
-  glbExtents,
   partName,
   resolveDrawingSheets,
   shopRoute,
@@ -528,30 +527,39 @@ export const make = Effect.gen(function* () {
               const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
               const unknown = request.occurrenceIds.filter((id) => {
                 const node = nodes.get(id);
-                return (
-                  !node || node.suppressed || (node.kind !== "part" && node.kind !== "assembly")
-                );
+                return !node || node.suppressed || node.kind === "unsupported";
               });
               if (unknown.length > 0)
                 return yield* new CadViewError({
                   reason: "invalid-operation",
-                  details: `occurrenceIds must be unsuppressed part or assembly occurrences from cad_hierarchy or cad_find_parts: ${unknown.join(", ")}`,
+                  details: `occurrenceIds must be unsuppressed part, assembly, or Part Studio occurrences from cad_hierarchy or cad_find_parts: ${unknown.join(", ")}`,
                 });
               const candidates = resolveDrawingSheets(snapshot, request.occurrenceIds);
               const isGroup = request.occurrenceIds.some((id) => nodes.get(id)?.kind !== "part");
-              const routed = yield* Effect.forEach(candidates, (candidate) =>
-                initialized.binding.readAsset(candidate.sha256).pipe(
-                  Effect.map((bytes) => ({
-                    candidate,
-                    route: shopRoute(candidate.material, glbExtents(bytes)),
-                  })),
-                  Effect.mapError(unavailable),
-                ),
-              );
               // Drawings: parts named one by one are drawn as asked; an assembly keeps the parts the
-              // shop draws. CAM: only plates, whichever way they were named.
-              const keep = (route: ShopRoute) =>
-                mode === "cam" ? route === "cnc" : !isGroup || route === "drawing";
+              // shop draws. CAM: only plates, whichever way they were named. Only the meshes a route
+              // needs are read, for their bounds, and the bounds are cached across calls.
+              const needsRoute = (candidate: (typeof candidates)[number]) =>
+                mode === "cam" || !candidate.named;
+              const { binding } = initialized;
+              const bounds = yield* loadCadBounds(
+                snapshot,
+                (sha256: string) => binding.readAsset(sha256).pipe(Effect.mapError(unavailable)),
+                boundsCache,
+                new Set(candidates.filter(needsRoute).map((candidate) => candidate.geometryKey)),
+              );
+              const routed = candidates.map((candidate) => {
+                const box = bounds.get(candidate.geometryKey);
+                const route: ShopRoute | "named" = needsRoute(candidate)
+                  ? shopRoute(
+                      candidate.material,
+                      box ? box.max.map((max, k) => max - box.min[k]!) : null,
+                    )
+                  : "named";
+                return { candidate, route };
+              });
+              const keep = (route: ShopRoute | "named") =>
+                mode === "cam" ? route === "cnc" : route === "named" || route === "drawing";
               const kept = routed
                 .filter((entry) => keep(entry.route))
                 .map((entry) => entry.candidate);

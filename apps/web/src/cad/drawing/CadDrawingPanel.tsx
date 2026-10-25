@@ -19,9 +19,11 @@ import { resolveDrawingSheets, type DrawingSheetEntry } from "./drawingModel";
 import { SHEET_H, SHEET_W } from "./sheetKit";
 import { VARIANTS, describePart, type SheetData, type VariantKey } from "./sheets";
 import {
+  formatLength,
   holeReadings,
   operationsFor,
   stockFor,
+  unitSuffix,
   type HoleReading,
   type Units,
 } from "./shopKnowledge";
@@ -82,7 +84,7 @@ const buildSheet = (
 ): SheetData => {
   const readings = new Map<string, HoleReading>();
   for (const group of prepared.part.holes) {
-    const options = holeReadings(group, prepared.part);
+    const options = holeReadings(group, units);
     readings.set(
       group.key,
       options.find((option) => option.id === choices?.readings[group.key]) ?? options[0]!,
@@ -99,8 +101,8 @@ const buildSheet = (
     ...form,
     units,
     readings,
-    stock: stockFor(prepared.part, material),
-    operations: operationsFor(prepared.part, material, readings),
+    stock: stockFor(prepared.part, material, units),
+    operations: operationsFor(prepared.part, material, readings, units),
     source: { partId: entry.partId, revision, date: new Date().toISOString().slice(0, 10) },
   };
 };
@@ -129,7 +131,8 @@ export function CadDrawingPanel({
     () => (manifest ? resolveDrawingSheets(manifest, drawing.occurrenceIds) : []),
     [manifest, drawing.occurrenceIds],
   );
-  // A group draws only what the shop draws; a part the user picked is drawn whatever it is.
+  // A group draws only what the shop draws; a part picked by name is drawn whatever it is, even
+  // when the selection also names a group.
   const isGroup = useMemo(
     () =>
       !!manifest &&
@@ -143,7 +146,9 @@ export function CadDrawingPanel({
   const sheets = useMemo(
     () =>
       isGroup
-        ? candidates.filter((candidate) => routes?.[candidate.sha256] === "drawing")
+        ? candidates.filter(
+            (candidate) => candidate.named || routes?.[candidate.sha256] === "drawing",
+          )
         : candidates,
     [isGroup, candidates, routes],
   );
@@ -415,12 +420,12 @@ export function CadDrawingPanel({
               />
             </Field>
             {ready.part.holes.map((group) => {
-              const options = holeReadings(group, ready.part);
+              const options = holeReadings(group, units);
               const confirmed = group.key in (choices[entry.geometryKey]?.readings ?? {});
               return (
                 <Field
                   key={group.key}
-                  label={`${group.holes.length}× Ø${(group.diameter / 0.0254).toFixed(3)} ${group.depth === null ? "through" : `${(group.depth / 0.0254).toFixed(2)} deep`}${group.bothEnds ? ", both ends" : ""}`}
+                  label={`${group.holes.length}× ${group.hex ? "hex " : ""}Ø${formatLength(group.diameter, units)}${unitSuffix(units)} ${group.depth === null ? "through" : `${formatLength(group.depth, units, 2)}${unitSuffix(units)} deep`}${group.bothEnds ? ", both ends" : ""}`}
                 >
                   <select
                     className={inputClass}

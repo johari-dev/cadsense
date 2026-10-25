@@ -11,7 +11,23 @@ const LINE = 0.011;
 const THIN = 0.006;
 export const TEXT = 0.125;
 
-const STANDARD_SCALES = [8, 6, 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.375, 0.25, 0.125, 0.0625];
+// Drawing scales and how the title block prints them.
+const SCALE_LABELS = new Map([
+  [8, "8:1"],
+  [6, "6:1"],
+  [4, "4:1"],
+  [3, "3:1"],
+  [2, "2:1"],
+  [1.5, "3:2"],
+  [1, "1:1"],
+  [0.75, "3:4"],
+  [0.5, "1:2"],
+  [0.375, "3:8"],
+  [0.25, "1:4"],
+  [0.125, "1:8"],
+  [0.0625, "1:16"],
+]);
+const STANDARD_SCALES = [...SCALE_LABELS.keys()];
 
 /** The largest standard scale at which every view fits its cell. */
 export const pickScale = (fits: readonly { view: DrawingView; w: number; h: number }[]) =>
@@ -22,7 +38,7 @@ export const pickScale = (fits: readonly { view: DrawingView; w: number; h: numb
     ),
   ) ?? STANDARD_SCALES.at(-1)!;
 
-export const scaleLabel = (s: number) => (s >= 1 ? `${s}:1` : `1:${1 / s}`);
+export const scaleLabel = (s: number) => SCALE_LABELS.get(s) ?? `${s}:1`;
 
 /** Maps model inches in a view to paper inches, centred in a cell. */
 export interface Placed {

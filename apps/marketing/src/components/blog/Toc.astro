@@ -1,0 +1,145 @@
+---
+// Contents rail for a blog post. Lists the post title (`.post h1[id]`), which leads to the top of the
+// page, then every `.post h2[id]` except headings marked `data-toc-skip`, so it stays in sync with the
+// headings, and marks the section being read. A heading can set a shorter `data-toc-label` so every
+// entry fits on one line. It only shows when the viewport has room for it, 1600 px and up, left of
+// the wide figures.
+---
+
+<nav class="toc" aria-label="Contents" data-toc>
+  <p class="toc-title">Contents</p>
+  <div class="rail">
+    <ol></ol>
+    <span class="marker" aria-hidden="true"></span>
+  </div>
+</nav>
+
+<script>
+  for (const nav of document.querySelectorAll<HTMLElement>("[data-toc]")) {
+    const list = nav.querySelector("ol")!;
+    const marker = nav.querySelector<HTMLElement>(".marker")!;
+    const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const headings = [...document.querySelectorAll<HTMLHeadingElement>(".post :is(h1, h2)[id]:not([data-toc-skip])")];
+    const links = headings.map((heading) => {
+      const link = document.createElement("a");
+      link.href = `#${heading.id}`;
+      link.textContent = heading.dataset.tocLabel ?? heading.textContent;
+      // Glide to the section instead of jumping. The heading's scroll-margin-top keeps it clear of the top.
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        const behavior = reduceMotion ? "auto" : "smooth";
+        if (heading.tagName === "H1") scrollTo({ top: 0, behavior });
+        else heading.scrollIntoView({ behavior });
+        history.pushState(null, "", link.hash);
+      });
+      const item = document.createElement("li");
+      item.append(link);
+      list.append(item);
+      return link;
+    });
+
+    // The current section is the last heading above 35% of the viewport.
+    let queued = false;
+    const update = () => {
+      queued = false;
+      const line = innerHeight * 0.35;
+      const index = headings.findLastIndex((heading) => heading.getBoundingClientRect().top <= line);
+      links.forEach((link, i) => link.toggleAttribute("aria-current", i === index));
+      // One marker slides between entries, so it moves up and down with the reader.
+      const active = links[index];
+      marker.style.opacity = active ? "1" : "0";
+      if (active) {
+        marker.style.transform = `translateY(${active.offsetTop}px)`;
+        marker.style.height = `${active.offsetHeight}px`;
+      }
+    };
+    addEventListener(
+      "scroll",
+      () => {
+        if (!queued) {
+          queued = true;
+          requestAnimationFrame(update);
+        }
+      },
+      { passive: true },
+    );
+    update();
+  }
+</script>
+
+<style>
+  .toc {
+    display: none;
+  }
+
+  @media (min-width: 1600px) {
+    .toc {
+      display: block;
+      position: fixed;
+      top: 96px;
+      left: calc(50% - 540px - 220px);
+      width: 196px;
+      max-height: calc(100vh - 128px);
+      overflow-y: auto;
+    }
+  }
+
+  /* Same type as the post's date line. */
+  .toc-title {
+    margin: 0 0 10px;
+    font: 12px var(--font-mono);
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+  }
+
+  .rail {
+    position: relative;
+  }
+
+  ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-left: 1px solid var(--border);
+  }
+
+  .marker {
+    position: absolute;
+    top: 0;
+    left: -0.5px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--marker);
+    opacity: 0;
+    transition:
+      transform 260ms cubic-bezier(0.25, 0.8, 0.25, 1),
+      height 260ms cubic-bezier(0.25, 0.8, 0.25, 1),
+      opacity 160ms;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .marker {
+      transition: none;
+    }
+  }
+
+  ol :global(a) {
+    display: block;
+    padding: 5px 0 5px 12px;
+    font-size: 13.5px;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  ol :global(a:hover) {
+    color: var(--text);
+  }
+
+  ol :global(a[aria-current]) {
+    color: var(--text);
+  }
+</style>

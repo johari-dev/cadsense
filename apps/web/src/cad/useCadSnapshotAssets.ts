@@ -125,14 +125,17 @@ export const useShopRoutes = (
   return candidates.length === 0 ? NO_ROUTES : routes;
 };
 
-/** Part instances per route among the candidates, for "not drawn" and "not cut" notes. */
+/**
+ * Part instances per route among the candidates a group sorted, for "not drawn" and "not cut"
+ * notes. Parts picked by name are kept whatever their route, so they are not counted.
+ */
 export const routeCounts = (
   candidates: readonly DrawingSheetEntry[],
   routes: Record<string, ShopRoute>,
 ) => {
   const count = (route: ShopRoute) =>
     candidates
-      .filter((candidate) => routes[candidate.sha256] === route)
+      .filter((candidate) => !candidate.named && routes[candidate.sha256] === route)
       .reduce((sum, candidate) => sum + candidate.qty, 0);
   return { drawing: count("drawing"), cnc: count("cnc"), print: count("print") };
 };
