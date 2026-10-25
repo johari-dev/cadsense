@@ -215,7 +215,8 @@ export const holeReadings = (group: HoleGroup, units: Units): HoleReading[] => {
 /**
  * Callout text for a hole group, e.g. "10-32 UNF ↧.50 BOTH ENDS". `toward` is the direction to
  * the viewer of the view the callout sits in; a countersink on the side away from the viewer
- * says FAR SIDE. Without a view, sides are named from where the drill enters.
+ * says FAR SIDE. Without a view, sides are named from where the drill enters. A BOTH ENDS pair
+ * has each countersink at its own entry, so it names no side.
  */
 export const holeCallout = (
   group: HoleGroup,
@@ -231,7 +232,7 @@ export const holeCallout = (
   // The drill enters on the viewer's side when it travels away from the viewer.
   const direction = group.holes[0]?.direction;
   const entryNear =
-    !toward || !direction
+    !toward || !direction || group.bothEnds
       ? true
       : direction[0] * toward[0] + direction[1] * toward[1] + direction[2] * toward[2] < 0;
   const sinks =
@@ -414,10 +415,17 @@ export const operationsFor = (
     const sinkText = (countersink: Countersink) =>
       `countersink Ø${measure(countersink.diameter, units)} × ${countersink.angle.toFixed(0)}°`;
     const { countersink: entry, farCountersink: exit } = group;
+    // With a countersink where the drill comes out, both are placed by the face they are on,
+    // named as the views show it, so the step and the callouts agree.
+    const direction = group.holes[0]!.direction;
+    const entryFace = faceName(part, [-direction[0], -direction[1], -direction[2]]);
+    const exitFace = faceName(part, direction);
     const sink =
       entry && exit && sinkText(entry) === sinkText(exit)
         ? `, ${sinkText(entry)} both sides`
-        : `${entry ? `, ${sinkText(entry)}` : ""}${exit ? `, ${sinkText(exit)} on the far side` : ""}`;
+        : exit && entryFace && exitFace
+          ? `${entry ? `, ${sinkText(entry)} on the ${entryFace}` : ""}, ${sinkText(exit)} on the ${exitFace}`
+          : `${entry ? `, ${sinkText(entry)}` : ""}${exit ? `, ${sinkText(exit)} on the far side` : ""}`;
     ops.push({
       machine,
       title:
@@ -436,6 +444,25 @@ export const operationsFor = (
   }
   ops.push({ machine: "Bench", title: "Deburr", detail: "Break all sharp edges", holeKey: null });
   return ops;
+};
+
+/**
+ * The face of the part an outward direction points out of, named as the views show it: the
+ * front view looks at the front face, the top view at the top, the right view at the right end.
+ * Null when the direction is not square to the views.
+ */
+const faceName = (part: PartAnalysis, outward: Vec3) => {
+  const { u, v, w } = part.frame;
+  const faces = [
+    [w, "front face", "back face"],
+    [v, "top face", "bottom face"],
+    [u, "right end", "left end"],
+  ] as const;
+  for (const [axis, plus, minus] of faces) {
+    if (!isAlong(outward, axis)) continue;
+    return outward[0] * axis[0] + outward[1] * axis[1] + outward[2] * axis[2] > 0 ? plus : minus;
+  }
+  return null;
 };
 
 /**
