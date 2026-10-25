@@ -93,6 +93,14 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_find_parts",
 ]);
 
+/**
+ * Tools that open a panel beside the user's chat. `cadsense mcp` reviews run outside the app with
+ * no panel to open, so it does not offer them.
+ */
+export const CAD_PANEL_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD_TOOL_INPUTS>([
+  "cad_part_drawing",
+]);
+
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
   const document = Schema.toJsonSchemaDocument(schema);
   return {
