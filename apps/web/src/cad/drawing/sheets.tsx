@@ -216,6 +216,12 @@ const PrimaryDims = ({
   return <g>{dims}</g>;
 };
 
+/** Paper height PrimaryDims takes below a view: the length, then shaft step rows. */
+const primaryDimsBelow = (part: PartAnalysis) => {
+  const grooves = part.steps.filter((s) => s.start > 0 && s.end < part.frame.size[0]).length;
+  return 0.55 + (part.steps.length ? (1 + 2 * grooves) * 0.35 + 0.1 : 0);
+};
+
 /** Leaders from one hole of each group to its callout, stacked beside the view. */
 const HoleLeaders = ({
   data,
@@ -248,7 +254,7 @@ const HoleLeaders = ({
                 side === "left" ? placed.left - 0.35 : placed.right + 0.35,
                 placed.top + 0.1 + i * 0.45,
               ];
-      const text = holeCallout(group, readingFor(data, group), data.units);
+      const text = holeCallout(group, readingFor(data, group), data.units, placed.view.spec.toward);
       const [main, ...rest] = text.split(" BOTH ENDS");
       return (
         <Leader
@@ -340,8 +346,7 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
   // Vertical room around the views: ordinates above, then dimensions and callouts below.
   const ordinateBand = (view: DrawingView) =>
     holeCount(data, view) === 0 ? 0 : holeCount(data, view) <= 12 ? 0.75 : 0.3;
-  const grooves = part.steps.filter((s) => s.start > 0 && s.end < part.frame.size[0]).length;
-  const dimsBelow = 0.55 + (part.steps.length ? (1 + 2 * grooves) * 0.35 + 0.1 : 0);
+  const dimsBelow = primaryDimsBelow(part);
   const frontGap = dimsBelow + 0.3;
   const above = { top: showTop ? ordinateBand(views.top) : 0, front: ordinateBand(views.front) };
   const below = {
@@ -534,8 +539,12 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
     front.top + (front.bottom - front.top) / 2,
   );
   const iso = place(views.iso, pickScale([{ view: views.iso, w: 2.4, h: 1.7 }]), 8.9, 1.55);
-  // Holes in every view get a tag and a table row; the shaft's end view uses leaders instead.
-  const tagged = tagHoles(data, [front, ...(showTop ? [top] : []), ...(turned ? [] : [right])]);
+  // Every view with holes gets callouts, so each hole's size is on the sheet. Holes also get a
+  // tag and a table row for their position while rows fit; the shaft's end view holes sit on
+  // its axis and need no position.
+  const tags = tagHoles(data, [front, ...(showTop ? [top] : []), ...(turned ? [] : [right])]);
+  const rowsFit = tags.length > TABLE_ROWS ? TABLE_ROWS - 1 : TABLE_ROWS;
+  const tagged = tags.slice(0, rowsFit);
   const zones = [0, 1, 2, 3];
   return (
     <>
@@ -564,10 +573,17 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
       <ViewGraphic placed={iso} showHidden={false} strokeScale={0.8} />
       <PrimaryDims data={data} placed={front} side={turned ? undefined : right} />
       {turned ? (
-        <HoleLeaders data={data} placed={right} side="above" />
+        <>
+          <HoleLeaders data={data} placed={right} side="above" />
+          <HoleLeaders data={data} placed={front} side="below" gap={primaryDimsBelow(part) + 0.3} />
+        </>
       ) : (
-        <HoleLeaders data={data} placed={front} side="right" />
+        <>
+          <HoleLeaders data={data} placed={front} side="right" />
+          <HoleLeaders data={data} placed={right} side="below" gap={0.65} />
+        </>
       )}
+      {showTop && <HoleLeaders data={data} placed={top} side="right" />}
       {warnings.map((warning, i) => (
         <Label
           key={warning}
@@ -612,7 +628,7 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
               weight={700}
             />
           ))}
-          {tagged.slice(0, 6).map((t, row) => (
+          {tagged.map((t, row) => (
             <g key={t.tag}>
               {[
                 t.tag,
@@ -624,19 +640,20 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
                 <Cell
                   key={i}
                   x={0.5 + TABLE_X[i]!}
-                  y={6.97 + row * 0.2}
+                  y={6.97 + row * TABLE_ROW}
                   w={TABLE_W[i]!}
-                  h={0.2}
+                  h={TABLE_ROW}
                   value={v}
-                  size={0.075}
+                  size={0.065}
                   weight={400}
                 />
               ))}
             </g>
           ))}
-          {tagged.length > 6 && (
-            <Label x={0.5} y={8.2} size={0.07} anchor="start">
-              + {tagged.length - 6} more holes not listed; positions are in the views
+          {tags.length > tagged.length && (
+            <Label x={0.5} y={6.97 + rowsFit * TABLE_ROW + 0.1} size={0.07} anchor="start">
+              + {tags.length - tagged.length} more holes not listed; their positions are not on this
+              sheet
             </Label>
           )}
         </g>
@@ -762,6 +779,9 @@ const ThirdAngleSymbol = ({ x, y }: { x: number; y: number }) => (
 
 const TABLE_X = [0, 0.4, 0.85, 1.4, 1.95];
 const TABLE_W = [0.4, 0.45, 0.55, 0.55, 1.45];
+// Hole table rows between its header and the sheet border.
+const TABLE_ROW = 0.14;
+const TABLE_ROWS = 8;
 
 /** One tag per hole across the views: a letter per hole group, numbered on through the views. */
 const tagHoles = (data: SheetData, views: readonly Placed[]) => {
@@ -783,6 +803,7 @@ const tagHoles = (data: SheetData, views: readonly Placed[]) => {
             { ...group, holes: [group.holes[0]!], bothEnds: false },
             readingFor(data, group),
             data.units,
+            placed.view.spec.toward,
           ),
         };
       }),
