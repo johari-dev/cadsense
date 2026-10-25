@@ -196,7 +196,8 @@ export function CadDrawingPanel({
     () => (manifest ? resolveDrawingSheets(manifest, drawing.occurrenceIds) : []),
     [manifest, drawing.occurrenceIds],
   );
-  // A group draws only what the shop draws; a part the user picked is drawn whatever it is.
+  // A group draws only what the shop draws; a part picked by name is drawn whatever it is, even
+  // when the selection also names a group.
   const isGroup = useMemo(
     () =>
       !!manifest &&
@@ -228,14 +229,16 @@ export function CadDrawingPanel({
   const sheets = useMemo(
     () =>
       isGroup
-        ? candidates.filter((candidate) => routes?.[candidate.sha256] === "drawing")
+        ? candidates.filter(
+            (candidate) => candidate.named || routes?.[candidate.sha256] === "drawing",
+          )
         : candidates,
     [isGroup, candidates, routes],
   );
   const skipped = useMemo(() => {
     const count = (route: ShopRoute) =>
       candidates
-        .filter((candidate) => routes?.[candidate.sha256] === route)
+        .filter((candidate) => !candidate.named && routes?.[candidate.sha256] === route)
         .reduce((sum, candidate) => sum + candidate.qty, 0);
     return isGroup && routes ? { cnc: count("cnc"), print: count("print") } : null;
   }, [isGroup, candidates, routes]);
