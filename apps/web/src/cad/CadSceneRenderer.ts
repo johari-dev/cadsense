@@ -798,6 +798,42 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       });
     },
     /**
+     * Highlights parts on screen without changing the view state or the camera,
+     * for the part picker's hover. Null restores the view's own highlight.
+     */
+    previewHighlight: (occurrenceIds: readonly string[] | null) => {
+      if (!model || !view) return;
+      const state = occurrenceIds
+        ? { ...view, highlightedOccurrenceIds: [...occurrenceIds] }
+        : view;
+      model.apply(displayed(state), review ? REVIEW_APPLY : undefined);
+      render();
+    },
+    /**
+     * The occurrence id of the frontmost solid part at a viewport point (CSS pixels),
+     * skipping faded and ghosted context. Null on empty space.
+     */
+    occurrenceAt: (x: number, y: number): string | null => {
+      if (!model) return null;
+      const loaded = model;
+      camera.updateMatrixWorld(true);
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2((x / width) * 2 - 1, 1 - (y / height) * 2), camera);
+      for (const hit of cadVisibleIntersections(loaded, ray)) {
+        let node: THREE.Object3D | null = hit.object;
+        while (node && loaded.objects.get(node.name)?.object !== node) node = node.parent;
+        if (!node || loaded.isFaded(node.name)) continue;
+        const material =
+          hit.object instanceof THREE.Mesh
+            ? Array.isArray(hit.object.material)
+              ? hit.object.material[hit.face?.materialIndex ?? 0]
+              : hit.object.material
+            : null;
+        if ((material?.opacity ?? 1) > REVIEW_GHOST_OPACITY) return node.name;
+      }
+      return null;
+    },
+    /**
      * Frames a comment target outside the card. A point replays the agent capture it was located
      * in, because locating proved it visible there. Other targets are revealed, and the parts in
      * front of them are ghosted. Returns the notice the card shows.

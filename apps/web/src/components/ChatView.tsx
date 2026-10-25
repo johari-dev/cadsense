@@ -370,6 +370,9 @@ const CadPanel = lazy(() =>
 const CadFilePrompt = lazy(() =>
   import("../cad/CadFilePrompt").then((module) => ({ default: module.CadFilePrompt })),
 );
+const CadDrawingPanel = lazy(() =>
+  import("../cad/drawing/CadDrawingPanel").then((module) => ({ default: module.CadDrawingPanel })),
+);
 const CadAutoPreview = lazy(() =>
   import("../cad/CadAutoPreview").then((module) => ({ default: module.CadAutoPreview })),
 );
@@ -1110,6 +1113,7 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelAvailable: Record<RightPanelSection, boolean> = {
     cad: cadAvailable,
     files: activeProject !== null,
+    drawing: cadAvailable && !!rightPanelState.drawing,
     agents: agentPanelModel.hasAgents,
     browser: browserTabId !== null && isPreviewSupportedInRuntime(),
   };
@@ -3894,6 +3898,14 @@ function ChatViewContent(props: ChatViewProps) {
               : "CAD is not available for this project."}
           </div>
         )}
+      </Suspense>
+    ) : rightPanelSection === "drawing" && rightPanelState.drawing && isServerThread ? (
+      <Suspense fallback={null}>
+        <CadDrawingPanel
+          key={`${activeThreadKey}:${rightPanelState.drawing.requestId}`}
+          threadRef={activeThreadRef}
+          drawing={rightPanelState.drawing}
+        />
       </Suspense>
     ) : rightPanelSection === "browser" ? (
       <Suspense fallback={null}>

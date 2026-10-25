@@ -1,6 +1,6 @@
 import type { CadViewState } from "@cadsense/contracts";
 import { useState } from "react";
-import { StackIcon as Boxes } from "~/lib/icons";
+import { CursorClickIcon, StackIcon as Boxes } from "~/lib/icons";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -39,10 +39,15 @@ export function CadCameraToolbar({
   view,
   disabled,
   onChange,
+  picking = false,
+  onTogglePicking,
 }: {
   view: CadViewState;
   disabled: boolean;
   onChange: (view: CadViewState) => void;
+  /** The viewer is waiting for a part click to open its drawing. */
+  picking?: boolean;
+  onTogglePicking?: () => void;
 }) {
   const [sectionOpen, setSectionOpen] = useState(false);
   const sectionKey = JSON.stringify(view.sectionPlanes ?? []);
@@ -187,6 +192,21 @@ export function CadCameraToolbar({
           />
           <TooltipPopup>{view.explosion > 0 ? "Collapse CAD" : "Explode CAD"}</TooltipPopup>
         </Tooltip>
+        {onTogglePicking && (
+          <>
+            <div className="mx-0.5 w-px self-stretch bg-border" />
+            <Button
+              aria-pressed={picking}
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-sm aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+              onClick={onTogglePicking}
+            >
+              <CursorClickIcon size={16} className="text-current" />
+              Click to draw
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

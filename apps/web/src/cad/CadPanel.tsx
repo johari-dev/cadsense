@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import {
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -47,6 +48,8 @@ import { useOpenInFileManager } from "../components/chat/OpenInExplorerButton";
 import { toastManager } from "../components/ui/toast";
 import { resolvePathLinkTarget } from "../path-links";
 import "./CadPanel.css";
+import { useRightPanelStore } from "../rightPanelStore";
+import { partName } from "./drawing/drawingModel";
 import {
   EMPTY_CAD_PANEL_REVIEW,
   useCadCommentReviewStore,
@@ -57,6 +60,8 @@ import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
+// Threads with click-to-draw mode on, so the mode outlives the scene remounting.
+const clickModeThreads = new Set<string>();
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
@@ -144,6 +149,56 @@ export function CadScene({
   const previousCamera = useRef(view.camera);
   const previousExplosion = useRef(view.explosion);
   const applied = useRef<{ manifest: CadSnapshotManifest | null; state: string } | null>(null);
+  // Part drawings. Click mode stays on until its button or Esc turns it off; each
+  // part click opens that part's drawing. It survives the trip to the drawing and back.
+  const threadKey = scopedThreadKey(threadRef);
+  const [picking, setPickingState] = useState(() => clickModeThreads.has(threadKey));
+  const setPicking = useCallback(
+    (next: boolean) => {
+      if (next) clickModeThreads.add(threadKey);
+      else clickModeThreads.delete(threadKey);
+      setPickingState(next);
+    },
+    [threadKey],
+  );
+  const [pickMiss, setPickMiss] = useState(false);
+  const [pickHover, setPickHover] = useState<string | null>(null);
+  const pickFrame = useRef(0);
+  const hoveredId = useRef<string | null>(null);
+  const pickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const nodeById = useMemo(
+    () => new Map(manifest?.nodes.map((node) => [node.id, node]) ?? []),
+    [manifest],
+  );
+  const openDrawing = useCallback(
+    (occurrenceIds: string[], title: string) =>
+      useRightPanelStore
+        .getState()
+        .openDrawing(threadRef, { snapshotId: view.snapshotId, occurrenceIds, title }),
+    [threadRef, view.snapshotId],
+  );
+  const partAt = (event: { clientX: number; clientY: number; currentTarget: HTMLElement }) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const id =
+      renderer.current?.occurrenceAt(event.clientX - box.left, event.clientY - box.top) ?? null;
+    const node = id ? nodeById.get(id) : undefined;
+    return node?.kind === "part" ? node : null;
+  };
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPicking(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      clearTimeout(pickTimer.current);
+      cancelAnimationFrame(pickFrame.current);
+      hoveredId.current = null;
+      setPickHover(null);
+      renderer.current?.previewHighlight(null);
+    };
+  }, [picking, setPicking, renderer]);
   useLayoutEffect(() => {
     latest.current = { view, disabled, onChange };
   }, [disabled, onChange, view]);
@@ -346,8 +401,33 @@ export function CadScene({
         >
           <div
             ref={canvas}
-            className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
+            className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""} ${picking ? "cursor-crosshair" : ""}`}
             style={{ pointerEvents: disabled ? "none" : "auto" }}
+            onPointerMove={(event) => {
+              if (!picking) return;
+              // Highlight the part under the cursor, at most once a frame.
+              const target = {
+                clientX: event.clientX,
+                clientY: event.clientY,
+                currentTarget: event.currentTarget,
+              };
+              cancelAnimationFrame(pickFrame.current);
+              pickFrame.current = requestAnimationFrame(() => {
+                const node = partAt(target);
+                // Redraw only when the hovered part changes; a scene redraw is the costly part.
+                if ((node?.id ?? null) === hoveredId.current) return;
+                hoveredId.current = node?.id ?? null;
+                setPickHover(node ? partName(node) : null);
+                renderer.current?.previewHighlight(node ? [node.id] : null);
+              });
+            }}
+            onPointerLeave={() => {
+              if (!picking) return;
+              cancelAnimationFrame(pickFrame.current);
+              hoveredId.current = null;
+              setPickHover(null);
+              renderer.current?.previewHighlight(null);
+            }}
             onPointerDown={(event) => {
               press.current =
                 event.isPrimary && event.button === 0
@@ -358,6 +438,29 @@ export function CadScene({
               // A click (not a drag) on empty space leaves the focused comment.
               const start = press.current;
               press.current = null;
+              if (
+                picking &&
+                start &&
+                Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 4
+              ) {
+                const node = partAt(event);
+                clearTimeout(pickTimer.current);
+                if (!node) {
+                  setPickMiss(true);
+                  pickTimer.current = setTimeout(() => setPickMiss(false), 1500);
+                  return;
+                }
+                // Flash the clicked part so the user sees what they picked, then open its drawing.
+                setPickMiss(false);
+                renderer.current?.previewHighlight([node.id]);
+                pickTimer.current = setTimeout(() => {
+                  renderer.current?.previewHighlight(null);
+                  // Forget the hover so the next move over this part highlights it again.
+                  hoveredId.current = null;
+                  openDrawing([node.id], partName(node));
+                }, 450);
+                return;
+              }
               if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
               if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
               const box = event.currentTarget.getBoundingClientRect();
@@ -379,7 +482,16 @@ export function CadScene({
             displayedSnapshotId={view.snapshotId}
           />
           {manifest && !unavailable && !compact && (
-            <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
+            <CadCameraToolbar
+              view={view}
+              disabled={disabled}
+              onChange={onChange}
+              picking={picking}
+              onTogglePicking={() => {
+                setPicking(!picking);
+                setPickMiss(false);
+              }}
+            />
           )}
           {manifest && !unavailable && !compact && (
             <CadViewChanges
@@ -388,7 +500,29 @@ export function CadScene({
               disabled={disabled}
               onChange={onChange}
               belowRevisionNotice={commentsCard.historical}
+              onOpenDrawing={openDrawing}
             />
+          )}
+          {picking && (
+            <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center">
+              <div
+                className="rounded-full border border-border bg-background px-3 py-1.5 text-xs shadow-lg"
+                role="status"
+              >
+                {pickMiss ? (
+                  "No part there. Click a part to draw it."
+                ) : pickHover ? (
+                  <>
+                    Click to draw <span className="font-medium">{pickHover}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium">Click mode is on.</span> Click a part to make its
+                    drawing.
+                  </>
+                )}
+              </div>
+            </div>
           )}
         </div>
         {lockStatus && <CadLockStrip status={lockStatus} />}

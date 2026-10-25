@@ -119,6 +119,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_find_parts",
       "cad_update_view",
       "cad_capture",
+      "cad_part_drawing",
     ]);
     expect(
       listedTools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name),
