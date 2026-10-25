@@ -568,10 +568,13 @@ const shaftProfile = (positions: Float64Array, frame: PartFrame) => {
         Math.PI * reach * (radius * radius - (radius * radius + radius * face + face * face) / 3)
       );
     },
-    /** True when metal stands proud of `radius` anywhere past `from` toward `side` (-1 or 1). */
+    /**
+     * True when metal stands proud of `radius` anywhere from `from` on toward `side` (-1 or 1).
+     * The plane at `from` counts: a groove wall's top ring sits there.
+     */
     proudBeyond: (from: number, radius: number, side: number) => {
       for (let i = 0; i < count; i++) {
-        if ((along[i]! - from) * side > 1e-5 && out[i]! > radius * 1.01) return true;
+        if ((along[i]! - from) * side > -1e-5 && out[i]! > radius * 1.01) return true;
       }
       return false;
     },
