@@ -455,6 +455,8 @@ export function CadScene({
                 renderer.current?.previewHighlight([node.id]);
                 pickTimer.current = setTimeout(() => {
                   renderer.current?.previewHighlight(null);
+                  // Forget the hover so the next move over this part highlights it again.
+                  hoveredId.current = null;
                   openDrawing([node.id], partName(node));
                 }, 450);
                 return;
