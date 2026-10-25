@@ -1045,7 +1045,11 @@ export interface DrawingView {
   readonly max: Vec2;
 }
 
+// Depth buffer size: a square view gets RASTER pixels a side. A long, thin view spends the same
+// pixel count along its length, up to RASTER_MAX_SIDE, so a .0625" wall still spans several
+// pixels of depth on a 60" tube.
 const RASTER = 1400;
+const RASTER_MAX_SIDE = 12000;
 
 /** Hidden-line projection: crease and silhouette edges, tested against a software depth buffer. */
 export const projectView = (part: PartAnalysis, spec: ViewSpec): DrawingView => {
@@ -1072,7 +1076,13 @@ export const projectView = (part: PartAnalysis, spec: ViewSpec): DrawingView => 
   }
   const span = Math.max(maxX - minX, maxY - minY) || 1;
   const pad = 4;
-  const pxPerInch = (RASTER - pad * 2) / span;
+  const pxPerInch = Math.min(
+    (RASTER_MAX_SIDE - pad * 2) / span,
+    Math.max(
+      (RASTER - pad * 2) / span,
+      Math.sqrt((RASTER * RASTER) / ((maxX - minX) * (maxY - minY))),
+    ),
+  );
   const width = Math.ceil((maxX - minX) * pxPerInch) + pad * 2 + 1;
   const height = Math.ceil((maxY - minY) * pxPerInch) + pad * 2 + 1;
   const toPx = (x: number) => (x - minX) * pxPerInch + pad;
@@ -1107,7 +1117,7 @@ export const projectView = (part: PartAnalysis, spec: ViewSpec): DrawingView => 
     }
   }
   // Depth slack of two pixels: enough for the raster's sampling error, small enough that a
-  // tube's inner wall (.063" behind its outer face) still reads as hidden on a long tube.
+  // tube's inner wall (.063" behind its outer face) still reads as hidden on a 60" tube.
   const epsilon = 2 / pxPerInch;
   const visibleAt = (x: number, y: number, z: number) => {
     const px = Math.round(toPx(x));
