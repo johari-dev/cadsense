@@ -1,7 +1,7 @@
 // The 2D features of a plate cut on a router: its outline, and the holes, cutouts, and pockets
 // machined from the top face. Read from the part mesh: every flat crease loop is a rim, a pocket
 // floor, a bottom exit, or the outline, depending on which side its flat face lies.
-import { METERS_PER_INCH, type PartAnalysis, type Vec2 } from "../drawing/analysis";
+import { METERS_PER_INCH, rayLeaves, type PartAnalysis, type Vec2 } from "../drawing/analysis";
 
 export type PlateFeature =
   | {
@@ -131,10 +131,10 @@ const circleOf = (points: readonly Vec2[]) => {
     )
     .sort((m1, m2) => m1 - m2);
   const even = steps.at(-1)! <= 2.5 * steps[Math.floor(steps.length / 2)]!;
-  // A hex or other coarse polygon also has its corners on one circle. A real hole's facets sit
-  // within a few thousandths of the arc; only small holes, which are drilled, are coarser.
+  // A hex or other coarse polygon also has its corners on one circle. A real hole is cut into at
+  // least 16 facets, except small holes, which are drilled.
   const sagitta = radius * (1 - Math.cos(Math.PI / points.length));
-  const fine = sagitta < 0.004 || (radius < 0.0625 && sagitta < 0.01);
+  const fine = points.length >= 16 || (radius < 0.0625 && sagitta < 0.01);
   return even && fine && radii.every((rr) => Math.abs(rr - radius) < radius * 0.006)
     ? { center, radius }
     : null;
@@ -304,22 +304,91 @@ export const plateGeometry = (part: PartAnalysis): PlateGeometry | null => {
   if (width - topWidth > 0.002 || height - topHeight > 0.002)
     warnings.push("The edges are chamfered or rounded; the profile cuts them square.");
   let edgeBreaks = 0;
-  for (const rim of loops.filter((loop) => loop.role === "rim" && within(loop, outline))) {
+  let unread = 0;
+  const rims = loops.filter((loop) => loop.role === "rim" && within(loop, outline));
+  // Whether a ray along the plate's axis, from just inside a loop's opening, leaves the part. It
+  // starts inside the loop but outside every smaller feature in it (a hole in a pocket's floor
+  // would let it through): at the centroid, or a little in from a corner.
+  const toMesh = (x: number, y: number, depth: number) =>
+    [0, 1, 2].map((k) => ((x + x0) * u[k]! + (y + y0) * v[k]! + (depth + z0) * w[k]!) / inch) as [
+      number,
+      number,
+      number,
+    ];
+  const opens = (loop: Loop, direction: -1 | 1) => {
+    const inner = loops.filter(
+      (other) =>
+        other !== loop &&
+        (other.role === "rim" || other.role === "exit") &&
+        other.area < loop.area &&
+        within(other, loop),
+    );
+    const start = [
+      loop.centroid,
+      ...loop.points.flatMap((p) =>
+        [0.05, 0.25].map(
+          (t): Vec2 => [p[0] + (loop.centroid[0] - p[0]) * t, p[1] + (loop.centroid[1] - p[1]) * t],
+        ),
+      ),
+    ].find(
+      (point) =>
+        pointInPolygon(point, loop.points) &&
+        !inner.some((other) => pointInPolygon(point, other.points)),
+    );
+    if (!start) return false;
+    return rayLeaves(positions, triangles, toMesh(start[0], start[1], loop.z + direction * 0.002), [
+      direction * w[0]!,
+      direction * w[1]!,
+      direction * w[2]!,
+    ]);
+  };
+  // The top of an island: its top face's loop, or the plate's top face.
+  const islandTop = (island: Loop) =>
+    loops.find(
+      (loop) => (loop.role === "floor" || loop.role === "outline") && sameShape(island, loop),
+    )?.z ?? thickness;
+  for (const rim of rims) {
     // The loop below a rim with the same shape ends the feature. A chamfer or countersink makes
     // the rim wider than the wall, so failing that the highest floor or exit inside it does, and
-    // the feature takes that loop's shape. No loop below means it goes through.
+    // the feature takes that loop's shape. Loops that belong to a feature further down, such as a
+    // hole in a pocket's floor, are not this feature's.
     const below = loops.filter(
       (loop) =>
         loop !== rim &&
         loop.z < rim.z - flatTol &&
         (loop.role === "floor" || loop.role === "exit") &&
-        !isIslandTop(loop),
+        !isIslandTop(loop) &&
+        !rims.some(
+          (other) =>
+            other !== rim &&
+            other.z < rim.z - flatTol &&
+            within(other, rim) &&
+            (sameShape(other, loop) || within(loop, other)),
+        ),
     );
     const matching = below.filter((loop) => sameShape(rim, loop));
     const narrower = below.filter((loop) => loop.area < rim.area && within(loop, rim));
     const end = (matching.length > 0 ? matching : narrower).sort((p, q) => q.z - p.z)[0];
-    const wall = end && !sameShape(rim, end) ? end : rim;
-    if (wall !== rim) edgeBreaks++;
+    // Nothing below: it opens into a recess cut from the bottom, or its floor is rounded into the
+    // walls. A ray straight down through the opening tells them apart; if it hits the part, the
+    // feature is left out and counted rather than guessed through.
+    if (!end && !opens(rim, -1)) {
+      unread++;
+      continue;
+    }
+    // The feature takes the narrower loop's shape when the rim is a chamfer or countersink: a
+    // through feature is never wider than its exit, and a pocket's chamfer shows as a crease
+    // where it meets the wall. A pocket floor rounded into the walls has no such crease, so the
+    // pocket is cut at the rim, square in the corners.
+    const chamfered =
+      !!end &&
+      !sameShape(rim, end) &&
+      (end.role === "exit" ||
+        loops.some(
+          (loop) => loop.z < rim.z - flatTol && loop.z > end.z + flatTol && sameShape(loop, end),
+        ));
+    const wall = chamfered ? end : rim;
+    if (chamfered) edgeBreaks++;
     const through = !end || end.role === "exit" || end.z < flatTol;
     const circle = circleOf(wall.points);
     if (through && circle)
@@ -333,15 +402,14 @@ export const plateGeometry = (part: PartAnalysis): PlateGeometry | null => {
     else if (through)
       features.push({ kind: "cutout", polygon: wall.points, top: rim.z, bottom: 0 });
     else {
+      // Islands standing up through this pocket's floor, including ones that rise from a deeper
+      // pocket inside it.
       const own = islands.filter(
-        (island) => Math.abs(island.z - end.z) < flatTol && within(island, wall),
+        (island) =>
+          island.z < end.z + flatTol && islandTop(island) > end.z + flatTol && within(island, wall),
       );
-      // A boss whose top sits below the plate's top face is left standing full height.
-      const low = own.filter((island) =>
-        loops.some(
-          (loop) => loop.role === "floor" && sameShape(island, loop) && loop.z < rim.z - flatTol,
-        ),
-      );
+      // A boss whose top sits below the pocket's top is left standing at its own height.
+      const low = own.filter((island) => islandTop(island) < rim.z - flatTol);
       if (low.length > 0)
         warnings.push(
           `${low.length} boss${low.length === 1 ? "" : "es"} in a pocket ${low.length === 1 ? "stands" : "stand"} lower than the top face; face ${low.length === 1 ? "it" : "them"} down by hand.`,
@@ -355,23 +423,46 @@ export const plateGeometry = (part: PartAnalysis): PlateGeometry | null => {
       });
     }
   }
+  if (unread > 0)
+    warnings.push(
+      `${unread} hole${unread === 1 ? "" : "s"} or pocket${unread === 1 ? "" : "s"} with no readable floor or exit (a rounded floor?) ${unread === 1 ? "is" : "are"} left out of the plan.`,
+    );
+  // A recess cut from the bottom shows as a ceiling. An exit no rim reaches is a hole from below,
+  // unless a ray up through it leaves the part: then its top edge is rounded, with no rim crease,
+  // and it is cut through at the exit's shape.
+  const ceilings = loops.filter((loop) => loop.role === "ceiling");
+  let bottomOnly = ceilings.length;
+  for (const exit of loops.filter(
+    (loop) =>
+      loop.role === "exit" &&
+      !loops.some(
+        (other) =>
+          (other.role === "rim" && (sameShape(other, loop) || within(loop, other))) ||
+          (other.role === "ceiling" && sameShape(other, loop)),
+      ),
+  )) {
+    if (!opens(exit, 1)) {
+      bottomOnly++;
+      continue;
+    }
+    edgeBreaks++;
+    const circle = circleOf(exit.points);
+    features.push(
+      circle
+        ? {
+            kind: "hole",
+            center: circle.center,
+            diameter: 2 * circle.radius,
+            top: thickness,
+            bottom: 0,
+          }
+        : { kind: "cutout", polygon: exit.points, top: thickness, bottom: 0 },
+    );
+  }
   if (edgeBreaks > 0)
     warnings.push(
-      `${edgeBreaks} hole or pocket edge${edgeBreaks === 1 ? " is" : "s are"} chamfered or countersunk; the plan cuts ${edgeBreaks === 1 ? "it" : "them"} square.`,
+      `${edgeBreaks} hole or pocket edge${edgeBreaks === 1 ? " is" : "s are"} chamfered, countersunk, or rounded; the plan cuts ${edgeBreaks === 1 ? "it" : "them"} square.`,
     );
-  // A recess cut from the bottom shows as a ceiling; an exit no rim reaches is a hole from below.
-  const ceilings = loops.filter((loop) => loop.role === "ceiling");
-  const bottomOnly =
-    ceilings.length +
-    loops.filter(
-      (loop) =>
-        loop.role === "exit" &&
-        !loops.some(
-          (other) =>
-            (other.role === "rim" && (sameShape(other, loop) || within(loop, other))) ||
-            (other.role === "ceiling" && sameShape(other, loop)),
-        ),
-    ).length;
   if (bottomOnly > 0)
     warnings.push(
       `${bottomOnly} feature${bottomOnly === 1 ? "" : "s"} open only on the bottom face; flip the plate to cut ${bottomOnly === 1 ? "it" : "them"}.`,

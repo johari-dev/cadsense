@@ -986,7 +986,7 @@ const sinkBetween = (outer: number, inner: number, depth: number): Countersink |
     : null;
 
 /** True when a ray from `origin` along `direction` leaves the part without touching a face. */
-const rayLeaves = (
+export const rayLeaves = (
   positions: Float64Array,
   triangles: Uint32Array,
   origin: Vec3,
