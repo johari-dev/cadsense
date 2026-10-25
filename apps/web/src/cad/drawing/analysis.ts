@@ -620,7 +620,9 @@ export const projectView = (part: PartAnalysis, spec: ViewSpec): DrawingView => 
       }
     }
   }
-  const epsilon = span * 0.004;
+  // Depth slack of two pixels: enough for the raster's sampling error, small enough that a
+  // tube's inner wall (.063" behind its outer face) still reads as hidden on a long tube.
+  const epsilon = 2 / pxPerInch;
   const visibleAt = (x: number, y: number, z: number) => {
     const px = Math.round(toPx(x));
     const py = Math.round(toPy(y));
