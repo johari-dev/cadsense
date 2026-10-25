@@ -1,6 +1,7 @@
 // Plate geometry as an R12 DXF in inches, the version every router CAM program reads. Each feature
 // type sits on its own layer so the shop can assign operations by layer. Pockets get one layer per
-// depth, named in thousandths: POCKET_125 is .125 deep. Islands sit on their pocket's layer.
+// floor depth below the top face, in thousandths: POCKET_125 bottoms out .125 down, so a pocket
+// inside another has its own layer. Islands sit on their pocket's layer.
 import type { Vec2 } from "../drawing/analysis";
 import type { PlateGeometry } from "./plateGeometry";
 
@@ -15,7 +16,9 @@ export const plateDxf = (plate: PlateGeometry): string => {
     { name: "CUTOUTS", color: 5 },
     ...[
       ...new Set(
-        plate.features.flatMap((f) => (f.kind === "pocket" ? [pocketLayer(f.top - f.floor)] : [])),
+        plate.features.flatMap((f) =>
+          f.kind === "pocket" ? [pocketLayer(plate.thickness - f.floor)] : [],
+        ),
       ),
     ].map((name) => ({ name, color: 3 })),
   ];
@@ -69,7 +72,7 @@ export const plateDxf = (plate: PlateGeometry): string => {
       pair(40, n(feature.diameter / 2));
     } else if (feature.kind === "cutout") polyline(feature.polygon, "CUTOUTS");
     else {
-      const layer = pocketLayer(feature.top - feature.floor);
+      const layer = pocketLayer(plate.thickness - feature.floor);
       polyline(feature.polygon, layer);
       for (const island of feature.islands) polyline(island, layer);
     }

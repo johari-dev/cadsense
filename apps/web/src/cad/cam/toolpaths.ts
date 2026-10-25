@@ -152,7 +152,8 @@ export const planPlate = (plate: PlateGeometry, settings: CamSettings): CamPlan 
     operations.push({
       kind: "pocket",
       name: "Pocket",
-      detail: `${fmt(depth)} deep`,
+      // Floor depth below the top face, so a pocket inside another reads deeper.
+      detail: `${fmt(plate.thickness - pocket.floor)} deep`,
       count: 1,
       paths: rings,
       depth,
