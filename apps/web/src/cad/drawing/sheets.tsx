@@ -19,10 +19,14 @@ import {
   type Placed,
 } from "./sheetKit";
 import {
+  TOLERANCES,
   formatFraction,
   formatLength,
+  formatSize,
   holeCallout,
   holeReadings,
+  unitSuffix,
+  unresolvedNotes,
   type HoleReading,
   type Operation,
   type Stock,
@@ -48,33 +52,54 @@ export interface SheetData {
 }
 
 const readingFor = (data: SheetData, group: HoleGroup) =>
-  data.readings.get(group.key) ?? holeReadings(group, data.part)[0]!;
+  data.readings.get(group.key) ?? holeReadings(group, data.units)[0]!;
 
-/** Hole groups whose holes appear as circles in this view, with their centres in model inches. */
+/**
+ * Hole groups whose holes appear as circles in this view: the group cut down to those holes,
+ * so callouts count what the view shows, and their centres in model inches.
+ */
 const holesIn = (data: SheetData, view: DrawingView) =>
   data.part.holes
-    .map((group) => ({
-      group,
-      centers: group.holes
-        .filter((hole) => isAlong(hole.direction, view.spec.toward))
-        .map((hole) => projectPoint(view.spec, hole.entry)),
-    }))
+    .map((group) => {
+      const holes = group.holes.filter((hole) => isAlong(hole.direction, view.spec.toward));
+      return {
+        group: { ...group, holes },
+        centers: holes.map((hole) => projectPoint(view.spec, hole.entry)),
+      };
+    })
     .filter((entry) => entry.centers.length > 0);
 
 const holeCount = (data: SheetData, view: DrawingView) =>
   holesIn(data, view).reduce((sum, entry) => sum + entry.centers.length, 0);
 
-const unitSuffix = (units: Units) => (units === "mm" ? " mm" : "");
+/** Warnings every sheet prints: what the model shows but the sheet does not dimension. */
+const sheetWarnings = (data: SheetData) => {
+  const { u, v, w } = data.part.frame;
+  const angled = data.part.holes
+    .flatMap((group) => group.holes)
+    .filter((hole) => ![u, v, w].some((axis) => isAlong(hole.direction, axis))).length;
+  return [
+    ...unresolvedNotes(data.part, data.units),
+    ...(angled > 0
+      ? [
+          `${angled} ${angled > 1 ? "holes are" : "hole is"} at an angle to every view and not shown. Check the model.`,
+        ]
+      : []),
+  ];
+};
 
 /** Overall dimensions plus hole callouts for one primary view. */
 const PrimaryDims = ({
   data,
   placed,
   side,
+  leftGap = 0.4,
 }: {
   data: SheetData;
   placed: Placed;
   side?: Placed | undefined;
+  /** How far left of the view the height dimension sits, clear of hole ordinates. */
+  leftGap?: number;
 }) => {
   const { part, units } = data;
   const [su, sv, sw] = part.frame.size;
@@ -91,7 +116,7 @@ const PrimaryDims = ({
   );
   if (isShaft(part.shape)) {
     // Round stock is sized by its diameter; hex by across-flats, which the end view labels.
-    if (part.shape.kind === "turned")
+    if (part.shape.kind !== "hex")
       dims.push(
         <VDim
           key="d"
@@ -131,6 +156,39 @@ const PrimaryDims = ({
           );
         }),
       );
+    // Turned-down sections below the length: journals share a row, each groove gets its own
+    // with its distance from the left end.
+    const x = (at: number) => placed.left + (at / 0.0254) * placed.scale;
+    let row = 0;
+    part.steps.forEach((step) => {
+      const groove = step.start > 0 && step.end < su;
+      if (groove) row++;
+      const level = placed.bottom + 0.8 + row * 0.35;
+      const size = `Ø${formatLength(step.diameter, units)}`;
+      const long = formatLength(step.end - step.start, units);
+      dims.push(
+        <HDim
+          key={`s${step.start}`}
+          x1={x(step.start)}
+          x2={x(step.end)}
+          from={placed.bottom}
+          level={level}
+          text={groove ? `GROOVE ${size} × ${long}` : `${size} × ${long}`}
+        />,
+      );
+      if (groove)
+        dims.push(
+          <HDim
+            key={`g${step.start}`}
+            x1={placed.left}
+            x2={x(step.start)}
+            from={placed.bottom}
+            level={level + 0.3}
+            text={formatLength(step.start, units)}
+          />,
+        );
+      if (groove) row++;
+    });
   } else {
     dims.push(
       <VDim
@@ -138,7 +196,7 @@ const PrimaryDims = ({
         y1={placed.top}
         y2={placed.bottom}
         from={placed.left}
-        level={placed.left - 0.4}
+        level={placed.left - leftGap}
         text={formatLength(sv, units)}
       />,
     );
@@ -163,10 +221,13 @@ const HoleLeaders = ({
   data,
   placed,
   side = "right",
+  gap = side === "below" ? 0.8 : 0.35,
 }: {
   data: SheetData;
   placed: Placed;
   side?: "right" | "left" | "above" | "below";
+  /** Distance from the view to the first stacked callout above or below it. */
+  gap?: number;
 }) => (
   <g>
     {holesIn(data, placed.view).map(({ group, centers }, i) => {
@@ -180,9 +241,9 @@ const HoleLeaders = ({
       const at: Vec2 = [cx + dirX * r * Math.SQRT1_2, cy + dirY * r * Math.SQRT1_2];
       const to: Vec2 =
         side === "above"
-          ? [cx + 0.5 * dirX, placed.top - 0.35 - i * 0.4]
+          ? [cx + 0.5 * dirX, placed.top - gap - i * 0.4]
           : side === "below"
-            ? [cx + 0.5 * dirX, placed.bottom + 0.8 + i * 0.4]
+            ? [cx + 0.5 * dirX, placed.bottom + gap + i * 0.4]
             : [
                 side === "left" ? placed.left - 0.35 : placed.right + 0.35,
                 placed.top + 0.1 + i * 0.45,
@@ -271,29 +332,50 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
   const { part, views } = data;
   const turned = isShaft(part.shape);
   const long = isLong(views.front);
-  // The top view only earns space when it shows holes the front view cannot.
-  const needsTop =
-    !turned &&
-    holesIn(data, views.top).some(
-      ({ group }) => !holesIn(data, views.front).some((f) => f.group === group),
-    );
-  const scale = long
-    ? pickScale([
-        { view: views.front, w: 6.0, h: 1.2 },
-        { view: views.right, w: 1.4, h: 1.2 },
-      ])
-    : pickScale([
-        { view: views.front, w: turned ? 4.2 : 4.4, h: turned ? 2.8 : 3.5 },
-        { view: views.right, w: turned ? 1.6 : 1.8, h: turned ? 2.8 : 3.5 },
-      ]);
-  const main = long
-    ? place(views.front, scale, 6.15, needsTop ? 4.2 : 3.4)
-    : place(views.front, scale, turned ? 7.3 : 5.4, 4.15);
-  const top = needsTop ? place(views.top, scale, 6.15, 2.35) : null;
+  const warnings = sheetWarnings(data);
+  // Every view holes point straight at gets their callouts and positions. The top view is drawn
+  // only for its holes; the end view always, for the outline.
+  const showTop = holeCount(data, views.top) > 0;
+  const frontBelow = !turned && !long ? null : "below";
+  // Vertical room around the views: ordinates above, then dimensions and callouts below.
+  const ordinateBand = (view: DrawingView) =>
+    holeCount(data, view) === 0 ? 0 : holeCount(data, view) <= 12 ? 0.75 : 0.3;
+  const grooves = part.steps.filter((s) => s.start > 0 && s.end < part.frame.size[0]).length;
+  const dimsBelow = 0.55 + (part.steps.length ? (1 + 2 * grooves) * 0.35 + 0.1 : 0);
+  const frontGap = dimsBelow + 0.3;
+  const above = { top: showTop ? ordinateBand(views.top) : 0, front: ordinateBand(views.front) };
+  const below = {
+    top: showTop ? 0.35 + holesIn(data, views.top).length * 0.4 : 0,
+    front: dimsBelow + (frontBelow ? 0.3 + holesIn(data, views.front).length * 0.4 : 0),
+  };
+  const firstY = 1.45 + warnings.length * 0.16;
+  const room = 6.25 - firstY - above.top - below.top - above.front - below.front;
+  const height = (view: DrawingView) => view.max[1] - view.min[1];
+  const rows = height(views.front) + (showTop ? height(views.top) : 0);
+  const share = (view: DrawingView) => Math.max(0.3, (room * height(view)) / rows);
+  const frontW = long ? 6.0 : turned ? 4.2 : 4.4;
+  const cap = long ? 1.2 : turned ? 2.8 : 3.5;
+  const scale = pickScale([
+    { view: views.front, w: frontW, h: Math.min(cap, share(views.front)) },
+    { view: views.right, w: long ? 1.4 : turned ? 1.6 : 1.8, h: cap },
+    ...(showTop ? [{ view: views.top, w: frontW, h: share(views.top) }] : []),
+  ]);
+  const mainX = long ? 6.15 : turned ? 7.3 : 5.4;
+  const top = showTop
+    ? place(views.top, scale, mainX, firstY + above.top + (height(views.top) * scale) / 2)
+    : null;
+  // Without a top view the front keeps its usual place, pushed down only for warnings.
+  const mainY = top
+    ? top.bottom + below.top + above.front + (height(views.front) * scale) / 2
+    : Math.max(long ? 3.4 : 4.15, firstY + above.front + (height(views.front) * scale) / 2);
+  const main = place(views.front, scale, mainX, mainY);
   const end = long
     ? place(views.right, scale, 9.95, main.top + (main.bottom - main.top) / 2)
-    : place(views.right, scale, turned ? 3.65 : 8.9, 4.15);
+    : place(views.right, scale, turned ? 3.65 : 8.9, mainY);
   const iso = place(views.iso, pickScale([{ view: views.iso, w: 1.4, h: 1.1 }]), 9.7, 1.05);
+  // Operations fill two columns, closer together when there are many.
+  const opRows = Math.max(4, Math.ceil(data.operations.length / 2));
+  const opStep = Math.min(0.27, 1.1 / opRows);
   const qty = Math.max(1, data.qty);
   const columns = qty > 28 ? 4 : qty > 14 ? 3 : 2;
   const box = qty > 28 ? 0.24 : 0.32;
@@ -341,6 +423,11 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
       <Label x={2.6} y={1.25} size={0.11} anchor="start" fill="#555">
         {data.name} · {data.material}
       </Label>
+      {warnings.map((warning, i) => (
+        <Label key={warning} x={2.6} y={1.45 + i * 0.16} size={0.1} anchor="start" fill={ACCENT}>
+          CHECK: {warning}
+        </Label>
+      ))}
       <ViewGraphic placed={iso} showHidden={false} strokeScale={0.8} />
 
       {turned && (
@@ -350,29 +437,45 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
           size={0.1}
           fill="#555"
         >
-          {part.shape.kind === "hex"
-            ? `END VIEW · ${formatFraction(part.shape.flats).replace('"', "")}" HEX A/F`
-            : "END VIEW"}
+          {endViewLabel(part, data.units)}
         </Label>
       )}
       <ViewGraphic placed={main} />
       <ViewGraphic placed={end} showHidden={part.shape.kind !== "plate"} />
       {top && <ViewGraphic placed={top} />}
-      <PrimaryDims data={data} placed={main} side={turned ? undefined : end} />
+      <PrimaryDims
+        data={data}
+        placed={main}
+        side={turned ? undefined : end}
+        leftGap={ordinateBand(views.front) === 0.75 ? 0.8 : 0.4}
+      />
+      <HoleLeaders data={data} placed={main} side={frontBelow ?? "right"} gap={frontGap} />
       <HoleLeaders
         data={data}
-        placed={turned ? end : main}
-        side={turned ? "above" : long ? "below" : "right"}
+        placed={end}
+        side={turned ? "above" : "below"}
+        gap={turned ? 0.35 : 0.65}
       />
-      {top && <HoleLeaders data={data} placed={top} side="below" />}
-      {!turned &&
-        (holeCount(data, (top ?? main).view) <= 12 ? (
-          <OrdinateDims data={data} placed={top ?? main} />
-        ) : (
-          <Label x={main.left} y={main.top - 0.25} size={0.1} anchor="start" fill="#555">
-            HOLE POSITIONS: CUT FROM DXF
-          </Label>
-        ))}
+      {top && <HoleLeaders data={data} placed={top} side="below" gap={0.35} />}
+      {[top, main, turned ? null : end].map(
+        (placed) =>
+          placed &&
+          holeCount(data, placed.view) > 0 &&
+          (holeCount(data, placed.view) <= 12 ? (
+            <OrdinateDims key={placed.view.spec.name} data={data} placed={placed} showY={!turned} />
+          ) : (
+            <Label
+              key={placed.view.spec.name}
+              x={placed.left}
+              y={placed.top - 0.15}
+              size={0.1}
+              anchor="start"
+              fill="#555"
+            >
+              HOLE POSITIONS: CUT FROM DXF
+            </Label>
+          )),
+      )}
 
       <line x1={2.6} y1={6.35} x2={10.6} y2={6.35} stroke={INK} strokeWidth={0.006} />
       <Label x={2.6} y={6.62} size={0.1} anchor="start" weight={700}>
@@ -381,9 +484,9 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
       {data.operations.map((op, i) => (
         <Label
           key={i}
-          x={2.6 + Math.floor(i / 4) * 4.1}
-          y={6.9 + (i % 4) * 0.27}
-          size={0.12}
+          x={2.6 + Math.floor(i / opRows) * 4.1}
+          y={6.9 + (i % opRows) * opStep}
+          size={Math.min(0.12, opStep * 0.45)}
           anchor="start"
         >
           {`${i + 1}. ${op.title}: ${op.detail}`}
@@ -395,7 +498,7 @@ export const ShopSheet = ({ data }: { data: SheetData }) => {
         </Label>
       )}
       <Label x={10.6} y={8.12} size={0.08} anchor="end" fill="#777">
-        SCALE {scaleLabel(scale)} · INCH · {data.source.revision}
+        SCALE {scaleLabel(scale)} · {data.units === "mm" ? "MM" : "INCH"} · {data.source.revision}
       </Label>
     </>
   );
@@ -408,17 +511,20 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
   const { part, views, units } = data;
   const turned = isShaft(part.shape);
   const long = isLong(views.front);
+  const warnings = sheetWarnings(data);
+  // Shafts show the top view only for holes that point at it.
+  const showTop = !turned || holeCount(data, views.top) > 0;
   const frontW = long ? 6.2 : 3.8;
   const scale = pickScale([
     { view: views.front, w: frontW, h: turned ? 2.2 : 2.3 },
     { view: views.right, w: long ? 1.2 : 2.2, h: 2.3 },
-    ...(turned ? [] : [{ view: views.top, w: frontW, h: 1.4 }]),
+    ...(showTop ? [{ view: views.top, w: frontW, h: 1.4 }] : []),
   ]);
   const front = place(views.front, scale, long ? 4.1 : 3.2, turned ? 3.6 : 4.35);
   const top = place(
     views.top,
     scale,
-    3.2,
+    front.left + (front.right - front.left) / 2,
     front.top - 0.35 - ((views.top.max[1] - views.top.min[1]) * scale) / 2 - 0.15,
   );
   const right = place(
@@ -428,7 +534,8 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
     front.top + (front.bottom - front.top) / 2,
   );
   const iso = place(views.iso, pickScale([{ view: views.iso, w: 2.4, h: 1.7 }]), 8.9, 1.55);
-  const tagged = turned ? [] : tagHoles(data, views.front);
+  // Holes in every view get a tag and a table row; the shaft's end view uses leaders instead.
+  const tagged = tagHoles(data, [front, ...(showTop ? [top] : []), ...(turned ? [] : [right])]);
   const zones = [0, 1, 2, 3];
   return (
     <>
@@ -452,7 +559,7 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
         </g>
       ))}
       <ViewGraphic placed={front} />
-      {!turned && <ViewGraphic placed={top} />}
+      {showTop && <ViewGraphic placed={top} />}
       <ViewGraphic placed={right} />
       <ViewGraphic placed={iso} showHidden={false} strokeScale={0.8} />
       <PrimaryDims data={data} placed={front} side={turned ? undefined : right} />
@@ -461,8 +568,20 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
       ) : (
         <HoleLeaders data={data} placed={front} side="right" />
       )}
+      {warnings.map((warning, i) => (
+        <Label
+          key={warning}
+          x={0.5}
+          y={6.35 - (warnings.length - i) * 0.15}
+          size={0.09}
+          anchor="start"
+          fill={ACCENT}
+        >
+          CHECK: {warning}
+        </Label>
+      ))}
       {tagged.map((t) => {
-        const [x, y] = front.at(t.center);
+        const [x, y] = t.placed.at(t.center);
         return (
           <Label key={t.tag} x={x + 0.09} y={y - 0.06} size={0.075} anchor="start" fill="#444">
             {t.tag}
@@ -477,16 +596,16 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
             y={6.55}
             w={3.4}
             h={0.22}
-            value="HOLE TABLE   (FROM LOWER LEFT, FRONT VIEW)"
+            value="HOLE TABLE   (FROM LOWER LEFT OF EACH VIEW)"
             size={0.08}
             weight={700}
           />
-          {["TAG", "X", "Y", "SIZE"].map((h, i) => (
+          {["TAG", "VIEW", "X", "Y", "SIZE"].map((h, i) => (
             <Cell
               key={h}
-              x={0.5 + [0, 0.45, 1.05, 1.65][i]!}
+              x={0.5 + TABLE_X[i]!}
               y={6.77}
-              w={[0.45, 0.6, 0.6, 1.75][i]!}
+              w={TABLE_W[i]!}
               h={0.2}
               value={h}
               size={0.07}
@@ -497,15 +616,16 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
             <g key={t.tag}>
               {[
                 t.tag,
+                t.placed.view.spec.name.toUpperCase(),
                 formatLength(t.x * 0.0254, units),
                 formatLength(t.y * 0.0254, units),
                 t.size,
               ].map((v, i) => (
                 <Cell
                   key={i}
-                  x={0.5 + [0, 0.45, 1.05, 1.65][i]!}
+                  x={0.5 + TABLE_X[i]!}
                   y={6.97 + row * 0.2}
-                  w={[0.45, 0.6, 0.6, 1.75][i]!}
+                  w={TABLE_W[i]!}
                   h={0.2}
                   value={v}
                   size={0.075}
@@ -516,7 +636,7 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
           ))}
           {tagged.length > 6 && (
             <Label x={0.5} y={8.2} size={0.07} anchor="start">
-              + {tagged.length - 6} more rows on sheet 2
+              + {tagged.length - 6} more holes not listed; positions are in the views
             </Label>
           )}
         </g>
@@ -527,7 +647,7 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
           NOTES:
         </Label>
         {[
-          "1. BREAK ALL SHARP EDGES .010-.020.",
+          `1. BREAK ALL SHARP EDGES ${TOLERANCES[units].edges}.`,
           `2. MATERIAL: ${data.material.toUpperCase()}.`,
           `3. STOCK: ${data.stock.description.toUpperCase()}.`,
           ...(data.notes ? [`4. ${data.notes.toUpperCase()}`] : []),
@@ -551,8 +671,8 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
         </Label>
         {[
           `DIMENSIONS IN ${units === "mm" ? "MM" : "INCHES"}`,
-          ".XX  ±.01",
-          ".XXX ±.005",
+          TOLERANCES[units].two,
+          TOLERANCES[units].three,
           "ANGLES ±0.5°",
           "THIRD ANGLE PROJECTION",
         ].map((line, i) => (
@@ -640,20 +760,35 @@ const ThirdAngleSymbol = ({ x, y }: { x: number; y: number }) => (
   </g>
 );
 
-const tagHoles = (data: SheetData, view: DrawingView) =>
-  holesIn(data, view).flatMap(({ group, centers }, gi) =>
-    centers.map((center, hi) => ({
-      tag: `${"ABCDEFGH"[gi] ?? "Z"}${hi + 1}`,
-      center,
-      x: center[0] - view.min[0],
-      y: center[1] - view.min[1],
-      size: holeCallout(
-        { ...group, holes: [group.holes[0]!], bothEnds: false },
-        readingFor(data, group),
-        data.units,
-      ),
-    })),
+const TABLE_X = [0, 0.4, 0.85, 1.4, 1.95];
+const TABLE_W = [0.4, 0.45, 0.55, 0.55, 1.45];
+
+/** One tag per hole across the views: a letter per hole group, numbered on through the views. */
+const tagHoles = (data: SheetData, views: readonly Placed[]) => {
+  const numbered = new Map<string, number>();
+  return views.flatMap((placed) =>
+    holesIn(data, placed.view).flatMap(({ group, centers }) =>
+      centers.map((center) => {
+        const letter =
+          "ABCDEFGH"[data.part.holes.findIndex((other) => other.key === group.key)] ?? "Z";
+        const number = (numbered.get(group.key) ?? 0) + 1;
+        numbered.set(group.key, number);
+        return {
+          tag: `${letter}${number}`,
+          placed,
+          center,
+          x: center[0] - placed.view.min[0],
+          y: center[1] - placed.view.min[1],
+          size: holeCallout(
+            { ...group, holes: [group.holes[0]!], bothEnds: false },
+            readingFor(data, group),
+            data.units,
+          ),
+        };
+      }),
+    ),
   );
+};
 
 // ---------------------------------------------------------------------------
 // C: traveler. One row per operation, each with the view it needs and a sign-off.
@@ -663,9 +798,17 @@ export const TravelerSheet = ({ data }: { data: SheetData }) => {
   const turned = isShaft(part.shape);
   const iso = place(views.iso, pickScale([{ view: views.iso, w: 2.4, h: 1.9 }]), 1.75, 2.75);
   const front = place(views.front, pickScale([{ view: views.front, w: 2.1, h: 1.5 }]), 1.55, 5.0);
-  const rows = data.operations.slice(0, 7);
-  const rowH = Math.min(0.95, 6.3 / Math.max(rows.length, 1));
-  const holeView = turned ? views.right : views.front;
+  const warnings = sheetWarnings(data);
+  const rows = data.operations;
+  // Every operation gets a row; long lists pack the rows tighter.
+  const firstRow = 1.78 + warnings.length * 0.17;
+  const rowH = Math.min(0.95, (8.1 - firstRow) / Math.max(rows.length, 1));
+  const titleAt = Math.min(0.3, rowH / 2 - 0.02);
+  // A hole step shows the first view its holes point at.
+  const holeView = (key: string) =>
+    (turned ? [views.right, views.front, views.top] : [views.front, views.top, views.right]).find(
+      (view) => holesIn(data, view).some((entry) => entry.group.key === key),
+    ) ?? null;
   return (
     <>
       <rect
@@ -722,18 +865,19 @@ export const TravelerSheet = ({ data }: { data: SheetData }) => {
           {h}
         </Label>
       ))}
+      {warnings.map((warning, i) => (
+        <Label key={warning} x={3.45} y={1.9 + i * 0.17} size={0.09} anchor="start" fill={ACCENT}>
+          CHECK: {warning}
+        </Label>
+      ))}
       {rows.map((op, i) => {
-        const y = 1.78 + i * rowH;
-        const mini = op.holeKey
-          ? place(
-              holeView,
-              pickScale([{ view: holeView, w: 1.1, h: rowH - 0.2 }]),
-              8.95,
-              y + rowH / 2,
-            )
+        const y = firstRow + i * rowH;
+        const view = op.holeKey ? holeView(op.holeKey) : null;
+        const mini = view
+          ? place(view, pickScale([{ view, w: 1.1, h: rowH - 0.2 }]), 8.95, y + rowH / 2)
           : null;
-        const highlight = op.holeKey
-          ? holesIn(data, holeView)
+        const highlight = view
+          ? holesIn(data, view)
               .find((entry) => entry.group.key === op.holeKey)
               ?.centers.map((center) => ({
                 center,
@@ -751,17 +895,24 @@ export const TravelerSheet = ({ data }: { data: SheetData }) => {
               stroke={INK}
               strokeWidth={0.006}
             />
-            <Label x={3.55} y={y + 0.3} size={0.16} anchor="start" weight={700}>
+            <Label x={3.55} y={y + titleAt} size={0.16} anchor="start" weight={700}>
               {i + 1}
             </Label>
-            <rect x={3.9} y={y + 0.14} width={0.85} height={0.22} rx={0.04} fill="#e8e8e8" />
-            <Label x={4.325} y={y + 0.295} size={0.09} weight={700}>
+            <rect
+              x={3.9}
+              y={y + titleAt - 0.16}
+              width={0.85}
+              height={0.22}
+              rx={0.04}
+              fill="#e8e8e8"
+            />
+            <Label x={4.325} y={y + titleAt - 0.005} size={0.09} weight={700}>
               {op.machine.toUpperCase()}
             </Label>
-            <Label x={4.9} y={y + 0.3} size={0.14} anchor="start" weight={700}>
+            <Label x={4.9} y={y + titleAt} size={0.14} anchor="start" weight={700}>
               {op.title}
             </Label>
-            <Label x={4.9} y={y + 0.52} size={0.11} anchor="start">
+            <Label x={4.9} y={y + titleAt + 0.22} size={0.11} anchor="start">
               {truncate(op.detail, 52)}
             </Label>
             {mini && <ViewGraphic placed={mini} highlight={highlight} strokeScale={0.7} />}
@@ -802,6 +953,14 @@ export const VARIANTS = [
 
 export type VariantKey = (typeof VARIANTS)[number]["key"];
 
+/** What the shaft's end view adds: hex size across flats, or a round tube's wall. */
+const endViewLabel = (part: PartAnalysis, units: Units) =>
+  part.shape.kind === "hex"
+    ? `END VIEW · ${formatFraction(part.shape.flats)} HEX A/F`
+    : part.shape.kind === "roundTube"
+      ? `END VIEW · WALL ${formatLength(part.shape.wall, units)}${unitSuffix(units)}`
+      : "END VIEW";
+
 /** One-line description like the hand sketch: "3/8" round shaft, 1-1/2" long, 10-32 tap .50 deep both ends". */
 export const describePart = (
   part: PartAnalysis,
@@ -809,11 +968,12 @@ export const describePart = (
   units: Units,
 ) => {
   const holes = part.holes.map((group) => {
-    const reading = readings.get(group.key) ?? holeReadings(group, part)[0]!;
-    const what = reading.tap ? `${reading.tap} tap` : `Ø${formatLength(group.diameter, units)}`;
+    const reading = readings.get(group.key) ?? holeReadings(group, units)[0]!;
+    const what = reading.tap ? `${reading.tap} tap` : reading.callout;
+    const axial = group.holes.every((hole) => isAlong(hole.direction, part.frame.u));
     const depth =
       group.depth === null
-        ? isShaft(part.shape)
+        ? isShaft(part.shape) && axial
           ? "thru bore"
           : "thru"
         : `${formatLength(group.depth, units, 2)}${unitSuffix(units)} deep`;
@@ -825,16 +985,20 @@ export const describePart = (
     return `${what} ${depth}${count}`;
   });
   const [su, sv, sw] = part.frame.size;
+  const size = (meters: number) => formatSize(meters, units);
+  const { shape } = part;
   const base =
-    part.shape.kind === "turned"
-      ? `${formatFraction(part.shape.diameter)} round, ${formatFraction(part.shape.length)} long`
-      : part.shape.kind === "hex"
-        ? `${formatFraction(part.shape.flats)} hex, ${formatFraction(part.shape.length)} long`
-        : part.shape.kind === "plate"
-          ? `${formatFraction(sw)} plate, ${formatFraction(su)} × ${formatFraction(sv)}`
-          : part.shape.kind === "tube"
-            ? `${formatFraction(sv)} × ${formatFraction(sw)} tube, ${formatFraction(su)} long`
-            : `${formatFraction(su)} × ${formatFraction(sv)} × ${formatFraction(sw)} block`;
+    shape.kind === "turned"
+      ? `${size(shape.diameter)} round, ${size(shape.length)} long`
+      : shape.kind === "roundTube"
+        ? `${size(shape.diameter)} OD round tube, ${size(shape.length)} long`
+        : shape.kind === "hex"
+          ? `${size(shape.flats)} hex, ${size(shape.length)} long`
+          : shape.kind === "plate"
+            ? `${size(sw)} plate, ${size(su)} × ${size(sv)}`
+            : shape.kind === "tube"
+              ? `${size(sv)} × ${size(sw)} tube, ${size(su)} long`
+              : `${size(su)} × ${size(sv)} × ${size(sw)} block`;
   const text = [
     base,
     ...holes.slice(0, 2),
