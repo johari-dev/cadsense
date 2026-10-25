@@ -811,7 +811,7 @@ const tagHoles = (data: SheetData, views: readonly Placed[]) => {
   const numbered = new Map<string, number>();
   return views.flatMap((placed) =>
     holesIn(data, placed.view).flatMap(({ group, centers }) =>
-      centers.map((center) => {
+      centers.map((center, index) => {
         const letter =
           "ABCDEFGH"[data.part.holes.findIndex((other) => other.key === group.key)] ?? "Z";
         const number = (numbered.get(group.key) ?? 0) + 1;
@@ -823,7 +823,7 @@ const tagHoles = (data: SheetData, views: readonly Placed[]) => {
           x: center[0] - placed.view.min[0],
           y: center[1] - placed.view.min[1],
           size: holeCallout(
-            { ...group, holes: [group.holes[0]!], bothEnds: false },
+            { ...group, holes: [group.holes[index]!], bothEnds: false },
             readingFor(data, group),
             data.units,
             placed.view.spec.toward,

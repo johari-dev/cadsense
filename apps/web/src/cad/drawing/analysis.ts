@@ -1188,10 +1188,15 @@ const findHoles = (
       dot(hole.entry, hole.direction) < dot(twin.entry, twin.direction)
         ? [hole, twin]
         : [twin, hole];
+    // A twin drilled the other way has its entry on the merged hole's far side. One drilled the
+    // same way starts inside the part and leaves by the far outer face.
+    const reversed = dot(near.direction, other.direction) < 0;
     merged[merged.indexOf(twin)] = {
       ...near,
-      countersink: near.countersink ?? other.countersink,
-      farCountersink: near.farCountersink ?? other.farCountersink,
+      countersink: near.countersink ?? (reversed ? other.farCountersink : other.countersink),
+      farCountersink: reversed
+        ? (other.countersink ?? near.farCountersink)
+        : (other.farCountersink ?? near.farCountersink),
       bothWalls: true,
     };
   }
@@ -1204,7 +1209,15 @@ const groupHoles = (holes: readonly Hole[], shape: Shape, frame: PartFrame): Hol
   const sink = (name: string, countersink: Countersink | null) =>
     countersink ? `|${name}${inches(countersink.diameter)}x${countersink.angle.toFixed(0)}` : "";
   for (const hole of holes) {
-    const key = `${hole.hex ? "hex" : ""}${inches(hole.diameter)}|${hole.depth === null ? "thru" : inches(hole.depth)}${hole.bothWalls ? "|2w" : ""}${sink("csk", hole.countersink)}${sink("far", hole.farCountersink)}`;
+    // Which face a countersink is on depends on which way the hole is drilled, so countersunk
+    // holes drilled opposite ways are separate callouts. Axial shaft holes stay together: the
+    // pair at both ends is one BOTH ENDS callout.
+    const facing =
+      (hole.countersink || hole.farCountersink) &&
+      !(isShaft(shape) && isAlong(hole.direction, frame.u))
+        ? `|${hole.direction.map((x) => Math.round(x * 1000)).join(",")}`
+        : "";
+    const key = `${hole.hex ? "hex" : ""}${inches(hole.diameter)}|${hole.depth === null ? "thru" : inches(hole.depth)}${hole.bothWalls ? "|2w" : ""}${sink("csk", hole.countersink)}${sink("far", hole.farCountersink)}${facing}`;
     groups.set(key, [...(groups.get(key) ?? []), hole]);
   }
   return [...groups].map(([key, members]) => ({
