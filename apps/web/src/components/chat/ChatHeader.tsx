@@ -209,7 +209,15 @@ export const ChatHeader = memo(function ChatHeader({
       onContextMenu={handleHeaderContextMenu}
     >
       <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">
-        <WorkspaceBreadcrumbItem current className={renamingTitle !== null ? "flex-1" : ""}>
+        {/* The title is 14px medium and capped so a long one leaves room for the project;
+            the tooltip shows the full title. */}
+        <WorkspaceBreadcrumbItem
+          current
+          className={cn(
+            "text-[0.9333rem]",
+            renamingTitle !== null ? "flex-1" : "max-w-[min(26rem,70%)]",
+          )}
+        >
           {renamingTitle !== null ? (
             <input
               autoFocus
@@ -256,10 +264,10 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           )}
         </WorkspaceBreadcrumbItem>
-        {/* The project follows the thread title in muted, regular-weight text, so the title
-            reads first and the project still answers which one the thread lives in. */}
+        {/* The project follows the thread title as a quiet 12px chip, set apart by a wider
+            gap, so the two never read as one long title. */}
         {activeProjectName ? (
-          <WorkspaceBreadcrumbItem>
+          <WorkspaceBreadcrumbItem className="ps-1">
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -267,7 +275,7 @@ export const ChatHeader = memo(function ChatHeader({
                     type="button"
                     aria-label={`New thread in ${activeProjectName}`}
                     onClick={onNewThreadInProject}
-                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-sm font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-[0.8rem] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 }
               >

@@ -13,9 +13,9 @@ type Preset = Extract<CadViewState["camera"], { kind: "preset" }>["preset"];
 
 /** Cube edge in px. */
 const EDGE = 42;
-/** The cube's box: its space diagonal, the widest it can project at any angle, so no
-    orientation reaches past the box. */
-const FOOTPRINT = Math.ceil(EDGE * Math.sqrt(3));
+/** The round backing, just wider than the cube's space diagonal (73px), its widest projection,
+    so no orientation reaches past it. */
+const BACKING = 76;
 /** Share of a face edge each edge and corner zone takes. */
 const RIM = 0.2;
 
@@ -195,16 +195,18 @@ export function CadViewCube({
         <TooltipTrigger
           aria-label="Isometric view"
           disabled={disabled}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
+          className="flex size-7 cursor-pointer items-center justify-center rounded-lg border bg-popover text-muted-foreground shadow-sm outline-none transition-colors hover:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_8%)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
           onClick={() => snap(ISOMETRIC)}
         >
           <CubeIcon aria-hidden="true" className="size-4" />
         </TooltipTrigger>
         <TooltipPopup>Isometric view</TooltipPopup>
       </Tooltip>
+      {/* A round backing, so the cube reads as a control at every angle, even edge-on, and
+          stands off the model behind it. */}
       <div
-        className="flex items-center justify-center"
-        style={{ width: FOOTPRINT, height: FOOTPRINT }}
+        className="flex items-center justify-center rounded-full border bg-popover/85 shadow-sm"
+        style={{ width: BACKING, height: BACKING }}
       >
         <div
           ref={cube}
@@ -235,7 +237,7 @@ export function CadViewCube({
                         <TooltipTrigger
                           aria-label={`${face.label} view`}
                           disabled={disabled}
-                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-wide text-muted-foreground uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
+                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-wide text-foreground/70 uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
                           onClick={() => snap(face.normal)}
                         >
                           {/* Wider than the center zone on long labels; clicks there still

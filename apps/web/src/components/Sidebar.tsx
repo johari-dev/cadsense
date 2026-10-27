@@ -159,6 +159,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
+  resolveSidebarThreadTitle,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -276,6 +277,8 @@ function buildThreadJumpLabelMap(input: {
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
+  /** The project name shown above the row; a title that repeats it drops it on display. */
+  projectName: string;
   projectCwd: string | null;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
@@ -335,6 +338,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     cancelRename,
     attemptArchiveThread,
     thread,
+    projectName,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
@@ -586,7 +590,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     className="min-w-0 flex-1 truncate text-[13px]"
                     data-testid={`thread-title-${thread.id}`}
                   >
-                    {thread.title}
+                    {resolveSidebarThreadTitle(thread.title, projectName)}
                   </span>
                 }
               />
@@ -686,6 +690,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
 
 interface SidebarProjectThreadListProps {
   projectKey: string;
+  projectName: string;
   projectExpanded: boolean;
   hasOverflowingThreads: boolean;
   hiddenThreadStatus: ThreadStatusPill | null;
@@ -745,6 +750,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
+    projectName,
     projectCwd,
     activeRouteThreadKey,
     threadJumpLabelByKey,
@@ -797,6 +803,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             <SidebarThreadRow
               key={threadKey}
               thread={thread}
+              projectName={projectName}
               projectCwd={projectCwd}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
@@ -2157,6 +2164,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       <SidebarProjectThreadList
         projectKey={project.projectKey}
+        projectName={project.displayName}
         projectExpanded={projectExpanded}
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}

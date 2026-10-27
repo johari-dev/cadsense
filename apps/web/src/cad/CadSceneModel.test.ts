@@ -287,7 +287,7 @@ it("fits a box into the free area tightly where a sphere fit leaves wide margins
     return extent;
   };
   expect(fill()).toBeLessThan(0.7);
-  expect(fill({ width: 1, height: 1 })).toBeCloseTo(0.9, 5);
-  // Half the width free: the tube fills 90% of that half.
-  expect(fill({ width: 0.5, height: 1 })).toBeCloseTo(0.45, 5);
+  expect(fill({ width: 1, height: 1 })).toBeCloseTo(0.97, 5);
+  // Half the width free: the tube fills 97% of that half.
+  expect(fill({ width: 0.5, height: 1 })).toBeCloseTo(0.485, 5);
 });

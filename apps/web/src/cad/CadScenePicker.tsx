@@ -35,7 +35,7 @@ export function CadScenePicker({
       href={documentUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className="min-w-0 flex-1 truncate rounded-sm py-2 text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+      className="min-w-0 flex-1 truncate rounded-sm py-2 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
       onClick={(event) => {
         const api = readLocalApi();
         if (!api) return;
@@ -54,13 +54,15 @@ export function CadScenePicker({
   ) : openFile ? (
     <button
       type="button"
-      className="min-w-0 flex-1 truncate rounded-sm py-2 text-left text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+      className="min-w-0 flex-1 truncate rounded-sm py-2 text-left text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
       onClick={openFile.onOpen}
     >
       {label}
     </button>
   ) : (
-    <h2 className="min-w-0 flex-1 truncate py-2 text-sm font-medium">{label}</h2>
+    <h2 className="min-w-0 flex-1 truncate py-2 text-xs font-normal text-muted-foreground">
+      {label}
+    </h2>
   );
   const action = documentUrl ? "Open in Onshape" : openFile?.action;
   if (scenes.length === 0 || onlyScene) {

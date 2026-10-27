@@ -95,6 +95,8 @@ export function CadViewChanges({
   const changeCount = changes.reduce((sum, group) => sum + group.ids.length, 0);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"changes" | "parts">("changes");
+  // The Changes tab hides while there are none, so the card shows parts then.
+  const shownTab = changeCount ? tab : "parts";
   const [expanded, setExpanded] = useState<ReadonlySet<ChangeKind>>(new Set());
   // The card stays mounted while its close transition plays.
   const [settledOpen, setSettledOpen] = useState(open);
@@ -180,7 +182,7 @@ export function CadViewChanges({
           className={cn(
             "cad-view-changes-card pointer-events-auto flex min-h-0 w-full shrink flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg",
             // The tree is virtualized and needs a definite height; the change list fits its rows.
-            tab === "parts" ? "h-[400px]" : "max-h-[400px]",
+            shownTab === "parts" ? "h-[400px]" : "max-h-[400px]",
           )}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return;
@@ -194,22 +196,25 @@ export function CadViewChanges({
                 ["changes", "Changes", changeCount],
                 ["parts", "All parts", partCount],
               ] as const
-            ).map(([id, label, count]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={tab === id}
-                className={cn(
-                  "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                  tab === id &&
-                    "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
-                )}
-                onClick={() => setTab(id)}
-              >
-                {label}
-                <span className="tabular-nums text-muted-foreground">{count}</span>
-              </button>
-            ))}
+            )
+              // With nothing changed the Changes tab would only say so; the card shows parts.
+              .filter(([id]) => id === "parts" || changeCount > 0)
+              .map(([id, label, count]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={shownTab === id}
+                  className={cn(
+                    "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                    shownTab === id &&
+                      "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
+                  )}
+                  onClick={() => setTab(id)}
+                >
+                  {label}
+                  <span className="tabular-nums text-muted-foreground">{count}</span>
+                </button>
+              ))}
             <span className="flex-1" />
             <Button
               size="icon-xs"
@@ -220,7 +225,7 @@ export function CadViewChanges({
               <XIcon />
             </Button>
           </div>
-          {tab === "parts" ? (
+          {shownTab === "parts" ? (
             <CadHierarchyTree
               manifest={manifest}
               view={view}
@@ -228,11 +233,6 @@ export function CadViewChanges({
               onChange={onChange}
               fullHeight
             />
-          ) : changeCount === 0 ? (
-            <p className="p-3 text-[13px] text-muted-foreground">
-              Every part shows normally. When you or the agent isolate, hide, ghost, or highlight
-              parts, they are listed here.
-            </p>
           ) : (
             <>
               <div className="min-h-0 flex-1 overflow-y-auto p-1">

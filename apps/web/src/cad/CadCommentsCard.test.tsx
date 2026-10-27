@@ -478,7 +478,7 @@ it("lists open findings by number and carries severity in each badge", () => {
           .className,
     );
   expect(fills).toEqual([
-    expect.stringContaining("bg-neutral-400"),
+    expect.stringContaining("bg-neutral-600"),
     expect.stringContaining("bg-red-300"),
     expect.stringContaining("bg-amber-200"),
     expect.stringContaining("bg-amber-200"),

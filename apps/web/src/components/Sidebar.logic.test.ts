@@ -22,6 +22,7 @@ import {
   resolveProjectStatusIndicator,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
+  resolveSidebarThreadTitle,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
@@ -1605,5 +1606,74 @@ describe("sortLogicalProjectsForSidebar", () => {
         (project) => project.projectKey,
       ),
     ).toEqual(["logical-newer", "logical-older"]);
+  });
+});
+
+describe("resolveSidebarThreadTitle", () => {
+  it("drops a leading project name and capitalizes what remains", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascade design feedback", "Elevator cascade")).toBe(
+      "Design feedback",
+    );
+  });
+
+  it("matches the project name in any case", () => {
+    expect(resolveSidebarThreadTitle("Review ELEVATOR Cascade", "review elevator")).toBe(
+      "Cascade",
+    );
+    expect(resolveSidebarThreadTitle("elevator Cascade Design Feedback", "Elevator cascade")).toBe(
+      "Design Feedback",
+    );
+  });
+
+  it("trims separators between the project name and the rest", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascade: motor access", "Elevator cascade")).toBe(
+      "Motor access",
+    );
+    expect(resolveSidebarThreadTitle("Elevator cascade - bearing review", "Elevator cascade")).toBe(
+      "Bearing review",
+    );
+    expect(resolveSidebarThreadTitle("Elevator cascade — wiring", "Elevator cascade")).toBe(
+      "Wiring",
+    );
+  });
+
+  it("keeps titles that do not start with the project name", () => {
+    expect(resolveSidebarThreadTitle("Review Elevator Cascade Design", "Elevator cascade")).toBe(
+      "Review Elevator Cascade Design",
+    );
+    expect(resolveSidebarThreadTitle("Cascade design", "Elevator cascade")).toBe("Cascade design");
+  });
+
+  it("only matches whole words", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascades compared", "Elevator cascade")).toBe(
+      "Elevator cascades compared",
+    );
+    expect(resolveSidebarThreadTitle("Disc transferring notes", "Disc transfer")).toBe(
+      "Disc transferring notes",
+    );
+  });
+
+  it("keeps the original title when nothing would remain", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascade", "Elevator cascade")).toBe(
+      "Elevator cascade",
+    );
+    expect(resolveSidebarThreadTitle("elevator cascade", "Elevator Cascade")).toBe(
+      "elevator cascade",
+    );
+    expect(resolveSidebarThreadTitle("Elevator cascade: ", "Elevator cascade")).toBe(
+      "Elevator cascade: ",
+    );
+  });
+
+  it("keeps the title when the project name is blank", () => {
+    expect(resolveSidebarThreadTitle("Design feedback", "")).toBe("Design feedback");
+    expect(resolveSidebarThreadTitle("Design feedback", "   ")).toBe("Design feedback");
+  });
+
+  it("treats regex characters in project names literally", () => {
+    expect(resolveSidebarThreadTitle("[SUS] Cascade wiring", "[SUS] Cascade")).toBe("Wiring");
+    expect(resolveSidebarThreadTitle("SUSX Cascade wiring", "[SUS] Cascade")).toBe(
+      "SUSX Cascade wiring",
+    );
   });
 });

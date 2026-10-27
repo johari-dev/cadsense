@@ -77,15 +77,18 @@ const pinWidth = (label: string) =>
   label.length <= 2 ? CAD_COMMENT_PIN_SIZE : 12 + 7 * label.length;
 /** Placement and type shared by comment pins and group count markers. */
 const PIN_SHAPE =
-  "pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full leading-none font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
-/** A single finding's pin; its fill is the finding's severity color (see SEVERITY_FILL). */
-const PIN_CLASS = `${PIN_SHAPE} h-5.5 min-w-5.5 border-[1.5px] border-neutral-950/80 px-1.5 text-[11px] text-neutral-950 shadow-[0_1px_3px_rgb(0_0_0/0.45)]`;
+  "pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center leading-none font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
 /**
- * A group's count marker: a compact dark disc with light numerals and two rings peeking out
- * behind it, so it reads as a pile and never as a severity pin. "12 comments" lives in its
- * tooltip and accessible name. Expanded, it shows a stack icon at the centre of its pins.
+ * A single finding's round pin, filled with its severity color (see SEVERITY_FILL). The near
+ * black rim keeps every fill readable on both light and dark parts.
  */
-const PIN_GROUP_CLASS = `${PIN_SHAPE} group h-6.5 min-w-6.5 border border-foreground/55 bg-popover px-1.5 text-xs text-foreground shadow-[3px_-3px_0_-1px_var(--color-popover),3px_-3px_0_0_rgb(255_255_255/0.5),6px_-6px_0_-1px_var(--color-popover),6px_-6px_0_0_rgb(255_255_255/0.3),0_1px_4px_rgb(0_0_0/0.6)] after:content-[attr(data-count)] aria-expanded:after:content-none`;
+const PIN_CLASS = `${PIN_SHAPE} h-5.5 min-w-5.5 rounded-full border-[1.5px] border-[#0b0b0b] px-1.5 text-[11px] shadow-[0_1px_3px_rgb(0_0_0/0.45)]`;
+/**
+ * A group's count marker: a rounded square, not a circle, on a neutral surface with a stack
+ * glyph and the count, so it never reads as another finding's pin. "12 comments" lives in its
+ * tooltip and accessible name. Expanded, it keeps only the glyph at the centre of its pins.
+ */
+const PIN_GROUP_CLASS = `${PIN_SHAPE} group h-6 min-w-6 gap-1 rounded-md border border-foreground/45 bg-popover px-1.5 text-[11px] text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)] after:content-[attr(data-count)] aria-expanded:px-0 aria-expanded:after:content-none`;
 /**
  * Width of the open comments card in CSS px, kept in step with CadPanel.css. The card sits
  * 12px from the viewport's right edge, so framing that avoids it reserves this plus 12px.
@@ -222,12 +225,18 @@ export function CadCommentsCard({
     history: comments.filter((c) => c.modelDescriptor !== descriptor || historical),
   };
   const visible = lists[filter];
+  const legend = SEVERITY_LEGEND.map((entry) => ({
+    ...entry,
+    count: lists.open.filter((c) => c.severity === entry.severity).length,
+  })).filter((entry) => entry.count > 0);
   /**
    * Collapsed, the toggle is a chip like the view changes chip across the viewport: the icon
-   * and the open count. Its width follows the count's digits (`ch`, with tabular numerals).
+   * and "11 comments". The surface needs an explicit width to morph from, so it follows the
+   * label: `ch` for the tabular digits and `em` for the word (in the surface's own font).
    */
+  const toggleText = `${openCount} comment${openCount === 1 ? "" : "s"}`;
   const toggleWidth = openCount
-    ? `calc(var(--cad-overlay-control) + 0.75rem + ${String(openCount).length}ch)`
+    ? `calc(var(--cad-overlay-control) + 0.75rem + ${String(openCount).length}ch + ${openCount === 1 ? 4 : 4.5}em)`
     : "var(--cad-overlay-control)";
   useEffect(() => {
     if (historical) setFilter("history");
@@ -523,6 +532,22 @@ export function CadCommentsCard({
           <X className="size-4" />
         </Button>
       </div>
+      {filter === "open" && legend.length > 0 && (
+        // The key for pin and badge colors, with how many open findings have each severity.
+        // Reviewed findings show muted badges, so the key only appears with the open list.
+        <ul
+          aria-label="Severity colors"
+          className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-xs text-muted-foreground"
+        >
+          {legend.map(({ severity, label, count }) => (
+            <li key={severity} className="flex items-center gap-1.5">
+              <span aria-hidden className={cn("size-2.5 rounded-full", SEVERITY_FILL[severity])} />
+              {label}
+              <span className="tabular-nums text-foreground/80">{count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {reviewNotice && (
         <div
           role="status"
@@ -554,8 +579,8 @@ export function CadCommentsCard({
                   // expanded row is lifted and marked by a light bar along its left edge.
                   "border-l-2 text-[13px] leading-5",
                   expanded
-                    ? "border-foreground/70 bg-foreground/[0.05]"
-                    : "border-transparent hover:bg-foreground/[0.03]",
+                    ? "border-foreground/70 bg-foreground/[0.08]"
+                    : "border-transparent hover:bg-foreground/[0.04]",
                 )}
               >
                 {/* The padding lives on the button so the whole row is clickable. */}
@@ -577,9 +602,9 @@ export function CadCommentsCard({
                     {c.title}
                   </span>
                   {c.targets.length > 1 && (
-                    <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
-                      <LocateFixed className="size-3" />
-                      {c.targets.length}
+                    <span className="shrink-0 pt-px text-xs text-muted-foreground">
+                      {c.targets.length}{" "}
+                      {c.targets.every((t) => t.kind === "part") ? "parts" : "locations"}
                     </span>
                   )}
                   {previousRevision && (
@@ -597,7 +622,7 @@ export function CadCommentsCard({
                   // 16px around the expanded finding; the body lines up under the title.
                   <div className="space-y-3 ps-[44px] pe-4 pb-4">
                     {c.severity && (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-foreground/80">
                         {severityLabel(c.severity, c.category)}
                       </p>
                     )}
@@ -837,10 +862,7 @@ export function CadCommentsCard({
                     onPointerLeave={releaseGroup}
                     className={cn(PIN_GROUP_CLASS, dimmed && "opacity-70 hover:opacity-100")}
                   >
-                    <StackIcon
-                      aria-hidden
-                      className="hidden size-3.5 text-muted-foreground group-aria-expanded:block"
-                    />
+                    <StackIcon aria-hidden className="size-3 text-muted-foreground" />
                   </button>
                 </Fragment>
               );
@@ -885,7 +907,7 @@ export function CadCommentsCard({
                 }
               >
                 <MessageSquare aria-hidden className="size-4 shrink-0" />
-                {openCount > 0 && <span className="tabular-nums">{openCount}</span>}
+                {openCount > 0 && <span className="tabular-nums">{toggleText}</span>}
               </TooltipTrigger>
               <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
             </Tooltip>
@@ -919,17 +941,24 @@ const COMMENT_FILTERS = [
 ] as const;
 
 /**
- * Pin and number badge fill per severity, so the list and the scene match: concern yellow,
- * question blue, nit grey, blocker red. A comment without a severity keeps the concern yellow.
- * All take dark numerals.
+ * Pin and number badge fill and numeral color per severity, so the list and the scene match:
+ * concern yellow, question violet (blue is the scene's selection color), nit dark grey with
+ * white numerals, blocker red. A comment without a severity keeps the concern yellow.
  */
 const SEVERITY_FILL: Record<CadCommentSeverity | "none", string> = {
-  blocker: "bg-red-300",
-  concern: "bg-amber-200",
-  question: "bg-sky-300",
-  nit: "bg-neutral-400",
-  none: "bg-amber-200",
+  blocker: "bg-red-300 text-neutral-950",
+  concern: "bg-amber-200 text-neutral-950",
+  question: "bg-violet-300 text-neutral-950",
+  nit: "bg-neutral-600 text-white",
+  none: "bg-amber-200 text-neutral-950",
 };
+/** Legend entries for the severities a review uses, most consequential first. */
+const SEVERITY_LEGEND: ReadonlyArray<{ severity: CadCommentSeverity; label: string }> = [
+  { severity: "blocker", label: "Blocker" },
+  { severity: "concern", label: "Concern" },
+  { severity: "question", label: "Question" },
+  { severity: "nit", label: "Nit" },
+];
 
 /** A small filled dot on the same 24px grid as the other severity icons. */
 const NitIcon: Icon = ({ size: _size, weight: _weight, ...props }) => (
@@ -1157,9 +1186,7 @@ export function CommentBadge({
       data-comment-badge
       className={cn(
         "inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full px-1 text-[10.5px] leading-none font-semibold tabular-nums",
-        reviewed
-          ? "bg-muted text-muted-foreground"
-          : [SEVERITY_FILL[severity ?? "none"], "text-neutral-950"],
+        reviewed ? "bg-muted text-muted-foreground" : SEVERITY_FILL[severity ?? "none"],
       )}
     >
       {number}

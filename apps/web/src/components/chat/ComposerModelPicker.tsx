@@ -182,6 +182,11 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   };
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The panel opens 8px above the whole composer box rather than the pill, so it never
+  // covers the prompt. Outside a composer it falls back to the trigger.
+  const panelAnchor = () =>
+    triggerRef.current?.closest('[data-chat-composer-main-surface="true"]') ?? triggerRef.current;
   useEffect(() => {
     if (!isMenuOpen) return;
     const frame = requestAnimationFrame(() => searchRef.current?.focus());
@@ -217,6 +222,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             <MenuTrigger
               render={
                 <button
+                  ref={triggerRef}
                   type="button"
                   aria-label="Change model and reasoning"
                   data-chat-provider-model-picker="true"
@@ -257,6 +263,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
       <MenuPopup
+        anchor={panelAnchor}
         align="end"
         side="top"
         sideOffset={8}
@@ -401,6 +408,13 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   )}
                   onClick={() => selectRow(row)}
                 >
+                  {/* Fixed leading column: the check never shifts the name or crowds the
+                      right edge, where the shortcut and star keep their own columns. */}
+                  <span className="flex w-3.5 shrink-0 justify-center">
+                    {row.selected ? (
+                      <CheckIcon aria-hidden="true" className="size-3.5 text-foreground" />
+                    ) : null}
+                  </span>
                   {tabEntry ? null : (
                     <ProviderInstanceIcon
                       driverKind={row.entry.driverKind}
@@ -413,14 +427,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     {getDisplayModelName(row.model)}
                     {row.model.isUnavailable ? " (Unavailable)" : ""}
                   </span>
-                  {row.selected ? (
-                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
-                  ) : null}
-                  {hint ? (
-                    <kbd className="shrink-0 font-sans text-[0.8rem] tabular-nums text-muted-foreground">
-                      {hint}
-                    </kbd>
-                  ) : null}
+                  <kbd className="w-11 shrink-0 text-right font-sans text-[0.8rem] tabular-nums text-muted-foreground">
+                    {hint}
+                  </kbd>
                   <button
                     type="button"
                     aria-label={`${row.starred ? "Unstar" : "Star"} ${row.model.name}`}
@@ -450,6 +459,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                 className="composer-model-row text-muted-foreground"
                 onClick={() => setShowLegacy(true)}
               >
+                <span aria-hidden="true" className="w-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">More models</span>
                 <span className="shrink-0 text-[0.8rem] tabular-nums text-muted-foreground">
                   {foldedCount}

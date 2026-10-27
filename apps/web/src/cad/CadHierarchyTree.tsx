@@ -260,7 +260,14 @@ export function CadHierarchyTree({
                         />
                       }
                     >
-                      <span className="truncate leading-[18px]">{row.title}</span>
+                      <span className="flex min-w-0 items-baseline gap-1.5 leading-[18px]">
+                        <span className="truncate">{row.title}</span>
+                        {row.instance && (
+                          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                            #{row.instance}
+                          </span>
+                        )}
+                      </span>
                       {row.detail && (
                         <span className="truncate text-xs leading-4 text-muted-foreground">
                           {row.detail}
@@ -269,10 +276,6 @@ export function CadHierarchyTree({
                     </TooltipTrigger>
                     <TooltipPopup>{node.name}</TooltipPopup>
                   </Tooltip>
-                  {/* A fixed column, so instance numbers line up down the list. */}
-                  <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-                    {row.instance && `#${row.instance}`}
-                  </span>
                   <div className="pointer-events-none absolute inset-y-0 right-7 flex items-center gap-0.5 ps-6 group-hover:pointer-events-auto group-focus-within:pointer-events-auto [background:linear-gradient(to_right,transparent,var(--row)_1.25rem)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-aria-pressed:opacity-100">
                     <Tooltip>
                       <TooltipTrigger

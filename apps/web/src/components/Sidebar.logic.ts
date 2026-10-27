@@ -418,6 +418,32 @@ export function isContextMenuPointerDown(input: {
   return input.isMac && input.button === 0 && input.ctrlKey;
 }
 
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+const LEADING_TITLE_SEPARATORS = /^[\s:\-\u2013\u2014|/·,.]+/u;
+
+/**
+ * The thread title as the sidebar shows it under its project. Generated titles often open
+ * with the project name ("Elevator cascade design feedback" under "Elevator cascade"), which
+ * repeats on every row, so a leading project name is dropped: case-insensitive, whole words
+ * only, then separators are trimmed and the first letter is capitalized. Returns the title
+ * unchanged when it does not start with the name or when nothing would remain. Display only;
+ * the stored title and its tooltip keep the full text.
+ */
+export function resolveSidebarThreadTitle(title: string, projectName: string): string {
+  const name = projectName.trim();
+  if (name.length === 0) return title;
+  if (title.slice(0, name.length).toLowerCase() !== name.toLowerCase()) return title;
+  const next = title.charAt(name.length);
+  // "Elevator cascades" must not lose "Elevator cascade": a name that ends in a letter or
+  // digit only matches when the title's next character is not one.
+  if (WORD_CHARACTER.test(name.charAt(name.length - 1)) && WORD_CHARACTER.test(next)) {
+    return title;
+  }
+  const rest = title.slice(name.length).replace(LEADING_TITLE_SEPARATORS, "").trimEnd();
+  if (rest.length === 0) return title;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;

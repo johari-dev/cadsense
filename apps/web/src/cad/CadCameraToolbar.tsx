@@ -167,6 +167,7 @@ export function CadCameraToolbar({
                 : "Cut the model with a plane"}
             </TooltipPopup>
           </Tooltip>
+          <ToolbarDivider />
           <Tooltip>
             <TooltipTrigger
               aria-label="Exploded view"

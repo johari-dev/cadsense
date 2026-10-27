@@ -299,8 +299,11 @@ export const cadFitDistance = (
   }
   return distance;
 };
-/** How much of the free area a box fit fills, leaving a small margin around the model. */
-const AREA_FILL = 0.9;
+/**
+ * How much of the free area a box fit fills. The box's corners usually stand clear of the model's
+ * outline, so a thin margin still leaves the model well inside the chrome.
+ */
+const AREA_FILL = 0.97;
 /**
  * Orthographic base height is derived from eye-target distance, making pose+zoom self-contained.
  * Without `area`, a fit encloses the bounds' sphere, as agent captures and thumbnails expect.

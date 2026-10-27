@@ -3951,6 +3951,7 @@ function ChatViewContent(props: ChatViewProps) {
     },
     onCloseBrowser: closeBrowserPage,
     titleSlotRef: setCadTitleSlot,
+    projectTitle: activeProject?.title,
   };
 
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
@@ -3970,12 +3971,12 @@ function ChatViewContent(props: ChatViewProps) {
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
-        {/* Top bar */}
+        {/* Top bar. Its 1px bottom divider gives text scrolling under it a clean edge. */}
         <WorkspacePageHeader
           data-chat-header
           electron={isElectron}
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
-          className="relative bg-background"
+          className="relative border-b border-border bg-background"
         >
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}

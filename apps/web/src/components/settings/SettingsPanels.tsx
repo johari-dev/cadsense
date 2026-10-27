@@ -2,7 +2,7 @@ import {
   ArchiveIcon,
   ArchiveIcon as ArchiveX,
   CaretRightIcon as ChevronRightIcon,
-  ArrowCounterClockwiseIcon as RotateCcwIcon,
+  ArrowUUpLeftIcon as Undo2Icon,
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
@@ -839,17 +839,22 @@ function FontFamilySettingsRow({
   );
 }
 
-/** Resets every setting `useSettingsRestore` tracks. Disabled while nothing differs. */
+/**
+ * Resets every setting `useSettingsRestore` tracks. While nothing differs it is disabled but
+ * keeps the secondary text color instead of fading, so it reads as an available page action.
+ * The undo glyph matches the per-row reset buttons.
+ */
 function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
 
   return (
     <Button
       variant="outline"
+      className="text-muted-foreground not-disabled:text-foreground disabled:opacity-100"
       disabled={changedSettingLabels.length === 0}
       onClick={() => void restoreDefaults()}
     >
-      <RotateCcwIcon className="size-3.5" />
+      <Undo2Icon className="size-3.5" />
       Restore defaults
     </Button>
   );

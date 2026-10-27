@@ -44,6 +44,11 @@ interface RightPanelProps {
   home: RightPanelSection | null;
   /** Names `home` on the Back button, such as the synced model's name. */
   homeLabel: string;
+  /**
+   * The project name, shown as the title while CAD is home and on screen. The CAD panel's
+   * scene picker follows it in the title slot as the document's secondary label.
+   */
+  projectTitle?: string | undefined;
   onBack: () => void;
   /**
    * Receives the title row's slot while CAD is home and on screen, so the CAD panel can
@@ -101,7 +106,20 @@ export function RightPanel(props: RightPanelProps) {
           )}
         >
           {props.section === "cad" && atHome ? (
-            <div ref={props.titleSlotRef} className="flex min-w-0 flex-1 items-center pl-1" />
+            <>
+              {props.projectTitle ? (
+                <h2 className="max-w-[50%] shrink-0 truncate pl-2 text-sm font-medium">
+                  {props.projectTitle}
+                </h2>
+              ) : null}
+              <div
+                ref={props.titleSlotRef}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center",
+                  props.projectTitle ? "pl-1.5" : "pl-1",
+                )}
+              />
+            </>
           ) : props.section !== null ? (
             <>
               {props.home !== null && !atHome ? (
