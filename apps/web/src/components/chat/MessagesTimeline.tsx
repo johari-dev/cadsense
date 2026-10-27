@@ -1,13 +1,14 @@
 import {
+  type ApprovalRequestId,
   type ChatFileAttachment,
   type EnvironmentId,
   type MessageId,
+  type ProviderApprovalDecision,
   type ScopedThreadRef,
   type ServerProviderSkill,
   type TurnId,
 } from "@cadsense/contracts";
 import { parseScopedThreadKey } from "@cadsense/client-runtime/environment";
-import { commandProgramName } from "@cadsense/client-runtime/work-log/command-label";
 import type { AgentPanelModel } from "@cadsense/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -17,6 +18,9 @@ import {
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const EMPTY_PENDING_APPROVALS: ReadonlyArray<PendingApproval> = [];
+const EMPTY_APPROVAL_IDS: ReadonlyArray<ApprovalRequestId> = [];
+const NOOP_RESPOND_TO_APPROVAL = () => {};
 import { resolveChatListAnchoredEndSpace } from "@cadsense/shared/chatList";
 import {
   createContext,
@@ -39,6 +43,7 @@ import {
   workEntryDisplayIndicatesToolFailure,
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
+  type PendingApproval,
 } from "../../session-logic";
 import {
   type ChatImageAttachment,
@@ -85,6 +90,11 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { MessageRatingButtons } from "./MessageRatingButtons";
 import { QuoteReplyPill } from "./QuoteReplyPill";
 import { RedoFeedbackForm, RedoWithFeedbackButton } from "./RedoWithFeedback";
+import {
+  buildToolCallExpandedBody,
+  toolCallExpandedBodyClassName,
+  ToolCallCardView,
+} from "./ToolCallCard";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -141,6 +151,7 @@ interface TimelineRowSharedState {
   openingVideoAttachmentId: string | null;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
+  onToggleToolCard: (groupId: string, anchorKey: string, expanded: boolean) => void;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
   onRedoWithFeedback: (prompt: string) => void;
@@ -151,6 +162,8 @@ interface TimelineRowActivityState {
   latestTurnId: TurnId | null;
   /** Current plan step label for the working row, when the turn has a plan. */
   workingStepLabel: string | null;
+  respondingApprovalIds: ReadonlyArray<ApprovalRequestId>;
+  onRespondToApproval: (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => void;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -239,6 +252,10 @@ interface MessagesTimelineProps {
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
   /** Sends feedback on the latest response as a new user turn. */
   onRedoWithFeedback: (prompt: string) => void;
+  /** Shown inline on the tool calls they gate; the composer panel shows them too. */
+  pendingApprovals?: ReadonlyArray<PendingApproval>;
+  respondingApprovalIds?: ReadonlyArray<ApprovalRequestId>;
+  onRespondToApproval?: (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,9 +290,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
   onRedoWithFeedback,
+  pendingApprovals = EMPTY_PENDING_APPROVALS,
+  respondingApprovalIds = EMPTY_APPROVAL_IDS,
+  onRespondToApproval = NOOP_RESPOND_TO_APPROVAL,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
+  const [toolCardOpenOverrides, setToolCardOpenOverrides] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const disclosureAnchorKeyRef = useRef<string | null>(null);
@@ -374,6 +397,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [suspendEndScrollMaintenanceForDisclosure],
   );
+  // A user's open or close sticks; untouched cards follow their live state.
+  const onToggleToolCard = useCallback(
+    (groupId: string, anchorKey: string, expanded: boolean) => {
+      suspendEndScrollMaintenanceForDisclosure(anchorKey);
+      setToolCardOpenOverrides((existing) => new Map(existing).set(groupId, !expanded));
+    },
+    [suspendEndScrollMaintenanceForDisclosure],
+  );
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
@@ -412,6 +443,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         runningTurnId,
         expandedTurnIds,
         expandedWorkGroupIds,
+        toolCardOpenOverrides,
+        pendingApprovals,
         isWorking,
         activeTurnStartedAt,
       }),
@@ -421,6 +454,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runningTurnId,
       expandedTurnIds,
       expandedWorkGroupIds,
+      toolCardOpenOverrides,
+      pendingApprovals,
       isWorking,
       activeTurnStartedAt,
     ],
@@ -552,6 +587,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       openingVideoAttachmentId,
       onToggleTurnFold,
       onToggleWorkGroup,
+      onToggleToolCard,
       agentPanelModel,
       onOpenAgents,
       onRedoWithFeedback,
@@ -567,6 +603,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       openingVideoAttachmentId,
       onToggleTurnFold,
       onToggleWorkGroup,
+      onToggleToolCard,
       agentPanelModel,
       onOpenAgents,
       onRedoWithFeedback,
@@ -577,8 +614,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isWorking,
       latestTurnId: latestTurn?.turnId ?? null,
       workingStepLabel,
+      respondingApprovalIds,
+      onRespondToApproval,
     }),
-    [isWorking, latestTurn?.turnId, workingStepLabel],
+    [isWorking, latestTurn?.turnId, workingStepLabel, respondingApprovalIds, onRespondToApproval],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -951,36 +990,24 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
-  const isExpandedToolGroupEntry = row.kind === "work" && row.isExpandedToolGroupEntry;
-  const isLastExpandedToolGroupEntry = row.kind === "work" && row.isLastExpandedToolGroupEntry;
-  const isExpandedToolGroupHeader =
-    (row.kind === "work-toggle" && row.summary !== null && row.onlyToolEntries && row.expanded) ||
-    (row.kind === "work-live" && row.expanded);
-
   return (
     <div
       className={cn(
         // Commentary (non-terminal assistant) rows carry no metadata row, so
         // they sit closer to the work that follows them.
-        isExpandedToolGroupEntry
-          ? isLastExpandedToolGroupEntry
-            ? "pb-1"
-            : "pb-0"
-          : isExpandedToolGroupHeader
-            ? "pb-0"
-            : row.kind === "turn-fold" || row.kind === "working"
-              ? "pb-1.5"
-              : (row.kind === "message" &&
-                    row.message.role === "assistant" &&
-                    !row.showAssistantMeta) ||
-                  row.kind === "work" ||
-                  row.kind === "cad-filmstrip" ||
-                  row.kind === "cad-comments" ||
-                  row.kind === "work-live" ||
-                  row.kind === "work-toggle" ||
-                  row.kind === "turn-plan"
-                ? "pb-2"
-                : "pb-4",
+        row.kind === "turn-fold" || row.kind === "working"
+          ? "pb-1.5"
+          : (row.kind === "message" &&
+                row.message.role === "assistant" &&
+                !row.showAssistantMeta) ||
+              row.kind === "work" ||
+              row.kind === "cad-filmstrip" ||
+              row.kind === "cad-comments" ||
+              row.kind === "tool-card" ||
+              row.kind === "work-toggle" ||
+              row.kind === "turn-plan"
+            ? "pb-2"
+            : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
@@ -988,15 +1015,10 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {row.kind === "work" ? (
-        <WorkGroupSection
-          groupedEntries={row.groupedEntries}
-          isExpandedToolGroupEntry={row.isExpandedToolGroupEntry}
-        />
-      ) : null}
+      {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
+      {row.kind === "tool-card" ? <ToolCardTimelineRow row={row} /> : null}
       {row.kind === "cad-filmstrip" ? <CadFilmstripTimelineRow row={row} /> : null}
       {row.kind === "cad-comments" ? <CadCommentsTimelineRow row={row} /> : null}
-      {row.kind === "work-live" ? <LiveWorkEntryTimelineRow row={row} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
@@ -1009,6 +1031,23 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     </div>
   );
 });
+
+function ToolCardTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "tool-card" }> }) {
+  const { workspaceRoot, onToggleToolCard, onToggleWorkGroup } = use(TimelineRowCtx);
+  const { respondingApprovalIds, onRespondToApproval } = use(TimelineRowActivityCtx);
+  return (
+    <ToolCallCardView
+      card={row.card}
+      expanded={row.expanded}
+      showAllCalls={row.showAllCalls}
+      workspaceRoot={workspaceRoot}
+      respondingApprovalIds={respondingApprovalIds}
+      onToggle={() => onToggleToolCard(row.groupId, row.id, row.expanded)}
+      onToggleShowAll={() => onToggleWorkGroup(row.groupId, row.id)}
+      onRespondToApproval={onRespondToApproval}
+    />
+  );
+}
 
 function CadFilmstripTimelineRow({
   row,
@@ -1479,19 +1518,16 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
-/** Renders one or more already-derived work log rows. Overflow expansion is modeled as LegendList data. */
+/** Renders log entries that are not tool calls. Overflow expansion is modeled as LegendList data. */
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
-  isExpandedToolGroupEntry,
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
-  isExpandedToolGroupEntry: boolean;
 }) {
   const { workspaceRoot } = use(TimelineRowCtx);
   const nonEmptyEntries = useMemo(
-    () =>
-      groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry, isExpandedToolGroupEntry)),
-    [groupedEntries, isExpandedToolGroupEntry],
+    () => groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry)),
+    [groupedEntries],
   );
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
   const groupLabel = onlyToolEntries
@@ -1499,15 +1535,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
       ? "1 tool call"
       : `${nonEmptyEntries.length} tool calls`
     : "Work Log";
-  const GroupContainer = isExpandedToolGroupEntry ? "div" : "section";
-
   if (nonEmptyEntries.length === 0) return null;
 
   return (
-    <GroupContainer
-      className={cn("-mx-1 px-1", isExpandedToolGroupEntry ? "py-0" : "space-y-0.5 py-0.5")}
-      aria-label={isExpandedToolGroupEntry ? undefined : groupLabel}
-    >
+    <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label={groupLabel}>
       {!onlyToolEntries && (
         <p className="px-0.5 pb-0.5 font-medium text-secondary-label text-[11px]">{groupLabel}</p>
       )}
@@ -1517,11 +1548,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
             key={workEntry.id}
             workEntry={workEntry}
             workspaceRoot={workspaceRoot}
-            isExpandedToolGroupEntry={isExpandedToolGroupEntry}
           />
         ))}
       </div>
-    </GroupContainer>
+    </section>
   );
 });
 
@@ -1603,28 +1633,10 @@ function LiveActivityContent({
   );
 }
 
-function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
-  const ctx = use(TimelineRowCtx);
-  const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot);
-  const failed = workEntryDisplayIndicatesToolFailure(row.entry);
-
-  return (
-    <button
-      type="button"
-      className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      aria-label={failed ? `${label}, tool call failed` : undefined}
-      aria-expanded={row.expanded}
-      onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
-    >
-      <LiveActivityRow label={label} iconName={workEntryIconName(row.entry)} failed={failed} />
-    </button>
-  );
-}
-
-function toolGroupSummaryIconName(
-  kind: Extract<TimelineRow, { kind: "work-toggle" }>["summaryKind"],
+function toolGroupActionIconName(
+  action: Exclude<ReturnType<typeof toolGroupAction>, "other">,
 ): WorkEntryIconName {
-  switch (kind) {
+  switch (action) {
     case "cad":
       return "box";
     case "read":
@@ -1637,17 +1649,6 @@ function toolGroupSummaryIconName(
       return "globe";
     case "code-search":
       return "search";
-    case "other":
-      return "wrench";
-    case "dynamic-tool":
-      return "hammer";
-    case "agent-tool":
-      return "bot";
-    case "tone-tool":
-      return "zap";
-    case "mixed":
-    case null:
-      return "hammer";
   }
 }
 
@@ -1657,32 +1658,7 @@ function WorkGroupToggleTimelineRow({
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
 }) {
   const ctx = use(TimelineRowCtx);
-  if (row.onlyToolEntries && row.summary) {
-    return (
-      <button
-        type="button"
-        className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        aria-label={row.hasFailure ? `${row.summary}, tool call failed` : undefined}
-        aria-expanded={row.expanded}
-        onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
-      >
-        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-          <WorkEntryIconSvg
-            name={toolGroupSummaryIconName(row.summaryKind)}
-            className="size-4 shrink-0 stroke-[1.8] opacity-70"
-          />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
-      </button>
-    );
-  }
-  const labelNoun = row.onlyToolEntries
-    ? row.hiddenCount === 1
-      ? "tool call"
-      : "tool calls"
-    : row.hiddenCount === 1
-      ? "log entry"
-      : "log entries";
+  const labelNoun = row.hiddenCount === 1 ? "log entry" : "log entries";
   return (
     <button
       type="button"
@@ -1704,9 +1680,7 @@ function WorkGroupToggleTimelineRow({
         />
       </span>
       {row.expanded ? (
-        <span className="font-medium text-foreground">
-          Show fewer {row.onlyToolEntries ? "tool calls" : "log entries"}
-        </span>
+        <span className="font-medium text-foreground">Show fewer log entries</span>
       ) : (
         <span className="font-medium text-foreground">
           +{row.hiddenCount} previous {labelNoun}
@@ -2037,63 +2011,6 @@ function workEntryPreview(
     : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
 }
 
-function workEntryRawCommand(
-  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
-): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
-  }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
-}
-
-function liveWorkEntryLabel(
-  workEntry: TimelineWorkEntry,
-  workspaceRoot: string | undefined,
-): string {
-  const command = workEntry.command?.trim();
-  if (command) {
-    // This row describes the active parent turn, not the command lifecycle.
-    // Keep its live "Running" copy until the turn or contiguous tool run settles.
-    const program = commandProgramName(command);
-    if (program) return `Running ${program}`;
-    return "Running command";
-  }
-
-  return workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
-}
-
-function buildToolCallExpandedBody(
-  workEntry: TimelineWorkEntry,
-  workspaceRoot: string | undefined,
-): string | null {
-  const blocks: string[] = [];
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
-  const raw = workEntryRawCommand(workEntry);
-  if (raw?.trim()) {
-    blocks.push(raw.trim());
-  } else if (workEntry.command?.trim()) {
-    blocks.push(workEntry.command.trim());
-  }
-  if (workEntry.detail?.trim()) {
-    blocks.push(workEntry.detail.trim());
-  }
-  const changedFiles = workEntry.changedFiles ?? [];
-  if (changedFiles.length > 0) {
-    blocks.push(
-      changedFiles
-        .map((filePath) => formatWorkspaceRelativePath(filePath, workspaceRoot))
-        .join("\n"),
-    );
-  }
-  return blocks.length > 0 ? blocks.join("\n\n") : null;
-}
-
-const toolCallExpandedBodyClassName =
-  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
-
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (
     workEntry.sourceActivityKind === "user-input.requested" ||
@@ -2102,7 +2019,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
     return "message-circle";
   }
   const action = toolGroupAction(workEntry);
-  if (action !== "other") return toolGroupSummaryIconName(action);
+  if (action !== "other") return toolGroupActionIconName(action);
 
   switch (workEntry.itemType) {
     case "mcp_tool_call":
@@ -2224,28 +2141,20 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
-  isExpandedToolGroupEntry: boolean;
 }) {
-  const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  const { workEntry, workspaceRoot } = props;
   // Before any hooks: spawn CTA rows render their own component.
   if (workEntry.agentSpawn) {
     return <AgentSpawnCtaRow workEntry={workEntry} />;
   }
-  return (
-    <PlainWorkEntryRow
-      workEntry={workEntry}
-      workspaceRoot={workspaceRoot}
-      isExpandedToolGroupEntry={isExpandedToolGroupEntry}
-    />
-  );
+  return <PlainWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />;
 });
 
 const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
-  isExpandedToolGroupEntry: boolean;
 }) {
-  const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
+  const { workEntry, workspaceRoot } = props;
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
@@ -2277,7 +2186,6 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : workLogEntryIsToolLike(workEntry)
         ? "text-secondary-label"
         : "text-foreground/80";
-  const showEntryIcon = !isExpandedToolGroupEntry || showWarningIndicator || showFailedIndicator;
   const accessibleDisplayText = showFailedIndicator
     ? `${displayText}, tool call failed`
     : displayText;
@@ -2300,8 +2208,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   return (
     <div
       className={cn(
-        "flex flex-col rounded-md px-0.5 transition-colors",
-        isExpandedToolGroupEntry ? "py-0" : "py-0.5",
+        "flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
         canExpand &&
           "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
       )}
@@ -2309,10 +2216,9 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     >
       <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
         <span
-          className={cn(iconWrapperClass, !showEntryIcon && "invisible")}
+          className={iconWrapperClass}
           role={showFailedIndicator ? "img" : undefined}
           aria-label={showFailedIndicator ? "Tool call failed" : undefined}
-          aria-hidden={!showEntryIcon}
         >
           <WorkEntryIconSvg
             name={entryIconName}

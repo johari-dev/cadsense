@@ -4066,6 +4066,9 @@ function ChatViewContent(props: ChatViewProps) {
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
                 onRedoWithFeedback={onRedoWithFeedback}
+                pendingApprovals={pendingApprovals}
+                respondingApprovalIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApproval}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge.

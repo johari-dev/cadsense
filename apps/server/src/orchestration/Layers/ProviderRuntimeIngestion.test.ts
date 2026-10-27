@@ -2671,6 +2671,33 @@ describe("ProviderRuntimeIngestion", () => {
     expect(resolvedPayload?.requestType).toBe("command_execution_approval");
   });
 
+  it("links an approval activity to the tool call it gates", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    // Claude names the gated tool use only in its provider refs.
+    harness.emit({
+      type: "request.opened",
+      eventId: asEventId("evt-request-opened-claude"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: ApprovalRequestId.make("req-claude"),
+      payload: { requestType: "command_execution_approval", detail: "Bash: pwd" },
+      providerRefs: { providerItemId: ProviderItemId.make("toolu_bash") },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-request-opened-claude",
+      ),
+    );
+    const requested = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-request-opened-claude",
+    );
+    expect(requested?.payload).toMatchObject({ requestId: "req-claude", toolCallId: "toolu_bash" });
+  });
+
   it("maps runtime.error into errored session state", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

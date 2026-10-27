@@ -3,6 +3,7 @@ import type {
   OrchestrationThreadActivity,
   OrchestrationThreadDetailSnapshot,
 } from "@cadsense/contracts";
+import { toolCallFactsForActivity } from "@cadsense/shared/toolCallFacts";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -343,10 +344,16 @@ export function projectActivityPayload(
   }
 
   const itemStatus = asRecord(data.item)?.status;
-  const projectedPayload =
-    payload.status === "completed" && (itemStatus === "failed" || itemStatus === "declined")
-      ? { ...payload, status: itemStatus }
-      : payload;
+  // Chat's tool call facts need the output this projection drops, so they are read first.
+  // Persisted in-progress updates are already projected and keep the facts they carry.
+  const toolCall = payload.toolCall ?? toolCallFactsForActivity(activity.kind, payload);
+  const projectedPayload = {
+    ...payload,
+    ...(payload.status === "completed" && (itemStatus === "failed" || itemStatus === "declined")
+      ? { status: itemStatus }
+      : {}),
+    ...(toolCall !== undefined ? { toolCall } : {}),
+  };
 
   if (payload.itemType === "mcp_tool_call") {
     return {

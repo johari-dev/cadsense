@@ -116,6 +116,43 @@ export function isToolLifecycleItemType(value: string): value is ToolLifecycleIt
   return TOOL_LIFECYCLE_ITEM_TYPES.includes(value as ToolLifecycleItemType);
 }
 
+/**
+ * The parts of a tool call's input that chat labels name: a file, a search, a command, or
+ * how many parts and items a CAD call touches. Strings are cut to one short line.
+ */
+export const ToolCallInputFacts = Schema.Struct({
+  path: Schema.optionalKey(Schema.String),
+  pattern: Schema.optionalKey(Schema.String),
+  query: Schema.optionalKey(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  command: Schema.optionalKey(Schema.String),
+  mode: Schema.optionalKey(Schema.String),
+  /** CAD view operations in order, with how many parts each one names. */
+  operations: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ type: Schema.String, partCount: Schema.Number })),
+  ),
+  /** Length of the call's list input: comments to publish, markers to place or check. */
+  itemCount: Schema.optionalKey(Schema.Number),
+});
+export type ToolCallInputFacts = typeof ToolCallInputFacts.Type;
+
+/**
+ * What chat shows about one tool call, read from its full payload before the payload is
+ * slimmed for clients (`payload.toolCall` on `tool.*` activities). Claude and Codex report
+ * the same facts in different shapes; this is the provider-neutral form.
+ */
+export const ToolCallFacts = Schema.Struct({
+  /** Tool name without its MCP server qualifier, e.g. `cad_capture`, `Bash`, `Read`. */
+  name: Schema.optionalKey(Schema.String),
+  server: Schema.optionalKey(Schema.String),
+  input: Schema.optionalKey(ToolCallInputFacts),
+  /** A count or value the result states, e.g. "4 matches". Absent when the output states none. */
+  resultSummary: Schema.optionalKey(Schema.String),
+  /** First line of the error a failed call reported. */
+  errorText: Schema.optionalKey(Schema.String),
+});
+export type ToolCallFacts = typeof ToolCallFacts.Type;
+
 export const CanonicalItemType = Schema.Literals([
   "user_message",
   "assistant_message",
