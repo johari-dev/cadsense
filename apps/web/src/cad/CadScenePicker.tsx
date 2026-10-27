@@ -30,6 +30,20 @@ export function CadScenePicker({
   const onlyScene = scenes.length === 1 ? scenes[0] : undefined;
   const selected = scenes.find((scene) => scene.id === selectedId);
   const label = onlyScene?.label ?? selected?.label ?? "CAD";
+  // The document's source leads its name ("Onshape / [SUS] Cascade"), so an Onshape element
+  // or file name reads as a document rather than raw data.
+  const source = documentUrl ? "Onshape" : openFile ? "File" : null;
+  const labelWithSource = source ? (
+    <>
+      {source}
+      <span aria-hidden className="px-1 text-tertiary-foreground">
+        /
+      </span>
+      {label}
+    </>
+  ) : (
+    label
+  );
   const heading = documentUrl ? (
     <a
       href={documentUrl}
@@ -49,7 +63,7 @@ export function CadScenePicker({
         });
       }}
     >
-      {label}
+      {labelWithSource}
     </a>
   ) : openFile ? (
     <button
@@ -57,7 +71,7 @@ export function CadScenePicker({
       className="min-w-0 flex-1 truncate rounded-sm py-2 text-left text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
       onClick={openFile.onOpen}
     >
-      {label}
+      {labelWithSource}
     </button>
   ) : (
     <h2 className="min-w-0 flex-1 truncate py-2 text-xs font-normal text-muted-foreground">

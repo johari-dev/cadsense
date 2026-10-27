@@ -52,6 +52,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import type { CadCommentLocation } from "./cadCommentReviewStore";
 import {
+  CAD_COMMENT_CLUSTER_SIZE,
   CAD_COMMENT_PIN_SIZE,
   groupOverlappingCommentPins,
   type CadCommentScreenPin,
@@ -86,26 +87,35 @@ const partSummary = (comment: CadComment) => {
 /** A pin's label: the comment number, plus a letter per location when it has several. */
 const pinLabel = (comment: CadComment, target: number) =>
   `${comment.number}${comment.targets.length > 1 ? String.fromCharCode(97 + target) : ""}`;
-/** A pin's width without measuring it: round up to two characters, a pill beyond that. */
+/**
+ * A pin's width before it has been measured: round up to two characters, a pill beyond that.
+ * The draw loop measures each pin once and uses the real width from then on.
+ */
 const pinWidth = (label: string) =>
   label.length <= 2 ? CAD_COMMENT_PIN_SIZE : 12 + 7 * label.length;
+/** Width of a group's "+N" count marker (12px semibold digits, 6px padding, 1.5px ring). */
+const clusterWidth = (count: number) =>
+  Math.max(CAD_COMMENT_CLUSTER_SIZE, 15 + 7.5 * (String(count).length + 1));
+/** Measured pin widths. Labels never change for a pin element, so one read is enough. */
+const measuredPinWidths = new WeakMap<HTMLElement, number>();
 /** Placement and type shared by comment pins and group count markers. */
 const PIN_SHAPE =
   "pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center leading-none font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
 /**
  * A single finding's round pin, filled with its severity color (see SEVERITY_FILL). A near
  * black rim (light for dark nit pins) and a faint dark halo keep every fill readable on both
- * light and dark parts.
+ * light and dark parts. Sizes are in px to match CAD_COMMENT_PIN_SIZE, which grouping uses
+ * (the app's 15px root font would make rem sizes drift from it).
  */
-const PIN_CLASS = `${PIN_SHAPE} h-5.5 min-w-5.5 rounded-full border-[1.5px] border-[#0b0b0b] px-1.5 text-[11px] shadow-[0_0_0_1px_rgb(0_0_0/0.55),0_1px_3px_rgb(0_0_0/0.45)]`;
+const PIN_CLASS = `${PIN_SHAPE} h-[22px] min-w-[22px] rounded-full border-[1.5px] border-[#0b0b0b] px-[6px] text-[11px] shadow-[0_0_0_1px_rgb(0_0_0/0.55),0_1px_3px_rgb(0_0_0/0.45)]`;
 /**
- * A group's count marker: a rounded square, not a circle, on a neutral surface reading "+3",
- * never a bare numeral, so it can't be mistaken for comment #3. A dot per severity inside
- * follows the count, so a concern is never hidden behind a neutral badge. "3 comments here: …"
- * lives in its tooltip and accessible name. Expanded, it shows a stack glyph at the centre of
- * its pins.
+ * A group's count marker: one rounded square, not a circle, on a neutral surface reading
+ * "+3", never a bare numeral, so it can't be mistaken for comment #3. Its 1.5px ring takes the
+ * color of the most severe comment inside (see clusterRing), so a hidden concern still shows.
+ * "3 comments here: …" lives in its tooltip and accessible name. Expanded, it shows a stack
+ * glyph at the centre of its pins. Sizes match clusterWidth and CAD_COMMENT_CLUSTER_SIZE.
  */
-const PIN_GROUP_CLASS = `${PIN_SHAPE} group h-6 min-w-6 gap-1.5 rounded-md border border-foreground/50 bg-popover px-1.5 text-[12px] text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)] before:content-[attr(data-count)] aria-expanded:px-0 aria-expanded:before:content-none`;
+const PIN_GROUP_CLASS = `${PIN_SHAPE} group h-[24px] min-w-[24px] rounded-md border-[1.5px] bg-popover px-[6px] text-[12px] text-foreground shadow-[0_0_0_1px_rgb(0_0_0/0.55),0_1px_4px_rgb(0_0_0/0.6)] before:content-[attr(data-count)] aria-expanded:px-0 aria-expanded:before:content-none`;
 /**
  * Width of the open comments card in CSS px, kept in step with CadPanel.css. The card sits
  * 12px from the viewport's right edge, so framing that avoids it reserves this plus 12px.
@@ -239,6 +249,7 @@ export function CadCommentsCard({
   const openComments = displayed.filter((c) => c.state === "open");
   const openCount = openComments.length;
   const blockerCount = openComments.filter((c) => c.severity === "blocker").length;
+  // The tooltip spells out what the chip's count means.
   const toggleLabel = `Comments (${openCount} unresolved${blockerCount ? `, ${blockerCount} blocking` : ""})`;
   const lists = {
     // By number: numbers are the IDs the agent cites in chat ("#6"), so they read in order.
@@ -354,6 +365,13 @@ export function CadCommentsCard({
     let frame = 0;
     const current = renderer.current;
     const byId = new Map(comments.map((comment) => [comment.id, comment]));
+    // Reads layout once per pin, in the read pass before any marker moves this frame.
+    const measurePin = (element: HTMLElement, label: string) => {
+      const width = element.offsetWidth;
+      if (!width) return pinWidth(label);
+      measuredPinWidths.set(element, width);
+      return width;
+    };
     const place = (element: HTMLElement, x: number, y: number) => {
       element.style.visibility = "visible";
       element.style.left = `${x}px`;
@@ -391,7 +409,7 @@ export function CadCommentsCard({
           severity: comment.severity,
           x: point.x,
           y: point.y,
-          width: pinWidth(label),
+          width: measuredPinWidths.get(element) ?? measurePin(element, label),
           pinned: open && comment.id === selection?.id,
         });
       });
@@ -400,7 +418,7 @@ export function CadCommentsCard({
         counters.set(element.dataset.pinGroup ?? "", element);
         element.style.visibility = "hidden";
       });
-      for (const indices of groupOverlappingCommentPins(pins)) {
+      for (const indices of groupOverlappingCommentPins(pins, { clusterWidth })) {
         const group = indices.map((i) => pins[i]!);
         const head = group[0]!;
         if (group.length === 1) {
@@ -416,13 +434,20 @@ export function CadCommentsCard({
         const counter = counters.get(key);
         if (counter) {
           place(counter, cx, cy);
-          const name = `${group.length} comments here: ${group.map((pin) => pin.label).join(", ")}`;
+          const severities = group.map((pin) => pin.severity ?? "concern");
+          const breakdown = SEVERITY_LEGEND.map(({ severity, label }) => {
+            const count = severities.filter((s) => s === severity).length;
+            return count ? `${count} ${label.toLowerCase()}${count === 1 ? "" : "s"}` : "";
+          })
+            .filter(Boolean)
+            .join(", ");
+          const name = `${group.length} comments here: ${group.map((pin) => pin.label).join(", ")} (${breakdown})`;
           counter.dataset.count = `+${group.length}`;
-          // Comments without a severity are yellow like concerns, so they light that dot.
-          const present = new Set<string>(group.map((pin) => pin.severity ?? "concern"));
-          counter.querySelectorAll<HTMLElement>("[data-severity-dot]").forEach((dot) => {
-            dot.style.display = present.has(dot.dataset.severityDot ?? "") ? "" : "none";
-          });
+          counter.style.borderColor =
+            CLUSTER_RING[
+              SEVERITY_LEGEND.find(({ severity }) => severities.includes(severity))?.severity ??
+                "concern"
+            ];
           counter.setAttribute("aria-expanded", String(expandedGroup === key));
           counter.setAttribute("aria-label", name);
           counter.title = name;
@@ -645,7 +670,7 @@ export function CadCommentsCard({
         onPointerMove={() => {
           if (!hoverReady) setHoverReady(true);
         }}
-        className="group/list min-h-0 flex-1 overflow-y-auto py-1"
+        className="group/list min-h-0 flex-1 overflow-y-auto pt-1"
       >
         {visible.length ? (
           visible.map((c) => {
@@ -669,12 +694,12 @@ export function CadCommentsCard({
                 key={c.id}
                 className={cn(
                   // Collapsed rows: a 14px medium title over a 12px part line. The expanded
-                  // row is lifted, outlined and barred in the scene's selection blue
+                  // row takes a blue-tinted background and a bar in the scene's selection blue
                   // (CadSceneModel's highlight), tying it to the highlighted part. Hover only
                   // lights a row once the pointer has moved over the list (see hoverReady).
                   "border-l-2 text-[14px] leading-[20px]",
                   expanded
-                    ? "border-[#7dbbff] bg-foreground/[0.08] outline outline-1 -outline-offset-1 outline-[#7dbbff]/35"
+                    ? "border-[#7dbbff] bg-[#202832]"
                     : "border-transparent group-data-[hover-ready]/list:hover:bg-foreground/[0.04]",
                 )}
               >
@@ -695,7 +720,7 @@ export function CadCommentsCard({
                     <span
                       className={cn(
                         "block",
-                        expanded ? "text-[15px] font-semibold" : "line-clamp-2 font-medium",
+                        expanded ? "font-semibold" : "line-clamp-2 font-medium",
                       )}
                     >
                       {c.title}
@@ -703,7 +728,7 @@ export function CadCommentsCard({
                     {(expanded ? metadata : partSummary(c)) && (
                       <span
                         className={cn(
-                          "mt-0.5 block text-[12px] leading-4",
+                          "mt-0.5 block text-[12px] leading-[18px]",
                           expanded ? "text-foreground/70" : "truncate text-muted-foreground",
                         )}
                       >
@@ -724,8 +749,9 @@ export function CadCommentsCard({
                 </button>
                 {expanded && (
                   // 16px around the expanded finding; the body lines up under the title.
-                  <div className="space-y-3 ps-[44px] pe-4 pb-4">
-                    <p className="whitespace-pre-wrap text-[14px] leading-[20px] text-[#bdbdbd]">
+                  // 12px between the explanation, the part chip and the actions.
+                  <div className="space-y-[12px] ps-[44px] pe-4 pb-4">
+                    <p className="whitespace-pre-wrap text-[14px] leading-[21px] text-[#bdbdbd]">
                       {c.body}
                     </p>
                     {outdated && <p className="text-[12px] text-muted-foreground">{outdated}</p>}
@@ -907,6 +933,12 @@ export function CadCommentsCard({
               : "No findings in this group."}
           </p>
         )}
+        {/* The list's last 24px: while more rows sit below, it sticks to the bottom edge and
+            fades them out; scrolled to the end, it sits over this empty space instead. */}
+        <div
+          aria-hidden
+          className="pointer-events-none sticky bottom-0 h-[24px] bg-linear-to-t from-popover to-transparent"
+        />
       </div>
     </div>
   );
@@ -972,20 +1004,6 @@ export function CadCommentsCard({
                       aria-hidden
                       className="hidden size-3 text-muted-foreground group-aria-expanded:block"
                     />
-                    {/* One dot per severity in the group; the draw loop shows the ones present. */}
-                    <span aria-hidden className="flex gap-[4px] group-aria-expanded:hidden">
-                      {SEVERITY_LEGEND.map(({ severity }) => (
-                        <span
-                          key={severity}
-                          data-severity-dot={severity}
-                          style={{ display: "none" }}
-                          className={cn(
-                            "size-[5px] rounded-full border border-transparent",
-                            SEVERITY_FILL[severity],
-                          )}
-                        />
-                      ))}
-                    </span>
                   </button>
                 </Fragment>
               );
@@ -1023,7 +1041,8 @@ export function CadCommentsCard({
                 render={
                   <button
                     type="button"
-                    aria-label={toggleLabel}
+                    // The accessible name is the visible label ("11 comments").
+                    aria-label={openCount ? toggleText : "Comments"}
                     aria-expanded={false}
                     onClick={() => setOpen(true)}
                     style={{ width: `calc(${toggleWidth} - 2px)` }}
@@ -1078,6 +1097,17 @@ const SEVERITY_FILL: Record<CadCommentSeverity | "none", string> = {
   question: "bg-violet-300 text-neutral-950",
   nit: "bg-[#262626] text-[#ededed] border-[#d4d4d4]",
   none: "bg-amber-200 text-neutral-950",
+};
+/**
+ * A group marker's ring color: the most severe comment inside, so a concern hidden in a group
+ * still shows. The same colors as SEVERITY_FILL (red-300, amber-200, violet-300, the nit rim),
+ * as literal values for the draw loop to set.
+ */
+const CLUSTER_RING: Record<CadCommentSeverity, string> = {
+  blocker: "#fca5a5",
+  concern: "#fde68a",
+  question: "#c4b5fd",
+  nit: "#d4d4d4",
 };
 /** Legend entries for the severities a review uses, most consequential first. */
 const SEVERITY_LEGEND: ReadonlyArray<{ severity: CadCommentSeverity; label: string }> = [

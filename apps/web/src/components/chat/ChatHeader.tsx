@@ -215,12 +215,12 @@ export const ChatHeader = memo(function ChatHeader({
       onContextMenu={handleHeaderContextMenu}
     >
       <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">
-        {/* The title is 14px medium and capped so a long one leaves room for the project;
-            the tooltip shows the full title. */}
+        {/* The title is 14px semibold (about #f2f2f2) so it reads as a title, not body text,
+            and capped so a long one leaves room for the project; the tooltip shows it all. */}
         <WorkspaceBreadcrumbItem
           current
           className={cn(
-            "text-[0.9333rem]",
+            "text-[0.9333rem] font-semibold text-foreground/95",
             renamingTitle !== null ? "flex-1" : "max-w-[min(26rem,70%)]",
           )}
         >

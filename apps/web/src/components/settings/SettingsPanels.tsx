@@ -3,6 +3,7 @@ import {
   ArchiveIcon as ArchiveX,
   CaretRightIcon as ChevronRightIcon,
   ArrowUUpLeftIcon as Undo2Icon,
+  FolderOpenIcon,
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
@@ -869,6 +870,13 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
   const serverConfig = useAtomValue(primaryServerConfigAtom);
   const defaultProjectDirectory =
     serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/";
+  // Opens the desktop folder picker Add Project uses, starting at the current folder.
+  const chooseDefaultProjectFolder = async () => {
+    const picked = await readLocalApi()?.dialogs.pickFolder({
+      initialPath: settings.addProjectBaseDirectory || defaultProjectDirectory,
+    });
+    if (picked) updateSettings({ addProjectBaseDirectory: picked });
+  };
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -937,7 +945,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("provider-update-checks")}
-          description="Check installed provider CLIs for new versions."
+          description="Check installed AI provider tools for updates."
           resetAction={
             settings.enableProviderUpdateChecks !==
             DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
@@ -965,7 +973,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
         <SettingsRow
           {...searchableSetting("add-project-starts-in")}
           // The input's placeholder shows the folder used while this is empty.
-          description="Folder that opens when you add a project."
+          description="Start in this folder when adding a project."
           resetAction={
             settings.addProjectBaseDirectory !==
             DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
@@ -980,14 +988,41 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
             ) : null
           }
           control={
-            <DraftInput
-              className="w-full sm:w-60"
-              value={settings.addProjectBaseDirectory}
-              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-              placeholder={defaultProjectDirectory}
-              spellCheck={false}
-              aria-label="Default project folder"
-            />
+            <div className="flex w-full items-center gap-1.5 sm:w-auto">
+              <DraftInput
+                className="w-full sm:w-60"
+                value={settings.addProjectBaseDirectory}
+                onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+                placeholder={
+                  defaultProjectDirectory === "~/"
+                    ? "~/ (home folder)"
+                    : `${defaultProjectDirectory} (default)`
+                }
+                spellCheck={false}
+                aria-label="Default project folder"
+              />
+              {/* The native picker needs the desktop app; the browser build can only type a path. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="inline-flex shrink-0">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        aria-label="Choose folder"
+                        disabled={!isElectron}
+                        onClick={() => void chooseDefaultProjectFolder()}
+                      >
+                        <FolderOpenIcon className="size-4" />
+                      </Button>
+                    </span>
+                  }
+                />
+                <TooltipPopup side="top">
+                  {isElectron ? "Choose folder" : "Choosing a folder needs the desktop app"}
+                </TooltipPopup>
+              </Tooltip>
+            </div>
           }
         />
 

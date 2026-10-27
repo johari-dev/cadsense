@@ -497,11 +497,12 @@ it("lists open findings by number and carries severity in each badge", () => {
   hooks.reset();
   hooks.beginRender();
   const closed = elements(CadCommentsCard({ ...props, open: false, selection: null }));
-  // The collapsed toggle is the tooltip trigger's rendered button; its tooltip repeats the label.
+  // The collapsed toggle is the tooltip trigger's rendered button.
   const toggle = closed
     .flatMap((element) => elements(element.props.render as ReactNode))
     .find((element) => element.props["aria-expanded"] === false);
-  expect(toggle?.props["aria-label"]).toBe("Comments (5 unresolved, 2 blocking)");
+  // Its accessible name is its visible label; the tooltip adds what the count means.
+  expect(toggle?.props["aria-label"]).toBe("5 comments");
   expect(
     closed.some((element) => element.props.children === "Comments (5 unresolved, 2 blocking)"),
   ).toBe(true);

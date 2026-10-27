@@ -47,8 +47,11 @@ type PickerRow = {
 };
 
 const JUMP_SHORTCUT_OPTIONS = { context: { modelPickerOpen: true } } as const;
+// Header controls: 28px tall, icon plus a 13px label.
 const TAB_CLASS_NAME =
-  "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-1.5 text-muted-foreground/70 outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
+  "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-[0.8667rem] text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
+// With more providers than this, inactive tabs fall back to icons so the header still fits.
+const MAX_LABELED_PROVIDER_TABS = 2;
 
 export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   /** The instance currently selected in the composer. */
@@ -269,7 +272,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         align="end"
         side="top"
         sideOffset={8}
-        className="composer-model-panel w-[min(18.5rem,92vw)]"
+        className="composer-model-panel w-[min(20rem,92vw)]"
         onKeyDownCapture={(event) => {
           // Tab walks the provider tabs instead of leaving (and closing) the menu.
           if (event.key === "Tab") {
@@ -302,10 +305,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 pt-1.5 pb-[7px]"
           >
             <PickerTabButton
-              label="Starred"
-              shortLabel="Starred"
+              label="Favorites"
+              showLabel
               active={openTab === STARRED_TAB}
-              showIndicator={entries.length > 1}
               onSelect={() => {
                 setTab(STARRED_TAB);
                 setQuery("");
@@ -318,11 +320,10 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               return (
                 <PickerTabButton
                   key={entry.instanceId}
-                  label={ready ? entry.displayName : `${entry.displayName} is unavailable`}
-                  shortLabel={entry.displayName}
+                  label={entry.displayName}
+                  showLabel={entries.length <= MAX_LABELED_PROVIDER_TABS}
+                  {...(ready ? {} : { unavailableReason: `${entry.displayName} is unavailable` })}
                   active={openTab === entry.instanceId}
-                  showIndicator={entries.length > 1}
-                  disabled={!ready}
                   onSelect={() => {
                     setTab(entry.instanceId);
                     setQuery("");
@@ -338,20 +339,21 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               );
             })}
             <span className="flex-1" />
+            {/* Opens Settings > Providers, where providers are added and configured. */}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Link
                     to="/settings/providers"
-                    aria-label="Add providers"
                     className={TAB_CLASS_NAME}
                     onClick={() => setMenuOpen(false)}
                   />
                 }
               >
                 <PlusIcon aria-hidden="true" className="size-3.5" />
+                Add provider
               </TooltipTrigger>
-              <TooltipPopup side="top">Add providers</TooltipPopup>
+              <TooltipPopup side="top">Add or set up providers in Settings</TooltipPopup>
             </Tooltip>
           </div>
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-[0.8rem]">
@@ -363,7 +365,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               ref={searchRef}
               type="text"
               aria-label="Search models"
-              placeholder={tabEntry ? "Search models…" : "Search starred…"}
+              placeholder={tabEntry ? "Search models…" : "Search favorites…"}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="h-8.5 min-w-0 flex-1 bg-transparent text-[0.8667rem] outline-none placeholder:text-muted-foreground/55"
@@ -478,7 +480,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   ? "No matching models"
                   : tabEntry
                     ? "No models found"
-                    : "Star a model to keep it here, across every provider."}
+                    : "Star a model to keep it in Favorites, across every provider."}
               </div>
             ) : null}
           </div>
@@ -491,45 +493,43 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   );
 });
 
+/**
+ * One source tab: icon plus its name, with the open tab on a filled pill. When the header is
+ * crowded the name is hidden on inactive tabs and the tooltip names them instead.
+ */
 function PickerTabButton(props: {
   label: string;
-  /** Visible name while the tab is open. */
-  shortLabel: string;
+  /** Show the name even while the tab is not open. */
+  showLabel?: boolean;
+  /** Set when the source cannot be picked right now; shown as the tooltip. */
+  unavailableReason?: string;
   active: boolean;
-  /** The underline only helps tell providers apart; a lone provider tab goes without it. */
-  showIndicator: boolean;
-  disabled?: boolean;
   onSelect: () => void;
   children: ReactNode;
 }) {
+  const labelVisible = props.active || (props.showLabel ?? false);
+  const tooltip = props.unavailableReason ?? (labelVisible ? null : props.label);
+  const tab = (
+    <button
+      type="button"
+      role="tab"
+      aria-label={props.unavailableReason ?? props.label}
+      aria-selected={props.active}
+      aria-disabled={props.unavailableReason !== undefined}
+      className={cn(TAB_CLASS_NAME, props.active && "bg-foreground/[0.1] text-foreground")}
+      onClick={() => {
+        if (props.unavailableReason === undefined) props.onSelect();
+      }}
+    >
+      {props.children}
+      {labelVisible ? <span>{props.label}</span> : null}
+    </button>
+  );
+  if (tooltip === null) return tab;
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            role="tab"
-            aria-label={props.label}
-            aria-selected={props.active}
-            aria-disabled={props.disabled ?? false}
-            className={cn(
-              TAB_CLASS_NAME,
-              props.active && "text-foreground",
-              props.active &&
-                props.showIndicator &&
-                "after:absolute after:inset-x-1.5 after:-bottom-[5px] after:h-0.5 after:rounded-full after:bg-foreground",
-            )}
-            onClick={() => {
-              if (!props.disabled) props.onSelect();
-            }}
-          />
-        }
-      >
-        {props.children}
-        {/* The open tab names itself; the others stay icons with a tooltip. */}
-        {props.active ? <span className="text-[0.8333rem]">{props.shortLabel}</span> : null}
-      </TooltipTrigger>
-      <TooltipPopup side="top">{props.label}</TooltipPopup>
+      <TooltipTrigger render={tab} />
+      <TooltipPopup side="top">{tooltip}</TooltipPopup>
     </Tooltip>
   );
 }

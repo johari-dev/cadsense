@@ -99,6 +99,31 @@ const createBackdrop = (background: number, dark: boolean) => {
   texture.needsUpdate = true;
   return texture;
 };
+/** A sky/ground ambient, a key from the upper right front, and a low fill from the back left. */
+const CAD_LIGHTS = {
+  keyDirection: [3, -4, 5],
+  fillDirection: [-3, 2, 1],
+  dark: { ambient: 1.5, key: 2.2, fill: 1 },
+  light: { ambient: 1.25, key: 2.2, fill: 0.8 },
+} as const;
+/**
+ * Every CAD frame (viewer, captures, thumbnails) passes through one soft tone curve,
+ * `ceiling * x / (1 + x)` on the exposed linear color, per channel. It narrows the range on the
+ * dark viewport: key-lit aluminum (#e8 untouched) lands near #b8 so it no longer outshines the
+ * chat or swallows yellow pins, front faces near #a6, and dark plates (#48) lift to about #52
+ * so they keep their shape. Overlays (backdrop, outlines, comment markers) are not tone mapped.
+ */
+const TONE_EXPOSURE = 1.81;
+const TONE_CEILING = 0.807;
+const IDENTITY_TONE_MAPPING = "vec3 CustomToneMapping( vec3 color ) { return color; }";
+if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(IDENTITY_TONE_MAPPING))
+  THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+    IDENTITY_TONE_MAPPING,
+    `vec3 CustomToneMapping( vec3 color ) {
+      vec3 exposed = toneMappingExposure * color;
+      return ${TONE_CEILING.toFixed(4)} * exposed / ( vec3( 1.0 ) + exposed );
+    }`,
+  );
 export interface CadSceneRendererOptions {
   readonly cacheScenes?: boolean;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -118,7 +143,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     throw new CadRendererError("renderer-unavailable");
   }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMapping = THREE.CustomToneMapping;
+  renderer.toneMappingExposure = TONE_EXPOSURE;
   renderer.setClearColor(DEFAULT_CAD_APPEARANCE.background);
   const outline = createCadOutline(renderer);
   const scene = new THREE.Scene();
@@ -138,13 +164,13 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       commentMarkers.remove(o);
     }
   };
-  const ambient = new THREE.HemisphereLight(0xffffff, 0x89939f, 1.5);
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x89939f, CAD_LIGHTS.dark.ambient);
   scene.add(ambient);
-  const key = new THREE.DirectionalLight(0xffffff, 2.2);
-  key.position.set(3, -4, 5);
+  const key = new THREE.DirectionalLight(0xffffff, CAD_LIGHTS.dark.key);
+  key.position.set(...CAD_LIGHTS.keyDirection);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xffffff, 1);
-  fill.position.set(-3, 2, 1);
+  const fill = new THREE.DirectionalLight(0xffffff, CAD_LIGHTS.dark.fill);
+  fill.position.set(...CAD_LIGHTS.fillDirection);
   scene.add(fill);
   for (const light of [ambient, key, fill]) light.layers.enable(CAD_CONTEXT_LAYER);
   let backdrop = createBackdrop(DEFAULT_CAD_APPEARANCE.background, DEFAULT_CAD_APPEARANCE.dark);
@@ -1341,7 +1367,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
               const radius = point.distanceTo(camera.position) * 0.008;
               const marker = new THREE.Mesh(
                 new THREE.SphereGeometry(radius, 12, 8),
-                new THREE.MeshBasicMaterial({ color: 0xffd866, depthTest: false }),
+                new THREE.MeshBasicMaterial({
+                  color: 0xffd866,
+                  depthTest: false,
+                  toneMapped: false,
+                }),
               );
               marker.position.copy(point);
               marker.renderOrder = 100;
@@ -1411,7 +1441,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         if (t.world) {
           const marker = new THREE.Mesh(
             new THREE.SphereGeometry(radius * 0.035, 12, 8),
-            new THREE.MeshBasicMaterial({ color: visible ? 0xffd866 : 0xff6262, depthTest: false }),
+            new THREE.MeshBasicMaterial({
+              color: visible ? 0xffd866 : 0xff6262,
+              depthTest: false,
+              toneMapped: false,
+            }),
           );
           marker.position.copy(t.world);
           marker.renderOrder = 100;
@@ -1430,7 +1464,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
             context.fillText(String(index + 1), 32, 33);
             const texture = new THREE.CanvasTexture(labelCanvas),
               sprite = new THREE.Sprite(
-                new THREE.SpriteMaterial({ map: texture, depthTest: false }),
+                new THREE.SpriteMaterial({ map: texture, depthTest: false, toneMapped: false }),
               );
             sprite.position.copy(t.world);
             sprite.scale.setScalar(radius * 0.13);
@@ -1479,8 +1513,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       renderer.setClearColor(next.background);
       backdrop.dispose();
       backdrop = createBackdrop(next.background, next.dark);
-      ambient.intensity = next.dark ? 1.5 : 1.25;
-      fill.intensity = next.dark ? 1 : 0.8;
+      const lights = next.dark ? CAD_LIGHTS.dark : CAD_LIGHTS.light;
+      ambient.intensity = lights.ambient;
+      key.intensity = lights.key;
+      fill.intensity = lights.fill;
       frameRevision++;
       if (view) render();
     },

@@ -43,6 +43,9 @@ function partLabel(name: string) {
   };
 }
 
+/** Indent per tree level in px. */
+const INDENT = 16;
+
 /** A row action. Hover actions sit over the end of the name, on the row's own background, so
     names get the full row width until the pointer or focus arrives. An active effect stays
     shown with a white icon. */
@@ -219,9 +222,18 @@ export function CadHierarchyTree({
                   style={{
                     top,
                     height: offsets[start + offset + 1]! - top,
-                    paddingLeft: 4 + row.depth * 16,
+                    paddingLeft: 4 + row.depth * INDENT,
                   }}
                 >
+                  {/* Indent guides: one line per ancestor, under that ancestor's chevron. */}
+                  {Array.from({ length: row.depth }, (_, level) => (
+                    <span
+                      key={level}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 w-px bg-border"
+                      style={{ left: 4 + level * INDENT + 10 }}
+                    />
+                  ))}
                   <button
                     type="button"
                     aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`}
@@ -276,7 +288,7 @@ export function CadHierarchyTree({
                     </TooltipTrigger>
                     <TooltipPopup>{node.name}</TooltipPopup>
                   </Tooltip>
-                  <div className="pointer-events-none absolute inset-y-0 right-7 flex items-center gap-0.5 ps-6 group-hover:pointer-events-auto group-focus-within:pointer-events-auto [background:linear-gradient(to_right,transparent,var(--row)_1.25rem)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-aria-pressed:opacity-100">
+                  <div className="pointer-events-none absolute inset-y-0 right-8 flex items-center gap-0.5 ps-6 group-hover:pointer-events-auto group-focus-within:pointer-events-auto [background:linear-gradient(to_right,transparent,var(--row)_1.25rem)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-aria-pressed:opacity-100">
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -350,7 +362,8 @@ export function CadHierarchyTree({
                       <TooltipPopup>Isolate and zoom to fit</TooltipPopup>
                     </Tooltip>
                   </div>
-                  {/* Visibility: quiet while the row is fully shown, always visible otherwise. */}
+                  {/* Visibility, in a fixed 28px column on every row: a muted eye when shown, a
+                      stronger crossed eye when hidden, brighter on hover. */}
                   <button
                     type="button"
                     role="checkbox"
@@ -358,8 +371,8 @@ export function CadHierarchyTree({
                     aria-checked={shown ? true : hidden ? false : "mixed"}
                     disabled={disabled || node.suppressed}
                     className={cn(
-                      "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
-                      shown && "opacity-0 group-hover:opacity-100",
+                      "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
+                      hidden ? "text-foreground/85" : "text-muted-foreground/70",
                     )}
                     onClick={() => {
                       const visibility = !shown
