@@ -11,10 +11,11 @@ import { CAD_VIEW_DIRECTIONS, cadPresetUp } from "./CadSceneModel";
 type Vec = readonly [number, number, number];
 type Preset = Extract<CadViewState["camera"], { kind: "preset" }>["preset"];
 
-/** Cube edge in px, and how far each edge and corner is chamfered off. A face keeps a flat
-    EDGE - 2 * CHAMFER square, wide enough for a 10px "FRONT" or "RIGHT". */
-const EDGE = 48;
-const CHAMFER = 6;
+/** Cube edge in px, and how far each edge and corner is chamfered off. The chamfer sets the
+    corner facets' size (BEVEL on a side, about 14px), large enough to click easily. A face keeps
+    a flat EDGE - 2 * CHAMFER square, wide enough for a 10px "FRONT" or "RIGHT". */
+const EDGE = 56;
+const CHAMFER = 10;
 const HALF = EDGE / 2;
 /** The flat face's side, and the width of the bevel strip along each edge. */
 const FLAT = EDGE - 2 * CHAMFER;
