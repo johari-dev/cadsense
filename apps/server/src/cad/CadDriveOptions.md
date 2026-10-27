@@ -32,7 +32,8 @@ drives that fit it.
    tool returns the two places the jackshaft axis can go.
 6. **Belts and chains.** A belt must wrap at least 6 teeth of its small pulley, a chain at least
    120 degrees of its small sprocket, and the wheels must clear each other by 1/8 in. With no fixed
-   center a belt or chain stage has no center and no loop, since any stock length works. Gears
+   center a belt or chain stage has no center and no loop, since any stock length works, but some
+   stock loop must meet these rules within a meter. Gears
    always get one: the exact center plus the usual 0.003 in.
 7. **Ranking.** Options that fit come first, then fewer stages, then smaller ratio error in 0.5%
    steps, then the smallest largest wheel. At most two options share a family combination, so a

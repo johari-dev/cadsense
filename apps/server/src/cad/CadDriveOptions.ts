@@ -525,8 +525,16 @@ export const searchDriveOptions = (
   const notes: string[] = [];
 
   if (centerMeters === null) {
+    // A belt or chain stage needs some stock loop it can use, up to a meter apart.
+    const usable = new Map<Stage, boolean>();
+    const buildable = (stage: Stage) => {
+      let found = usable.get(stage);
+      if (found === undefined) usable.set(stage, (found = stageBuilds(stage, 1).length > 0));
+      return found;
+    };
     for (const found of candidates) {
       if (options.length >= search.limit) break;
+      if (!found.stages.every(buildable)) continue;
       if (!take(found.stages)) continue;
       const builds = found.stages.map((stage) =>
         stage.family.shape.kind === "gear" ? stageBuilds(stage, Infinity)[0]! : null,
@@ -600,9 +608,10 @@ const cross = (a: Vector3, b: Vector3): Vector3 => [
   a[0] * b[1] - a[1] * b[0],
 ];
 /**
- * Where a jackshaft can sit `fromDriver` meters from the driver axis and `toDriven` from the driven
- * axis: the two intersections of those circles in the plane across the axes through the driver's
- * middle, or one point when the circles touch, or none when they cannot reach.
+ * Where a jackshaft can sit `fromDriver` meters from the driver's middle and `toDriven` from the
+ * driven axis: the two intersections of those circles in the plane across the driven axis through
+ * the driver's middle, where cad_drive_options measures the center, or one point when the circles
+ * touch, or none when they cannot reach.
  */
 export const jackshaftPositions = (
   driver: CadAxis,
@@ -611,11 +620,11 @@ export const jackshaftPositions = (
   toDriven: number,
 ): Vector3[] => {
   const offset = sub(driven.center, driver.center);
-  const across = sub(offset, scale(driver.axis, dot(offset, driver.axis)));
+  const across = sub(offset, scale(driven.axis, dot(offset, driven.axis)));
   const center = norm(across);
   if (center === 0) return [];
   const toward = scale(across, 1 / center);
-  const side = cross(driver.axis, toward);
+  const side = cross(driven.axis, toward);
   const along = (fromDriver ** 2 - toDriven ** 2 + center ** 2) / (2 * center);
   const height = fromDriver ** 2 - along ** 2;
   if (height < -1e-12) return [];

@@ -162,6 +162,15 @@ describe("centers", () => {
         }
   });
 
+  // The smaller of two unequal pulleys wraps under half its teeth, so 12 or fewer never wrap 6.
+  it("leaves out belt stages no stock belt can wrap 6 teeth of, even without a center", () => {
+    for (const reduction of [2, 3, 4])
+      for (const option of search({ reduction, families: ["htd-5mm", "gt2-3mm"] }).options)
+        for (const stage of option.stages)
+          if (stage.driver.teeth !== stage.driven.teeth)
+            expect(Math.min(stage.driver.teeth, stage.driven.teeth)).toBeGreaterThan(12);
+  });
+
   it("wraps at least 6 belt teeth and keeps wheels apart", () => {
     for (const centerMeters of [3 * INCH, 4.25 * INCH, 6 * INCH])
       for (const option of search({ reduction: 2.5, centerMeters }).options)
@@ -264,6 +273,33 @@ describe("centers", () => {
     const far = search({ reduction: 9, families: ["gear-20dp"], centerMeters: 20 * INCH });
     expect(far.options.filter((option) => option.fits)).toEqual([]);
     expect(far.notes.join(" ")).toContain("No stock drive");
+  });
+
+  it("places the jackshaft against the center the tool measured when the driver's axis tilts", () => {
+    // Fitted axes tilt slightly; the center is measured at the driver across the driven axis.
+    const tilt = (1.15 * Math.PI) / 180;
+    const driver = {
+      center: [0, 0.24, 0] as const,
+      axis: [Math.sin(tilt), Math.cos(tilt), 0] as const,
+      halfLength: 0.05,
+      radius: 0.03,
+    };
+    const driven = {
+      center: [0.1219, 0, 0.0914] as const,
+      axis: [0, 1, 0] as const,
+      halfLength: 0.18,
+      radius: 0.025,
+    };
+    const center = Math.hypot(0.1219, 0.0914);
+    const [c1, c2] = [0.6 * center, 0.4 * center];
+    const points = jackshaftPositions(driver, driven, c1, c2);
+    expect(points.length).toBeGreaterThan(0);
+    for (const p of points) {
+      expect(
+        Math.hypot(p[0] - driver.center[0], p[1] - driver.center[1], p[2] - driver.center[2]),
+      ).toBeCloseTo(c1, 9);
+      expect(Math.hypot(p[0] - 0.1219, p[2] - 0.0914)).toBeCloseTo(c2, 9);
+    }
   });
 
   it("places the jackshaft at each stage's center from its axis, across the axes", () => {
