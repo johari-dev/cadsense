@@ -19,8 +19,8 @@ drives that fit it.
    catalog does not say their center distance.
 3. **Axes.** With `driverOccurrenceId` and `drivenOccurrenceId`, both parts' axes come from
    `fitCadAxis`, snapped onto a shaft through them the same way `cad_checks` does it. The axes must
-   be parallel. The center is the distance between the two lines. The driven part's diameter feeds
-   a surface-speed target.
+   be parallel. The center is measured at the driver's middle, where the drive sits, across the
+   driven part's axis. The driven part's diameter feeds a surface-speed target.
 4. **Stages.** One stage is a pair of wheels in one family. Two stages multiply. Every stage reduces
    for a reduction above 1 and speeds up below 1, and no stage goes past 7:1.
 5. **Fit.** With a fixed center, a single stage fits only when `cad_checks` would pass it once it is
@@ -42,6 +42,10 @@ drives that fit it.
 ## Limits
 
 - It does not check wheels against other parts. After modeling a suggestion, run `cad_checks`.
+- Axes fitted from tessellated meshes tilt slightly, so a center measured far along a tilted axis
+  drifts: a Kraken 9 in along the axis from its roller read 0.010 in short across the motor's axis
+  and 0.004 in short across the roller's, which is why the driven part's axis is used. Gear options
+  at a measured center have only a 0.010 in window, so check the reported center against the model.
 - The jackshaft position is one of two points on a circle intersection; it does not know where the
   frame is.
 - Belt and chain length use the loop-length check's pitch-radius formula, which is close for chain

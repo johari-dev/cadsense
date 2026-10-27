@@ -688,7 +688,9 @@ export const readCadDriveOptions = Effect.fn("readCadDriveOptions")(function* (
       );
     if (centerMeters !== null)
       notes.push("centerInches was ignored: the center comes from the named parts.");
-    centerMeters = lineDistance(driven.center, driver.center, driver.axis);
+    // Measured at the driver's middle, where the drive sits, across the driven part's axis: fitted
+    // axes tilt slightly, and a tilt grows with the distance along the axis it is carried.
+    centerMeters = lineDistance(driver.center, driven.center, driven.axis);
   }
 
   const motor = input.motor ?? (driver ? driveMotorFromName(driver.name) : null);
