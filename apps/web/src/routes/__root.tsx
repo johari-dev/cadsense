@@ -70,7 +70,6 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <DocumentTitleSync />
         <FontAppearanceSync />
-        <GlassAppearanceSync />
         <AuthenticatedTracingBootstrap />
         <ConfirmDialogHost />
         <SlowRpcRequestToastCoordinator />
@@ -80,14 +79,6 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
-}
-
-function GlassAppearanceSync() {
-  const opacity = useClientSettings((settings) => settings.glassOpacity);
-  useEffect(() => {
-    document.documentElement.style.setProperty("--glass-opacity", `${opacity}%`);
-  }, [opacity]);
-  return null;
 }
 
 function FontAppearanceSync() {
