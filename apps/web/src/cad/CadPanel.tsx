@@ -58,6 +58,10 @@ import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
+// Fits keep the model clear of the parts chip along the top and the camera toolbar along the
+// bottom; the compact preview shows neither.
+const PANEL_FRAME_INSETS = { top: 48, bottom: 64 } as const;
+const COMPACT_FRAME_INSETS = { top: 0, bottom: 0 } as const;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -136,7 +140,7 @@ export function CadScene({
   // Where the primary pointer went down on the viewer, to tell a click from an orbit drag.
   const press = useRef<{ id: number; x: number; y: number } | null>(null);
   const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
-  const latest = useRef({ view, disabled, onChange });
+  const latest = useRef({ view, disabled, onChange, compact });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
@@ -145,8 +149,8 @@ export function CadScene({
   const previousExplosion = useRef(view.explosion);
   const applied = useRef<{ manifest: CadSnapshotManifest | null; state: string } | null>(null);
   useLayoutEffect(() => {
-    latest.current = { view, disabled, onChange };
-  }, [disabled, onChange, view]);
+    latest.current = { view, disabled, onChange, compact };
+  }, [compact, disabled, onChange, view]);
   useLayoutEffect(() => {
     try {
       renderer.current?.setInteractive(!disabled);
@@ -205,6 +209,7 @@ export function CadScene({
     const { renderer: current, canvas: node, diagnostics } = attachment;
     attachmentRef.current = attachment;
     renderer.current = current;
+    current.setFrameInsets(latest.current.compact ? COMPACT_FRAME_INSETS : PANEL_FRAME_INSETS);
     const stopLoad = attachment.watchLoad(view.snapshotId, (state) => {
       try {
         if (state.status === "idle") {

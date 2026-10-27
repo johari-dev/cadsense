@@ -50,7 +50,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    title: "Default project folder",
     to: "/settings/general",
   },
   { id: "archive-confirmation", title: "Archive confirmation", to: "/settings/general" },

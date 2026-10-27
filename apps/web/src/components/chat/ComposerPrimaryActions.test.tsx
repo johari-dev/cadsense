@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  COMPOSER_ICON_ACTION_CLASS_NAME,
+  COMPOSER_PRIMARY_ACTION_CLASS_NAME,
   ComposerPrimaryActions,
   formatPendingPrimaryActionLabel,
 } from "./ComposerPrimaryActions";
@@ -207,15 +207,16 @@ describe("ComposerPrimaryActions", () => {
     expect(renderSendButton()).toContain("size-7.5");
   });
 
-  it("renders send and stop as quiet icon buttons with no fill", () => {
+  it("renders send and stop as the same filled circle", () => {
     const send = renderSendButton();
     const stop = renderStandaloneStop();
 
     // Static markup escapes the "&" in the class's arbitrary variant.
-    const quiet = COMPOSER_ICON_ACTION_CLASS_NAME.replaceAll("&", "&amp;");
-    expect(send).toContain(quiet);
-    expect(stop).toContain(quiet);
-    expect(send).not.toContain("bg-message-action");
+    const circle = COMPOSER_PRIMARY_ACTION_CLASS_NAME.replaceAll("&", "&amp;");
+    expect(send).toContain(circle);
+    expect(stop).toContain(circle);
+    expect(circle).toContain("rounded-full");
+    expect(circle).toContain("bg-message-action");
     expect(stop).not.toContain("bg-destructive");
   });
 

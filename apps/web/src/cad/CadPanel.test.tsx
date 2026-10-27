@@ -159,6 +159,7 @@ const harness = (
     cachedManifest: () => (cached ? manifest : null),
     displayedManifest: () => (active ? manifest : null),
     setInteractive() {},
+    setFrameInsets() {},
     resize() {},
     apply,
     transition,

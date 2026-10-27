@@ -171,9 +171,16 @@ export function SettingsRow({
       {...rowProps}
       ref={targetRef}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
-      className={cn("rounded-xl px-3 sm:px-4", children ? "pt-3 pb-1" : "py-3", className)}
+      data-settings-row=""
+      className={cn(
+        // A hairline sits between consecutive rows, inset to the text edge and centered in
+        // the section's row gap. Other section content (cards, lists) never gets one.
+        "relative rounded-xl px-3 sm:px-4 [[data-settings-row]+&]:before:pointer-events-none [[data-settings-row]+&]:before:absolute [[data-settings-row]+&]:before:inset-x-3 [[data-settings-row]+&]:before:-top-0.5 [[data-settings-row]+&]:before:h-px [[data-settings-row]+&]:before:bg-border sm:[[data-settings-row]+&]:before:inset-x-4",
+        children ? "pt-3.5 pb-1.5" : "py-3.5",
+        className,
+      )}
     >
-      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-8">
+      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="text-sm font-medium tracking-[-0.005em] text-foreground">{title}</h3>
@@ -182,7 +189,7 @@ export function SettingsRow({
             </span>
           </div>
           {description ? (
-            <p className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground/80">
+            <p className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground">
               {description}
             </p>
           ) : null}
@@ -253,7 +260,12 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        <WorkspacePageContainer width={width} className={cn("gap-12", className)}>
+        {/* Readable pages keep the label column and its control close together; wider
+            pages (diagnostics, tables) opt out through `width`. */}
+        <WorkspacePageContainer
+          width={width}
+          className={cn("gap-10", width === "readable" && "max-w-[46rem]", className)}
+        >
           {children}
         </WorkspacePageContainer>
       </div>

@@ -11,11 +11,16 @@ const decodeView = Schema.decodeUnknownSync(CadViewState);
 
 export type CadApplyOptions = {
   /**
-   * Comment reviews show the parts an isolation would hide at this opacity instead of hiding
-   * them, so the isolated part keeps its surroundings for context.
+   * Comment reviews show the parts an isolation would hide as muted context instead of hiding
+   * them, so the isolated part keeps its surroundings.
    */
-  fadeIsolatedOut?: number;
+  fadeIsolatedOut?: boolean;
 };
+/**
+ * Faded context meshes render only on this layer. The renderer draws it as one quiet backdrop
+ * after the solid parts; the main pass, outlines, and raycasts (all on layer 0) skip it.
+ */
+export const CAD_CONTEXT_LAYER = 1;
 
 /** GLTF hierarchy clones share immutable geometry, materials, and texture buffers. */
 export const buildCadSceneModel = (
@@ -73,6 +78,8 @@ export const buildCadSceneModel = (
   let materialStyle = "";
   // Parts the last applied view faded instead of hiding (see CadApplyOptions).
   let faded: ReadonlySet<string> = new Set();
+  // Whether the last applied view ghosts any part to a translucent copy.
+  let ghosting = false;
   const clearOverrides = () => {
     const disposed = new Set<THREE.Material>();
     for (const [object, entry] of overrides) {
@@ -106,18 +113,16 @@ export const buildCadSceneModel = (
     ];
     if (ids.some((id) => !index.nodes.has(id))) throw new CadRendererError("invalid-view");
     const shown = index.visible(state);
-    const fadeOpacity = state.isolatedOccurrenceIds.length ? options?.fadeIsolatedOut : undefined;
+    const fade = state.isolatedOccurrenceIds.length > 0 && options?.fadeIsolatedOut === true;
     // With fading on, everything the view shows without its isolation stays visible, and the
     // parts only the isolation hid are faded.
-    const visible =
-      fadeOpacity === undefined ? shown : index.visible({ ...state, isolatedOccurrenceIds: [] });
+    const visible = fade ? index.visible({ ...state, isolatedOccurrenceIds: [] }) : shown;
     const fadedIds = new Set<string>();
-    if (fadeOpacity !== undefined)
+    if (fade)
       for (const [id, isVisible] of visible) if (isVisible && !shown.get(id)) fadedIds.add(id);
     const nextStyle = JSON.stringify([
       state.highlightedOccurrenceIds ?? [],
       state.ghost ?? null,
-      fadeOpacity ?? null,
       [...fadedIds],
     ]);
     const changedStyle = materialStyle !== nextStyle;
@@ -136,10 +141,11 @@ export const buildCadSceneModel = (
     const visibleBounds = new THREE.Box3();
     for (const [id, entry] of objects) {
       entry.object.visible = visible.get(id) ?? false;
-      const opacity = Math.min(
-        ghosted.has(id) ? state.ghost!.opacity : 1,
-        fadedIds.has(id) ? fadeOpacity! : 1,
-      );
+      const opacity = ghosted.has(id) ? state.ghost!.opacity : 1;
+      if (changedStyle) {
+        const layer = fadedIds.has(id) ? CAD_CONTEXT_LAYER : 0;
+        entry.object.traverse((object) => object.layers.set(layer));
+      }
       if (changedStyle && (highlighted.has(id) || opacity < 1))
         entry.object.traverse((object) => {
           if (
@@ -185,6 +191,7 @@ export const buildCadSceneModel = (
     }
     group.updateMatrixWorld(true);
     faded = fadedIds;
+    ghosting = ghosted.size > 0;
     shownBounds = visibleBounds.isEmpty() ? bounds.clone() : visibleBounds;
     // All-hidden/empty fits remain deterministic and never produce NaN camera positions.
     return fitBounds.isEmpty()
@@ -204,6 +211,10 @@ export const buildCadSceneModel = (
     visibleBounds: () => shownBounds.clone(),
     /** Parts shown faded rather than hidden by the last applied view. */
     isFaded: (id: string) => faded.has(id),
+    /** Whether the last applied view shows any faded context (see CAD_CONTEXT_LAYER). */
+    hasFaded: () => faded.size > 0,
+    /** Whether the last applied view, including any review on top of it, ghosts parts. */
+    hasGhosts: () => ghosting,
     dispose: clearOverrides,
   };
 };
@@ -218,11 +229,16 @@ const directions = {
   top: [0, 0, 1],
   bottom: [0, 0, -1],
 } satisfies Record<string, [number, number, number]>;
-/** Orthographic base height is derived from eye-target distance, making pose+zoom self-contained. */
+/**
+ * Orthographic base height is derived from eye-target distance, making pose+zoom self-contained.
+ * `fill` is the share of the viewport height a fit may use, so overlay chrome along the top and
+ * bottom edges does not cover the fitted model.
+ */
 export const resolveCadCamera = (
   camera: CadViewState["camera"],
   bounds: THREE.Box3,
   aspect: number,
+  fill = 1,
 ): ResolvedCadCamera => {
   if (camera.kind === "pose" && camera.fit === null) return camera.pose;
   const center = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
@@ -235,7 +251,10 @@ export const resolveCadCamera = (
       ? new THREE.Vector3(...directions[camera.preset])
       : new THREE.Vector3(...camera.pose.position).sub(new THREE.Vector3(...camera.pose.target));
   const halfFov = THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2);
-  const limitingAngle = Math.min(halfFov, Math.atan(Math.tan(halfFov) * aspect));
+  const limitingAngle = Math.min(
+    Math.atan(Math.tan(halfFov) * fill),
+    Math.atan(Math.tan(halfFov) * aspect),
+  );
   const distance = (radius * 1.1) / Math.sin(limitingAngle);
   const position = direction.normalize().multiplyScalar(distance).add(center);
   const up =

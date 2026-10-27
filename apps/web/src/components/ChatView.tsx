@@ -137,7 +137,7 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { RightPanel } from "./RightPanel";
+import { RightPanel, resolveDefaultCadPanelWidth } from "./RightPanel";
 import { singleCadModelName } from "../cad/cadModelName";
 import { AgentsPanel } from "./AgentsPanel";
 import {
@@ -4065,22 +4065,22 @@ function ChatViewContent(props: ChatViewProps) {
                 onRedoWithFeedback={onRedoWithFeedback}
               />
 
-              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
+              {/* scroll to end pill — shown when user has scrolled away from the live edge.
+                  A solid, shadowed surface so it never reads as part of the text under it. */}
               {showScrollToBottom && (
                 <div
-                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
-                  style={{ bottom: scrollToEndClearance + 4 }}
+                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center"
+                  style={{ bottom: scrollToEndClearance + 8 }}
                 >
-                  <Button
+                  <button
+                    type="button"
                     aria-label="Scroll to end"
                     onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto gap-1.5 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                    size="xs"
-                    variant="glass"
+                    className="pointer-events-auto flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover px-3 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <ChevronDownIcon className="size-3.5" />
+                    <ChevronDownIcon className="size-3.5" aria-hidden />
                     Scroll to end
-                  </Button>
+                  </button>
                 </div>
               )}
             </div>
@@ -4092,9 +4092,17 @@ function ChatViewContent(props: ChatViewProps) {
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
               }
             >
+              {/* Docked, the composer sits on a solid backing down to the window edge so the
+                  transcript never shows through below or beside it; the top 1rem fades in. */}
+              {isDraftHeroState ? null : (
+                <div
+                  aria-hidden
+                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_1rem)]"
+                />
+              )}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
                 className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
@@ -4261,7 +4269,7 @@ function ChatViewContent(props: ChatViewProps) {
           {...(cadAvailable
             ? {
                 widthStorageKey: "cadsense:design-viewport-width",
-                defaultWidth: Math.round(window.innerWidth * 0.6),
+                defaultWidth: resolveDefaultCadPanelWidth(window.innerWidth),
               }
             : {})}
           maximized={rightPanelMaximized}

@@ -87,7 +87,7 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
           <EmptyTitle className="text-foreground text-xl">Couldn’t start a new thread</EmptyTitle>
-          <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
+          <EmptyDescription className="mt-2 text-sm text-muted-foreground">
             The project is still available. Try opening the draft again.
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
@@ -113,14 +113,11 @@ function NoProjectsHero() {
             <div className="mx-auto mb-7 flex size-24 items-center justify-center rounded border border-primary/30 bg-primary/5 text-primary">
               <CubeIcon size={58} weight="duotone" />
             </div>
-            <p className="mb-3 text-center text-[11px] font-medium uppercase tracking-[0.22em] text-primary">
-              Cadsense / Design workspace
-            </p>
             <EmptyHeader className="max-w-none">
               <EmptyTitle className="text-foreground text-2xl sm:text-3xl">
                 A place to think in 3D.
               </EmptyTitle>
-              <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
+              <EmptyDescription className="mt-2 text-sm text-muted-foreground">
                 Bring in your project to explore assemblies, review details, and work through design
                 changes with an agent.
               </EmptyDescription>

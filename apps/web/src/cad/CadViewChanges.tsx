@@ -129,25 +129,29 @@ export function CadViewChanges({
     <div
       className={cn(
         // Spans down to just above the camera toolbar, so the card can shrink to fit.
-        "pointer-events-none absolute bottom-16 left-3 z-20 flex w-[min(304px,calc(100%-72px))] flex-col items-start gap-2",
+        "pointer-events-none absolute bottom-16 left-3 z-20 flex flex-col items-start gap-2",
         belowRevisionNotice ? "top-14" : "top-3",
+        // The parts tree gets extra width so long part names read before they truncate.
+        (open || settling) && tab === "parts"
+          ? "w-[min(352px,calc(100%-72px))]"
+          : "w-[min(304px,calc(100%-72px))]",
       )}
     >
-      <div className="pointer-events-auto flex h-(--cad-overlay-control) shrink-0 items-center rounded-lg border bg-popover text-xs shadow-sm">
+      <div className="pointer-events-auto flex h-(--cad-overlay-control) shrink-0 items-center rounded-lg border bg-popover text-[13px] shadow-sm">
         <button
           type="button"
           aria-expanded={open}
           aria-label={changeCount ? `View changes: ${summary.join(", ")}` : "Parts"}
           className={cn(
-            "flex h-full cursor-pointer items-center gap-2 rounded-lg px-2.5 transition-colors hover:bg-accent",
+            "flex h-full cursor-pointer items-center gap-2 rounded-lg px-2.5 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:text-foreground",
             !changeCount && "text-muted-foreground",
           )}
           onClick={toggle}
         >
           {changeCount ? (
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-[var(--accent-text)]" />
+            <span aria-hidden="true" className="mx-[5px] size-1.5 rounded-full bg-foreground" />
           ) : (
-            <ListTreeIcon aria-hidden="true" className="size-3.5" />
+            <ListTreeIcon aria-hidden="true" className="size-4" />
           )}
           <span className="whitespace-nowrap">{chipLabel}</span>
         </button>
@@ -200,9 +204,9 @@ export function CadViewChanges({
                 type="button"
                 aria-pressed={tab === id}
                 className={cn(
-                  "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground",
+                  "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
                   tab === id &&
-                    "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-[var(--accent-text)]",
+                    "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
                 )}
                 onClick={() => setTab(id)}
               >
@@ -229,7 +233,7 @@ export function CadViewChanges({
               fullHeight
             />
           ) : changeCount === 0 ? (
-            <p className="p-3 text-xs text-muted-foreground">
+            <p className="p-3 text-[13px] text-muted-foreground">
               Every part shows normally. When you or the agent isolate, hide, ghost, or highlight
               parts, they are listed here.
             </p>
@@ -247,7 +251,7 @@ export function CadViewChanges({
                       {shown.map((id) => (
                         <div
                           key={id}
-                          className="group flex h-7 items-center gap-2 rounded-md ps-2 pe-1 text-xs hover:bg-accent"
+                          className="group flex h-7 items-center gap-2 rounded-md ps-2 pe-1 text-[13px] hover:bg-accent"
                         >
                           <Tooltip>
                             <TooltipTrigger
@@ -286,7 +290,7 @@ export function CadViewChanges({
                       {!showAll && (
                         <button
                           type="button"
-                          className="h-6 cursor-pointer ps-2 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-7 cursor-pointer ps-2 text-[13px] text-muted-foreground hover:text-foreground"
                           onClick={() => setExpanded(new Set([...expanded, group.kind]))}
                         >
                           and {group.ids.length - GROUP_PREVIEW} more

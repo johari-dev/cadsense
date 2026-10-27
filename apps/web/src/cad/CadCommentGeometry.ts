@@ -198,3 +198,56 @@ export const cadCommentVisible = (
     (hit) => hit.distance <= Math.max(0, distance - epsilon) || cadHitIsTransparent(hit),
   );
 };
+
+/** Height of a comment pin in CSS px; one- and two-character pins are round, so also their width. */
+export const CAD_COMMENT_PIN_SIZE = 22;
+/** A comment pin projected onto the viewport. Pinned pins (the focused comment's) never group. */
+export interface CadCommentScreenPin {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly pinned: boolean;
+}
+
+/**
+ * Groups pins whose shapes overlap on screen (or nearly touch), so the comments card can show one
+ * count marker instead of a pile. Overlap is transitive: a pin touching any member joins the
+ * group. Returns indices into `pins`, each group and the list ordered by first appearance.
+ * Runs on every orbit frame; with the few dozen pins a review has, the pairwise pass is cheap.
+ */
+export const groupOverlappingCommentPins = (
+  pins: readonly CadCommentScreenPin[],
+  gap = 2,
+): number[][] => {
+  const parent = pins.map((_, i) => i);
+  const root = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
+    return i;
+  };
+  for (let i = 0; i < pins.length; i++) {
+    const a = pins[i]!;
+    if (a.pinned) continue;
+    for (let j = i + 1; j < pins.length; j++) {
+      const b = pins[j]!;
+      // Pins are horizontal capsules: a segment as long as the pill's flat part, inflated by
+      // half the pin height. Two overlap when their segments come closer than one pin height.
+      const dx = Math.max(
+        0,
+        Math.abs(a.x - b.x) - (a.width + b.width) / 2 + CAD_COMMENT_PIN_SIZE,
+      );
+      if (!b.pinned && Math.hypot(dx, a.y - b.y) < CAD_COMMENT_PIN_SIZE + gap) {
+        const [ra, rb] = [root(i), root(j)];
+        // Keep the earliest index as the root, so groups list in input order.
+        parent[Math.max(ra, rb)] = Math.min(ra, rb);
+      }
+    }
+  }
+  const groups = new Map<number, number[]>();
+  pins.forEach((_, i) => {
+    const key = root(i);
+    const group = groups.get(key);
+    if (group) group.push(i);
+    else groups.set(key, [i]);
+  });
+  return [...groups.values()];
+};

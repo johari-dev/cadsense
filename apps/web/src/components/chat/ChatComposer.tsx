@@ -107,7 +107,10 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { useClientSettings } from "../../hooks/useSettings";
-import { COMPOSER_ICON_ACTION_CLASS_NAME, ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import {
+  COMPOSER_PRIMARY_ACTION_CLASS_NAME,
+  ComposerPrimaryActions,
+} from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -267,7 +270,7 @@ import {
   WarningCircleIcon as CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
-  ArrowElbowDownLeftIcon,
+  ArrowUpIcon,
   PlayIcon,
   type Icon as LucideIcon,
   LockSimpleIcon as LockIcon,
@@ -2706,7 +2709,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 {inlineTasksBadge}
                 <button
                   type="button"
-                  className={COMPOSER_ICON_ACTION_CLASS_NAME}
+                  className={COMPOSER_PRIMARY_ACTION_CLASS_NAME}
                   disabled={collapsedComposerPrimaryActionDisabled}
                   aria-label={collapsedComposerPrimaryActionLabel}
                   onPointerDown={(event) => event.preventDefault()}
@@ -2715,7 +2718,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     submitComposer();
                   }}
                 >
-                  <ArrowElbowDownLeftIcon aria-hidden="true" />
+                  <ArrowUpIcon aria-hidden="true" />
                 </button>
               </div>
             ) : null}
@@ -2725,7 +2728,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               className={cn(
                 // Text lines up with the footer's attach glyph: 14px inset plus the
                 // glyph's 6.5px inside a 28px button, at the default interface size.
-                "relative px-5.5 pt-4.25 pb-2",
+                // 12px above the first line of text.
+                "relative px-5.5 pt-3.25 pb-1.5",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
               )}
@@ -3082,7 +3086,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   cursor={composerCursor}
                   skills={selectedProviderStatus?.skills ?? []}
-                  {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                  // One line tall when empty so the docked composer stays compact in a
+                  // narrow column; it grows with the text up to the editor's max height.
+                  className={cn("min-h-[1lh]", showMobilePendingAnswerActions && "max-sm:pb-11")}
                   onChange={onPromptChange}
                   onCommandKeyDown={onComposerCommandKey}
                   onPaste={onComposerPaste}
@@ -3145,8 +3151,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
-                  // 14px from the sides and 12px from the bottom at the default interface size.
-                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3.75 pb-3.25",
+                  // 14px from the sides and 10px from the bottom at the default interface size.
+                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3.75 pb-2.75",
                   pendingUserInputs.length > 0 && "pt-2",
                   showMobilePendingAnswerActions && "hidden sm:flex",
                 )}

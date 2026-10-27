@@ -94,6 +94,7 @@
   --color-accent-foreground: var(--contrast-accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--contrast-muted-foreground);
+  --color-tertiary-foreground: var(--contrast-tertiary-foreground);
   --color-muted: var(--muted);
   --color-placeholder: var(--contrast-placeholder);
   --color-secondary-label: var(--contrast-secondary-label);
@@ -1133,8 +1134,14 @@
   --app-theme-surface: #131313;
   --app-theme-surface-raised: #171717;
   --app-theme-surface-overlay: #171717;
+  /* Text tiers: primary (--app-theme-text), secondary (muted-foreground) for
+     descriptions, subtitles, and inactive labels, and tertiary for timestamps,
+     counts, and hints. Placeholders sit just above tertiary so an empty input
+     still reads as empty. Disabled controls drop to 50% opacity, which keeps
+     them below the secondary tier. */
   --app-theme-text: #fcfcfc;
-  --app-theme-text-muted: rgb(252 252 252 / 58%);
+  --app-theme-text-muted: rgb(252 252 252 / 68%);
+  --app-theme-text-tertiary: rgb(252 252 252 / 46%);
   --app-theme-border: rgb(252 252 252 / 7.2%);
   --app-theme-input: rgb(252 252 252 / 11.8%);
   --app-theme-focus: rgb(245 128 86 / 63%);
@@ -1143,10 +1150,10 @@
   --app-theme-secondary: rgb(252 252 252 / 2.6%);
   --app-theme-secondary-foreground: #fcfcfc;
   --app-theme-muted: rgb(252 252 252 / 2.6%);
-  --app-theme-muted-foreground: rgb(252 252 252 / 58%);
-  --app-theme-placeholder: rgb(252 252 252 / 32.9%);
-  --app-theme-secondary-label: rgb(252 252 252 / 58%);
-  --app-theme-icon-muted: rgb(252 252 252 / 58%);
+  --app-theme-muted-foreground: var(--app-theme-text-muted);
+  --app-theme-placeholder: rgb(252 252 252 / 48%);
+  --app-theme-secondary-label: var(--app-theme-text-muted);
+  --app-theme-icon-muted: rgb(252 252 252 / 62%);
   --app-theme-error: oklch(0.734642 0.162647 21.864);
   --app-theme-error-foreground: oklch(0.702184 0.189226 22.228);
   --app-theme-error-surface: oklch(0.265257 0.046957 17.692);
@@ -1167,7 +1174,7 @@
   --app-theme-code-foreground: #fcfcfc;
   --app-theme-sidebar: #111111;
   --app-theme-sidebar-foreground: #fcfcfc;
-  --app-theme-sidebar-muted-foreground: rgb(252 252 252 / 58%);
+  --app-theme-sidebar-muted-foreground: var(--app-theme-text-muted);
   --app-theme-sidebar-control-surface: rgb(252 252 252 / 2.6%);
   --app-theme-sidebar-row-hover: rgb(252 252 252 / 3.9%);
   --app-theme-sidebar-row-active: rgb(252 252 252 / 5.5%);
@@ -1201,6 +1208,7 @@
   --secondary-foreground: var(--app-theme-secondary-foreground);
   --muted: var(--app-theme-muted);
   --muted-foreground: var(--app-theme-muted-foreground);
+  --tertiary-foreground: var(--app-theme-text-tertiary);
   --placeholder: var(--app-theme-placeholder);
   --secondary-label: var(--app-theme-secondary-label);
   --icon-muted: var(--app-theme-icon-muted);
@@ -1354,6 +1362,7 @@
   --accent-foreground: var(--app-theme-accent-surface-foreground);
   --muted: var(--app-theme-muted);
   --muted-foreground: var(--app-theme-muted-foreground);
+  --tertiary-foreground: var(--app-theme-text-tertiary);
   --border: var(--app-theme-border);
   --input: var(--app-theme-input);
   --sidebar: var(--app-theme-sidebar);
@@ -1381,6 +1390,7 @@
   --contrast-border: var(--border);
   --contrast-foreground: var(--foreground);
   --contrast-muted-foreground: var(--muted-foreground);
+  --contrast-tertiary-foreground: var(--tertiary-foreground);
   --contrast-placeholder: var(--placeholder);
   --contrast-secondary-label: var(--secondary-label);
   --contrast-icon-muted: var(--icon-muted);
@@ -1586,7 +1596,18 @@ code {
 }
 
 .chat-markdown li + li {
-  margin-top: 0.25rem;
+  margin-top: 0.375rem;
+}
+
+/* A paragraph that is only bold text ("Quick cleanup:") is a run-in heading: it sits close to
+   the list or paragraph it introduces and further from what came before. */
+.chat-markdown p[data-markdown-lead] {
+  margin-top: 1.125rem;
+  margin-bottom: 0.375rem;
+}
+
+.chat-markdown p[data-markdown-lead] + :is(p, ul, ol) {
+  margin-top: 0.375rem;
 }
 
 /* Markdown task lists: the checkbox replaces the list marker. */

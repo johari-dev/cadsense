@@ -6,7 +6,7 @@ import type {
   ResolvedKeybindingsConfig,
 } from "@cadsense/contracts";
 import { resolveSelectableModel } from "@cadsense/shared/model";
-import { LightningIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "~/lib/icons";
+import { CheckIcon, LightningIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -41,7 +41,7 @@ type PickerRow = {
 
 const JUMP_SHORTCUT_OPTIONS = { context: { modelPickerOpen: true } } as const;
 const TAB_CLASS_NAME =
-  "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center rounded-lg px-1.5 text-muted-foreground/70 outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
+  "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-1.5 text-muted-foreground/70 outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
 
 export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   /** The instance currently selected in the composer. */
@@ -275,6 +275,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
           >
             <PickerTabButton
               label="Starred"
+              shortLabel="Starred"
               active={openTab === STARRED_TAB}
               onSelect={() => {
                 setTab(STARRED_TAB);
@@ -289,6 +290,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                 <PickerTabButton
                   key={entry.instanceId}
                   label={ready ? entry.displayName : `${entry.displayName} is unavailable`}
+                  shortLabel={entry.displayName}
                   active={openTab === entry.instanceId}
                   disabled={!ready}
                   onSelect={() => {
@@ -361,7 +363,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
           </div>
           <div
             role="tabpanel"
-            className="flex max-h-[min(12.5rem,40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
+            // Six whole rows (1.875rem each, 1px gaps, plus padding) so the last visible
+            // row is never cut in half against the footer.
+            className="flex max-h-[min(calc(6*1.875rem+5px+0.5rem),40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
           >
             {rows.map((row) => {
               const hint = jumpHintFor(row);
@@ -372,7 +376,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   aria-current={row.selected ? "true" : undefined}
                   disabled={row.disabledReason !== null}
                   title={row.disabledReason ?? undefined}
-                  className={cn("composer-model-row group", row.selected && "bg-foreground/[0.06]")}
+                  className={cn("composer-model-row group", row.selected && "text-foreground")}
                   onClick={() => selectRow(row)}
                 >
                   {tabEntry ? null : (
@@ -387,8 +391,11 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     {getDisplayModelName(row.model)}
                     {row.model.isUnavailable ? " (Unavailable)" : ""}
                   </span>
+                  {row.selected ? (
+                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
+                  ) : null}
                   {hint ? (
-                    <kbd className="h-4 shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-[14px] text-muted-foreground">
+                    <kbd className="shrink-0 font-sans text-[0.6875rem] tabular-nums text-tertiary-foreground">
                       {hint}
                     </kbd>
                   ) : null}
@@ -426,7 +433,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             ) : null}
           </div>
           {props.traitRows ? (
-            <div className="flex flex-col gap-px border-t border-border p-1">{props.traitRows}</div>
+            <div className="flex flex-col gap-px border-t border-input bg-popover p-1">
+              {props.traitRows}
+            </div>
           ) : null}
         </div>
       </MenuPopup>
@@ -436,6 +445,8 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
 
 function PickerTabButton(props: {
   label: string;
+  /** Visible name while the tab is open. */
+  shortLabel: string;
   active: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -454,7 +465,7 @@ function PickerTabButton(props: {
             className={cn(
               TAB_CLASS_NAME,
               props.active &&
-                "text-foreground after:absolute after:inset-x-1.5 after:-bottom-[5px] after:h-0.5 after:rounded-full after:bg-[var(--accent-text)]",
+                "text-foreground after:absolute after:inset-x-1.5 after:-bottom-[5px] after:h-0.5 after:rounded-full after:bg-foreground",
             )}
             onClick={() => {
               if (!props.disabled) props.onSelect();
@@ -463,6 +474,8 @@ function PickerTabButton(props: {
         }
       >
         {props.children}
+        {/* The open tab names itself; the others stay icons with a tooltip. */}
+        {props.active ? <span className="text-[0.8333rem]">{props.shortLabel}</span> : null}
       </TooltipTrigger>
       <TooltipPopup side="top">{props.label}</TooltipPopup>
     </Tooltip>

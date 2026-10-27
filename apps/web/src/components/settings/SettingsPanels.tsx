@@ -337,7 +337,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Provider update checks"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
+        ? ["Default project folder"]
         : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
@@ -938,12 +938,13 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("add-project-starts-in")}
-          description={`Leave empty to use "${defaultProjectDirectory}" when the Add Project browser opens.`}
+          // The input's placeholder shows the folder used while this is empty.
+          description="Folder that opens when you add a project."
           resetAction={
             settings.addProjectBaseDirectory !==
             DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
               <SettingResetButton
-                label="add project base directory"
+                label="default project folder"
                 onClick={() =>
                   updateSettings({
                     addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -954,12 +955,12 @@ export function GeneralSettingsPanel() {
           }
           control={
             <DraftInput
-              className="w-full sm:w-72"
+              className="w-full sm:w-60"
               value={settings.addProjectBaseDirectory}
               onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
               placeholder={defaultProjectDirectory}
               spellCheck={false}
-              aria-label="Add project base directory"
+              aria-label="Default project folder"
             />
           }
         />

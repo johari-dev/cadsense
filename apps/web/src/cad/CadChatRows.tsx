@@ -4,16 +4,20 @@ import type {
   CadCommentsPublishedCard,
   ScopedThreadRef,
 } from "@cadsense/contracts";
-import { WarningCircleIcon as CircleAlertIcon, ChatIcon as MessageSquareIcon } from "~/lib/icons";
-import { useMemo } from "react";
+import {
+  ArrowRightIcon,
+  WarningCircleIcon as CircleAlertIcon,
+  ChatIcon as MessageSquareIcon,
+} from "~/lib/icons";
+import { useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
-import { CadSeverityLabel, CommentBadge } from "./CadCommentsCard";
+import { CadSeverityIcon, CommentBadge } from "./CadCommentsCard";
 
 const MAX_THUMBNAILS = 6;
-const MAX_LISTED_COMMENTS = 8;
+const MAX_LISTED_COMMENTS = 6;
 
 /** Opens the CAD panel's comments, optionally focused on one comment with all its locations. */
 function openCadComments(threadRef: ScopedThreadRef, commentId?: string) {
@@ -147,7 +151,7 @@ export function CadPublishedComments({
   const listed = card.published.slice(0, MAX_LISTED_COMMENTS);
   const unlisted = count - listed.length;
   return (
-    <div className="text-sm leading-relaxed">
+    <div className="text-sm">
       <div className="flex min-h-6 items-center gap-1.5 px-0.5">
         <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
           <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
@@ -155,7 +159,8 @@ export function CadPublishedComments({
         <span className="min-w-0 flex-1 truncate font-medium text-foreground">
           {describeCadCommentsPublished(card)}
         </span>
-        {count > 0 || card.proposed.length > 0 ? (
+        {/* The footer's "Show all" link takes over when the list is cut short. */}
+        {unlisted === 0 && (count > 0 || card.proposed.length > 0) ? (
           <button
             type="button"
             className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
@@ -165,46 +170,44 @@ export function CadPublishedComments({
           </button>
         ) : null}
       </div>
-      {listed.map((comment) => (
-        <button
-          key={comment.commentId}
-          type="button"
-          className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
-          onClick={() => openCadComments(threadRef, comment.commentId)}
-        >
-          <CommentBadge number={comment.number} />
-          <span className="min-w-0 flex-1 truncate text-foreground">
-            <CadSeverityLabel severity={comment.severity} />
-            {comment.title}
-          </span>
-          {comment.location ? (
-            <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
-              {comment.location}
-            </span>
-          ) : null}
-        </button>
-      ))}
+      <div className="mt-1 flex flex-col">
+        {listed.map((comment) =>
+          commentRow({
+            key: comment.commentId,
+            number: comment.number,
+            title: comment.title,
+            onOpen: () => openCadComments(threadRef, comment.commentId),
+            detail:
+              comment.severity || comment.location ? (
+                <>
+                  <CadSeverityIcon severity={comment.severity} category={comment.category} />
+                  {comment.location ? (
+                    <span className="min-w-0 truncate">{comment.location}</span>
+                  ) : null}
+                </>
+              ) : null,
+          }),
+        )}
+        {card.proposed.map((proposal) =>
+          commentRow({
+            key: proposal.commentId,
+            number: proposal.number,
+            title: proposal.title,
+            onOpen: () => openCadComments(threadRef, proposal.commentId),
+            detail: "Resolution proposed",
+          }),
+        )}
+      </div>
       {unlisted > 0 ? (
         <button
           type="button"
-          className="py-0.5 pl-[30px] text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
+          className="mt-0.5 ml-[30px] flex items-center gap-1 rounded-sm py-1 text-xs font-medium text-secondary-label transition-colors hover:text-foreground"
           onClick={() => openCadComments(threadRef)}
         >
-          {unlisted} more in CAD
+          Show all {count} in CAD
+          <ArrowRightIcon className="size-3.5" aria-hidden />
         </button>
       ) : null}
-      {card.proposed.map((proposal) => (
-        <button
-          key={proposal.commentId}
-          type="button"
-          className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
-          onClick={() => openCadComments(threadRef, proposal.commentId)}
-        >
-          <CommentBadge number={proposal.number} />
-          <span className="min-w-0 flex-1 truncate text-foreground">{proposal.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">resolution proposed</span>
-        </button>
-      ))}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}
@@ -215,5 +218,43 @@ export function CadPublishedComments({
         </p>
       ))}
     </div>
+  );
+}
+
+/**
+ * One comment in the chat list: its number and full title on the first line, then the
+ * secondary detail (severity and part, or the proposal state) on a second, quieter line.
+ * The badge sits in the header icon's column so titles line up with the header text.
+ */
+function commentRow({
+  key,
+  number,
+  title,
+  onOpen,
+  detail,
+}: {
+  key: string;
+  number: number;
+  title: string;
+  onOpen: () => void;
+  detail: ReactNode;
+}) {
+  return (
+    <button
+      key={key}
+      type="button"
+      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-md px-0.5 py-1 text-left transition-colors hover:bg-accent/20"
+      onClick={onOpen}
+    >
+      <span className="flex h-5 items-center justify-center">
+        <CommentBadge number={number} />
+      </span>
+      <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
+      {detail ? (
+        <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-xs leading-5 text-muted-foreground">
+          {detail}
+        </span>
+      ) : null}
+    </button>
   );
 }

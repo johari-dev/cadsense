@@ -1,38 +1,29 @@
 import type { CadViewState } from "@cadsense/contracts";
 import { useState } from "react";
-import { StackIcon as Boxes } from "~/lib/icons";
+import { ArrowUUpLeftIcon, ScanIcon, StackIcon } from "~/lib/icons";
+import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 
-const presets = ["isometric", "front", "back", "left", "right", "top", "bottom"] as const;
-type Preset = (typeof presets)[number];
+/** Camera presets in toolbar order, with the short label each button shows. */
+const presets = [
+  ["isometric", "Iso"],
+  ["front", "Front"],
+  ["back", "Back"],
+  ["left", "Left"],
+  ["right", "Right"],
+  ["top", "Top"],
+  ["bottom", "Bottom"],
+] as const;
 
-// The PoC's face-highlighted cubes keep all seven views one click away.
-function ViewCube({ view }: { view: Preset }) {
-  const faces = [
-    ["top", "M16 2.8 25.2 8.2 16 13.6 6.8 8.2Z"],
-    ["front", "M6.8 9.7 16 15 16 26 6.8 20.5Z"],
-    ["right", "M16 15 25.2 9.7 25.2 20.5 16 26Z"],
-    ["left", "M4.9 10.8 6.8 9.7 6.8 20.5 4.9 19.4Z"],
-    ["back", "M25.2 9.7 27.1 10.8 27.1 19.4 25.2 20.5Z"],
-    ["bottom", "M6.8 20.5 16 26 25.2 20.5 25.2 22.6 16 28.2 6.8 22.6Z"],
-  ] as const;
-  return (
-    <svg aria-hidden="true" className="size-5" fill="none" viewBox="0 0 32 32">
-      {faces.map(([face, path]) => (
-        <path
-          key={face}
-          d={path}
-          strokeWidth="1.15"
-          className={
-            view === "isometric" || view === face
-              ? "fill-red-500/85 stroke-red-300"
-              : "fill-background stroke-current opacity-60"
-          }
-        />
-      ))}
-    </svg>
-  );
+/** One toolbar button. Pressed (the current view, an applied section, exploded) is white. */
+const toolbarControl =
+  "flex h-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
+const sectionField =
+  "h-7 w-full rounded-md border border-input bg-background px-2 text-[13px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24 disabled:opacity-60";
+
+function ToolbarDivider() {
+  return <div aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border" />;
 }
 
 export function CadCameraToolbar({
@@ -64,17 +55,23 @@ export function CadCameraToolbar({
   const offset = Number(sectionOffset);
   const validOffset =
     sectionOffset.trim() !== "" && Number.isFinite(offset) && Math.abs(offset) <= 1e9;
+  const sectionApplied = (view.sectionPlanes?.length ?? 0) > 0;
+  const inspecting =
+    sectionApplied ||
+    (view.highlightedOccurrenceIds?.length ?? 0) > 0 ||
+    (view.ghost?.occurrenceIds.length ?? 0) > 0;
   return (
     // Above the comment marker layer (z-20) and opaque, so markers never show through it.
     <div className="pointer-events-none absolute inset-x-2 bottom-3 z-30 flex justify-center">
       <div
         role="toolbar"
         aria-label="CAD camera views"
-        className="pointer-events-auto flex max-w-full flex-wrap justify-center gap-0.5 rounded-md border border-border/70 bg-background p-1 shadow-lg"
+        className="pointer-events-auto relative flex max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-popover p-0.5 shadow-sm"
       >
         {sectionOpen && (
           <form
-            className="absolute bottom-full mb-2 flex flex-wrap items-center gap-2 rounded-md border bg-background p-3 text-xs"
+            aria-label="Section view"
+            className="absolute bottom-full left-1/2 mb-2 flex w-72 -translate-x-1/2 flex-col gap-3 rounded-lg border bg-popover p-3 text-[13px] text-popover-foreground shadow-lg"
             onSubmit={(event) => {
               event.preventDefault();
               if (disabled || !validOffset) return;
@@ -83,110 +80,124 @@ export function CadCameraToolbar({
               onChange({ ...view, sectionPlanes: [{ normal, constant: -offset }] });
             }}
           >
-            <label>
-              Keep axis ≥ offset{" "}
-              <select
-                aria-label="Section axis"
-                value={sectionAxis}
-                disabled={disabled}
-                onChange={(event) => setDraft({ ...section, axis: event.target.value })}
-              >
-                <option value="x">X</option>
-                <option value="y">Y</option>
-                <option value="z">Z</option>
-              </select>
-            </label>
-            <label>
-              Offset (m){" "}
-              <input
-                aria-label="Section offset in meters"
-                className="w-24 rounded border px-1"
-                type="number"
-                step="any"
-                min={-1e9}
-                max={1e9}
-                value={sectionOffset}
-                disabled={disabled}
-                onChange={(event) => setDraft({ ...section, offset: event.target.value })}
-              />
-            </label>
-            <Button size="sm" type="submit" disabled={disabled || !validOffset}>
-              Apply section
-            </Button>
-            <p className="w-full text-muted-foreground">
+            <div className="flex flex-col gap-1">
+              <p className="font-medium">Section view</p>
+              <p className="text-xs text-muted-foreground">
+                Keeps the geometry where the axis is at or above the offset.
+              </p>
+            </div>
+            <div className="grid grid-cols-[5rem_1fr] gap-2">
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Axis
+                <select
+                  aria-label="Section axis"
+                  className={sectionField}
+                  value={sectionAxis}
+                  disabled={disabled}
+                  onChange={(event) => setDraft({ ...section, axis: event.target.value })}
+                >
+                  <option value="x">X</option>
+                  <option value="y">Y</option>
+                  <option value="z">Z</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                Offset (m)
+                <input
+                  aria-label="Section offset in meters"
+                  className={cn(sectionField, "tabular-nums")}
+                  type="number"
+                  step="any"
+                  min={-1e9}
+                  max={1e9}
+                  value={sectionOffset}
+                  disabled={disabled}
+                  onChange={(event) => setDraft({ ...section, offset: event.target.value })}
+                />
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
               {view.sectionPlanes?.length && axisIndex < 0
                 ? "Apply section replaces the current planes with the selected axis and offset."
                 : "Uncapped section in displayed world coordinates."}
             </p>
+            <Button size="sm" type="submit" disabled={disabled || !validOffset}>
+              Apply section
+            </Button>
           </form>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={sectionOpen}
-          disabled={disabled}
-          onClick={() => setSectionOpen(!sectionOpen)}
-        >
-          Section
-        </Button>
-        {presets.map((preset) => {
+        {presets.map(([preset, short]) => {
           const label = `${preset[0]!.toUpperCase()}${preset.slice(1)} CAD view`;
           return (
             <Tooltip key={preset}>
               <TooltipTrigger
-                render={
-                  <Button
-                    aria-label={label}
-                    aria-pressed={view.camera.kind === "preset" && view.camera.preset === preset}
-                    disabled={disabled}
-                    variant="ghost"
-                    size="icon-sm"
-                    className="size-8 rounded-sm aria-pressed:bg-accent disabled:opacity-100"
-                    onClick={() =>
-                      onChange({ ...view, camera: { kind: "preset", preset, fit: [] } })
-                    }
-                  >
-                    <ViewCube view={preset} />
-                  </Button>
-                }
-              />
-              <TooltipPopup>{label}</TooltipPopup>
+                aria-label={label}
+                aria-pressed={view.camera.kind === "preset" && view.camera.preset === preset}
+                disabled={disabled}
+                className={toolbarControl}
+                onClick={() => onChange({ ...view, camera: { kind: "preset", preset, fit: [] } })}
+              >
+                {short}
+              </TooltipTrigger>
+              <TooltipPopup>{`${preset[0]!.toUpperCase()}${preset.slice(1)} view`}</TooltipPopup>
             </Tooltip>
           );
         })}
-        {view.highlightedOccurrenceIds?.length ||
-        view.ghost?.occurrenceIds.length ||
-        view.sectionPlanes?.length ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled}
-            onClick={() =>
-              onChange({ ...view, highlightedOccurrenceIds: [], ghost: null, sectionPlanes: [] })
-            }
-          >
-            Reset inspection
-          </Button>
-        ) : null}
-        <div className="mx-0.5 w-px self-stretch bg-border" />
+        <ToolbarDivider />
         <Tooltip>
           <TooltipTrigger
-            render={
-              <Button
-                aria-label="Exploded view"
-                aria-pressed={view.explosion > 0}
-                disabled={disabled}
-                variant="ghost"
-                size="icon-sm"
-                className="size-8 rounded-sm aria-pressed:bg-accent disabled:opacity-100"
-                onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
-              >
-                <Boxes size={16} />
-              </Button>
-            }
-          />
-          <TooltipPopup>{view.explosion > 0 ? "Collapse CAD" : "Explode CAD"}</TooltipPopup>
+            aria-expanded={sectionOpen}
+            data-active={sectionApplied || undefined}
+            disabled={disabled}
+            className={toolbarControl}
+            onClick={() => setSectionOpen(!sectionOpen)}
+          >
+            <ScanIcon aria-hidden="true" />
+            Section
+          </TooltipTrigger>
+          <TooltipPopup>
+            {sectionApplied ? "Section applied: edit the cut plane" : "Cut the model with a plane"}
+          </TooltipPopup>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="Exploded view"
+            aria-pressed={view.explosion > 0}
+            disabled={disabled}
+            className={toolbarControl}
+            onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
+          >
+            <StackIcon aria-hidden="true" />
+            Explode
+          </TooltipTrigger>
+          <TooltipPopup>
+            {view.explosion > 0 ? "Put the parts back together" : "Spread the parts apart"}
+          </TooltipPopup>
+        </Tooltip>
+        {inspecting && (
+          <>
+            <ToolbarDivider />
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Reset inspection"
+                disabled={disabled}
+                className={toolbarControl}
+                onClick={() =>
+                  onChange({
+                    ...view,
+                    highlightedOccurrenceIds: [],
+                    ghost: null,
+                    sectionPlanes: [],
+                  })
+                }
+              >
+                <ArrowUUpLeftIcon aria-hidden="true" />
+                Reset
+              </TooltipTrigger>
+              <TooltipPopup>Clear highlights, ghosting, and section planes</TooltipPopup>
+            </Tooltip>
+          </>
+        )}
       </div>
     </div>
   );

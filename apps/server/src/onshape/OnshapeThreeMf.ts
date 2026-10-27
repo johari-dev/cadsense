@@ -94,28 +94,188 @@ const color = (value: string | undefined) => {
     value.length === 9 ? parseInt(value.slice(7, 9), 16) / 255 : 1,
   ];
 };
-function glb(object: Object3mf, palettes: Map<string, number[][]>) {
-  const positions = new Float32Array(object.positions);
-  const normals = new Float32Array(positions.length);
-  for (const indices of object.triangles.values())
-    for (let i = 0; i < indices.length; i += 3) {
-      const a = indices[i]! * 3,
-        b = indices[i + 1]! * 3,
-        c = indices[i + 2]! * 3;
-      const ux = positions[b]! - positions[a]!,
-        uy = positions[b + 1]! - positions[a + 1]!,
-        uz = positions[b + 2]! - positions[a + 2]!;
-      const vx = positions[c]! - positions[a]!,
-        vy = positions[c + 1]! - positions[a + 1]!,
-        vz = positions[c + 2]! - positions[a + 2]!;
-      const n = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
-      for (const j of [a, b, c])
-        for (let k = 0; k < 3; k++) normals[j + k] = normals[j + k]! + n[k]!;
-    }
-  for (let i = 0; i < normals.length; i += 3) {
-    const length = Math.hypot(normals[i]!, normals[i + 1]!, normals[i + 2]!);
-    if (length) for (let k = 0; k < 3; k++) normals[i + k] = normals[i + k]! / length;
+// Faces meeting at a sharper angle than this get separate normals along their shared edge.
+const CREASE_COS = Math.cos((40 * Math.PI) / 180);
+/**
+ * Crease-aware normals for triangles that share `positions`. Each corner averages, by area, the
+ * faces around its vertex that lie within the crease angle of its own face; corners of one vertex
+ * with equal results share an output vertex, so flat fans and smooth surfaces stay indexed while
+ * a flat face and the wall of a hole through it split. `groups` are index lists (one per color)
+ * into the shared positions. The web viewer repairs assets converted before this with the same
+ * algorithm (`creaseNormals` in apps/web/src/cad/CadNormals.ts); keep the two in step.
+ */
+const creaseNormals = (positions: Float32Array, groups: readonly Uint32Array[]) => {
+  const vertices = positions.length / 3;
+  let corners = 0;
+  for (const group of groups) corners += group.length;
+  const triangles = corners / 3;
+  const index = new Uint32Array(corners);
+  let at = 0;
+  for (const group of groups) {
+    index.set(group, at);
+    at += group.length;
   }
+  // Area-weighted (cross product) and unit face normals.
+  const area = new Float32Array(triangles * 3);
+  const unit = new Float32Array(triangles * 3);
+  for (let t = 0; t < triangles; t++) {
+    const a = index[t * 3]! * 3,
+      b = index[t * 3 + 1]! * 3,
+      c = index[t * 3 + 2]! * 3;
+    const ux = positions[b]! - positions[a]!,
+      uy = positions[b + 1]! - positions[a + 1]!,
+      uz = positions[b + 2]! - positions[a + 2]!;
+    const vx = positions[c]! - positions[a]!,
+      vy = positions[c + 1]! - positions[a + 1]!,
+      vz = positions[c + 2]! - positions[a + 2]!;
+    const nx = uy * vz - uz * vy,
+      ny = uz * vx - ux * vz,
+      nz = ux * vy - uy * vx;
+    area[t * 3] = nx;
+    area[t * 3 + 1] = ny;
+    area[t * 3 + 2] = nz;
+    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (!length) continue;
+    unit[t * 3] = nx / length;
+    unit[t * 3 + 1] = ny / length;
+    unit[t * 3 + 2] = nz / length;
+  }
+  // Corners around each vertex, in compressed rows.
+  const start = new Uint32Array(vertices + 1);
+  for (let corner = 0; corner < corners; corner++) start[index[corner]! + 1]!++;
+  for (let v = 0; v < vertices; v++) start[v + 1]! += start[v]!;
+  const fill = start.slice(0, vertices);
+  const around = new Uint32Array(corners);
+  for (let corner = 0; corner < corners; corner++) around[fill[index[corner]!]!++] = corner;
+
+  let capacity = Math.max(vertices, 16);
+  let outPositions = new Float32Array(capacity * 3);
+  let outNormals = new Float32Array(capacity * 3);
+  let emitted = 0;
+  const emit = (v: number, x: number, y: number, z: number) => {
+    if (emitted === capacity) {
+      capacity *= 2;
+      const grownPositions = new Float32Array(capacity * 3);
+      grownPositions.set(outPositions);
+      outPositions = grownPositions;
+      const grownNormals = new Float32Array(capacity * 3);
+      grownNormals.set(outNormals);
+      outNormals = grownNormals;
+    }
+    outPositions[emitted * 3] = positions[v * 3]!;
+    outPositions[emitted * 3 + 1] = positions[v * 3 + 1]!;
+    outPositions[emitted * 3 + 2] = positions[v * 3 + 2]!;
+    outNormals[emitted * 3] = x;
+    outNormals[emitted * 3 + 1] = y;
+    outNormals[emitted * 3 + 2] = z;
+    return emitted++;
+  };
+  const outIndex = new Uint32Array(corners);
+  // Per-vertex scratch: corners with the same face direction form one facet, so a flat fan of
+  // any size costs one comparison per corner instead of one per pair.
+  let facetOf = new Uint32Array(64);
+  let facetTriangle = new Uint32Array(64);
+  let facetArea = new Float64Array(64 * 3);
+  let facetNormal = new Float64Array(64 * 3);
+  let facetVertex = new Int32Array(64);
+  for (let v = 0; v < vertices; v++) {
+    const first = start[v]!,
+      count = start[v + 1]! - first;
+    if (!count) continue;
+    if (count > facetOf.length) {
+      facetOf = new Uint32Array(count);
+      facetTriangle = new Uint32Array(count);
+      facetArea = new Float64Array(count * 3);
+      facetNormal = new Float64Array(count * 3);
+      facetVertex = new Int32Array(count);
+    }
+    let facets = 0;
+    let degenerate = false;
+    for (let k = 0; k < count; k++) {
+      const t = Math.floor(around[first + k]! / 3);
+      const x = unit[t * 3]!,
+        y = unit[t * 3 + 1]!,
+        z = unit[t * 3 + 2]!;
+      if (x === 0 && y === 0 && z === 0) {
+        facetOf[k] = 0xffffffff;
+        degenerate = true;
+        continue;
+      }
+      let facet = 0;
+      for (; facet < facets; facet++) {
+        const r = facetTriangle[facet]! * 3;
+        if (x * unit[r]! + y * unit[r + 1]! + z * unit[r + 2]! > 0.99999) break;
+      }
+      if (facet === facets) {
+        facetTriangle[facet] = t;
+        facetArea[facet * 3] = facetArea[facet * 3 + 1] = facetArea[facet * 3 + 2] = 0;
+        facets++;
+      }
+      facetOf[k] = facet;
+      for (let axis = 0; axis < 3; axis++)
+        facetArea[facet * 3 + axis] = facetArea[facet * 3 + axis]! + area[t * 3 + axis]!;
+    }
+    // Each facet's normal sums the facets within the crease angle of it; facets with equal
+    // results share one output vertex.
+    for (let i = 0; i < facets; i++) {
+      const r = facetTriangle[i]! * 3;
+      let x = 0,
+        y = 0,
+        z = 0;
+      for (let j = 0; j < facets; j++) {
+        const s = facetTriangle[j]! * 3;
+        if (
+          unit[r]! * unit[s]! + unit[r + 1]! * unit[s + 1]! + unit[r + 2]! * unit[s + 2]! <
+          CREASE_COS
+        )
+          continue;
+        x += facetArea[j * 3]!;
+        y += facetArea[j * 3 + 1]!;
+        z += facetArea[j * 3 + 2]!;
+      }
+      const length = Math.sqrt(x * x + y * y + z * z);
+      facetNormal[i * 3] = x / length;
+      facetNormal[i * 3 + 1] = y / length;
+      facetNormal[i * 3 + 2] = z / length;
+      let shared = -1;
+      for (let j = 0; j < i && shared < 0; j++)
+        if (
+          facetNormal[i * 3]! * facetNormal[j * 3]! +
+            facetNormal[i * 3 + 1]! * facetNormal[j * 3 + 1]! +
+            facetNormal[i * 3 + 2]! * facetNormal[j * 3 + 2]! >
+          0.999999
+        )
+          shared = facetVertex[j]!;
+      facetVertex[i] =
+        shared >= 0
+          ? shared
+          : emit(v, facetNormal[i * 3]!, facetNormal[i * 3 + 1]!, facetNormal[i * 3 + 2]!);
+    }
+    // Zero-area corners draw nothing; they reuse any vertex here.
+    const fallback = degenerate ? (facets ? facetVertex[0]! : emit(v, 0, 0, 1)) : 0;
+    for (let k = 0; k < count; k++)
+      outIndex[around[first + k]!] =
+        facetOf[k] === 0xffffffff ? fallback : facetVertex[facetOf[k]!]!;
+  }
+  const result: Uint32Array[] = [];
+  at = 0;
+  for (const group of groups) {
+    result.push(outIndex.slice(at, at + group.length));
+    at += group.length;
+  }
+  return {
+    positions: outPositions.slice(0, emitted * 3),
+    normals: outNormals.slice(0, emitted * 3),
+    groups: result,
+  };
+};
+function glb(object: Object3mf, palettes: Map<string, number[][]>) {
+  const colors = [...object.triangles];
+  const creased = creaseNormals(
+    new Float32Array(object.positions),
+    colors.map(([, indices]) => Uint32Array.from(indices)),
+  );
+  const { positions, normals } = creased;
   const chunks: Uint8Array[] = [],
     views: { buffer: number; byteOffset: number; byteLength: number }[] = [];
   let offset = 0;
@@ -158,11 +318,11 @@ function glb(object: Object3mf, palettes: Map<string, number[][]>) {
   });
   const materials: unknown[] = [],
     primitives: unknown[] = [];
-  for (const [key, indices] of object.triangles) {
+  for (const [i, [key]] of colors.entries()) {
     const [pid, pindex] = key.split(":");
     const rgba = pid ? palettes.get(pid)?.[Number(pindex)] : [0.5, 0.5, 0.5, 1];
     if (!rgba) throw invalid();
-    const values = new Uint32Array(indices),
+    const values = creased.groups[i]!,
       accessor = accessors.length;
     accessors.push({
       bufferView: add(new Uint8Array(values.buffer)),

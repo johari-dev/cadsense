@@ -450,7 +450,7 @@ function DesktopOnlyBrowserDefaults({ children }: { readonly children: ReactNode
         <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <p>Only available in the desktop app.</p>
       </div>
-      <div className="[&_h3]:opacity-64 [&_p]:opacity-64">{children}</div>
+      <div className="[&_h3]:opacity-50 [&_p]:opacity-50">{children}</div>
     </div>
   );
 }

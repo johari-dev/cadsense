@@ -63,6 +63,7 @@ import {
   cadCommentVisible,
   cadCommentCameraUp,
   cadCommentInspectionDirections,
+  groupOverlappingCommentPins,
 } from "./CadCommentGeometry";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 const setup = (explosion = 0) => {
@@ -402,4 +403,28 @@ it.each([
     model.dispose();
     material.dispose();
   }
+});
+
+describe("groupOverlappingCommentPins", () => {
+  const pin = (x: number, y: number, width = 22, pinned = false) => ({ x, y, width, pinned });
+  it("merges overlapping pins, including chains, and keeps input order", () => {
+    // 0 and 2 never touch, but 1 overlaps both, so all three pile into one group.
+    expect(
+      groupOverlappingCommentPins([pin(0, 0), pin(300, 0), pin(18, 0), pin(36, 0), pin(300, 80)]),
+    ).toEqual([[0, 2, 3], [1], [4]]);
+  });
+  it("uses each pin's width, so wide pills group where round pins would not", () => {
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(28, 0)])).toEqual([[0], [1]]);
+    expect(groupOverlappingCommentPins([pin(0, 0, 34), pin(28, 0, 34)])).toEqual([[0, 1]]);
+    // Stacked vertically, round pins group once their circles meet.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(0, 20)])).toEqual([[0, 1]]);
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(0, 30)])).toEqual([[0], [1]]);
+    // Diagonal neighbours whose boxes nearly touch are still clear of each other as circles.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(22, 23)])).toEqual([[0], [1]]);
+  });
+  it("never folds a pinned pin into a group or bridges others through it", () => {
+    expect(
+      groupOverlappingCommentPins([pin(0, 0), pin(18, 0, 22, true), pin(36, 0), pin(40, 0)]),
+    ).toEqual([[0], [1], [2, 3]]);
+  });
 });

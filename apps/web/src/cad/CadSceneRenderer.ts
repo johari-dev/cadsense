@@ -32,10 +32,12 @@ import { prefetchCadAssets } from "./CadAssetPrefetch";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
 import { prepareCadMaterials } from "./CadMaterials";
+import { creaseCadNormals } from "./CadNormals";
 import { createCadOutline, supportsCadOutline } from "./CadOutline";
 import {
   buildCadSceneModel,
   CAD_CAMERA_FOV,
+  CAD_CONTEXT_LAYER,
   CadRendererError,
   disposeCadObjects,
   resolveCadCamera,
@@ -46,8 +48,40 @@ import {
 export { CadRendererError } from "./CadSceneModel";
 /** Parts in front of a reviewed target stay faintly visible for context. */
 const REVIEW_GHOST_OPACITY = 0.15;
-// Comment reviews fade the parts outside an isolation to this opacity instead of hiding them.
-const REVIEW_APPLY = { fadeIsolatedOut: 0.08 } as const;
+// Comment reviews mute the parts outside an isolation instead of hiding them.
+const REVIEW_APPLY = { fadeIsolatedOut: true } as const;
+/** Overlay chrome a fit keeps the model clear of, in CSS pixels. */
+export type CadFrameInsets = { readonly top: number; readonly bottom: number };
+// A chosen camera pose survives small viewport changes; past this ratio in either dimension
+// (maximizing or restoring the panel) the view refits so the model stays whole and centered.
+const REFIT_RATIO = 1.25;
+/**
+ * The interactive viewport's backdrop: a slight cool lift at the top falling to just below the
+ * themed background at the bottom, so the canvas reads as its own space against the app chrome.
+ * Captures keep the flat themed color.
+ */
+const createBackdrop = (background: number, dark: boolean) => {
+  const steps = 64;
+  const data = new Uint8Array(steps * 4);
+  const channels = [(background >> 16) & 0xff, (background >> 8) & 0xff, background & 0xff];
+  const lift = dark ? [10, 11, 14] : [6, 6, 8];
+  for (let row = 0; row < steps; row++) {
+    // Rows run bottom to top; ease so most of the lift sits in the upper half.
+    const t = (row / (steps - 1)) ** 1.4;
+    channels.forEach((value, channel) => {
+      const bottom = value * (dark ? 0.86 : 0.94);
+      data[row * 4 + channel] = Math.round(
+        Math.min(255, bottom + (value + lift[channel]! - bottom) * t),
+      );
+    });
+    data[row * 4 + 3] = 255;
+  }
+  const texture = new THREE.DataTexture(data, 1, steps);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+};
 export interface CadSceneRendererOptions {
   readonly cacheScenes?: boolean;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -95,6 +129,18 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   const fill = new THREE.DirectionalLight(0xffffff, 1);
   fill.position.set(-3, 2, 1);
   scene.add(fill);
+  for (const light of [ambient, key, fill]) light.layers.enable(CAD_CONTEXT_LAYER);
+  let backdrop = createBackdrop(DEFAULT_CAD_APPEARANCE.background, DEFAULT_CAD_APPEARANCE.dark);
+  // Faded context draws as one quiet, neutral layer: a depth-only pass keeps just the nearest
+  // context surface at each pixel, so overlapping parts never stack into fog, then that surface
+  // is shaded once at low opacity behind or around the solid parts in focus.
+  const contextDepth = new THREE.MeshBasicMaterial({ colorWrite: false });
+  const contextSurface = new THREE.MeshLambertMaterial({
+    color: 0xc4c9d0,
+    transparent: true,
+    opacity: 0.16,
+    depthWrite: false,
+  });
   let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = new THREE.PerspectiveCamera(
     CAD_CAMERA_FOV,
     1,
@@ -143,6 +189,14 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let review: ((state: CadViewState) => CadViewState) | null = null;
   const displayed = (state: CadViewState) => (review ? review(state) : state);
   let focusOffset = { x: 0, y: 0 };
+  let insets: CadFrameInsets = { top: 0, bottom: 0 };
+  /** Share of the viewport height a fit may use around the overlay chrome. */
+  const frameFill = () => Math.max(0.25, (height - insets.top - insets.bottom) / height);
+  // Whether the camera shows a fit (a preset, or a refit after a large resize) rather than a
+  // pose someone chose, the viewport size that framing was made for, and the bounds it fit.
+  let fitted = false;
+  let framedSize = { width: 1, height: 1 };
+  let fitBounds: THREE.Box3 | null = null;
 
   let appearance = DEFAULT_CAD_APPEARANCE;
   let animationFrame: number | null = null;
@@ -156,22 +210,47 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (disposed || lost || renderer.getContext().isContextLost())
       throw new CadRendererError("renderer-unavailable");
   };
-  /** Draws the model and its outline from `eye`, without comment markers or frame callbacks. */
-  const drawScene = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
-    renderer.clippingPlanes = model?.clippingPlanes() ?? [];
-    renderer.render(scene, eye);
-    if (
-      model &&
-      outlineSupported &&
-      !view?.sectionPlanes?.length &&
-      !view?.ghost?.occurrenceIds.length
-    )
-      outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
+  /** Draws faded context over the finished frame (see contextDepth). */
+  const drawContext = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
+    const background = scene.background;
+    const autoClear = renderer.autoClear;
+    const layers = eye.layers.mask;
+    try {
+      scene.background = null;
+      renderer.autoClear = false;
+      eye.layers.set(CAD_CONTEXT_LAYER);
+      scene.overrideMaterial = contextDepth;
+      renderer.render(scene, eye);
+      scene.overrideMaterial = contextSurface;
+      renderer.render(scene, eye);
+    } finally {
+      scene.overrideMaterial = null;
+      scene.background = background;
+      renderer.autoClear = autoClear;
+      eye.layers.mask = layers;
+    }
   };
-  const render = () => {
+  /**
+   * Draws the model, its outline, and any faded context from `eye`, without comment markers or
+   * frame callbacks. Captures pass `withBackdrop: false` to keep the flat themed background.
+   */
+  const drawScene = (
+    eye: THREE.PerspectiveCamera | THREE.OrthographicCamera,
+    withBackdrop = true,
+  ) => {
+    renderer.clippingPlanes = model?.clippingPlanes() ?? [];
+    scene.background = withBackdrop ? backdrop : null;
+    renderer.render(scene, eye);
+    // The outline's opaque normal pass would draw cut-open or ghosted parts as solid shells.
+    // Faded context sits on its own layer, so it never gets outlines.
+    if (model && outlineSupported && !model.clippingPlanes().length && !model.hasGhosts())
+      outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
+    if (model?.hasFaded()) drawContext(eye);
+  };
+  const render = (withBackdrop = true) => {
     assertAvailable();
     const start = options.onFrame ? performance.now() : 0;
-    drawScene(camera);
+    drawScene(camera, withBackdrop);
     if (commentMarkers.children.length) {
       const autoClear = renderer.autoClear;
       const clippingPlanes = renderer.clippingPlanes;
@@ -225,6 +304,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         camera.lookAt(target);
         camera.updateProjectionMatrix();
       }
+      fitted = false;
+      framedSize = { width, height };
       frameRevision++;
       render();
       if (controls) controls.object.matrix.copy(camera.matrix);
@@ -300,7 +381,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!model) throw new CadRendererError("invalid-view");
     clearCommentMarkers();
     const bounds = model.apply(displayed(state), review ? REVIEW_APPLY : undefined);
-    const resolved = resolveCadCamera(state.camera, bounds, width / height);
+    const resolved = resolveCadCamera(state.camera, bounds, width / height, frameFill());
+    fitted = review === null && !(state.camera.kind === "pose" && state.camera.fit === null);
+    framedSize = { width, height };
+    fitBounds = bounds;
     applying = true;
     try {
       configureCamera(resolved, synchronizeControls);
@@ -329,6 +413,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       state.camera,
       model.apply(displayed(state), review ? REVIEW_APPLY : undefined),
       width / height,
+      frameFill(),
     );
     const fromTarget = new THREE.Vector3(...from.target);
     const toTarget = new THREE.Vector3(...to.target);
@@ -468,6 +553,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
               defaultFinish.add(object);
           });
           prepareCadMaterials(prototype, appearancesByHash.get(asset.sha256) ?? [], defaultFinish);
+          creaseCadNormals(prototype);
           assetsByHash.set(asset.sha256, prototype);
         } else decodedBytes = budget.add(asset, complexities.get(asset.sha256)!).decodedBytes;
         loaded.set(asset.geometryKey, prototype);
@@ -523,7 +609,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!model || !view) throw new CadRendererError("invalid-view");
     const token = generation,
       revision = frameRevision;
-    render();
+    render(false);
     let blob: Blob | null;
     try {
       blob =
@@ -555,7 +641,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         width / height,
       ),
     );
-    drawScene(overview);
+    drawScene(overview, false);
     let encoded: Promise<Blob | null>;
     try {
       encoded =
@@ -571,9 +657,14 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   };
   // Camera and framing from before the current comment review began, so leaving the focus
   // can return to them.
-  let reviewStart: { pose: ResolvedCadCamera; offset: { x: number; y: number } } | null = null;
+  let reviewStart: {
+    pose: ResolvedCadCamera;
+    offset: { x: number; y: number };
+    fitted: boolean;
+  } | null = null;
   const beginCommentReview = () => {
-    if (!reviewStart) reviewStart = { pose: pose(), offset: { ...focusOffset } };
+    if (!reviewStart) reviewStart = { pose: pose(), offset: { ...focusOffset }, fitted };
+    fitted = false;
   };
   /** Eases the camera to `to` and the comment framing offset to `offset`. */
   const easeCameraTo = (
@@ -631,8 +722,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       model.apply(view);
       render();
     }
-    if (returnCamera && start && model && view)
+    if (returnCamera && start && model && view) {
       easeCameraTo(start.pose, start.offset, returnCamera.reducedMotion);
+      fitted = start.fitted;
+    }
   };
   /**
    * The shared end of a comment focus. Faded context in a line of sight to the parts in focus is
@@ -1214,6 +1307,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (next.background === appearance.background && next.dark === appearance.dark) return;
       appearance = next;
       renderer.setClearColor(next.background);
+      backdrop.dispose();
+      backdrop = createBackdrop(next.background, next.dark);
       ambient.intensity = next.dark ? 1.5 : 1.25;
       fill.intensity = next.dark ? 1 : 0.8;
       frameRevision++;
@@ -1231,13 +1326,46 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height, false);
       frameRevision++;
+      // A comment review keeps the pose it flew to; otherwise fits follow the viewport, and a
+      // chosen pose refits once the viewport has grown or shrunk a lot since it was framed.
+      const resized = Math.max(
+        Math.abs(Math.log(width / framedSize.width)),
+        Math.abs(Math.log(height / framedSize.height)),
+      );
+      const shown = view,
+        loaded = model;
+      const refit =
+        loaded !== null &&
+        shown !== null &&
+        animationFrame === null &&
+        review === null &&
+        reviewStart === null &&
+        (fitted || resized > Math.log(REFIT_RATIO));
       applying = true;
       try {
-        configureCamera(currentPose, animationFrame === null);
+        if (refit) {
+          focusOffset = { x: 0, y: 0 };
+          configureCamera(
+            resolveCadCamera(
+              shown.camera.kind === "pose"
+                ? { kind: "pose", pose: currentPose, fit: shown.camera.fit ?? [] }
+                : shown.camera,
+              fitBounds ?? loaded.visibleBounds(),
+              width / height,
+              frameFill(),
+            ),
+          );
+          fitted = true;
+          framedSize = { width, height };
+        } else configureCamera(currentPose, animationFrame === null);
         if (view) render();
       } finally {
         applying = false;
       }
+    },
+    /** Keeps fits clear of overlay chrome along the viewport's top and bottom edges. */
+    setFrameInsets: (next: CadFrameInsets) => {
+      insets = next;
     },
     setInteractive: (enabled: boolean) => {
       assertAvailable();
@@ -1250,6 +1378,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (disposed) return;
       clearCommentMarkers();
       outline.dispose();
+      backdrop.dispose();
+      contextDepth.dispose();
+      contextSurface.dispose();
       disposed = true;
       frameListeners.clear();
       generation++;

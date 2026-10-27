@@ -9,7 +9,7 @@ import {
   describeCadCommentRejection,
   describeCadCommentsPublished,
 } from "./CadChatRows";
-import { CadSeverityLabel } from "./CadCommentsCard";
+import { CadSeverityIcon } from "./CadCommentsCard";
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("env"),
@@ -58,8 +58,8 @@ it("opens a published comment at its location in the CAD panel", () => {
   expect(text(tree)).toContain('"Add bolt heads" was not published');
 
   const commentButton = buttons.find((button) => text(button).includes("roller shaft"));
-  const label = elements(commentButton).find((element) => element.type === CadSeverityLabel);
-  expect(label?.props.severity).toBe("blocker");
+  const severity = elements(commentButton).find((element) => element.type === CadSeverityIcon);
+  expect(severity?.props.severity).toBe("blocker");
   (commentButton?.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-1",
@@ -93,7 +93,7 @@ it("lists resolution proposals apart from written comments and opens their comme
     "Wrote 1 comment, proposed 1 resolution",
   );
   const tree = CadPublishedComments({ card: proposals, threadRef });
-  expect(text(tree)).toContain("resolution proposed");
+  expect(text(tree)).toContain("Resolution proposed");
   const button = elements(tree)
     .filter((element) => element.type === "button")
     .find((element) => text(element).includes("Loose cable"));

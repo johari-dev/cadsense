@@ -22,11 +22,11 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   return (
     <Button
       size="xs"
-      variant="ghost"
+      variant="outline"
       disabled={changedSettingLabels.length === 0}
       onClick={() => void restoreDefaults()}
     >
-      <RotateCcwIcon className="mx-1 size-3.5" />
+      <RotateCcwIcon className="size-3.5" />
       Restore defaults
     </Button>
   );

@@ -155,23 +155,18 @@ interface TimelineRowActivityState {
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
-const TIMELINE_LIST_FADE_HEADER = (
-  <div className="h-[var(--workspace-titlebar-scroll-fade-height)]" />
-);
 
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
 function TimelineLoadEarlierHeader({
   loading,
   onLoadEarlier,
-  fade,
 }: {
   loading: boolean;
   onLoadEarlier: () => void;
-  fade: boolean;
 }) {
   return (
-    <div className={fade ? "pt-[var(--workspace-titlebar-scroll-fade-height)]" : "pt-3 sm:pt-4"}>
+    <div className="pt-3 sm:pt-4">
       <div className="mx-auto w-full max-w-3xl pb-2">
         <button
           type="button"
@@ -623,17 +618,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             onScroll={handleScroll}
             className={cn(
               "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
+              // A short fade under the header: text scrolls off with a soft edge instead
+              // of leaving a whole half-transparent line under the title. The header
+              // spacer is taller than the fade, so the first row is never faded at rest.
+              topFadeEnabled &&
+                "topbar-scroll-fade [--workspace-titlebar-scroll-fade-height:0.625rem]",
             )}
             ListHeaderComponent={
               loadEarlier !== null ? (
                 <TimelineLoadEarlierHeader
                   loading={loadEarlier.loading}
                   onLoadEarlier={loadEarlier.onLoadEarlier}
-                  fade={topFadeEnabled}
                 />
-              ) : topFadeEnabled ? (
-                TIMELINE_LIST_FADE_HEADER
               ) : (
                 TIMELINE_LIST_HEADER
               )
@@ -1054,7 +1050,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div className="relative max-w-[80%] rounded-2xl bg-message px-3.5 py-2.5 text-message-foreground">
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (

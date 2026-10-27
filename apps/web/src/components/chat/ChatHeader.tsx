@@ -202,8 +202,10 @@ export const ChatHeader = memo(function ChatHeader({
     [commitRename],
   );
   return (
+    // ps-2.5 lines the title up with the transcript's text edge (list padding plus the
+    // scrollbar gutter) instead of the header's own inset.
     <div
-      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
+      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 ps-2.5 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
     >
       <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">
@@ -254,8 +256,8 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           )}
         </WorkspaceBreadcrumbItem>
-        {/* The project follows the thread title in muted text, so the title reads first
-            and the project still answers which one the thread lives in. */}
+        {/* The project follows the thread title in muted, regular-weight text, so the title
+            reads first and the project still answers which one the thread lives in. */}
         {activeProjectName ? (
           <WorkspaceBreadcrumbItem>
             <Tooltip>
@@ -265,7 +267,7 @@ export const ChatHeader = memo(function ChatHeader({
                     type="button"
                     aria-label={`New thread in ${activeProjectName}`}
                     onClick={onNewThreadInProject}
-                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-sm font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 }
               >

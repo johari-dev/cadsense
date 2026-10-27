@@ -312,6 +312,58 @@ describe("CAD renderer lifecycle without WebGL", () => {
       parser.mockRestore();
     }
   });
+  it("refits a chosen pose after a large resize but keeps the pose a comment review flew to", async () => {
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas });
+    const chosen = {
+      position: [0.05, -0.3, 0.1] as const,
+      target: [0.05, 0, 0] as const,
+      up: [0, 0, 1] as const,
+      projection: "perspective" as const,
+      zoom: 1,
+    };
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [{ ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey }],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(800, 600);
+      renderer.apply({ ...state, camera: { kind: "pose", pose: chosen, fit: null } });
+      renderer.resize(860, 640);
+      expect(renderer.cameraPose().target).toEqual(chosen.target);
+      // Maximizing: the model is framed whole and centered, seen from the same direction.
+      renderer.resize(1400, 640);
+      const refit = renderer.cameraPose();
+      for (const value of refit.target) expect(value).toBeCloseTo(0, 10);
+      const direction = new Vector3(...refit.position).sub(new Vector3(...refit.target));
+      expect(direction.normalize().dot(new Vector3(0, -3, 1).normalize())).toBeCloseTo(1, 10);
+      renderer.focusComment(
+        {
+          kind: "point",
+          label: "Corner",
+          occurrenceId: id,
+          point: [0.01, -0.01, 0.01],
+          normal: [0, -1, 0],
+          captureId: "capture",
+          inspectionId: "inspection",
+          confirmationReason: "Verified corner",
+        },
+        { width: 700, height: 640, centerX: 350, centerY: 320 },
+        true,
+      );
+      const reviewed = renderer.cameraPose();
+      renderer.resize(800, 600);
+      expect(renderer.cameraPose()).toEqual(reviewed);
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+    }
+  });
   it.each(["perspective", "orthographic"] as const)(
     "centers an arbitrary world point and scales magnification in %s captures",
     async (projection) => {
@@ -345,7 +397,8 @@ describe("CAD renderer lifecycle without WebGL", () => {
           const captured = renderer.capture();
           h.completeCapture();
           expect((await captured).type).toBe("image/png");
-          renderer.resize(800, 900);
+          // Small viewport changes keep the chosen pose (large ones refit; see below).
+          renderer.resize(800, 700);
           const resized: Camera = calls.render.mock.calls.at(-1)![1];
           expect(new Vector3(...pose.target).project(resized).x).toBeCloseTo(0, 10);
           renderer.resize(800, 600);

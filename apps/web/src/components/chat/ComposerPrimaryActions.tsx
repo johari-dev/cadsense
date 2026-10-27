@@ -1,6 +1,6 @@
 import { memo, type PointerEventHandler } from "react";
 import {
-  ArrowElbowDownLeftIcon,
+  ArrowUpIcon,
   CaretDownIcon as ChevronDownIcon,
   CaretLeftIcon as ChevronLeftIcon,
   StopIcon,
@@ -57,11 +57,12 @@ export const formatPendingPrimaryActionLabel = (input: {
 };
 
 /**
- * Send and stop are quiet icon buttons like the composer's attach button: no fill until
- * hovered, so the composer footer reads as one row of controls.
+ * Send and stop are 28px filled circles in the message-action color: the one solid control
+ * in the composer, so the way to send is never in doubt. With nothing to send, send dims to
+ * a faint disc instead of disappearing.
  */
-export const COMPOSER_ICON_ACTION_CLASS_NAME =
-  "relative flex size-7.5 shrink-0 items-center justify-center rounded-[var(--control-radius)] text-muted-foreground transition-colors duration-150 enabled:cursor-pointer hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
+export const COMPOSER_PRIMARY_ACTION_CLASS_NAME =
+  "relative flex size-7.5 shrink-0 items-center justify-center rounded-full bg-message-action text-message-action-foreground transition-colors duration-150 enabled:cursor-pointer hover:bg-message-action-hover disabled:pointer-events-none disabled:bg-foreground/10 disabled:text-foreground/35 pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
 
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
@@ -92,12 +93,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const renderStopGenerationButton = () => (
     <button
       type="button"
-      className={COMPOSER_ICON_ACTION_CLASS_NAME}
+      className={COMPOSER_PRIMARY_ACTION_CLASS_NAME}
       {...pointerFocusProps}
       onClick={onInterrupt}
       aria-label="Stop generation"
     >
-      <StopIcon aria-hidden="true" />
+      <StopIcon aria-hidden="true" className="fill-current" />
     </button>
   );
 
@@ -216,7 +217,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const sendButton = (
     <button
       type="submit"
-      className={COMPOSER_ICON_ACTION_CLASS_NAME}
+      className={COMPOSER_PRIMARY_ACTION_CLASS_NAME}
       {...pointerFocusProps}
       disabled={
         isSendBusy ||
@@ -240,7 +241,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       {isConnecting || isSendBusy ? (
         <Spinner aria-hidden="true" />
       ) : (
-        <ArrowElbowDownLeftIcon aria-hidden="true" />
+        <ArrowUpIcon aria-hidden="true" />
       )}
     </button>
   );

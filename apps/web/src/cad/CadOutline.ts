@@ -3,7 +3,10 @@ import * as THREE from "three";
 // RGBA8 normals + 32-bit depth: at most 16 MiB per renderer. Color stays in the
 // original antialiased framebuffer; only the transparent edge overlay is composited.
 const MAX_OUTLINE_PIXELS = 2 * 1024 * 1024;
-/** The normal override is only faithful for opaque, front-sided surface geometry. */
+/**
+ * The normal override is only faithful for opaque surface geometry. Double-sided surfaces are
+ * fine: the override is double-sided too and flips back-face normals the way shading does.
+ */
 export const supportsCadOutline = (root: THREE.Object3D) => {
   let supported = true;
   root.traverse((object) => {
@@ -21,7 +24,7 @@ export const supportsCadOutline = (root: THREE.Object3D) => {
         material.alphaTest > 0 ||
         material.alphaHash ||
         (material instanceof THREE.MeshPhysicalMaterial && material.transmission > 0) ||
-        material.side !== THREE.FrontSide ||
+        material.side === THREE.BackSide ||
         !material.depthTest ||
         !material.depthWrite
       )
@@ -45,7 +48,7 @@ export const createCadOutline = (renderer: THREE.WebGLRenderer) => {
     magFilter: THREE.LinearFilter,
     depthTexture: new THREE.DepthTexture(1, 1, THREE.UnsignedIntType),
   });
-  const normals = new THREE.MeshNormalMaterial();
+  const normals = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
   const material = new THREE.ShaderMaterial({
     transparent: true,
     depthTest: false,

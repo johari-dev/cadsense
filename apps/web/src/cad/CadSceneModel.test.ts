@@ -2,7 +2,12 @@ import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { buildCadSceneModel, disposeCadObjects, resolveCadCamera } from "./CadSceneModel";
+import {
+  buildCadSceneModel,
+  CAD_CONTEXT_LAYER,
+  disposeCadObjects,
+  resolveCadCamera,
+} from "./CadSceneModel";
 
 const id = (n: number) => n.toString(16).padStart(64, "0");
 const transform = (x: number, y = 0) => [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -222,4 +227,26 @@ it("owns inspection materials per occurrence and per renderer, restores and disp
   expect(sourceDispose).not.toHaveBeenCalled();
   expect(textureDispose).not.toHaveBeenCalled();
   expect(geometryDispose).not.toHaveBeenCalled();
+});
+
+it("moves faded review context onto the context layer without copying its materials", () => {
+  const source = prototype();
+  const model = buildCadSceneModel(manifest, new Map([[id(9), source]]));
+  const isolated = model.objects.get(id(3))!.object.children[0] as THREE.Mesh;
+  const context = model.objects.get(id(4))!.object.children[0] as THREE.Mesh;
+  const review = { ...state, isolatedOccurrenceIds: [id(3)] };
+  const fit = model.apply(review, { fadeIsolatedOut: true });
+  expect(model.isFaded(id(4))).toBe(true);
+  expect(model.hasFaded()).toBe(true);
+  expect(context.layers.isEnabled(CAD_CONTEXT_LAYER)).toBe(true);
+  expect(context.layers.isEnabled(0)).toBe(false);
+  expect(context.material).toBe(source.material);
+  expect(isolated.layers.isEnabled(0)).toBe(true);
+  // Context never widens the fit.
+  expect(fit.equals(new THREE.Box3().setFromObject(model.objects.get(id(3))!.object))).toBe(true);
+  model.apply(review);
+  expect(model.hasFaded()).toBe(false);
+  expect(model.objects.get(id(4))!.object.visible).toBe(false);
+  expect(context.layers.isEnabled(0)).toBe(true);
+  expect(context.layers.isEnabled(CAD_CONTEXT_LAYER)).toBe(false);
 });

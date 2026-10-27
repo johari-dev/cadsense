@@ -9,6 +9,24 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
+import { THREAD_SIDEBAR_DEFAULT_WIDTH } from "./threadSidebarWidth";
+
+/** Chat column width the CAD panel's default leaves beside the default sidebar. */
+const CAD_PANEL_DEFAULT_CHAT_WIDTH = 416;
+
+/**
+ * Initial CAD panel width before the user resizes it, for `defaultWidth`. It leaves a
+ * readable chat column (about 416px at 1440 wide) and never takes less than half the
+ * window, so the model stays the dominant column.
+ */
+export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
+  return Math.round(
+    Math.max(
+      viewportWidth * 0.5,
+      viewportWidth - THREAD_SIDEBAR_DEFAULT_WIDTH - CAD_PANEL_DEFAULT_CHAT_WIDTH,
+    ),
+  );
+}
 
 interface RightPanelProps {
   mode: PreviewPanelMode;

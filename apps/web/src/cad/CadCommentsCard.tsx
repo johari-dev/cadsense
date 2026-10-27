@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   CAD_COMMENT_SEVERITIES,
   type CadComment,
@@ -16,18 +24,14 @@ import {
   CrosshairIcon as LocateFixed,
   CheckIcon as Check,
   ArrowCounterClockwiseIcon as RotateCcw,
-  CubeIcon as Box,
   StackIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  CheckCircleIcon,
   ClockCounterClockwiseIcon,
-  DotOutlineIcon,
   EyeIcon,
   InfoIcon,
   ProhibitIcon,
   QuestionIcon,
-  RecordIcon,
   WarningCircleIcon,
   WarningIcon,
   WarningOctagonIcon,
@@ -45,6 +49,11 @@ import { cadPanelEnvironment } from "../state/cadPanel";
 import { useAtomCommand } from "../state/use-atom-command";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import type { CadCommentLocation } from "./cadCommentReviewStore";
+import {
+  CAD_COMMENT_PIN_SIZE,
+  groupOverlappingCommentPins,
+  type CadCommentScreenPin,
+} from "./CadCommentGeometry";
 import { useDiscussCadComment } from "./useDiscussCadComment";
 
 /** How long the card animates when it opens or closes; matches the transitions in CadPanel.css. */
@@ -63,6 +72,15 @@ const severityRank = (comment: CadComment) =>
   comment.severity === null
     ? CAD_COMMENT_SEVERITIES.length
     : CAD_COMMENT_SEVERITIES.indexOf(comment.severity);
+/** A pin's label: the comment number, plus a letter per location when it has several. */
+const pinLabel = (comment: CadComment, target: number) =>
+  `${comment.number}${comment.targets.length > 1 ? String.fromCharCode(97 + target) : ""}`;
+/** A pin's width without measuring it: round up to two characters, a pill beyond that. */
+const pinWidth = (label: string) =>
+  label.length <= 2 ? CAD_COMMENT_PIN_SIZE : 12 + 7 * label.length;
+/** The comment pin shared by single pins and group count markers; it matches CommentBadge. */
+const PIN_CLASS =
+  "pointer-events-auto absolute flex h-5.5 min-w-5.5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border-[1.5px] border-neutral-950/80 bg-amber-200 text-[11px] leading-none font-semibold tabular-nums text-neutral-950 shadow-[0_1px_3px_rgb(0_0_0/0.45)] outline-none focus-visible:ring-2 focus-visible:ring-ring";
 export interface CadCommentSelection {
   id: string;
   target: CadCommentLocation;
@@ -114,6 +132,9 @@ export function CadCommentsCard({
   const [dismissing, setDismissing] = useState<{ id: string; reason: string } | null>(null);
   const inFlightReviews = useRef(new Set<string>());
   const [layoutVersion, setLayoutVersion] = useState(0);
+  // The pin group fanned out around its count marker, by the key of its first pin.
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const collapseTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The card animates whenever `open` changes. `settledOpen` is the state it last finished
   // animating to, so the open panel stays mounted until a close has played out.
   const [settledOpen, setSettledOpen] = useState(open);
@@ -175,12 +196,20 @@ export function CadCommentsCard({
   const openCount = openComments.length;
   const blockerCount = openComments.filter((c) => c.severity === "blocker").length;
   const toggleLabel = `Comments (${openCount} unresolved${blockerCount ? `, ${blockerCount} blocking` : ""})`;
-  const visible =
-    filter === "history"
-      ? comments.filter((c) => c.modelDescriptor !== descriptor || historical)
-      : filter === "open"
-        ? openComments.sort((a, b) => severityRank(a) - severityRank(b) || a.number - b.number)
-        : displayed.filter((c) => c.state !== "open");
+  const lists = {
+    // Open findings group by severity, most consequential first; headings name each group.
+    open: openComments.sort((a, b) => severityRank(a) - severityRank(b) || a.number - b.number),
+    reviewed: displayed.filter((c) => c.state !== "open"),
+    history: comments.filter((c) => c.modelDescriptor !== descriptor || historical),
+  };
+  const visible = lists[filter];
+  /**
+   * Collapsed, the toggle is a chip like the view changes chip across the viewport: the icon
+   * and the open count. Its width follows the count's digits (`ch`, with tabular numerals).
+   */
+  const toggleWidth = openCount
+    ? `calc(var(--cad-overlay-control) + 0.75rem + ${String(openCount).length}ch)`
+    : "var(--cad-overlay-control)";
   useEffect(() => {
     if (historical) setFilter("history");
   }, [historical]);
@@ -266,24 +295,86 @@ export function CadCommentsCard({
     let frame = 0;
     const current = renderer.current;
     const byId = new Map(comments.map((comment) => [comment.id, comment]));
+    const place = (element: HTMLElement, x: number, y: number) => {
+      element.style.visibility = "visible";
+      element.style.left = `${x}px`;
+      element.style.top = `${y}px`;
+    };
     const draw = () => {
       frame = 0;
-      markers.current?.querySelectorAll<HTMLButtonElement>("[data-comment]").forEach((button) => {
-        const comment = byId.get(button.dataset.comment ?? "");
+      const root = markers.current;
+      if (!root) return;
+      // Read every projection first, then group pins that would pile up on screen.
+      const pins: Array<CadCommentScreenPin & { element: HTMLElement; label: string }> = [];
+      root.querySelectorAll<HTMLElement>("[data-comment]").forEach((element) => {
+        const comment = byId.get(element.dataset.comment ?? "");
         const shown =
           manifest &&
           comment &&
           (comment.state === "open" ||
             (open && filter === "reviewed" && comment.id === selection?.id));
-        const target = shown ? comment.targets[Number(button.dataset.target)] : null;
+        const target = shown ? comment.targets[Number(element.dataset.target)] : null;
         const point = target ? current?.commentProjection(target) : null;
-        button.style.visibility = point?.visible ? "visible" : "hidden";
-        if (point) {
-          button.style.left = `${point.x}px`;
-          button.style.top = `${point.y}px`;
-          button.style.borderStyle = "solid";
+        if (!comment || !point?.visible) {
+          element.style.visibility = "hidden";
+          return;
         }
+        const label = pinLabel(comment, Number(element.dataset.target));
+        pins.push({
+          element,
+          label,
+          x: point.x,
+          y: point.y,
+          width: pinWidth(label),
+          pinned: open && comment.id === selection?.id,
+        });
       });
+      const counters = new Map<string, HTMLElement>();
+      root.querySelectorAll<HTMLElement>("[data-pin-group]").forEach((element) => {
+        counters.set(element.dataset.pinGroup ?? "", element);
+        element.style.visibility = "hidden";
+      });
+      for (const indices of groupOverlappingCommentPins(pins)) {
+        const group = indices.map((i) => pins[i]!);
+        const head = group[0]!;
+        if (group.length === 1) {
+          place(head.element, head.x, head.y);
+          head.element.style.zIndex = "";
+          continue;
+        }
+        // A group shows one count marker at its centre, owned by its first pin. Expanded, its
+        // pins fan out around that marker; collapsed, they hide behind it.
+        const cx = group.reduce((sum, pin) => sum + pin.x, 0) / group.length;
+        const cy = group.reduce((sum, pin) => sum + pin.y, 0) / group.length;
+        const key = head.element.dataset.pinKey ?? "";
+        const counter = counters.get(key);
+        if (counter) {
+          place(counter, cx, cy);
+          counter.dataset.count = String(group.length);
+          counter.setAttribute("aria-expanded", String(expandedGroup === key));
+          counter.setAttribute(
+            "aria-label",
+            `${group.length} comments here: ${group.map((pin) => pin.label).join(", ")}`,
+          );
+        }
+        if (expandedGroup !== key) {
+          group.forEach((pin) => (pin.element.style.visibility = "hidden"));
+          continue;
+        }
+        // Each pin gets a share of the ring as wide as itself plus a gap, starting at the top,
+        // so wide pills never crowd their neighbours.
+        const arcs = group.map((pin) => pin.width + 8);
+        const circumference = arcs.reduce((sum, arc) => sum + arc, 0);
+        const radius = Math.max(CAD_COMMENT_PIN_SIZE + 6, circumference / (2 * Math.PI));
+        let along = -arcs[0]! / 2;
+        group.forEach((pin, i) => {
+          along += arcs[i]! / 2;
+          const angle = -Math.PI / 2 + (2 * Math.PI * along) / circumference;
+          along += arcs[i]! / 2;
+          place(pin.element, cx + radius * Math.cos(angle), cy + radius * Math.sin(angle));
+          pin.element.style.zIndex = "20";
+        });
+      }
     };
     // Project once after layout, then after renders in the same frame they were drawn:
     // deferring to the next animation frame paints markers one frame behind the model, which
@@ -308,7 +399,18 @@ export function CadCommentsCard({
       unsubscribe?.();
       cancelAnimationFrame(frame);
     };
-  }, [comments, manifest, renderer, open, filter, selection?.id]);
+  }, [comments, manifest, renderer, open, filter, selection?.id, expandedGroup]);
+  useEffect(() => () => clearTimeout(collapseTimer.current), []);
+  // A group stays expanded while the pointer is over its marker or any of its pins; leaving
+  // them all collapses it after a short grace period, so moving between them never flickers.
+  const holdGroup = (key?: string) => {
+    clearTimeout(collapseTimer.current);
+    if (key !== undefined) setExpandedGroup(key);
+  };
+  const releaseGroup = () => {
+    clearTimeout(collapseTimer.current);
+    collapseTimer.current = setTimeout(() => setExpandedGroup(null), 300);
+  };
   const change = async (c: CadComment, state: CadComment["state"], reason = "") => {
     // Guard synchronously as two clicks can arrive before React disables the controls.
     if (inFlightReviews.current.has(c.id)) return;
@@ -365,29 +467,57 @@ export function CadCommentsCard({
               manifest &&
               (c.state === "open" || (open && filter === "reviewed" && c.id === selection?.id)),
           )
+          // By number, so a group's count marker belongs to its lowest-numbered pin.
+          .sort((a, b) => a.number - b.number)
           .flatMap((c) =>
-            c.targets.map((t, i) => (
-              <button
-                key={`${c.id}:${i}`}
-                data-comment={c.id}
-                data-target={i}
-                style={{ visibility: "hidden" }}
-                aria-label={`Comment ${c.number}: ${t.label}`}
-                onClick={() => choose(c, i)}
-                className={cn(
-                  "pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center gap-1 rounded-full border-2 border-solid border-neutral-800 bg-amber-200 px-1.5 py-1 text-[11px] font-semibold text-neutral-950 shadow transition-[filter] duration-200",
-                  open && c.id === selection?.id && "ring-2 ring-foreground",
-                  // While a comment is focused, the others step back but brighten on hover.
-                  open &&
-                    selection &&
-                    c.id !== selection.id &&
-                    "brightness-50 saturate-50 hover:brightness-100 hover:saturate-100",
-                )}
-              >
-                {t.kind === "part" && <Box size={12} />} {c.number}
-                {c.targets.length > 1 ? String.fromCharCode(97 + i) : ""}
-              </button>
-            )),
+            c.targets.map((t, i) => {
+              const key = `${c.id}:${i}`;
+              const focused = open && c.id === selection?.id;
+              // While a comment is focused, the others step back but return on hover.
+              const dimmed = open && selection !== null && !focused;
+              return (
+                <Fragment key={key}>
+                  <button
+                    type="button"
+                    data-comment={c.id}
+                    data-target={i}
+                    data-pin-key={key}
+                    style={{ visibility: "hidden" }}
+                    aria-label={`Comment ${c.number}: ${t.label}`}
+                    onClick={() => {
+                      setExpandedGroup(null);
+                      choose(c, i);
+                    }}
+                    onPointerEnter={() => holdGroup()}
+                    onPointerLeave={releaseGroup}
+                    className={cn(
+                      PIN_CLASS,
+                      "px-1.5 transition-[opacity,scale] duration-150",
+                      focused && "z-10 scale-[1.18] ring-2 ring-foreground",
+                      dimmed && "opacity-70 hover:opacity-100",
+                    )}
+                  >
+                    {pinLabel(c, i)}
+                  </button>
+                  <button
+                    type="button"
+                    data-pin-group={key}
+                    style={{ visibility: "hidden" }}
+                    onClick={() => setExpandedGroup((g) => (g === key ? null : key))}
+                    onPointerEnter={() => holdGroup(key)}
+                    onPointerLeave={releaseGroup}
+                    className={cn(
+                      PIN_CLASS,
+                      // A second disc peeking out behind marks a stack of comments.
+                      "gap-0.5 ps-1 pe-1.5 shadow-[3px_-3px_0_-1.5px_var(--color-amber-200),3px_-3px_0_0_rgb(10_10_10/0.8),0_1px_3px_rgb(0_0_0/0.45)] after:content-[attr(data-count)]",
+                      dimmed && "opacity-70 hover:opacity-100",
+                    )}
+                  >
+                    <StackIcon aria-hidden className="size-3" />
+                  </button>
+                </Fragment>
+              );
+            }),
           )}
       </div>
       {historical && (
@@ -404,7 +534,9 @@ export function CadCommentsCard({
         data-open={open}
         data-closing={!open && settling}
         data-historical={historical}
-        className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-popover-foreground shadow-lg"
+        // Collapsed, the surface is as wide as the toggle chip; open, CadPanel.css sizes it.
+        style={open ? undefined : { width: toggleWidth }}
+        className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-xs text-popover-foreground shadow-lg"
       >
         {!open && (
           // Collapsed, the surface itself is the toggle: this button fills its inside edge to
@@ -418,11 +550,13 @@ export function CadCommentsCard({
                   aria-label={toggleLabel}
                   aria-expanded={false}
                   onClick={() => setOpen(true)}
-                  className="absolute right-0 top-0 flex size-[calc(var(--cad-overlay-control)-2px)] cursor-pointer items-center justify-center rounded-[calc(var(--radius-lg)-1px)] outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                  style={{ width: `calc(${toggleWidth} - 2px)` }}
+                  className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--radius-lg)-1px)] outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
                 />
               }
             >
-              <MessageSquare size={16} />
+              <MessageSquare aria-hidden className="size-4 shrink-0" />
+              {openCount > 0 && <span className="tabular-nums">{openCount}</span>}
             </TooltipTrigger>
             <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
           </Tooltip>
@@ -434,49 +568,45 @@ export function CadCommentsCard({
             inert={!open}
             className="cad-comments-content flex flex-col"
           >
-            <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b ps-3 pe-1.5 text-sm">
-              <span className="flex items-center gap-2">
-                <MessageSquare size={16} />
-                <strong>Comments</strong>
-                {openCount > 0 && <CommentBadge number={openCount} />}
-              </span>
-              <span className="flex items-center gap-1">
-                <div
-                  role="group"
-                  aria-label="Show comments"
-                  className="flex gap-px rounded-md bg-foreground/[0.04] p-0.5"
-                >
-                  {COMMENT_FILTERS.map(({ id, label, icon: FilterIcon }) => (
-                    <Tooltip key={id}>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            aria-label={label}
-                            aria-pressed={filter === id}
-                            onClick={() => setFilter(id)}
-                            className={cn(
-                              "inline-flex h-5.5 cursor-pointer items-center rounded-sm px-1.5 text-muted-foreground transition-colors hover:text-foreground",
-                              filter === id && "bg-foreground/[0.09] text-foreground",
-                            )}
-                          />
-                        }
-                      >
-                        <FilterIcon className="size-3.5" />
-                      </TooltipTrigger>
-                      <TooltipPopup side="top">{label}</TooltipPopup>
-                    </Tooltip>
-                  ))}
-                </div>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label="Close comments"
-                  onClick={() => setOpen(false)}
-                >
-                  <X />
-                </Button>
-              </span>
+            {/* Labelled tabs and a close button, laid out like the view changes card. */}
+            <div className="flex shrink-0 items-center gap-0.5 border-b ps-1.5 pe-1.5 pt-1.5 pb-[7px]">
+              <div role="group" aria-label="Show comments" className="flex items-center gap-0.5">
+                {COMMENT_FILTERS.map(({ id, label, tooltip }) => (
+                  <Tooltip key={id}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-pressed={filter === id}
+                          onClick={() => setFilter(id)}
+                          className={cn(
+                            "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground",
+                            filter === id &&
+                              "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
+                          )}
+                        />
+                      }
+                    >
+                      {label}
+                      {lists[id].length > 0 && (
+                        <span className="tabular-nums text-muted-foreground">
+                          {lists[id].length}
+                        </span>
+                      )}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{tooltip}</TooltipPopup>
+                  </Tooltip>
+                ))}
+              </div>
+              <span className="flex-1" />
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Close comments"
+                onClick={() => setOpen(false)}
+              >
+                <X className="size-4" />
+              </Button>
             </div>
             {reviewNotice && (
               <div
@@ -498,14 +628,26 @@ export function CadCommentsCard({
             )}
             <div className="min-h-0 flex-1 overflow-y-auto p-1">
               {visible.length ? (
-                visible.map((c) => {
+                visible.flatMap((c, index) => {
                   const location = selection?.id === c.id ? locationOf(c, selection.target) : null;
                   const expanded = location !== null;
                   const previousRevision = c.modelDescriptor !== descriptor;
                   const outdated = c.outdated
                     ? `Outdated: ${OUTDATED_REASONS[c.outdated.reason]} in a newer revision`
                     : null;
-                  return (
+                  const heading =
+                    filter === "open" && visible[index - 1]?.severity !== c.severity ? (
+                      <h3
+                        key={`severity:${c.severity}`}
+                        className="flex gap-1.5 px-2 pt-2 pb-1 text-[11px] font-normal text-muted-foreground"
+                      >
+                        {c.severity === null ? "Other" : SEVERITY_GROUPS[c.severity]}
+                        <span className="tabular-nums">
+                          {visible.filter((x) => x.severity === c.severity).length}
+                        </span>
+                      </h3>
+                    ) : null;
+                  const row = (
                     <article
                       key={c.id}
                       className={cn(
@@ -526,8 +668,8 @@ export function CadCommentsCard({
                         <CadSeverityIcon severity={c.severity} category={c.category} />
                         <span
                           className={cn(
-                            "min-w-0 flex-1",
-                            expanded ? "font-semibold" : "line-clamp-1",
+                            "min-w-0 flex-1 leading-[18px]",
+                            expanded ? "font-semibold" : "line-clamp-2",
                           )}
                         >
                           {c.title}
@@ -707,6 +849,7 @@ export function CadCommentsCard({
                       )}
                     </article>
                   );
+                  return heading ? [heading, row] : [row];
                 })
               ) : (
                 <p className="p-3 text-xs text-muted-foreground">
@@ -719,19 +862,6 @@ export function CadCommentsCard({
           </div>
         )}
       </div>
-      {/* The toggle's count sits outside the surface, which clips its contents while it shrinks
-          closed, so the badge's overhang past the corner stays whole. */}
-      {!open && openCount > 0 && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute right-3 top-3 size-(--cad-overlay-control)"
-        >
-          {/* A flex box, so the line height here does not push the badge down. */}
-          <span className="absolute -right-0.5 top-0 flex">
-            <CommentBadge number={openCount} />
-          </span>
-        </span>
-      )}
     </div>
   );
 }
@@ -752,16 +882,31 @@ export function CadSeverityLabel({ severity }: { severity: CadCommentSeverity | 
 }
 
 const COMMENT_FILTERS = [
-  { id: "open", label: "Open", icon: RecordIcon },
-  { id: "reviewed", label: "Reviewed", icon: CheckCircleIcon },
-  { id: "history", label: "Previous revisions", icon: ClockCounterClockwiseIcon },
+  { id: "open", label: "Open", tooltip: "Open findings on this revision" },
+  { id: "reviewed", label: "Reviewed", tooltip: "Resolved and dismissed findings" },
+  { id: "history", label: "History", tooltip: "Findings on previous revisions" },
 ] as const;
+
+/** Headings for the open list's severity groups. */
+const SEVERITY_GROUPS: Record<CadCommentSeverity, string> = {
+  blocker: "Blockers",
+  concern: "Concerns",
+  question: "Questions",
+  nit: "Nits",
+};
+
+/** A small filled dot on the same 24px grid as the other severity icons. */
+const NitIcon: Icon = ({ size: _size, weight: _weight, ...props }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <circle cx="12" cy="12" r="4" />
+  </svg>
+);
 
 const SEVERITY_ICON: Record<CadCommentSeverity, { icon: Icon; className: string }> = {
   blocker: { icon: WarningOctagonIcon, className: "text-destructive-foreground" },
   concern: { icon: WarningIcon, className: "text-warning" },
-  question: { icon: QuestionIcon, className: "text-sky-300" },
-  nit: { icon: DotOutlineIcon, className: "text-muted-foreground/60" },
+  question: { icon: QuestionIcon, className: "text-info-foreground" },
+  nit: { icon: NitIcon, className: "text-muted-foreground" },
 };
 const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
 
@@ -866,16 +1011,21 @@ function LocationChip(props: {
   const details = [props.notice, props.wholePartNote ? `Whole part: ${props.wholePartNote}` : ""]
     .filter(Boolean)
     .join(". ");
+  // A bordered chip; the selected one takes the neutral active treatment. The button's negative
+  // icon margins are reset so the label never runs into the notice icon.
   const chipProps = {
     size: "compact",
-    variant: props.selected ? "secondary" : "ghost",
-    className: "max-w-48",
+    variant: "outline",
+    className: cn(
+      "max-w-56 gap-1.5 font-normal [&_svg]:mx-0",
+      props.selected && "border-foreground/30 bg-accent dark:bg-accent",
+    ),
     onClick: props.onClick,
   } as const;
   const ChipIcon = props.icon ?? LocateFixed;
   const content = (
     <>
-      <ChipIcon />
+      <ChipIcon className="size-3.5 text-muted-foreground" />
       <span className="truncate">{props.label}</span>
       {NoticeIcon && (
         <NoticeIcon
@@ -902,7 +1052,7 @@ export function CommentBadge({ number, reviewed = false }: { number: number; rev
   return (
     <span
       data-comment-badge
-      className={`inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums ${reviewed ? "bg-muted text-muted-foreground" : "bg-amber-200 text-neutral-950"}`}
+      className={`inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full px-1 text-[10.5px] leading-none font-semibold tabular-nums ${reviewed ? "bg-muted text-muted-foreground" : "bg-amber-200 text-neutral-950"}`}
     >
       {number}
     </span>

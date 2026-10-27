@@ -104,7 +104,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { formatRelativeTimeLabel } from "../timestampFormat";
+import { formatRelativeTime } from "../timestampFormat";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -198,6 +198,21 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
   "inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-icon-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+
+/**
+ * One tile for every project: a model thumbnail fills it once one is captured; until then
+ * the source logo sits inside it, desaturated so a row of uncaptured projects reads as
+ * neutral placeholders rather than a column of brand marks.
+ */
+const SIDEBAR_PROJECT_ICON_CLASS =
+  "size-7 rounded-md border border-sidebar-border bg-sidebar-control-surface p-1 [&[src='/onshape.svg']]:opacity-70 [&[src='/onshape.svg']]:grayscale";
+
+/** The thread row's timestamp: the relative value without its "ago" suffix. */
+function formatCompactRelativeTime(isoDate: string): string {
+  const relative = formatRelativeTime(isoDate);
+  if (!relative) return "";
+  return relative.suffix === null ? "now" : relative.value;
+}
 
 function SidebarThreadDetailPrewarmer({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
   useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
@@ -582,7 +597,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <div className="flex min-w-12 justify-end max-sm:min-w-20">
+          {/* Wide enough for the hover archive button, so it never covers the title. */}
+          <div className="flex min-w-6 justify-end max-sm:min-w-20">
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -651,12 +667,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
                 ) : (
+                  // Compact ("28d", "now") so the title keeps the row's width.
                   <span
-                    className={`text-[10px] tabular-nums ${
-                      isHighlighted ? "text-foreground" : "text-secondary-label"
+                    className={`text-[11px] tabular-nums ${
+                      isHighlighted ? "text-muted-foreground" : "text-tertiary-foreground"
                     }`}
                   >
-                    {formatRelativeTimeLabel(
+                    {formatCompactRelativeTime(
                       thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
                     )}
                   </span>
@@ -2079,7 +2096,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           )}
           <ProjectFavicon
             cadSnapshotId={currentCadRoots[0]?.current?.snapshotId}
-            className="size-7 rounded border border-sidebar-border bg-sidebar-control-surface p-1"
+            className={SIDEBAR_PROJECT_ICON_CLASS}
             environmentId={project.environmentId}
             cwd={project.workspaceRoot}
             onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
@@ -2089,12 +2106,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <span className="block truncate text-sm font-semibold text-sidebar-foreground">
                 {project.displayName}
               </span>
-              <span className="block truncate text-[10px] text-sidebar-muted-foreground">
+              <span className="block truncate text-[11px] text-sidebar-muted-foreground">
                 {cadSummary ?? (project.onshapeSource ? "Onshape project" : "Local project")}
               </span>
             </span>
             {project.groupedProjectCount > 1 ? (
-              <span className="shrink-0 text-secondary-label text-[10px]">
+              <span className="shrink-0 text-tertiary-foreground text-[11px]">
                 {project.groupedProjectCount} projects
               </span>
             ) : null}

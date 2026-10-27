@@ -1,4 +1,4 @@
-/* The comments card morphs between the 34px toggle and a panel sized to its content (up to a
+/* The comments card morphs between the count chip toggle and a panel sized to its content (up to a
    cap). `interpolate-size` lets height animate to and from `auto` where supported; other
    browsers keep the size change without animating it. */
 /* Size of the viewport's corner controls: the comments toggle and the view changes chip. */
@@ -19,7 +19,7 @@
 }
 
 .cad-comments-surface[data-open="true"] {
-  width: min(304px, calc(100% - 24px));
+  width: min(328px, calc(100% - 24px));
   height: auto;
   max-height: min(440px, 60%);
 }
@@ -40,7 +40,7 @@
 .cad-comments-content {
   flex: 1 1 auto;
   align-self: flex-end;
-  width: min(304px, calc(100cqw - 24px));
+  width: min(328px, calc(100cqw - 24px));
   min-height: 0;
   transform-origin: top right;
   transition:
