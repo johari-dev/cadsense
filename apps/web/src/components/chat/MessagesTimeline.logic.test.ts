@@ -295,7 +295,7 @@ describe("CAD review rows", () => {
     location: "Motor mount",
   });
 
-  it("shows a CAD group as one card and its captures once as a filmstrip", () => {
+  it("splits a CAD group at each capture, so its images show in capture order", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         tool("context", "cad_context"),
@@ -308,19 +308,25 @@ describe("CAD review rows", () => {
       activeTurnStartedAt: null,
       expandedTurnIds: new Set([turnId]),
     });
-    expect(rows.map((row) => row.kind)).toEqual(["turn-fold", "tool-card", "cad-filmstrip"]);
-    expect(rows[1]).toMatchObject({ expanded: false, card: { title: "Used 3 tools" } });
-    const filmstrip = rows[2];
-    expect(filmstrip?.kind === "cad-filmstrip" && filmstrip.captures.length).toBe(2);
+    expect(rows.map((row) => row.kind)).toEqual([
+      "turn-fold",
+      "tool-card",
+      "cad-filmstrip",
+      "tool-card",
+      "cad-filmstrip",
+    ]);
+    expect(rows[1]).toMatchObject({ expanded: false, card: { title: "Used 2 tools" } });
+    expect(rows[3]).toMatchObject({ expanded: false, card: { title: "Used 1 tool" } });
+    expect(
+      rows.flatMap((row) =>
+        row.kind === "cad-filmstrip" ? row.captures.map((capture) => capture.captureId) : [],
+      ),
+    ).toEqual(["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"]);
   });
 
   it("shows each kind of tool in a mixed card's header", () => {
     const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
-        tool("capture-tool", "cad_capture"),
-        capture("capture-03"),
-        tool("read", "Read File"),
-      ],
+      timelineEntries: [tool("capture-tool", "cad_capture"), tool("read", "Read File")],
       isWorking: false,
       activeTurnStartedAt: null,
       expandedTurnIds: new Set([turnId]),
@@ -330,7 +336,7 @@ describe("CAD review rows", () => {
     });
   });
 
-  it("shows the captures so far under live CAD work", () => {
+  it("shows the captures so far in order, with the live card after them", () => {
     const entries = [
       tool("capture-tool", "cad_capture"),
       capture("capture-04"),
@@ -342,8 +348,15 @@ describe("CAD review rows", () => {
       runningTurnId: turnId,
       activeTurnStartedAt: entries[0]!.createdAt,
     });
-    expect(rows.map((row) => row.kind)).toEqual(["working", "tool-card", "cad-filmstrip"]);
-    const live = rows[1];
+    expect(rows.map((row) => row.kind)).toEqual([
+      "working",
+      "tool-card",
+      "cad-filmstrip",
+      "tool-card",
+    ]);
+    // The capture ended the first card; the call after the image is the live one.
+    expect(rows[1]?.kind === "tool-card" && rows[1].expanded).toBe(false);
+    const live = rows[3];
     expect(live?.kind === "tool-card" && live.expanded).toBe(true);
     expect(live?.kind === "tool-card" && live.card.calls.at(-1)?.label).toBe(
       "Updating the CAD view",

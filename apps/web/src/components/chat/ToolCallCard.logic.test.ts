@@ -130,21 +130,67 @@ describe("grouping", () => {
     expect(cards(timelineRows).map((card) => card.card.calls.length)).toEqual([2, 1]);
   });
 
-  it("keeps a capture inside its card and shows the image once, below the card", () => {
+  /** The image a capture recorded, as `cad.captured` reports it. */
+  const captured = (seconds: number, n: number) =>
+    activity("cad.captured", seconds, {
+      captureId: `00000000-0000-4000-8000-00000000000${n}`,
+      snapshotId: "00000000-0000-4000-8000-000000000009",
+      revision: 0,
+    });
+
+  it("ends a card at a capture, so the image sits in order between the calls around it", () => {
+    const timelineRows = rows([
+      ...call("context", "cad_context", 1, 2),
+      ...call("look", "cad_capture", 3, 5),
+      captured(4.9, 1),
+      ...call("isolate", "cad_update_view", 6, 7),
+      ...call("check", "cad_checks", 8, 12),
+    ]);
+    expect(kinds(timelineRows)).toEqual(["tool-card", "cad-filmstrip", "tool-card"]);
+    const [before, after] = cards(timelineRows);
+    // Each card counts and times only its own calls.
+    expect(before!.card).toMatchObject({ title: "Used 2 tools", duration: "4.0s" });
+    expect(before!.card.calls.map((row) => row.kind)).toEqual(["cad", "cad-capture"]);
+    expect(after!.card).toMatchObject({ title: "Used 2 tools", duration: "6.0s" });
+    expect(after!.card.calls.map((row) => row.kind)).toEqual(["cad-view", "cad"]);
+  });
+
+  it("puts captures with no calls between them on one filmstrip", () => {
     const timelineRows = rows([
       ...call("look", "cad_capture", 1, 3),
-      activity("cad.captured", 2.9, {
-        captureId: "00000000-0000-4000-8000-000000000001",
-        snapshotId: "00000000-0000-4000-8000-000000000002",
-        revision: 0,
+      captured(2.5, 1),
+      captured(2.8, 2),
+      ...call("check", "cad_checks", 4, 5),
+    ]);
+    expect(kinds(timelineRows)).toEqual(["tool-card", "cad-filmstrip", "tool-card"]);
+    const filmstrip = timelineRows.find((row) => row.kind === "cad-filmstrip");
+    expect(filmstrip?.kind === "cad-filmstrip" && filmstrip.captures.length).toBe(2);
+  });
+
+  it("keeps a card's id while the turn streams and a capture splits the run", () => {
+    const [early] = cards(
+      rows([...call("context", "cad_context", 1, 2), ...call("look", "cad_capture", 3, null)], {
+        running: true,
       }),
-      ...call("next", "cad_checks", 4, 5),
-    ]);
-    expect(kinds(timelineRows)).toEqual(["tool-card", "cad-filmstrip"]);
-    expect(cards(timelineRows)[0]!.card.calls.map((row) => row.kind)).toEqual([
-      "cad-capture",
-      "cad",
-    ]);
+    );
+    const split = rows(
+      [
+        ...call("context", "cad_context", 1, 2),
+        ...call("look", "cad_capture", 3, 5),
+        captured(4.9, 1),
+        ...call("isolate", "cad_update_view", 6, null),
+      ],
+      { running: true },
+    );
+    expect(kinds(split)).toEqual(["working", "tool-card", "cad-filmstrip", "tool-card"]);
+    const [first, second] = cards(split);
+    // The first card is the same row as before the split, so the list does not remount it.
+    expect(first!.id).toBe(early!.id);
+    expect(first!.groupId).toBe(early!.groupId);
+    // The capture ended it: it settles, and the calls after the image form the live card.
+    expect(first).toMatchObject({ expanded: false, card: { live: false, title: "Used 2 tools" } });
+    expect(second).toMatchObject({ expanded: true, card: { live: true, title: "Using 1 tool" } });
+    expect(second!.id).not.toBe(first!.id);
   });
 
   it("does not let a runtime warning join a card", () => {

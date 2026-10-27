@@ -828,43 +828,58 @@ export function deriveMessagesTimelineRows(input: {
     });
   };
 
+  /**
+   * One run of tool calls, split at its captures: a capture ends the card before it, its image
+   * shows at that point in the run, and the calls after it start a new card. Captures with no
+   * calls between them share one filmstrip. The first card keeps the run's identity, so a card
+   * that a new capture splits keeps its row while the turn streams.
+   */
   const appendToolCard = (entries: ReadonlyArray<WorkLogEntry>) => {
     const first = entries[0];
     if (!first) return;
-    const identity = workGroupIdentity(first.id, first);
     const visibleEntries = omitSupersededLifecycleMarkers(
       entries.filter((entry) => workEntryIsVisibleInGroup(entry, workEntryIsInActiveRun(entry))),
       (entry) => entry,
     );
-    const card = buildToolCallCard({
-      entries: visibleEntries.filter((entry) => entry.cadCapture === undefined),
-      live: entries.some((entry) => liveToolEntryIds.has(entry.id)),
-      runningTurnId: input.isWorking ? unsettledTurnId : null,
-      pendingApprovals,
-    });
-    if (card) {
-      const groupId = workGroupId(first.id, first);
+    const pieces: Array<{ captures: boolean; entries: WorkLogEntry[] }> = [];
+    for (const entry of visibleEntries) {
+      const isCapture = entry.cadCapture !== undefined;
+      const piece = pieces.at(-1);
+      if (piece?.captures === isCapture) piece.entries.push(entry);
+      else pieces.push({ captures: isCapture, entries: [entry] });
+    }
+    // Only the run's trailing calls can still grow; a card that a capture ended is done.
+    const runIsLive = entries.some((entry) => liveToolEntryIds.has(entry.id));
+    pieces.forEach((piece, index) => {
+      const pieceFirst = index === 0 ? first : piece.entries[0]!;
+      const identity = workGroupIdentity(pieceFirst.id, pieceFirst);
+      if (piece.captures) {
+        nextRows.push({
+          kind: "cad-filmstrip",
+          id: `cad-filmstrip:${identity}`,
+          createdAt: piece.entries[0]!.createdAt,
+          captures: piece.entries.flatMap((entry) => (entry.cadCapture ? [entry.cadCapture] : [])),
+        });
+        return;
+      }
+      const card = buildToolCallCard({
+        entries: piece.entries,
+        live: runIsLive && index === pieces.length - 1,
+        runningTurnId: input.isWorking ? unsettledTurnId : null,
+        pendingApprovals,
+      });
+      if (!card) return;
+      const groupId = workGroupId(pieceFirst.id, pieceFirst);
       nextRows.push({
         kind: "tool-card",
         id: `tool-card:${identity}`,
-        createdAt: first.createdAt,
+        createdAt: pieceFirst.createdAt,
         groupId,
         card,
         expanded: input.toolCardOpenOverrides?.get(groupId) ?? card.live,
         showAllCalls: input.expandedWorkGroupIds?.has(groupId) ?? false,
       });
-    }
-    // Captures render once, as a filmstrip under their card, instead of as rows inside it.
-    const captures = visibleEntries.flatMap((entry) =>
-      entry.cadCapture ? [entry.cadCapture] : [],
-    );
-    if (captures.length > 0)
-      nextRows.push({
-        kind: "cad-filmstrip",
-        id: `cad-filmstrip:${identity}`,
-        createdAt: first.createdAt,
-        captures,
-      });
+    });
   };
 
   const appendLogEntries = (entries: ReadonlyArray<WorkLogEntry>) => {
