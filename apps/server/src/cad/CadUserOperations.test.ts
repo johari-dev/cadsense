@@ -108,6 +108,7 @@ const harness = Effect.fn(function* (options?: {
       checkReserve: reserve,
       findGeometry: unused,
       putAsset: unused,
+      putThumbnail: unused,
       publish: unused,
       load: unused,
       readAsset: unused,

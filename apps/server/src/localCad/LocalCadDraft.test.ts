@@ -285,6 +285,7 @@ describe("SolidWorks import profile", () => {
           list: () => Effect.sync(() => [{ ...latest, byteLength: 1 }]),
           readAsset: () => Effect.die("No asset reads"),
           remove: () => Effect.die("No removals"),
+          putThumbnail: () => Effect.die("No thumbnails"),
           withPinned: () => Effect.die("No pins"),
           withAcquisition: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
         } satisfies CadSnapshotStoreShape;

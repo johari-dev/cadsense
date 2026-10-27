@@ -18,7 +18,7 @@ import {
   CadUserOperationError,
 } from "./cadUser.ts";
 import { CadRenderError, CadRenderEvent } from "./cadRender.ts";
-import { CadStorageEntry, CadStorageInput } from "./cadStorage.ts";
+import { CadStorageEntry, CadStorageInput, CadThumbnailSaveInput } from "./cadStorage.ts";
 import { CadViewError, CadViewState } from "./cadView.ts";
 import {
   CadPanelInput,
@@ -201,6 +201,7 @@ export const WS_METHODS = {
   cadPanelScene: "cad.panel.scene",
   cadStorageWatch: "cad.storage.watch",
   cadStorageRun: "cad.storage.run",
+  cadThumbnailSave: "cad.thumbnail.save",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -539,6 +540,11 @@ export const WsCadStorageRunRpc = Rpc.make(WS_METHODS.cadStorageRun, {
   success: Schema.Void,
   error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
 });
+export const WsCadThumbnailSaveRpc = Rpc.make(WS_METHODS.cadThumbnailSave, {
+  payload: CadThumbnailSaveInput,
+  success: Schema.Void,
+  error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
+});
 export const WsCadPanelSceneRpc = Rpc.make(WS_METHODS.cadPanelScene, {
   payload: CadPanelSceneInput,
   success: CadPanelSceneTicket,
@@ -762,6 +768,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCadReviewLearningRemoveRpc,
   WsCadStorageWatchRpc,
   WsCadStorageRunRpc,
+  WsCadThumbnailSaveRpc,
   WsCadPanelSceneRpc,
   WsCadPanelSaveRpc,
   WsCadUserCancelRpc,
