@@ -43,8 +43,8 @@
   }
 }
 
-/* While the sidebar is folded to its inspection rail, the width it gave up. The right
-   panel adds it to its own width so the model, not the chat, gets the room back. */
+/* While the sidebar is folded to its icon rail, the width it gave up. The right panel adds
+   it to its own width so the model, not the chat, gets the room back. */
 [data-sidebar-state="rail"] {
   --sidebar-rail-reclaimed-width: calc(var(--sidebar-width) - var(--sidebar-width-icon));
 }

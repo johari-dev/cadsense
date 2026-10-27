@@ -25,12 +25,11 @@ import {
   useSidebarStageBackdropVariant,
 } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
-import { useIsMobile } from "../hooks/useMediaQuery";
 import {
   INITIAL_SIDEBAR_INSPECTION,
   isInspecting,
   reduceSidebarInspection,
-  resolveSidebarPresentation,
+  resolveSidebarOpen,
   useInspectionTriggersStore,
 } from "./sidebarInspection";
 import {
@@ -166,9 +165,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
     setSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth));
   };
-  // Inspection mode (see sidebarInspection.ts): a maximized CAD panel or docked comments
-  // collapse the sidebar to its icon rail, and the user's own state returns afterwards.
-  const isMobile = useIsMobile();
+  // Collapsing folds the sidebar to its icon rail (see sidebarInspection.ts). Inspection mode,
+  // a maximized CAD panel or docked comments, folds an expanded sidebar too, and the user's
+  // own state returns afterwards.
   const inspecting = useInspectionTriggersStore(isInspecting);
   const [sidebarInspection, dispatchSidebarInspection] = useReducer(
     reduceSidebarInspection,
@@ -177,7 +176,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     dispatchSidebarInspection({ type: "inspection", inspecting });
   }, [inspecting]);
-  const sidebarPresentation = resolveSidebarPresentation(sidebarInspection, { isMobile });
+  const sidebarOpen = resolveSidebarOpen(sidebarInspection);
   const handleSidebarOpenChange = useCallback(
     (open: boolean) => dispatchSidebarInspection({ type: "user", open }),
     [],
@@ -190,7 +189,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
-    // The inspection rail is as wide as the floating sidebar toggle plus its 0.75rem (and
+    // The icon rail is as wide as the floating sidebar toggle plus its 0.75rem (and
     // 1px) inset on both sides, plus the rail's 1px right border, so the rail's center line
     // is the toggle's and every rail item lines up under it. macOS moves the toggle past the
     // traffic lights, beyond the rail, so it has no toggle to line up with.
@@ -241,15 +240,16 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider
       className="h-dvh! min-h-0!"
-      open={sidebarPresentation.open}
+      open={sidebarOpen}
       onOpenChange={handleSidebarOpenChange}
-      collapsedLayout={sidebarPresentation.collapsible}
+      collapsedLayout="icon"
       style={sidebarProviderStyle}
     >
       <ProjectProjectionRetention />
       <Sidebar
         side="left"
-        collapsible={sidebarPresentation.collapsible}
+        // Collapsing on desktop always folds to the icon rail; it never hides the sidebar.
+        collapsible="icon"
         data-app-sidebar=""
         className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         resizable={{

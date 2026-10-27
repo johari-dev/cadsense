@@ -5,106 +5,59 @@ import {
   INITIAL_SIDEBAR_INSPECTION,
   isInspecting,
   reduceSidebarInspection,
-  resolveSidebarPresentation,
+  resolveSidebarOpen,
   useInspectionTriggersStore,
-  type SidebarInspectionState,
 } from "./sidebarInspection";
 
-const desktop = (state: SidebarInspectionState) =>
-  resolveSidebarPresentation(state, { isMobile: false });
+const start = (state = INITIAL_SIDEBAR_INSPECTION) =>
+  reduceSidebarInspection(state, { type: "inspection", inspecting: true });
+const end = (state: typeof INITIAL_SIDEBAR_INSPECTION) =>
+  reduceSidebarInspection(state, { type: "inspection", inspecting: false });
+const userSets = (state: typeof INITIAL_SIDEBAR_INSPECTION, open: boolean) =>
+  reduceSidebarInspection(state, { type: "user", open });
 
-describe("reduceSidebarInspection and resolveSidebarPresentation", () => {
-  it("shows the user's sidebar while nothing is being inspected", () => {
-    expect(desktop(INITIAL_SIDEBAR_INSPECTION)).toEqual({ open: true, collapsible: "offcanvas" });
-    const hidden = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "user",
-      open: false,
-    });
-    expect(desktop(hidden)).toEqual({ open: false, collapsible: "offcanvas" });
+describe("reduceSidebarInspection and resolveSidebarOpen", () => {
+  it("follows the user while nothing is being inspected", () => {
+    expect(resolveSidebarOpen(INITIAL_SIDEBAR_INSPECTION)).toBe(true);
+    expect(resolveSidebarOpen(userSets(INITIAL_SIDEBAR_INSPECTION, false))).toBe(false);
   });
 
-  it("collapses an open sidebar to the icon rail when inspection starts", () => {
-    const inspecting = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "inspection",
-      inspecting: true,
-    });
-    expect(desktop(inspecting)).toEqual({ open: false, collapsible: "icon" });
+  it("folds an expanded sidebar to the rail when inspection starts", () => {
+    expect(resolveSidebarOpen(start())).toBe(false);
   });
 
   it("keeps a sidebar the user expands during inspection expanded until inspection ends", () => {
-    let state = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "inspection",
-      inspecting: true,
-    });
-    state = reduceSidebarInspection(state, { type: "user", open: true });
-    expect(desktop(state).open).toBe(true);
+    let state = userSets(start(), true);
+    expect(resolveSidebarOpen(state)).toBe(true);
     // A repeated inspection signal (another render, the second trigger) must not undo it.
-    state = reduceSidebarInspection(state, { type: "inspection", inspecting: true });
-    expect(desktop(state).open).toBe(true);
+    state = start(state);
+    expect(resolveSidebarOpen(state)).toBe(true);
   });
 
   it("restores the user's own state when inspection ends, whatever they chose during it", () => {
-    let state = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "inspection",
-      inspecting: true,
-    });
-    state = reduceSidebarInspection(state, { type: "user", open: true });
-    state = reduceSidebarInspection(state, { type: "user", open: false });
-    state = reduceSidebarInspection(state, { type: "inspection", inspecting: false });
-    expect(desktop(state)).toEqual({ open: true, collapsible: "offcanvas" });
+    const expanded = end(userSets(userSets(start(), true), false));
+    expect(resolveSidebarOpen(expanded)).toBe(true);
 
-    let hidden = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, { type: "user", open: false });
-    hidden = reduceSidebarInspection(hidden, { type: "inspection", inspecting: true });
-    hidden = reduceSidebarInspection(hidden, { type: "user", open: true });
-    hidden = reduceSidebarInspection(hidden, { type: "inspection", inspecting: false });
-    expect(desktop(hidden)).toEqual({ open: false, collapsible: "offcanvas" });
+    const rail = end(userSets(start(userSets(INITIAL_SIDEBAR_INSPECTION, false)), true));
+    expect(resolveSidebarOpen(rail)).toBe(false);
+  });
+
+  it("keeps a collapsed sidebar collapsed through an inspection", () => {
+    const collapsed = userSets(INITIAL_SIDEBAR_INSPECTION, false);
+    expect(resolveSidebarOpen(start(collapsed))).toBe(false);
+    expect(resolveSidebarOpen(end(start(collapsed)))).toBe(false);
   });
 
   it("starts each inspection fresh instead of reusing the last one's choice", () => {
-    let state = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "inspection",
-      inspecting: true,
-    });
-    state = reduceSidebarInspection(state, { type: "user", open: true });
-    state = reduceSidebarInspection(state, { type: "inspection", inspecting: false });
-    state = reduceSidebarInspection(state, { type: "inspection", inspecting: true });
-    expect(desktop(state)).toEqual({ open: false, collapsible: "icon" });
+    expect(resolveSidebarOpen(start(end(userSets(start(), true))))).toBe(false);
   });
 
-  it("keeps a sidebar the user had hidden hidden, rather than adding a rail", () => {
-    let state = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, { type: "user", open: false });
-    state = reduceSidebarInspection(state, { type: "inspection", inspecting: true });
-    expect(desktop(state)).toEqual({ open: false, collapsible: "offcanvas" });
-  });
-
-  it("collapses back to the rail when the user collapses it again during inspection", () => {
-    let state = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "inspection",
-      inspecting: true,
-    });
-    state = reduceSidebarInspection(state, { type: "user", open: true });
-    state = reduceSidebarInspection(state, { type: "user", open: false });
-    expect(desktop(state)).toEqual({ open: false, collapsible: "icon" });
-  });
-
-  it("leaves narrow (mobile) windows alone, where the sidebar is a sheet", () => {
-    const state = reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-      type: "inspection",
-      inspecting: true,
-    });
-    expect(resolveSidebarPresentation(state, { isMobile: true })).toEqual({
-      open: true,
-      collapsible: "offcanvas",
-    });
+  it("collapses back when the user collapses it again during inspection", () => {
+    expect(resolveSidebarOpen(userSets(userSets(start(), true), false))).toBe(false);
   });
 
   it("returns the same state object when nothing changes", () => {
-    expect(
-      reduceSidebarInspection(INITIAL_SIDEBAR_INSPECTION, {
-        type: "inspection",
-        inspecting: false,
-      }),
-    ).toBe(INITIAL_SIDEBAR_INSPECTION);
+    expect(end(INITIAL_SIDEBAR_INSPECTION)).toBe(INITIAL_SIDEBAR_INSPECTION);
   });
 });
 

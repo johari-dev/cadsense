@@ -170,7 +170,10 @@ function SidebarProvider({
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
-        data-sidebar-state={state === "collapsed" && collapsedLayout === "icon" ? "rail" : state}
+        data-sidebar-state={
+          // Mobile renders the sidebar as a sheet, so a closed one leaves no rail behind.
+          state === "collapsed" && collapsedLayout === "icon" && !isMobile ? "rail" : state
+        }
         data-slot="sidebar-wrapper"
         style={
           {

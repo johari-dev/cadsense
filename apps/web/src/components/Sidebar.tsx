@@ -2767,7 +2767,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   );
 });
 
-/** One square control in the inspection rail, with its label as a tooltip. */
+/** One square control in the icon rail, with its label as a tooltip. */
 function SidebarRailButton({
   label,
   onClick,
@@ -2797,12 +2797,11 @@ function SidebarRailButton({
 }
 
 /**
- * The sidebar folded to its icon rail during inspection (see sidebarInspection.ts): a new
- * thread in the current project, one tile per project, and settings. A project tile or the
- * expand button opens the full sidebar, which then stays open until inspection ends. The
- * floating sidebar toggle sits above the rail in the titlebar row.
+ * The collapsed sidebar: an icon rail (see sidebarInspection.ts) with a new thread in the
+ * current project, one tile per project, and settings. A project tile or the expand button
+ * opens the full sidebar. The floating sidebar toggle sits above the rail in the titlebar row.
  */
-function SidebarInspectionRail({
+function SidebarIconRail({
   projects,
   activeProjectKey,
   onCreateThread,
@@ -2820,7 +2819,7 @@ function SidebarInspectionRail({
   return (
     <div
       className="hidden min-h-0 flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
-      data-sidebar-inspection-rail=""
+      data-sidebar-icon-rail=""
     >
       {threadProject ? (
         <SidebarRailButton
@@ -3502,8 +3501,8 @@ export default function ThreadSidebar() {
       {prewarmedSidebarThreadRefs.map((threadRef) => (
         <SidebarThreadDetailPrewarmer key={scopedThreadKey(threadRef)} threadRef={threadRef} />
       ))}
-      {/* The full sidebar hides while it is folded to the inspection rail; both stay mounted,
-          so expanded thread lists survive the fold. */}
+      {/* The full sidebar hides while it is folded to the icon rail; both stay mounted, so
+          expanded thread lists survive the fold. */}
       <div className="contents group-data-[collapsible=icon]:hidden">
         <SidebarChromeHeader isElectron={isElectron} />
 
@@ -3546,7 +3545,7 @@ export default function ThreadSidebar() {
         />
         <SidebarChromeFooter />
       </div>
-      <SidebarInspectionRail
+      <SidebarIconRail
         projects={sortedProjects}
         activeProjectKey={activeRouteProjectKey}
         onCreateThread={createThreadInProject}

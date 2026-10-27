@@ -1,10 +1,11 @@
 import { create } from "zustand";
 
 /**
- * Inspection mode: while the user inspects a model (the right panel is maximized, or CAD
- * comments are docked beside the model), the app sidebar collapses to an icon rail so the
- * model gets the width. The user can still expand it; that choice holds until inspection
- * ends, and then their own sidebar state comes back.
+ * On desktop the app sidebar is either expanded or folded to its icon rail; collapsing never
+ * hides it. Inspection mode (the right panel is maximized, or CAD comments are docked beside
+ * the model) folds an expanded sidebar to the rail so the model gets the width. The user can
+ * still expand it; that choice holds until inspection ends, and then their own state comes
+ * back. Mobile uses a sheet with its own open state and ignores all of this.
  */
 
 /** What can put the workspace into inspection mode. */
@@ -69,20 +70,8 @@ export function reduceSidebarInspection(
   return state.inspecting ? { ...state, override: event.open } : { ...state, userOpen: event.open };
 }
 
-/**
- * How the desktop sidebar renders. Outside inspection it follows the user and collapses
- * off-canvas. During inspection an open sidebar becomes the icon rail unless the user expands
- * it; a sidebar they had hidden stays hidden. Mobile uses a sheet and is never changed.
- */
-export function resolveSidebarPresentation(
-  state: SidebarInspectionState,
-  environment: { readonly isMobile: boolean },
-): { readonly open: boolean; readonly collapsible: "offcanvas" | "icon" } {
-  if (environment.isMobile || !state.inspecting) {
-    return { open: state.userOpen, collapsible: "offcanvas" };
-  }
-  if (state.override === null) {
-    return { open: false, collapsible: state.userOpen ? "icon" : "offcanvas" };
-  }
-  return { open: state.override, collapsible: "icon" };
+/** Whether the desktop sidebar is expanded (true) or folded to its icon rail (false). */
+export function resolveSidebarOpen(state: SidebarInspectionState): boolean {
+  if (!state.inspecting) return state.userOpen;
+  return state.override ?? false;
 }
