@@ -171,19 +171,27 @@ describe("centers", () => {
             expect(Math.min(stage.driver.teeth, stage.driven.teeth)).toBeGreaterThan(12);
   });
 
-  it("wraps at least 6 belt teeth and keeps wheels apart", () => {
-    for (const centerMeters of [3 * INCH, 4.25 * INCH, 6 * INCH])
-      for (const option of search({ reduction: 2.5, centerMeters }).options)
+  // Checked at the center each stage returns, which for a chain can sit a link's worth from the
+  // requested one (3:1 #35 at 2.52 in once came back overlapping at 2.318 in).
+  it("wraps at least 6 belt teeth or 120 degrees of chain, and keeps wheels apart", () => {
+    const cases: [number, number, readonly CadDriveFamily[]][] = [
+      [2.5, 3, ALL],
+      [2.5, 4.25, ALL],
+      [2.5, 6, ALL],
+      [3, 2.52, ["chain-35"]],
+    ];
+    for (const [reduction, inches, families] of cases)
+      for (const option of search({ reduction, centerMeters: inches * INCH, families }).options)
         for (const stage of option.stages) {
           if (stage.centerInches === null || stage.family.startsWith("gear")) continue;
           const c = stage.centerInches * INCH;
           const small = pitchRadius(stage.family, stage.driver.teeth);
           const large = pitchRadius(stage.family, stage.driven.teeth);
           expect(c - small - large).toBeGreaterThanOrEqual(0.125 * INCH - 1e-5);
-          if (!stage.family.startsWith("chain")) {
-            const wrap = Math.PI - 2 * Math.asin((large - small) / c);
-            expect((stage.driver.teeth * wrap) / (2 * Math.PI)).toBeGreaterThanOrEqual(6);
-          }
+          const wrap = Math.PI - 2 * Math.asin((large - small) / c);
+          if (stage.family.startsWith("chain"))
+            expect(wrap).toBeGreaterThanOrEqual((2 * Math.PI) / 3 - 1e-4);
+          else expect((stage.driver.teeth * wrap) / (2 * Math.PI)).toBeGreaterThanOrEqual(6);
         }
   });
 

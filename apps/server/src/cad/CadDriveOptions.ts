@@ -265,20 +265,21 @@ const buildAt = (stage: Stage, center: number): (Build & { readonly fits: boolea
     shape.kind === "belt"
       ? [...stage.family.belts.keys()]
       : [2 * Math.floor(needed / shape.pitchMm / 2), 2 * Math.ceil(needed / shape.pitchMm / 2)];
-  let best: { loop: number; error: number } | null = null;
+  // A loop's own center can sit up to half a link from `center`, so it must meet the rules too.
+  let best: { loop: number; error: number; built: number } | null = null;
   for (const loop of loops) {
     const error = needed - loop * shape.pitchMm;
-    if (!best || Math.abs(error) < Math.abs(best.error)) best = { loop, error };
+    const built = loopCenter(stage, loop * shape.pitchMm);
+    if (built === null || !loopUsable(stage, built)) continue;
+    if (!best || Math.abs(error) < Math.abs(best.error)) best = { loop, error, built };
   }
-  if (!best) return null;
-  const built = loopCenter(stage, best.loop * shape.pitchMm);
-  return built === null
-    ? null
-    : {
-        center: built,
+  return best
+    ? {
+        center: best.built,
         loop: best.loop,
         fits: loopLengthFits(best.error, shape.kind === "chain", shape.pitchMm),
-      };
+      }
+    : null;
 };
 
 /** The pair of builds whose centers reach between axes `center` apart with the least excess. */
