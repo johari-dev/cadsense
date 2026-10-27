@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, XIcon as X } from "~/lib/icons";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { isElectron } from "~/env";
 import type { RightPanelSection } from "~/rightPanelStore";
@@ -9,6 +9,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
+import { holdInspection } from "./sidebarInspection";
 import { THREAD_SIDEBAR_DEFAULT_WIDTH } from "./threadSidebarWidth";
 
 /** Chat column width the CAD panel's default leaves beside the default sidebar. */
@@ -77,6 +78,12 @@ const SECTION_LABEL = {
 export function RightPanel(props: RightPanelProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const atHome = props.section !== null && props.section === props.home;
+  // A maximized inline panel is an inspection: the app sidebar folds to its icon rail.
+  const holdsInspection = props.mode === "inline" && props.maximized === true;
+  useEffect(
+    () => (holdsInspection ? holdInspection("panel-maximized") : undefined),
+    [holdsInspection],
+  );
 
   return (
     <PreviewPanelShell

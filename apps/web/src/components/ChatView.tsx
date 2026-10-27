@@ -3988,6 +3988,7 @@ function ChatViewContent(props: ChatViewProps) {
             activeProjectOnshapeSource={activeProject?.onshapeSource}
             openInCwd={activeProject?.workspaceRoot ?? null}
             rightPanelOpen={rightPanelOpen}
+            projectShownInRightPanel={rightPanelOpen && rightPanelSection === "cad"}
             onNewThreadInProject={handleNewThreadInActiveProject}
           />
         </WorkspacePageHeader>

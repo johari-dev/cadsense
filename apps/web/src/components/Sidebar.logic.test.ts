@@ -1617,9 +1617,7 @@ describe("resolveSidebarThreadTitle", () => {
   });
 
   it("matches the project name in any case", () => {
-    expect(resolveSidebarThreadTitle("Review ELEVATOR Cascade", "review elevator")).toBe(
-      "Cascade",
-    );
+    expect(resolveSidebarThreadTitle("Review ELEVATOR Cascade", "review elevator")).toBe("Cascade");
     expect(resolveSidebarThreadTitle("elevator Cascade Design Feedback", "Elevator cascade")).toBe(
       "Design Feedback",
     );

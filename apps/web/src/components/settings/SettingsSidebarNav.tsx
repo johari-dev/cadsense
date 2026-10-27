@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArchiveIcon,
+  HardDriveIcon,
   ShapesIcon as BlocksIcon,
   RobotIcon as BotIcon,
   KeyboardIcon,
@@ -48,7 +49,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/keybindings": KeyboardIcon,
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
-  "/settings/cad-storage": ArchiveIcon,
+  "/settings/cad-storage": HardDriveIcon,
   "/settings/archived": ArchiveIcon,
 };
 

@@ -71,6 +71,7 @@ import {
   IconHelpCircle,
   IconHighlight,
   IconHistory,
+  IconHome,
   IconInfoCircle,
   IconKey,
   IconKeyboard,
@@ -215,6 +216,7 @@ export const GlobeIcon = tablerIcon(IconWorld);
 export const HammerIcon = tablerIcon(IconHammer);
 export const HardDriveIcon = tablerIcon(IconServer);
 export const HighlighterIcon = tablerIcon(IconHighlight);
+export const HouseIcon = tablerIcon(IconHome);
 export const InfoIcon = tablerIcon(IconInfoCircle);
 export const IntersectIcon = tablerIcon(IconVectorTriangle);
 export const KeyIcon = tablerIcon(IconKey);

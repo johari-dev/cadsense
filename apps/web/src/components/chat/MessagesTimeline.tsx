@@ -154,13 +154,13 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
-// As tall as the list's 1.5rem top fade, so the first row is never faded at rest.
-const TIMELINE_LIST_HEADER = <div className="h-6" />;
-// The fade under the chat header: fully transparent for the first 0.625rem, then opaque by
-// 1.5rem, so a line sliding under the header dissolves instead of reading as cut text. The
-// second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
+// As tall as the list's 1.625rem top fade, so the first row is never faded at rest.
+const TIMELINE_LIST_HEADER = <div className="h-6.5" />;
+// The fade under the chat header's divider: fully transparent for the first 1.25rem (about
+// 19px, a whole line down to its descenders) so no glyph fragment shows against the divider, then an eased ramp to
+// opaque by 1.625rem (about 24px). The second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
 const TIMELINE_TOP_FADE_CLASS_NAME =
-  "[mask-image:linear-gradient(to_bottom,transparent_0.625rem,black_1.5rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
+  "[mask-image:linear-gradient(to_bottom,transparent_1.25rem,rgb(0_0_0/0.3)_1.45rem,black_1.625rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
 
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
@@ -172,7 +172,7 @@ function TimelineLoadEarlierHeader({
   onLoadEarlier: () => void;
 }) {
   return (
-    <div className="pt-6">
+    <div className="pt-6.5">
       <div className="mx-auto w-full max-w-3xl pb-2">
         <button
           type="button"

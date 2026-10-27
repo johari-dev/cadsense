@@ -3,7 +3,7 @@
 // Drawn with CSS 3D transforms, so it needs no second WebGL context.
 import type { CadViewState } from "@cadsense/contracts";
 import { type RefObject, useLayoutEffect, useRef } from "react";
-import { CubeIcon } from "~/lib/icons";
+import { HouseIcon } from "~/lib/icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { CAD_VIEW_DIRECTIONS, cadPresetUp } from "./CadSceneModel";
@@ -193,19 +193,19 @@ export function CadViewCube({
     >
       <Tooltip>
         <TooltipTrigger
-          aria-label="Isometric view"
+          aria-label="Reset view to isometric"
           disabled={disabled}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg border bg-popover text-muted-foreground shadow-sm outline-none transition-colors hover:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_8%)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
+          className="flex size-7 cursor-pointer items-center justify-center rounded-lg border border-input bg-popover text-foreground/75 shadow-sm outline-none transition-colors hover:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_8%)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
           onClick={() => snap(ISOMETRIC)}
         >
-          <CubeIcon aria-hidden="true" className="size-4" />
+          <HouseIcon aria-hidden="true" className="size-4" />
         </TooltipTrigger>
-        <TooltipPopup>Isometric view</TooltipPopup>
+        <TooltipPopup>Reset view</TooltipPopup>
       </Tooltip>
       {/* A round backing, so the cube reads as a control at every angle, even edge-on, and
           stands off the model behind it. */}
       <div
-        className="flex items-center justify-center rounded-full border bg-popover/85 shadow-sm"
+        className="flex items-center justify-center rounded-full border border-input bg-popover/85 shadow-md"
         style={{ width: BACKING, height: BACKING }}
       >
         <div
@@ -218,7 +218,7 @@ export function CadViewCube({
             return (
               <div
                 key={face.preset}
-                className="absolute inset-0 grid [backface-visibility:hidden] border border-foreground/20 transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]!"
+                className="absolute inset-0 grid [backface-visibility:hidden] border border-foreground/30 transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]!"
                 style={{
                   transform: faceTransform(face.normal, face.up),
                   background: `color-mix(in srgb, var(--popover), ${face.shade < 0 ? "black" : "var(--foreground)"} ${Math.abs(face.shade)}%)`,
@@ -237,7 +237,7 @@ export function CadViewCube({
                         <TooltipTrigger
                           aria-label={`${face.label} view`}
                           disabled={disabled}
-                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-wide text-foreground/70 uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
+                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-[0.04em] text-foreground/70 uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
                           onClick={() => snap(face.normal)}
                         >
                           {/* Wider than the center zone on long labels; clicks there still

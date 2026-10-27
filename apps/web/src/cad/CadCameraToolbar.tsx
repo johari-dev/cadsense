@@ -8,9 +8,11 @@ import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { CadViewCube } from "./CadViewCube";
 
 /** One 32px toolbar button with a 16px icon. Pressed (an applied section, exploded) is
-    white; an open popover gets the hover background. */
+    white; an open popover gets the hover background. In a narrow viewport (under 608px; the
+    bar's container is 16px narrower) buttons drop their labels to 32px squares, so the bar keeps
+    clear of the view cube. */
 const toolbarControl =
-  "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
+  "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[13px] text-foreground/75 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40 @max-[592px]:w-8 @max-[592px]:px-0 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
 const sectionField =
   "h-7 w-full rounded-md border border-input bg-background px-2 text-[13px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24 disabled:opacity-60";
 
@@ -64,11 +66,11 @@ export function CadCameraToolbar({
         <CadViewCube renderer={renderer} view={view} disabled={disabled} onChange={onChange} />
       </div>
       {/* Above the comment marker layer (z-20) and opaque, so markers never show through it. */}
-      <div className="pointer-events-none absolute inset-x-2 bottom-3 z-30 flex justify-center">
+      <div className="@container pointer-events-none absolute inset-x-2 bottom-4 z-30 flex justify-center">
         <div
           role="toolbar"
           aria-label="CAD camera views"
-          className="pointer-events-auto relative flex max-w-full items-center gap-0.5 rounded-lg border bg-popover p-0.5 shadow-sm"
+          className="pointer-events-auto relative flex max-w-full items-center gap-0.5 rounded-lg border border-input bg-popover p-0.5 shadow-md"
         >
           {sectionOpen && (
             <form
@@ -145,13 +147,14 @@ export function CadCameraToolbar({
               }
             >
               <ZoomScanIcon aria-hidden="true" />
-              Fit
+              <span className="@max-[592px]:sr-only">Fit</span>
             </TooltipTrigger>
             <TooltipPopup>Fit the whole model in view</TooltipPopup>
           </Tooltip>
           <ToolbarDivider />
           <Tooltip>
             <TooltipTrigger
+              aria-label="Section"
               aria-expanded={sectionOpen}
               data-active={sectionApplied || undefined}
               disabled={disabled}
@@ -159,7 +162,7 @@ export function CadCameraToolbar({
               onClick={() => setSectionOpen(!sectionOpen)}
             >
               <SquareHalfIcon aria-hidden="true" />
-              Section
+              <span className="@max-[592px]:sr-only">Section</span>
             </TooltipTrigger>
             <TooltipPopup>
               {sectionApplied
@@ -177,7 +180,7 @@ export function CadCameraToolbar({
               onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
             >
               <ComponentsIcon aria-hidden="true" />
-              Explode
+              <span className="@max-[592px]:sr-only">Explode</span>
             </TooltipTrigger>
             <TooltipPopup>
               {view.explosion > 0 ? "Put the parts back together" : "Spread the parts apart"}
@@ -201,7 +204,7 @@ export function CadCameraToolbar({
                   }
                 >
                   <ArrowUUpLeftIcon aria-hidden="true" />
-                  Reset
+                  <span className="@max-[592px]:sr-only">Reset</span>
                 </TooltipTrigger>
                 <TooltipPopup>Clear highlights, ghosting, and section planes</TooltipPopup>
               </Tooltip>

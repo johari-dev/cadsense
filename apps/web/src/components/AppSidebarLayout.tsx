@@ -1,7 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
+  useCallback,
   useEffect,
+  useReducer,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -23,6 +25,14 @@ import {
   useSidebarStageBackdropVariant,
 } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
+import { useIsMobile } from "../hooks/useMediaQuery";
+import {
+  INITIAL_SIDEBAR_INSPECTION,
+  isInspecting,
+  reduceSidebarInspection,
+  resolveSidebarPresentation,
+  useInspectionTriggersStore,
+} from "./sidebarInspection";
 import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
@@ -156,6 +166,22 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
     setSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth));
   };
+  // Inspection mode (see sidebarInspection.ts): a maximized CAD panel or docked comments
+  // collapse the sidebar to its icon rail, and the user's own state returns afterwards.
+  const isMobile = useIsMobile();
+  const inspecting = useInspectionTriggersStore(isInspecting);
+  const [sidebarInspection, dispatchSidebarInspection] = useReducer(
+    reduceSidebarInspection,
+    INITIAL_SIDEBAR_INSPECTION,
+  );
+  useEffect(() => {
+    dispatchSidebarInspection({ type: "inspection", inspecting });
+  }, [inspecting]);
+  const sidebarPresentation = resolveSidebarPresentation(sidebarInspection, { isMobile });
+  const handleSidebarOpenChange = useCallback(
+    (open: boolean) => dispatchSidebarInspection({ type: "user", open }),
+    [],
+  );
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"
@@ -207,11 +233,17 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
+    <SidebarProvider
+      className="h-dvh! min-h-0!"
+      open={sidebarPresentation.open}
+      onOpenChange={handleSidebarOpenChange}
+      collapsedLayout={sidebarPresentation.collapsible}
+      style={sidebarProviderStyle}
+    >
       <ProjectProjectionRetention />
       <Sidebar
         side="left"
-        collapsible="offcanvas"
+        collapsible={sidebarPresentation.collapsible}
         data-app-sidebar=""
         className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         resizable={{

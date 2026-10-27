@@ -34,6 +34,8 @@ interface ChatHeaderProps {
   activeProjectOnshapeSource?: OnshapeProjectSource | undefined;
   openInCwd: string | null;
   rightPanelOpen: boolean;
+  /** The open CAD panel already names the project in its header, so the chip would repeat it. */
+  projectShownInRightPanel: boolean;
   onNewThreadInProject: () => void;
 }
 
@@ -69,6 +71,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectOnshapeSource,
   openInCwd,
   rightPanelOpen,
+  projectShownInRightPanel,
   onNewThreadInProject,
 }: ChatHeaderProps) {
   const activeThreadRef = useMemo(
@@ -265,8 +268,9 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
         {/* The project follows the thread title as a quiet 12px chip, set apart by a wider
-            gap, so the two never read as one long title. */}
-        {activeProjectName ? (
+            gap, so the two never read as one long title. It hides while the CAD panel is
+            open, because that panel's header already names the project. */}
+        {activeProjectName && !projectShownInRightPanel ? (
           <WorkspaceBreadcrumbItem className="ps-1">
             <Tooltip>
               <TooltipTrigger

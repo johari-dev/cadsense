@@ -270,16 +270,12 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        {/* Page text starts 64px from the settings nav (48px here plus the rows' own 16px
-            inset) instead of centering in the window. Readable pages cap the form at 720px so each label stays close to its
-            control; wider pages (diagnostics, tables) opt out through `width`. */}
+        {/* Pages center in the area right of the settings nav. Readable pages cap the form
+            at 720px so each label stays close to its control; wider pages (diagnostics,
+            tables) opt out through `width`. */}
         <WorkspacePageContainer
           width={width}
-          className={cn(
-            "mx-0 gap-8 sm:ps-12",
-            width === "readable" && "max-w-[calc(45rem+4.5rem)]",
-            className,
-          )}
+          className={cn("gap-8", width === "readable" && "max-w-[calc(45rem+3rem)]", className)}
         >
           {children}
         </WorkspacePageContainer>

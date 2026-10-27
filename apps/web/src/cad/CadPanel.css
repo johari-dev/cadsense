@@ -5,7 +5,7 @@
    width, so the canvas resizes once, and only its content fades in. */
 /* Size of the viewport's corner controls: the comments toggle and the view changes chip. */
 :root {
-  --cad-overlay-control: 34px;
+  --cad-overlay-control: 32px;
 }
 
 .cad-comments-surface {

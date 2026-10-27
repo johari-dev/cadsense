@@ -84,11 +84,11 @@ const PIN_SHAPE =
  */
 const PIN_CLASS = `${PIN_SHAPE} h-5.5 min-w-5.5 rounded-full border-[1.5px] border-[#0b0b0b] px-1.5 text-[11px] shadow-[0_1px_3px_rgb(0_0_0/0.45)]`;
 /**
- * A group's count marker: a rounded square, not a circle, on a neutral surface with a stack
- * glyph and the count, so it never reads as another finding's pin. "12 comments" lives in its
- * tooltip and accessible name. Expanded, it keeps only the glyph at the centre of its pins.
+ * A group's count marker: a rounded square, not a circle, on a neutral surface reading "+3",
+ * never a bare numeral, so it can't be mistaken for comment #3. "3 comments here: …" lives in
+ * its tooltip and accessible name. Expanded, it shows a stack glyph at the centre of its pins.
  */
-const PIN_GROUP_CLASS = `${PIN_SHAPE} group h-6 min-w-6 gap-1 rounded-md border border-foreground/45 bg-popover px-1.5 text-[11px] text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)] after:content-[attr(data-count)] aria-expanded:px-0 aria-expanded:after:content-none`;
+const PIN_GROUP_CLASS = `${PIN_SHAPE} group h-6 min-w-6 rounded-md border border-foreground/50 bg-popover px-1.5 text-[12px] text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)] after:content-[attr(data-count)] aria-expanded:px-0 aria-expanded:after:content-none`;
 /**
  * Width of the open comments card in CSS px, kept in step with CadPanel.css. The card sits
  * 12px from the viewport's right edge, so framing that avoids it reserves this plus 12px.
@@ -151,6 +151,8 @@ export function CadCommentsCard({
   const [dismissing, setDismissing] = useState<{ id: string; reason: string } | null>(null);
   const inFlightReviews = useRef(new Set<string>());
   const [layoutVersion, setLayoutVersion] = useState(0);
+  // Whether the pointer has moved over the list since the card opened (see the list's hover).
+  const [hoverReady, setHoverReady] = useState(false);
   // The pin group fanned out around its count marker, by the key of its first pin.
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -236,7 +238,7 @@ export function CadCommentsCard({
    */
   const toggleText = `${openCount} comment${openCount === 1 ? "" : "s"}`;
   const toggleWidth = openCount
-    ? `calc(var(--cad-overlay-control) + 0.75rem + ${String(openCount).length}ch + ${openCount === 1 ? 4 : 4.5}em)`
+    ? `calc(48px + ${String(openCount).length}ch + ${openCount === 1 ? 4.3 : 4.8}em)`
     : "var(--cad-overlay-control)";
   useEffect(() => {
     if (historical) setFilter("history");
@@ -254,6 +256,7 @@ export function CadCommentsCard({
   useEffect(() => {
     if (!open) {
       renderer.current?.endCommentReview();
+      setHoverReady(false);
       lastFocus.current = "";
       setFocusNotice("");
       setReviewNotice(null);
@@ -379,7 +382,7 @@ export function CadCommentsCard({
         if (counter) {
           place(counter, cx, cy);
           const name = `${group.length} comments here: ${group.map((pin) => pin.label).join(", ")}`;
-          counter.dataset.count = String(group.length);
+          counter.dataset.count = `+${group.length}`;
           counter.setAttribute("aria-expanded", String(expandedGroup === key));
           counter.setAttribute("aria-label", name);
           counter.title = name;
@@ -532,22 +535,26 @@ export function CadCommentsCard({
           <X className="size-4" />
         </Button>
       </div>
-      {filter === "open" && legend.length > 0 && (
-        // The key for pin and badge colors, with how many open findings have each severity.
-        // Reviewed findings show muted badges, so the key only appears with the open list.
-        <ul
-          aria-label="Severity colors"
-          className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-xs text-muted-foreground"
-        >
-          {legend.map(({ severity, label, count }) => (
-            <li key={severity} className="flex items-center gap-1.5">
-              <span aria-hidden className={cn("size-2.5 rounded-full", SEVERITY_FILL[severity])} />
-              {label}
-              <span className="tabular-nums text-foreground/80">{count}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {filter === "open" &&
+        legend.length > 0 && (
+          // The key for pin and badge colors, with how many open findings have each severity.
+          // Reviewed findings show muted badges, so the key only appears with the open list.
+          <ul
+            aria-label="Severity colors"
+            className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-xs text-muted-foreground"
+          >
+            {legend.map(({ severity, label, count }) => (
+              <li key={severity} className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className={cn("size-2.5 rounded-full", SEVERITY_FILL[severity])}
+                />
+                {label}
+                <span className="tabular-nums text-foreground/80">{count}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       {reviewNotice && (
         <div
           role="status"
@@ -562,7 +569,15 @@ export function CadCommentsCard({
           )}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+      <div
+        // The dock can open under a resting pointer (a pin click right where the dock appears);
+        // row hover waits for real movement so that row never reads as a second selection.
+        data-hover-ready={hoverReady || undefined}
+        onPointerMove={() => {
+          if (!hoverReady) setHoverReady(true);
+        }}
+        className="group/list min-h-0 flex-1 overflow-y-auto py-1"
+      >
         {visible.length ? (
           visible.map((c) => {
             const location = selection?.id === c.id ? locationOf(c, selection.target) : null;
@@ -571,23 +586,34 @@ export function CadCommentsCard({
             const outdated = c.outdated
               ? `Outdated: ${OUTDATED_REASONS[c.outdated.reason]} in a newer revision`
               : null;
+            // The expanded finding's metadata line: "Concern · Interference · 2 parts".
+            const metadata = [
+              c.severity ? severityLabel(c.severity, c.category) : "",
+              c.targets.length > 1
+                ? `${c.targets.length} ${c.targets.every((t) => t.kind === "part") ? "parts" : "locations"}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
             return (
               <article
                 key={c.id}
                 className={cn(
-                  // Reading size: 13px titles and body on a 20px line, 12px metadata. The
-                  // expanded row is lifted and marked by a light bar along its left edge.
-                  "border-l-2 text-[13px] leading-5",
+                  // Rows read at 13px on a 20px line. The expanded row is lifted and marked by a
+                  // bar in the scene's selection blue (CadSceneModel's highlight), tying it to
+                  // the highlighted part. Hover only lights a row once the pointer has moved
+                  // over the list (see hoverReady).
+                  "border-l-2 text-[13px] leading-[20px]",
                   expanded
-                    ? "border-foreground/70 bg-foreground/[0.08]"
-                    : "border-transparent hover:bg-foreground/[0.04]",
+                    ? "border-[#7dbbff] bg-foreground/[0.08]"
+                    : "border-transparent group-data-[hover-ready]/list:hover:bg-foreground/[0.04]",
                 )}
               >
                 {/* The padding lives on the button so the whole row is clickable. */}
                 <button
                   className={cn(
                     "flex w-full cursor-pointer items-start gap-2.5 ps-[14px] pe-4 text-left",
-                    expanded ? "pt-4 pb-2" : "py-2",
+                    expanded ? "pt-4 pb-3" : "py-2",
                   )}
                   aria-expanded={expanded}
                   onClick={() => choose(c, "all")}
@@ -596,17 +622,21 @@ export function CadCommentsCard({
                   <span className="flex w-5 shrink-0 pt-px">
                     <SeverityBadge comment={c} />
                   </span>
-                  <span
-                    className={cn("min-w-0 flex-1", expanded ? "font-semibold" : "line-clamp-2")}
-                  >
-                    {c.title}
-                  </span>
-                  {c.targets.length > 1 && (
-                    <span className="shrink-0 pt-px text-xs text-muted-foreground">
-                      {c.targets.length}{" "}
-                      {c.targets.every((t) => t.kind === "part") ? "parts" : "locations"}
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        "block",
+                        expanded ? "text-[14px] font-semibold" : "line-clamp-2",
+                      )}
+                    >
+                      {c.title}
                     </span>
-                  )}
+                    {expanded && metadata && (
+                      <span className="mt-0.5 block text-[12px] leading-4 text-foreground/70">
+                        {metadata}
+                      </span>
+                    )}
+                  </span>
                   {previousRevision && (
                     <RowStatusIcon icon={ClockCounterClockwiseIcon} label="Previous revision" />
                   )}
@@ -621,13 +651,10 @@ export function CadCommentsCard({
                 {expanded && (
                   // 16px around the expanded finding; the body lines up under the title.
                   <div className="space-y-3 ps-[44px] pe-4 pb-4">
-                    {c.severity && (
-                      <p className="text-xs text-foreground/80">
-                        {severityLabel(c.severity, c.category)}
-                      </p>
-                    )}
-                    <p className="whitespace-pre-wrap text-foreground/85">{c.body}</p>
-                    {outdated && <p className="text-xs text-muted-foreground">{outdated}</p>}
+                    <p className="whitespace-pre-wrap text-[14px] leading-[21px] text-foreground/80">
+                      {c.body}
+                    </p>
+                    {outdated && <p className="text-[12px] text-muted-foreground">{outdated}</p>}
                     {c.link && (
                       <button
                         className="cursor-pointer text-left underline"
@@ -656,7 +683,9 @@ export function CadCommentsCard({
                       </p>
                     )}
                     {c.state === "dismissed" && c.reviewReason && (
-                      <p className="text-xs text-muted-foreground">Dismissed: {c.reviewReason}</p>
+                      <p className="text-[12px] text-muted-foreground">
+                        Dismissed: {c.reviewReason}
+                      </p>
                     )}
                     <div className="flex flex-wrap items-center gap-1">
                       {c.targets.length > 1 && (
@@ -862,7 +891,10 @@ export function CadCommentsCard({
                     onPointerLeave={releaseGroup}
                     className={cn(PIN_GROUP_CLASS, dimmed && "opacity-70 hover:opacity-100")}
                   >
-                    <StackIcon aria-hidden className="size-3 text-muted-foreground" />
+                    <StackIcon
+                      aria-hidden
+                      className="hidden size-3 text-muted-foreground group-aria-expanded:block"
+                    />
                   </button>
                 </Fragment>
               );
@@ -887,7 +919,9 @@ export function CadCommentsCard({
           data-historical={historical}
           // Collapsed, the surface is as wide as the toggle chip; open, CadPanel.css sizes it.
           style={open ? undefined : { width: toggleWidth }}
-          className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-xs text-popover-foreground shadow-lg"
+          // 13px, so the collapsed chip's `ch`/`em` width matches its label (the card's own text
+          // sets its sizes explicitly).
+          className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-[8px] border bg-popover text-[13px] text-popover-foreground shadow-lg"
         >
           {!open && (
             // Collapsed, the surface itself is the toggle: this button fills its inside edge to
@@ -902,11 +936,11 @@ export function CadCommentsCard({
                     aria-expanded={false}
                     onClick={() => setOpen(true)}
                     style={{ width: `calc(${toggleWidth} - 2px)` }}
-                    className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--radius-lg)-1px)] outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[7px] font-medium outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 }
               >
-                <MessageSquare aria-hidden className="size-4 shrink-0" />
+                <MessageSquare aria-hidden className="size-[16px] shrink-0" />
                 {openCount > 0 && <span className="tabular-nums">{toggleText}</span>}
               </TooltipTrigger>
               <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
@@ -942,14 +976,15 @@ const COMMENT_FILTERS = [
 
 /**
  * Pin and number badge fill and numeral color per severity, so the list and the scene match:
- * concern yellow, question violet (blue is the scene's selection color), nit dark grey with
- * white numerals, blocker red. A comment without a severity keeps the concern yellow.
+ * concern yellow, question violet (blue is the scene's selection color), nit light grey,
+ * blocker red, all light fills with dark numerals; the pins' dark rim separates them from
+ * the model. A comment without a severity keeps the concern yellow.
  */
 const SEVERITY_FILL: Record<CadCommentSeverity | "none", string> = {
   blocker: "bg-red-300 text-neutral-950",
   concern: "bg-amber-200 text-neutral-950",
   question: "bg-violet-300 text-neutral-950",
-  nit: "bg-neutral-600 text-white",
+  nit: "bg-neutral-300 text-neutral-950",
   none: "bg-amber-200 text-neutral-950",
 };
 /** Legend entries for the severities a review uses, most consequential first. */

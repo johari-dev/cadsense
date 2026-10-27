@@ -350,7 +350,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               <TooltipPopup side="top">Add providers</TooltipPopup>
             </Tooltip>
           </div>
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-[0.8rem]">
             <MagnifyingGlassIcon
               aria-hidden="true"
               className="size-3.5 shrink-0 text-muted-foreground/60"
@@ -389,9 +389,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
           </div>
           <div
             role="tabpanel"
-            // Six whole rows (2.125rem each, set by .composer-model-row; 1px gaps, plus
+            // Six whole rows (2.4rem each, set by .composer-model-row; 1px gaps, plus
             // padding) so the last visible row is never cut in half against the footer.
-            className="flex max-h-[min(calc(6*2.125rem+5px+0.5rem),40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
+            className="flex max-h-[min(calc(6*2.4rem+5px+0.5rem),40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
           >
             {rows.map((row) => {
               const hint = jumpHintFor(row);
@@ -404,7 +404,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   title={row.disabledReason ?? undefined}
                   className={cn(
                     "composer-model-row group",
-                    row.selected && "bg-foreground/[0.05] text-foreground",
+                    row.selected && "bg-foreground/[0.12] text-foreground",
                   )}
                   onClick={() => selectRow(row)}
                 >
@@ -478,9 +478,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             ) : null}
           </div>
           {props.traitRows ? (
-            <div className="flex flex-col gap-px border-t border-input bg-popover p-1">
-              {props.traitRows}
-            </div>
+            <div className="flex flex-col gap-px border-t border-border p-1">{props.traitRows}</div>
           ) : null}
         </div>
       </MenuPopup>

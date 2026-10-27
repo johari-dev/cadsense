@@ -59,6 +59,7 @@ import {
   CadCommentsCard,
   type CadCommentsCardProps,
 } from "./CadCommentsCard";
+import { holdInspection } from "../components/sidebarInspection";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
@@ -74,13 +75,13 @@ const frameInsets = (compact: boolean, cardFloating: boolean) => ({
   right: cardFloating ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
 });
 /** Width of the docked comments column, in CSS px. */
-const DOCK_WIDTH = 300;
+const DOCK_WIDTH = 320;
 /**
  * Below this scene width the open comments card floats over the viewport; at or above it, the
- * card docks as a column beside a viewport that keeps at least 440px, so it never covers the
- * model and the model never gets squeezed. The default 760px CAD panel at a 1440px window docks.
+ * card docks as a column beside a viewport that keeps at least 420px, so it never covers the
+ * model. The default CAD panel in a 1440px window (about 760px) docks.
  */
-const DOCK_MIN_WIDTH = DOCK_WIDTH + 440;
+const DOCK_MIN_WIDTH = DOCK_WIDTH + 420;
 const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
@@ -190,6 +191,9 @@ export function CadScene({
   // renderer now, so the card's focus (a passive effect) frames the comment in the new canvas
   // instead of the old one; the ResizeObserver below would only catch up after it.
   const docked = commentsCard.open && dock !== null;
+  // Docked comments are an inspection: the app sidebar folds to its icon rail before the
+  // docked layout paints.
+  useLayoutEffect(() => (docked ? holdInspection("cad-comments-docked") : undefined), [docked]);
   useLayoutEffect(() => {
     const attachment = attachmentRef.current;
     if (!attachment) return;

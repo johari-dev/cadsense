@@ -2730,6 +2730,113 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   );
 });
 
+/** One square control in the inspection rail, with its label as a tooltip. */
+function SidebarRailButton({
+  label,
+  onClick,
+  children,
+}: {
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="right">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * The sidebar folded to its icon rail during inspection (see sidebarInspection.ts): a new
+ * thread in the current project, one tile per project, and settings. A project tile or the
+ * expand button opens the full sidebar, which then stays open until inspection ends. The
+ * floating sidebar toggle sits above the rail in the titlebar row.
+ */
+function SidebarInspectionRail({
+  projects,
+  activeProjectKey,
+  onCreateThread,
+}: {
+  readonly projects: readonly SidebarProjectSnapshot[];
+  readonly activeProjectKey: string | null;
+  readonly onCreateThread: (project: SidebarProjectSnapshot) => void;
+}) {
+  const navigate = useNavigate();
+  const { setOpen } = useSidebar();
+  const expand = useCallback(() => void setOpen(true), [setOpen]);
+  const threadProject =
+    projects.find((project) => project.projectKey === activeProjectKey) ?? projects[0];
+
+  return (
+    <div
+      className="hidden min-h-0 flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
+      data-sidebar-inspection-rail=""
+    >
+      {threadProject ? (
+        <SidebarRailButton
+          label={`New thread in ${threadProject.displayName}`}
+          onClick={() => onCreateThread(threadProject)}
+        >
+          <SquarePenIcon className="size-4" />
+        </SidebarRailButton>
+      ) : null}
+      <div aria-hidden className="my-1 h-px w-5 shrink-0 bg-sidebar-border" />
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+        {projects.map((project) => {
+          const isActiveProject = project.projectKey === activeProjectKey;
+          return (
+            <Tooltip key={project.projectKey}>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`Show ${project.displayName} threads`}
+                    aria-current={isActiveProject ? "true" : undefined}
+                    className={`inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg hover:bg-sidebar-row-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
+                      isActiveProject ? "bg-sidebar-row-active" : ""
+                    }`}
+                    onClick={expand}
+                  />
+                }
+              >
+                <ProjectFavicon
+                  cadSnapshotId={
+                    project.cad?.roots.find((root) => root.current)?.current?.snapshotId
+                  }
+                  className={SIDEBAR_PROJECT_ICON_CLASS}
+                  environmentId={project.environmentId}
+                  cwd={project.workspaceRoot}
+                  onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="right">{project.displayName}</TooltipPopup>
+            </Tooltip>
+          );
+        })}
+      </div>
+      <SidebarRailButton label="Expand sidebar" onClick={expand}>
+        <ChevronRightIcon className="size-4" />
+      </SidebarRailButton>
+      <SidebarRailButton label="Settings" onClick={() => void navigate({ to: "/settings" })}>
+        <SettingsIcon className="size-4" />
+      </SidebarRailButton>
+    </div>
+  );
+}
+
 export default function ThreadSidebar() {
   const projects = useProjects();
   const sidebarThreads = useThreadShells();
@@ -3315,50 +3422,82 @@ export default function ThreadSidebar() {
     });
   }, []);
 
+  const createThreadInRailProject = useCallback(
+    (project: SidebarProjectSnapshot) => {
+      const member = project.memberProjects[0];
+      if (!member) return;
+      void (async () => {
+        const result = await settlePromise(() =>
+          handleNewThread(scopeProjectRef(member.environmentId, member.id)),
+        );
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not create thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [handleNewThread],
+  );
+
   return (
     <>
       {prewarmedSidebarThreadRefs.map((threadRef) => (
         <SidebarThreadDetailPrewarmer key={scopedThreadKey(threadRef)} threadRef={threadRef} />
       ))}
-      <SidebarChromeHeader isElectron={isElectron} />
+      {/* The full sidebar hides while it is folded to the inspection rail; both stay mounted,
+          so expanded thread lists survive the fold. */}
+      <div className="contents group-data-[collapsible=icon]:hidden">
+        <SidebarChromeHeader isElectron={isElectron} />
 
-      <SidebarProjectsContent
-        showArm64IntelBuildWarning={showArm64IntelBuildWarning}
-        arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
-        desktopUpdateButtonAction={desktopUpdateButtonAction}
-        desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
-        desktopUpdateActionPending={desktopUpdateActionPending}
-        handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
-        projectSortOrder={sidebarProjectSortOrder}
-        threadSortOrder={sidebarThreadSortOrder}
-        threadPreviewCount={sidebarThreadPreviewCount}
-        updateSettings={updateSettings}
-        openAddProject={openAddProjectCommandPalette}
-        isManualProjectSorting={isManualProjectSorting}
-        projectDnDSensors={projectDnDSensors}
-        projectCollisionDetection={projectCollisionDetection}
-        handleProjectDragStart={handleProjectDragStart}
-        handleProjectDragEnd={handleProjectDragEnd}
-        handleProjectDragCancel={handleProjectDragCancel}
-        handleNewThread={handleNewThread}
-        archiveThread={archiveThread}
-        deleteThread={deleteThread}
-        sortedProjects={sortedProjects}
-        expandedThreadListsByProject={expandedThreadListsByProject}
-        activeRouteProjectKey={activeRouteProjectKey}
-        routeThreadKey={routeThreadKey}
-        newThreadShortcutLabel={newThreadShortcutLabel}
-        threadJumpLabelByKey={visibleThreadJumpLabelByKey}
-        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-        expandThreadListForProject={expandThreadListForProject}
-        collapseThreadListForProject={collapseThreadListForProject}
-        dragInProgressRef={dragInProgressRef}
-        suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-        suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-        attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-        projectsLength={projects.length}
+        <SidebarProjectsContent
+          showArm64IntelBuildWarning={showArm64IntelBuildWarning}
+          arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
+          desktopUpdateButtonAction={desktopUpdateButtonAction}
+          desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
+          desktopUpdateActionPending={desktopUpdateActionPending}
+          handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
+          projectSortOrder={sidebarProjectSortOrder}
+          threadSortOrder={sidebarThreadSortOrder}
+          threadPreviewCount={sidebarThreadPreviewCount}
+          updateSettings={updateSettings}
+          openAddProject={openAddProjectCommandPalette}
+          isManualProjectSorting={isManualProjectSorting}
+          projectDnDSensors={projectDnDSensors}
+          projectCollisionDetection={projectCollisionDetection}
+          handleProjectDragStart={handleProjectDragStart}
+          handleProjectDragEnd={handleProjectDragEnd}
+          handleProjectDragCancel={handleProjectDragCancel}
+          handleNewThread={handleNewThread}
+          archiveThread={archiveThread}
+          deleteThread={deleteThread}
+          sortedProjects={sortedProjects}
+          expandedThreadListsByProject={expandedThreadListsByProject}
+          activeRouteProjectKey={activeRouteProjectKey}
+          routeThreadKey={routeThreadKey}
+          newThreadShortcutLabel={newThreadShortcutLabel}
+          threadJumpLabelByKey={visibleThreadJumpLabelByKey}
+          attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+          expandThreadListForProject={expandThreadListForProject}
+          collapseThreadListForProject={collapseThreadListForProject}
+          dragInProgressRef={dragInProgressRef}
+          suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+          suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+          attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
+          projectsLength={projects.length}
+        />
+        <SidebarChromeFooter />
+      </div>
+      <SidebarInspectionRail
+        projects={sortedProjects}
+        activeProjectKey={activeRouteProjectKey}
+        onCreateThread={createThreadInRailProject}
       />
-      <SidebarChromeFooter />
     </>
   );
 }

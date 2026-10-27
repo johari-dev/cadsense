@@ -98,6 +98,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  collapsedLayout = "offcanvas",
   className,
   style,
   children,
@@ -106,6 +107,12 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * How the collapsed sidebar renders, matching the Sidebar's `collapsible`. A collapsed icon
+   * rail still takes room at the left, so the wrapper reports `data-sidebar-state="rail"`
+   * and titlebars skip the inset they keep clear of the floating sidebar toggle.
+   */
+  collapsedLayout?: "offcanvas" | "icon";
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
@@ -163,7 +170,7 @@ function SidebarProvider({
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
-        data-sidebar-state={state}
+        data-sidebar-state={state === "collapsed" && collapsedLayout === "icon" ? "rail" : state}
         data-slot="sidebar-wrapper"
         style={
           {

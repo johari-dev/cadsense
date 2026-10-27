@@ -140,7 +140,12 @@ export function PreviewPanelShell(props: {
             : "shrink-0 border-l border-border"
           : "w-full",
       )}
-      style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
+      // The width the app sidebar frees by folding to its rail goes to this panel, never stored.
+      style={
+        isInline && !props.maximized
+          ? { width: `calc(${width}px + var(--sidebar-rail-reclaimed-width, 0px))` }
+          : undefined
+      }
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
       inert={!open}
