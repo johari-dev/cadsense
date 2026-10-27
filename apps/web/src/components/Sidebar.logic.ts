@@ -441,25 +441,41 @@ const LOCAL_CAD_FORMAT_LABELS: ReadonlyArray<readonly [extension: string, label:
   [".sldprt", "SolidWorks · Part"],
 ];
 
+/** A project row's subtitle: an optional source logo, then a short label. */
+export interface ProjectSourceDescription {
+  /** Shown before the label in place of the source's name. */
+  readonly logo: "onshape" | null;
+  readonly label: string;
+}
+
 /**
- * The project row's subtitle: where its CAD comes from and what kind it is ("Onshape ·
- * Assembly", "STEP file"). Onshape element names such as "Part Studio 1" mean little at a
- * glance, so callers keep those for the tooltip.
+ * The project row's subtitle: where its CAD comes from and what kind it is. An Onshape project
+ * shows the Onshape logo and its model kind ("Assembly"); a local file shows its format ("STEP
+ * file"). Onshape element names such as "Part Studio 1" mean little at a glance, so callers keep
+ * those for the tooltip.
  */
-export function describeProjectSource(project: ProjectSourceInput): string {
+export function describeProjectSource(project: ProjectSourceInput): ProjectSourceDescription {
   if (project.localCadSource) {
     const path = project.localCadSource.filePath.toLowerCase();
-    return (
-      LOCAL_CAD_FORMAT_LABELS.find(([extension]) => path.endsWith(extension))?.[1] ?? "CAD file"
-    );
+    return {
+      logo: null,
+      label:
+        LOCAL_CAD_FORMAT_LABELS.find(([extension]) => path.endsWith(extension))?.[1] ?? "CAD file",
+    };
   }
   if (project.onshapeSource) {
     const synced = project.cad?.roots.filter((root) => root.current !== null) ?? [];
     const only = synced.length === 1 ? synced[0] : undefined;
-    if (only) return `Onshape · ${only.kind === "assembly" ? "Assembly" : "Part Studio"}`;
-    return synced.length > 1 ? `Onshape · ${synced.length} models` : "Onshape";
+    const label = only
+      ? only.kind === "assembly"
+        ? "Assembly"
+        : "Part Studio"
+      : synced.length > 1
+        ? `${synced.length} models`
+        : "Not synced yet";
+    return { logo: "onshape", label };
   }
-  return "Local project";
+  return { logo: null, label: "Local project" };
 }
 
 const WORD_CHARACTER = /[\p{L}\p{N}]/u;

@@ -170,7 +170,10 @@ function SidebarProvider({
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
-        data-sidebar-state={state === "collapsed" && collapsedLayout === "icon" ? "rail" : state}
+        data-sidebar-state={
+          // Mobile renders the sidebar as a sheet, so a closed one leaves no rail behind.
+          state === "collapsed" && collapsedLayout === "icon" && !isMobile ? "rail" : state
+        }
         data-slot="sidebar-wrapper"
         style={
           {
@@ -291,7 +294,9 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-150 ease-out motion-reduce:transition-none",
+            // Same duration and easing as the right panel's width (PreviewPanelShell), which takes
+            // back the width the folded rail frees, so the chat column slides as one piece.
+            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -302,7 +307,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-150 ease-out motion-reduce:transition-none",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",

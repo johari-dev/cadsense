@@ -31,7 +31,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { prefetchCadAssets } from "./CadAssetPrefetch";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
-import { liftDarkCadColors, prepareCadMaterials } from "./CadMaterials";
+import { prepareCadMaterials } from "./CadMaterials";
 import { creaseCadNormals } from "./CadNormals";
 import { createCadOutline, supportsCadOutline } from "./CadOutline";
 import {
@@ -69,6 +69,8 @@ const FOCUS_FILL = 0.8;
 // A chosen camera pose survives small viewport changes; past this ratio in either dimension
 // (maximizing or restoring the panel) the view refits so the model stays whole and centered.
 const REFIT_RATIO = 1.25;
+/** A single resize step at least this large is a jump (maximizing), not one animation frame. */
+const RESIZE_JUMP = 1.1;
 /**
  * The interactive viewport's backdrop: a cool lift at the top falling to just above the themed
  * background at the bottom, so the canvas reads as its own space against the app chrome.
@@ -107,21 +109,28 @@ const CAD_LIGHTS = {
   light: { ambient: 1.25, key: 2.2, fill: 0.8 },
 } as const;
 /**
- * Every CAD frame (viewer, captures, thumbnails) passes through one soft tone curve,
- * `ceiling * x / (1 + x)` on the exposed linear color, per channel. It narrows the range on the
- * dark viewport: key-lit aluminum (#e8 untouched) lands near #b8 so it no longer outshines the
- * chat or swallows yellow pins, front faces near #a6, and dark plates (#48) lift to about #52
- * so they keep their shape. Overlays (backdrop, outlines, comment markers) are not tone mapped.
+ * Every CAD frame (viewer, captures, thumbnails) passes through one tone curve on luminance,
+ * applied by scaling all three channels alike so part colors keep the hue and saturation of their
+ * Onshape appearance. Exposure sets the overall level; luminance below TONE_KNEE then passes
+ * through unchanged, so black anodized parts stay near-black, and only highlights above it roll
+ * off smoothly toward TONE_CEILING. Key-lit aluminum (#e8 untouched) lands near #b7 so it does
+ * not outshine the chat or swallow yellow pins, and front faces stay near #a0. Overlays (backdrop,
+ * outlines, comment markers) and faded context are not tone mapped.
  */
-const TONE_EXPOSURE = 1.81;
-const TONE_CEILING = 0.807;
+const TONE_EXPOSURE = 0.85;
+const TONE_KNEE = 0.33;
+const TONE_CEILING = 0.5;
 const IDENTITY_TONE_MAPPING = "vec3 CustomToneMapping( vec3 color ) { return color; }";
 if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(IDENTITY_TONE_MAPPING))
   THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
     IDENTITY_TONE_MAPPING,
     `vec3 CustomToneMapping( vec3 color ) {
       vec3 exposed = toneMappingExposure * color;
-      return ${TONE_CEILING.toFixed(4)} * exposed / ( vec3( 1.0 ) + exposed );
+      float luminance = dot( exposed, vec3( 0.2126, 0.7152, 0.0722 ) );
+      if ( luminance <= ${TONE_KNEE.toFixed(4)} ) return exposed;
+      float range = ${(TONE_CEILING - TONE_KNEE).toFixed(4)};
+      float mapped = ${TONE_KNEE.toFixed(4)} + range * ( 1.0 - exp( -( luminance - ${TONE_KNEE.toFixed(4)} ) / range ) );
+      return saturate( exposed * ( mapped / luminance ) );
     }`,
   );
 export interface CadSceneRendererOptions {
@@ -650,7 +659,6 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
               defaultFinish.add(object);
           });
           prepareCadMaterials(prototype, appearancesByHash.get(asset.sha256) ?? [], defaultFinish);
-          liftDarkCadColors(prototype);
           creaseCadNormals(prototype);
           assetsByHash.set(asset.sha256, prototype);
         } else decodedBytes = budget.add(asset, complexities.get(asset.sha256)!).decodedBytes;
@@ -1523,13 +1531,20 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       )
         throw new CadRendererError("invalid-view");
       const currentPose = pose();
+      // How far this one step moved, against the size the camera was last drawn for.
+      const step = Math.max(
+        Math.abs(Math.log(nextWidth / width)),
+        Math.abs(Math.log(nextHeight / height)),
+      );
       width = nextWidth;
       height = nextHeight;
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height, false);
       frameRevision++;
       // A comment review keeps the pose it flew to; otherwise fits follow the viewport, and a
-      // chosen pose refits once the viewport has grown or shrunk a lot since it was framed.
+      // chosen pose refits once the viewport has jumped to a much larger or smaller size since
+      // it was framed. An animated layout change (or a dragged window edge) arrives as small
+      // steps, one per frame; those keep the pose, so the camera never snaps mid-animation.
       const resized = Math.max(
         Math.abs(Math.log(width / framedSize.width)),
         Math.abs(Math.log(height / framedSize.height)),
@@ -1542,7 +1557,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         animationFrame === null &&
         review === null &&
         reviewStart === null &&
-        (fitted || resized > Math.log(REFIT_RATIO));
+        (fitted || (step > Math.log(RESIZE_JUMP) && resized > Math.log(REFIT_RATIO)));
       applying = true;
       try {
         if (refit) {

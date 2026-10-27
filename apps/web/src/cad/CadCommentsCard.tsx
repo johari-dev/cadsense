@@ -210,11 +210,18 @@ export function CadCommentsCard({
    * The part of the viewport the card leaves free, where a focused comment is framed. The
    * open card's content already has its final width and right edge while the card animates,
    * so this stays put through the opening animation instead of changing every frame. A docked
-   * card sits beside the viewport and renders no floating surface, so the whole viewport is free.
+   * card sits beside the viewport, so the whole viewport is free.
    */
   const focusArea = () => {
     if (!host.current) return null;
     const bounds = host.current.getBoundingClientRect();
+    if (docked)
+      return {
+        width: Math.round(bounds.width),
+        height: Math.round(bounds.height),
+        centerX: Math.round(bounds.width / 2),
+        centerY: Math.round(bounds.height / 2),
+      };
     // Layout sizes, not the content's box: its open animation scales it slightly, and the
     // card's right edge never moves.
     const cardBox = card.current?.getBoundingClientRect();
@@ -318,7 +325,9 @@ export function CadCommentsCard({
     // growing), never for every frame of the card's own animation.
     let area = JSON.stringify(focusArea());
     const observer = new ResizeObserver(() => {
-      if (settlingRef.current) return;
+      // A docked card leaves the whole viewport free at any size; the renderer keeps a focus
+      // centered as the viewport animates, so there is nothing to re-frame.
+      if (settlingRef.current || docked) return;
       const next = JSON.stringify(focusArea());
       if (next !== area) {
         area = next;
@@ -342,7 +351,9 @@ export function CadCommentsCard({
     const location = locationOf(selected, selection.target);
     const target = location === "all" ? null : selected.targets[location];
     if (!area || target === undefined) return;
-    const key = JSON.stringify([selection, descriptor, area]);
+    // Docked, the free area is the whole viewport whatever its size, so its size (which
+    // animates as the dock opens) is no reason to focus again.
+    const key = JSON.stringify([selection, descriptor, docked ? "docked" : area]);
     if (key === lastFocus.current) return;
     lastFocus.current = key;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -357,7 +368,7 @@ export function CadCommentsCard({
             target.kind === "point" ? captureViews[target.captureId] : undefined,
           );
     setFocusNotice(notice ?? COMMENT_FOCUS_UNAVAILABLE);
-    card.current?.querySelector('[aria-expanded="true"]')?.scrollIntoView({ block: "nearest" });
+    content.current?.querySelector('[aria-expanded="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selection, descriptor, open, layoutVersion, settling, docked]);
   useEffect(() => {
     let frame = 0;
@@ -1001,47 +1012,51 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
-      {docked && open && createPortal(panel, dock)}
-      {!(docked && open) && (
-        <div
-          ref={card}
-          data-comments-surface
-          data-open={open}
-          data-closing={!open && settling}
-          data-historical={historical}
-          // Collapsed, the surface is as wide as the toggle chip; open, CadPanel.css sizes it.
-          style={open ? undefined : { width: toggleWidth }}
-          // 13px, so the collapsed chip's `ch`/`em` width matches its label (the card's own text
-          // sets its sizes explicitly).
-          className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-[8px] border bg-popover text-[13px] text-popover-foreground shadow-lg"
-        >
-          {!open && (
-            // Collapsed, the surface itself is the toggle: this button fills its inside edge to
-            // edge with the same rounding, so hover lights up the one shape that then grows into
-            // the card. It stays pinned to the corner while the card shrinks back into it.
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    // The accessible name is the visible label ("11 comments").
-                    aria-label={openCount ? toggleText : "Comments"}
-                    aria-expanded={false}
-                    onClick={() => setOpen(true)}
-                    style={{ width: `calc(${toggleWidth} - 2px)` }}
-                    className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[7px] font-medium outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                }
-              >
-                <MessageSquare aria-hidden className="size-[16px] shrink-0" />
-                {openCount > 0 && <span className="tabular-nums">{toggleText}</span>}
-              </TooltipTrigger>
-              <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
-            </Tooltip>
-          )}
-          {!docked && (open || settling) && panel}
-        </div>
-      )}
+      {/* Docked, the card stays in its column while the column closes, then unmounts. */}
+      {docked && (open || settling) && createPortal(panel, dock)}
+      {/* Docked, the surface is only ever the chip; it fades out while the column is open. */}
+      <div
+        ref={card}
+        data-comments-surface
+        data-open={open && !docked}
+        data-closing={!open && settling && !docked}
+        data-historical={historical}
+        inert={docked && open}
+        // Collapsed, the surface is as wide as the toggle chip; open, CadPanel.css sizes it.
+        style={open && !docked ? undefined : { width: toggleWidth }}
+        // 13px, so the collapsed chip's `ch`/`em` width matches its label (the card's own text
+        // sets its sizes explicitly).
+        className={cn(
+          "cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-[8px] border bg-popover text-[13px] text-popover-foreground shadow-lg",
+          docked && open && "opacity-0",
+        )}
+      >
+        {(!open || docked) && (
+          // Collapsed, the surface itself is the toggle: this button fills its inside edge to
+          // edge with the same rounding, so hover lights up the one shape that then grows into
+          // the card. It stays pinned to the corner while the card shrinks back into it.
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  // The accessible name is the visible label ("11 comments").
+                  aria-label={openCount ? toggleText : "Comments"}
+                  aria-expanded={false}
+                  onClick={() => setOpen(true)}
+                  style={{ width: `calc(${toggleWidth} - 2px)` }}
+                  className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[7px] font-medium outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              }
+            >
+              <MessageSquare aria-hidden className="size-[16px] shrink-0" />
+              {openCount > 0 && <span className="tabular-nums">{toggleText}</span>}
+            </TooltipTrigger>
+            <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
+          </Tooltip>
+        )}
+        {!docked && (open || settling) && panel}
+      </div>
     </div>
   );
 }

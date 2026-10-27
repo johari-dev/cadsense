@@ -2053,9 +2053,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
   const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
-  // The subtitle names the source and kind; the model's own name (an Onshape element such
+  // The subtitle shows the source (the Onshape logo, or a file format) and kind; the model's own name (an Onshape element such
   // as "Part Studio 1", or the local file's path) moves to the subtitle's tooltip.
-  const sourceLabel = describeProjectSource(project);
+  const source = describeProjectSource(project);
+  const subtitle = (
+    <>
+      {source.logo === "onshape" ? (
+        <img src="/onshape.svg" alt="Onshape" className="size-3 shrink-0 object-contain" />
+      ) : null}
+      <span className="truncate">{source.label}</span>
+    </>
+  );
   const modelName = project.localCadSource?.filePath ?? singleCadModelName(project.cad);
 
   return (
@@ -2118,15 +2126,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               {modelName ? (
                 <Tooltip>
                   <TooltipTrigger
-                    render={<span className="block truncate text-xs text-tertiary-foreground" />}
+                    render={
+                      <span className="flex min-w-0 items-center gap-1 text-xs text-tertiary-foreground" />
+                    }
                   >
-                    {sourceLabel}
+                    {subtitle}
                   </TooltipTrigger>
                   <TooltipPopup side="right">{modelName}</TooltipPopup>
                 </Tooltip>
               ) : (
-                <span className="block truncate text-xs text-tertiary-foreground">
-                  {sourceLabel}
+                <span className="flex min-w-0 items-center gap-1 text-xs text-tertiary-foreground">
+                  {subtitle}
                 </span>
               )}
             </span>
@@ -2767,7 +2777,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   );
 });
 
-/** One square control in the inspection rail, with its label as a tooltip. */
+/** One square control in the icon rail, with its label as a tooltip. */
 function SidebarRailButton({
   label,
   onClick,
@@ -2797,12 +2807,11 @@ function SidebarRailButton({
 }
 
 /**
- * The sidebar folded to its icon rail during inspection (see sidebarInspection.ts): a new
- * thread in the current project, one tile per project, and settings. A project tile or the
- * expand button opens the full sidebar, which then stays open until inspection ends. The
- * floating sidebar toggle sits above the rail in the titlebar row.
+ * The collapsed sidebar: an icon rail (see sidebarInspection.ts) with a new thread in the
+ * current project, one tile per project, and settings. A project tile, or the sidebar toggle
+ * that sits above the rail in the titlebar row, opens the full sidebar.
  */
-function SidebarInspectionRail({
+function SidebarIconRail({
   projects,
   activeProjectKey,
   onCreateThread,
@@ -2820,7 +2829,7 @@ function SidebarInspectionRail({
   return (
     <div
       className="hidden min-h-0 flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
-      data-sidebar-inspection-rail=""
+      data-sidebar-icon-rail=""
     >
       {threadProject ? (
         <SidebarRailButton
@@ -2866,9 +2875,6 @@ function SidebarInspectionRail({
           );
         })}
       </div>
-      <SidebarRailButton label="Expand sidebar" onClick={expand}>
-        <ChevronRightIcon className="size-4" />
-      </SidebarRailButton>
       <SidebarRailButton label="Settings" onClick={() => void navigate({ to: "/settings" })}>
         <SettingsIcon className="size-4" />
       </SidebarRailButton>
@@ -3502,8 +3508,8 @@ export default function ThreadSidebar() {
       {prewarmedSidebarThreadRefs.map((threadRef) => (
         <SidebarThreadDetailPrewarmer key={scopedThreadKey(threadRef)} threadRef={threadRef} />
       ))}
-      {/* The full sidebar hides while it is folded to the inspection rail; both stay mounted,
-          so expanded thread lists survive the fold. */}
+      {/* The full sidebar hides while it is folded to the icon rail; both stay mounted, so
+          expanded thread lists survive the fold. */}
       <div className="contents group-data-[collapsible=icon]:hidden">
         <SidebarChromeHeader isElectron={isElectron} />
 
@@ -3546,7 +3552,7 @@ export default function ThreadSidebar() {
         />
         <SidebarChromeFooter />
       </div>
-      <SidebarInspectionRail
+      <SidebarIconRail
         projects={sortedProjects}
         activeProjectKey={activeRouteProjectKey}
         onCreateThread={createThreadInProject}

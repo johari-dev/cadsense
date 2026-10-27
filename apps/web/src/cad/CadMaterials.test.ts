@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as THREE from "three";
-import { liftDarkCadColors, prepareCadMaterials } from "./CadMaterials";
+import { prepareCadMaterials } from "./CadMaterials";
 
 const appearance = { color: { red: 64, green: 64, blue: 64 }, opacity: 255 };
 const scene = (colors: THREE.Color[]) => {
@@ -111,29 +111,5 @@ describe("Onshape CAD materials", () => {
     material(root, 0).map = new THREE.Texture();
     prepareCadMaterials(root, [appearance]);
     expect(material(root, 0).color.r).toBe(64 / 255);
-  });
-});
-
-describe("dark CAD colors", () => {
-  it("lifts near-black parts, keeps their hue, and leaves mid and light colors alone", () => {
-    const root = scene([
-      new THREE.Color(0.0382, 0.0382, 0.0382),
-      new THREE.Color(0.01, 0.02, 0.06),
-      new THREE.Color(0, 0, 0),
-      new THREE.Color(0.6, 0.3, 0.9),
-      new THREE.Color(0.9, 0.9, 0.9),
-    ]);
-    const textured = material(root, 4);
-    textured.map = new THREE.Texture();
-    textured.color.setRGB(0.01, 0.01, 0.01);
-    liftDarkCadColors(root);
-    // L = 0.0382 gains 0.09 * (1 - 0.0382 / 0.3)^2.
-    expect(material(root, 0).color.r).toBeCloseTo(0.1069, 3);
-    const blue = material(root, 1).color;
-    expect(blue.g / blue.r).toBeCloseTo(2, 5);
-    expect(blue.b / blue.r).toBeCloseTo(6, 5);
-    expect(material(root, 2).color.r).toBeCloseTo(0.09, 5);
-    expect(material(root, 3).color).toEqual(new THREE.Color(0.6, 0.3, 0.9));
-    expect(textured.color.r).toBe(0.01);
   });
 });

@@ -106,10 +106,7 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { useClientSettings } from "../../hooks/useSettings";
-import {
-  COMPOSER_PRIMARY_ACTION_CLASS_NAME,
-  ComposerPrimaryActions,
-} from "./ComposerPrimaryActions";
+import { COMPOSER_ICON_ACTION_CLASS_NAME, ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -269,7 +266,7 @@ import {
   WarningCircleIcon as CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
-  ArrowUpIcon,
+  ArrowElbowDownLeftIcon,
   PlayIcon,
   type Icon as LucideIcon,
   LockSimpleIcon as LockIcon,
@@ -2709,7 +2706,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 {inlineTasksBadge}
                 <button
                   type="button"
-                  className={COMPOSER_PRIMARY_ACTION_CLASS_NAME}
+                  className={COMPOSER_ICON_ACTION_CLASS_NAME}
                   disabled={collapsedComposerPrimaryActionDisabled}
                   aria-label={collapsedComposerPrimaryActionLabel}
                   onPointerDown={(event) => event.preventDefault()}
@@ -2718,7 +2715,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     submitComposer();
                   }}
                 >
-                  <ArrowUpIcon aria-hidden="true" />
+                  <ArrowElbowDownLeftIcon aria-hidden="true" />
                 </button>
               </div>
             ) : null}
@@ -3086,9 +3083,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   cursor={composerCursor}
                   skills={selectedProviderStatus?.skills ?? []}
-                  // One line tall when empty so the docked composer stays compact in a
-                  // narrow column; it grows with the text up to the editor's max height.
-                  className={cn("min-h-[1lh]", showMobilePendingAnswerActions && "max-sm:pb-11")}
+                  // Two lines tall when empty, so the composer reads as a place to write; it
+                  // grows with the text up to the editor's max height.
+                  className={cn("min-h-[2lh]", showMobilePendingAnswerActions && "max-sm:pb-11")}
                   onChange={onPromptChange}
                   onCommandKeyDown={onComposerCommandKey}
                   onPaste={onComposerPaste}

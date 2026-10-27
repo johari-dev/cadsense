@@ -277,15 +277,15 @@ export const QuotesIcon = tablerIcon(IconBlockquote);
 export const ThumbsDownIcon = tablerIcon(IconThumbDown, IconThumbDownFilled);
 export const ThumbsUpIcon = tablerIcon(IconThumbUp, IconThumbUpFilled);
 export const ArrowElbowDownLeftIcon = tablerIcon(IconCornerDownLeft);
-// The composer's stop glyph. Tabler's square spans 18 of 24 units, a third wider than the
-// send arrow's 13, so this one spans 13 units (5.5 to 18.5) with the same stroke width.
-// Both glyphs then cover the same share of the button and draw lines the same thickness.
+// The composer's stop glyph. Tabler's square spans 18 of 24 units. A closed square reads
+// larger than the open send arrow at the same extent, so this one spans 11 units (6.5 to
+// 17.5) with the same stroke width, which makes the two look the same size in the button.
 export const StopIcon = tablerIcon(
   createReactComponent("outline", "stop", "Stop", [
     [
       "path",
       {
-        d: "M5.5 7a1.5 1.5 0 0 1 1.5 -1.5h10a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1 -1.5 1.5h-10a1.5 1.5 0 0 1 -1.5 -1.5z",
+        d: "M6.5 8a1.5 1.5 0 0 1 1.5 -1.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1 -1.5 1.5h-8a1.5 1.5 0 0 1 -1.5 -1.5z",
         key: "svg-0",
       },
     ],

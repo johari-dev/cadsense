@@ -57,31 +57,3 @@ export const prepareCadMaterials = (
         material.roughness = 0.4;
     }
 };
-
-// Linear luminance below which base colors are lifted, and the most a black part is raised.
-const DARK_KNEE = 0.3;
-const DARK_LIFT = 0.09;
-/**
- * Lifts dark base colors so black anodized covers, motor cans and belts keep their shape on the
- * dark viewport: a gearbox cover's front face shows about #48 instead of #3d, while light
- * aluminum keeps its tone. The lift tapers to nothing at DARK_KNEE (mid greys gain at most a
- * few percent), and it scales the color to keep its hue; only colors too dark to have a hue are
- * raised toward neutral grey. Runs once per decoded asset, after prepareCadMaterials, so
- * captures and the viewer match.
- */
-export const liftDarkCadColors = (root: THREE.Object3D) => {
-  const materials = new Set<THREE.MeshStandardMaterial>();
-  root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) return;
-    for (const material of Array.isArray(object.material) ? object.material : [object.material])
-      if (material instanceof THREE.MeshStandardMaterial && !material.map && !material.vertexColors)
-        materials.add(material);
-  });
-  for (const { color } of materials) {
-    const luminance = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
-    if (luminance >= DARK_KNEE) continue;
-    const lift = DARK_LIFT * (1 - luminance / DARK_KNEE) ** 2;
-    if (luminance > 0.004) color.multiplyScalar((luminance + lift) / luminance);
-    else color.addScalar(lift);
-  }
-};

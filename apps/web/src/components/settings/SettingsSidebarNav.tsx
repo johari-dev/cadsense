@@ -178,7 +178,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
-          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
+          {/* Search needs the full sidebar; on the icon rail only the section icons show. */}
+          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden">
             <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
             <Input
               ref={searchInputRef}
@@ -231,7 +232,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             </p>
           ) : null}
           <SidebarMenu
-            className="ps-px"
+            className="ps-px group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:ps-0"
             id={isSearching && hasResults ? "settings-search-results" : undefined}
             role={isSearching && hasResults ? "listbox" : undefined}
             aria-label={isSearching && hasResults ? "Settings search results" : undefined}
