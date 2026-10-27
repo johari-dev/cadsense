@@ -62,6 +62,7 @@ export const createCadOutline = (renderer: THREE.WebGLRenderer) => {
       far: { value: 1 },
       orthographic: { value: false },
       tolerance: { value: 0.0002 },
+      silhouette: { value: 0.01 },
     },
     vertexShader: `
       varying vec2 sampleUv;
@@ -74,8 +75,9 @@ export const createCadOutline = (renderer: THREE.WebGLRenderer) => {
       varying vec2 sampleUv;
       uniform sampler2D normalTexture, depthTexture;
       uniform vec2 pixel;
-      uniform float near, far, tolerance;
+      uniform float near, far, tolerance, silhouette;
       uniform bool orthographic;
+      const float CREASE = 0.35;
       float viewDepth(vec2 uv) {
         float d = texture2D(depthTexture, uv).r;
         return orthographic ? d * (near - far) - near
@@ -83,17 +85,29 @@ export const createCadOutline = (renderer: THREE.WebGLRenderer) => {
       }
       void main() {
         float z = viewDepth(sampleUv);
+        bool solid = texture2D(depthTexture, sampleUv).r < 1.0;
         vec3 n = normalize(texture2D(normalTexture, sampleUv).rgb * 2.0 - 1.0);
+        // Silhouettes (the model against the backdrop, or a part well in front of what is
+        // behind it) draw at full strength. Creases, and the small depth steps at hole rims and
+        // fine features, draw at CREASE strength so they stop competing with pins and outlines.
         float edge = 0.0;
         for (int i = 0; i < 4; i++) {
           vec2 offset = i == 0 ? vec2(pixel.x, 0.0) : i == 1 ? vec2(-pixel.x, 0.0)
             : i == 2 ? vec2(0.0, pixel.y) : vec2(0.0, -pixel.y);
           vec2 uv = sampleUv + offset * 0.65;
+          bool neighborSolid = texture2D(depthTexture, uv).r < 1.0;
+          if (solid != neighborSolid) {
+            edge = 1.0;
+            continue;
+          }
+          if (!solid) continue;
           vec3 neighbor = normalize(texture2D(normalTexture, uv).rgb * 2.0 - 1.0);
+          float gap = abs(z - viewDepth(uv));
           float threshold = max(tolerance, abs(z) * 0.002);
-          edge = max(edge, smoothstep(threshold, threshold * 2.0, abs(z - viewDepth(uv))));
-          if (texture2D(depthTexture, sampleUv).r < 1.0 && texture2D(depthTexture, uv).r < 1.0)
-            edge = max(edge, 1.0 - smoothstep(0.55, 0.8, dot(n, neighbor)));
+          float depthEdge = smoothstep(threshold, threshold * 2.0, gap);
+          float strength = mix(CREASE, 1.0, smoothstep(silhouette, silhouette * 2.0, gap));
+          edge = max(edge, depthEdge * strength);
+          edge = max(edge, (1.0 - smoothstep(0.55, 0.8, dot(n, neighbor))) * CREASE);
         }
         // A charcoal line rather than black: strong on light parts, quiet on dark ones, and
         // barely visible where a silhouette meets the dark backdrop.
@@ -185,6 +199,9 @@ export const createCadOutline = (renderer: THREE.WebGLRenderer) => {
       material.uniforms.far!.value = camera.far;
       material.uniforms.orthographic!.value = camera instanceof THREE.OrthographicCamera;
       material.uniforms.tolerance!.value = Math.max(sceneSize * 0.001, 1e-9);
+      // Depth steps past 4% of the model's size separate distinct parts (a full-strength edge);
+      // smaller ones are hole rims and fine features.
+      material.uniforms.silhouette!.value = Math.max(sceneSize * 0.04, 1e-9);
       const previousTarget = renderer.getRenderTarget();
       const previousOverride = scene.overrideMaterial;
       const previousBackground = scene.background;

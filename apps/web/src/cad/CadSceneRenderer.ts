@@ -70,20 +70,23 @@ const FOCUS_FILL = 0.8;
 // (maximizing or restoring the panel) the view refits so the model stays whole and centered.
 const REFIT_RATIO = 1.25;
 /**
- * The interactive viewport's backdrop: a slight cool lift at the top falling to just below the
- * themed background at the bottom, so the canvas reads as its own space against the app chrome.
+ * The interactive viewport's backdrop: a cool lift at the top falling to just above the themed
+ * background at the bottom, so the canvas reads as its own space against the app chrome.
  * Captures keep the flat themed color.
  */
 const createBackdrop = (background: number, dark: boolean) => {
   const steps = 64;
   const data = new Uint8Array(steps * 4);
   const channels = [(background >> 16) & 0xff, (background >> 8) & 0xff, background & 0xff];
-  const lift = dark ? [12, 13, 16] : [6, 6, 8];
+  // On the default #171717 this runs from #24262a at the top to #1a1b1d at the bottom: lighter
+  // and cooler than the chat column at every height, so dark plates keep their outline.
+  const lift = dark ? [13, 15, 19] : [6, 6, 8];
+  const base = dark ? [3, 4, 6] : null;
   for (let row = 0; row < steps; row++) {
     // Rows run bottom to top; ease so most of the lift sits in the upper half.
     const t = (row / (steps - 1)) ** 1.4;
     channels.forEach((value, channel) => {
-      const bottom = value * (dark ? 0.86 : 0.94);
+      const bottom = base ? value + base[channel]! : value * 0.94;
       data[row * 4 + channel] = Math.round(
         Math.min(255, bottom + (value + lift[channel]! - bottom) * t),
       );

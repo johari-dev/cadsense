@@ -100,6 +100,7 @@ import {
   resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapTopPercent,
   shouldPreserveAssistantLineBreaks,
+  collapsedUserMessagePreview,
   toolGroupAction,
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
@@ -154,13 +155,14 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
-// As tall as the list's 1.625rem top fade, so the first row is never faded at rest.
-const TIMELINE_LIST_HEADER = <div className="h-6.5" />;
-// The fade under the chat header's divider: fully transparent for the first 1.25rem (about
-// 19px, a whole line down to its descenders) so no glyph fragment shows against the divider, then an eased ramp to
-// opaque by 1.625rem (about 24px). The second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
+// As tall as the list's 2.125rem top fade, so the first row is never faded at rest.
+const TIMELINE_LIST_HEADER = <div className="h-8.5" />;
+// The fade under the chat header's divider: the first 0.8rem (12px) is fully masked, so no
+// glyph fragment shows against the divider, then a ramp that stays faint until about 24px and
+// is clear by 2.125rem (32px), so a line passing through reads as gone rather than ghosted.
+// The second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
 const TIMELINE_TOP_FADE_CLASS_NAME =
-  "[mask-image:linear-gradient(to_bottom,transparent_1.25rem,rgb(0_0_0/0.3)_1.45rem,black_1.625rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
+  "[mask-image:linear-gradient(to_bottom,transparent_0.8rem,rgb(0_0_0/0.08)_1.4rem,rgb(0_0_0/0.45)_1.8rem,black_2.125rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
 
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
@@ -172,7 +174,7 @@ function TimelineLoadEarlierHeader({
   onLoadEarlier: () => void;
 }) {
   return (
-    <div className="pt-6.5">
+    <div className="pt-8.5">
       <div className="mx-auto w-full max-w-3xl pb-2">
         <button
           type="button"
@@ -1205,7 +1207,9 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    // No divider under the fold: the turn's result (often the review card, which has its own
+    // border) follows directly, and a second line above it read as a double rule.
+    <div className="pb-2 pt-1">
       <button
         type="button"
         aria-expanded={row.expanded}
@@ -1793,8 +1797,6 @@ function UserMessagePreviewAnnotationCard(props: {
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
 const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
-const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
 
 function shouldCollapseUserMessage(text: string): boolean {
   if (text.trim().length === 0) {
@@ -1818,26 +1820,19 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;
 
+  // Collapsed, the bubble renders a preview cut on whole lines (no fade, no half-hidden line),
+  // and the toggle sits on its own footer row under a hairline.
   return (
     <div>
       {hasVisibleBody ? (
         <div
-          className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
+          className="relative"
           data-user-message-body="true"
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
-          data-user-message-fade={isCollapsed ? "true" : "false"}
-          style={
-            isCollapsed
-              ? {
-                  WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                  maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                }
-              : undefined
-          }
         >
           <UserMessageBody
-            text={props.text}
+            text={isCollapsed ? collapsedUserMessagePreview(props.text) : props.text}
             skills={props.skills}
             markdownCwd={props.markdownCwd}
           />
@@ -1846,8 +1841,9 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
       {canCollapse || props.footer ? (
         <div
           className={cn(
-            "mt-1.5 flex items-center gap-2",
-            canCollapse && props.footer ? "justify-between" : "justify-end",
+            "flex items-center gap-2",
+            canCollapse ? "mt-2.5 -mb-1 h-8 border-t border-foreground/10 pt-1" : "mt-1.5",
+            canCollapse ? "justify-between" : "justify-end",
           )}
           data-user-message-footer="true"
         >
@@ -1859,7 +1855,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               aria-expanded={expanded}
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
-              className="-ml-1 h-6 rounded-md px-1.5 text-secondary-label text-xs hover:bg-muted/55 hover:text-message-foreground"
+              className="-ml-1.5 h-7 rounded-md px-1.5 text-xs font-medium text-secondary-label hover:bg-muted/55 hover:text-message-foreground sm:text-xs"
             >
               {expanded ? "Show less" : "Show full message"}
             </Button>

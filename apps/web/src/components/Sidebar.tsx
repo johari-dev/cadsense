@@ -159,6 +159,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
+  describeProjectSource,
   resolveSidebarThreadTitle,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -2052,10 +2053,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
   const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
-  // One synced model shows its Onshape name; several show a count.
-  const cadSummary =
-    singleCadModelName(project.cad) ??
-    (currentCadRoots.length > 1 ? `${currentCadRoots.length} models` : null);
+  // The subtitle names the source and kind; the model's own name (an Onshape element such
+  // as "Part Studio 1", or the local file's path) moves to the subtitle's tooltip.
+  const sourceLabel = describeProjectSource(project);
+  const modelName = project.localCadSource?.filePath ?? singleCadModelName(project.cad);
 
   return (
     <>
@@ -2114,9 +2115,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <span className="block truncate text-sm font-semibold text-sidebar-foreground">
                 {project.displayName}
               </span>
-              <span className="block truncate text-[11px] text-sidebar-muted-foreground">
-                {cadSummary ?? (project.onshapeSource ? "Onshape project" : "Local project")}
-              </span>
+              {modelName ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="block truncate text-xs text-tertiary-foreground" />}
+                  >
+                    {sourceLabel}
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">{modelName}</TooltipPopup>
+                </Tooltip>
+              ) : (
+                <span className="block truncate text-xs text-tertiary-foreground">
+                  {sourceLabel}
+                </span>
+              )}
             </span>
             {project.groupedProjectCount > 1 ? (
               <span className="shrink-0 text-tertiary-foreground text-[11px]">
@@ -2371,7 +2383,7 @@ function ProjectSortMenu({
       <Tooltip>
         <TooltipTrigger
           render={
-            <MenuTrigger className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-icon-muted transition-colors hover:bg-accent hover:text-foreground" />
+            <MenuTrigger className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-icon-muted transition-colors hover:bg-accent hover:text-foreground" />
           }
         >
           <ArrowUpDownIcon className="size-3.5" />
@@ -2507,6 +2519,8 @@ interface SidebarProjectsContentProps {
   threadPreviewCount: SidebarThreadPreviewCount;
   updateSettings: ReturnType<typeof useUpdateClientSettings>;
   openAddProject: () => void;
+  /** Starts a thread in the active project (or the first one); null with no projects. */
+  newThreadTarget: { readonly label: string; readonly start: () => void } | null;
   isManualProjectSorting: boolean;
   projectDnDSensors: ReturnType<typeof useSensors>;
   projectCollisionDetection: CollisionDetection;
@@ -2547,6 +2561,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     threadPreviewCount,
     updateSettings,
     openAddProject,
+    newThreadTarget,
     isManualProjectSorting,
     projectDnDSensors,
     projectCollisionDetection,
@@ -2620,7 +2635,29 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
+            {newThreadTarget ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      aria-label={newThreadTarget.label}
+                      className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
+                      onClick={newThreadTarget.start}
+                    />
+                  }
+                >
+                  <SquarePenIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup side="right">
+                  {newThreadShortcutLabel
+                    ? `${newThreadTarget.label} (${newThreadShortcutLabel})`
+                    : newThreadTarget.label}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
             <ProjectSortMenu
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
@@ -2637,7 +2674,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                     variant="ghost-muted"
                     aria-label="Add project"
                     data-testid="sidebar-add-project-trigger"
-                    className="size-6 [--control-icon-color:currentColor] text-icon-muted"
+                    className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
                     onClick={openAddProject}
                   />
                 }
@@ -3422,7 +3459,7 @@ export default function ThreadSidebar() {
     });
   }, []);
 
-  const createThreadInRailProject = useCallback(
+  const createThreadInProject = useCallback(
     (project: SidebarProjectSnapshot) => {
       const member = project.memberProjects[0];
       if (!member) return;
@@ -3443,6 +3480,19 @@ export default function ThreadSidebar() {
       })();
     },
     [handleNewThread],
+  );
+  const newThreadProject =
+    sortedProjects.find((project) => project.projectKey === activeRouteProjectKey) ??
+    sortedProjects[0];
+  const newThreadTarget = useMemo(
+    () =>
+      newThreadProject
+        ? {
+            label: `New thread in ${newThreadProject.displayName}`,
+            start: () => createThreadInProject(newThreadProject),
+          }
+        : null,
+    [createThreadInProject, newThreadProject],
   );
 
   return (
@@ -3467,6 +3517,7 @@ export default function ThreadSidebar() {
           threadPreviewCount={sidebarThreadPreviewCount}
           updateSettings={updateSettings}
           openAddProject={openAddProjectCommandPalette}
+          newThreadTarget={newThreadTarget}
           isManualProjectSorting={isManualProjectSorting}
           projectDnDSensors={projectDnDSensors}
           projectCollisionDetection={projectCollisionDetection}
@@ -3496,7 +3547,7 @@ export default function ThreadSidebar() {
       <SidebarInspectionRail
         projects={sortedProjects}
         activeProjectKey={activeRouteProjectKey}
-        onCreateThread={createThreadInRailProject}
+        onCreateThread={createThreadInProject}
       />
     </>
   );

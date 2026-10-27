@@ -210,14 +210,17 @@ export interface CadCommentScreenPin {
 }
 
 /**
- * Groups pins whose shapes overlap on screen (or nearly touch), so the comments card can show one
- * count marker instead of a pile. Overlap is transitive: a pin touching any member joins the
- * group. Returns indices into `pins`, each group and the list ordered by first appearance.
- * Runs on every orbit frame; with the few dozen pins a review has, the pairwise pass is cheap.
+ * Groups pins that sit nearly on top of each other on screen, so the comments card can show one
+ * count marker instead of an unreadable stack. Pins that merely touch or overlap a little stay
+ * apart, so a cluster never hides comments that could be read. Grouping is transitive: a pin
+ * close to any member joins the group. Returns indices into `pins`, each group and the list
+ * ordered by first appearance. Runs on every orbit frame; with the few dozen pins a review has,
+ * the pairwise pass is cheap.
  */
 export const groupOverlappingCommentPins = (
   pins: readonly CadCommentScreenPin[],
-  gap = 2,
+  /** Closest two pins may come before they group: center distance for round pins. */
+  minDistance = CAD_COMMENT_PIN_SIZE - 4,
 ): number[][] => {
   const parent = pins.map((_, i) => i);
   const root = (i: number): number => {
@@ -230,12 +233,10 @@ export const groupOverlappingCommentPins = (
     for (let j = i + 1; j < pins.length; j++) {
       const b = pins[j]!;
       // Pins are horizontal capsules: a segment as long as the pill's flat part, inflated by
-      // half the pin height. Two overlap when their segments come closer than one pin height.
-      const dx = Math.max(
-        0,
-        Math.abs(a.x - b.x) - (a.width + b.width) / 2 + CAD_COMMENT_PIN_SIZE,
-      );
-      if (!b.pinned && Math.hypot(dx, a.y - b.y) < CAD_COMMENT_PIN_SIZE + gap) {
+      // half the pin height. Distance runs between segments, which for round pins is between
+      // their centers.
+      const dx = Math.max(0, Math.abs(a.x - b.x) - (a.width + b.width) / 2 + CAD_COMMENT_PIN_SIZE);
+      if (!b.pinned && Math.hypot(dx, a.y - b.y) < minDistance) {
         const [ra, rb] = [root(i), root(j)];
         // Keep the earliest index as the root, so groups list in input order.
         parent[Math.max(ra, rb)] = Math.min(ra, rb);

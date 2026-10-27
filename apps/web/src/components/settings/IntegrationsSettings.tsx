@@ -186,10 +186,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
             onValueChange={selectViewport}
             disabled={disabled}
           >
-            <SelectTrigger
-              className="w-full min-w-0 sm:w-44"
-              aria-label="Default browser viewport"
-            >
+            <SelectTrigger className="w-full min-w-0 sm:w-44" aria-label="Default browser viewport">
               <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false} className="min-w-64">

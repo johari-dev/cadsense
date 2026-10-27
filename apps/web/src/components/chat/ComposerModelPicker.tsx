@@ -255,9 +255,11 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             </>
           ) : null}
           {props.traits?.label ? (
-            // The effort always follows the model name as a muted suffix, in every composer,
-            // so the trigger matches what the picker's Reasoning row says.
-            <span className="shrink-0 text-muted-foreground">{props.traits.label}</span>
+            // The reasoning level always follows the model name as its own quiet pill, in every
+            // composer, so "Claude Opus 5.5" and "Medium" never read as one long name.
+            <span className="shrink-0 rounded-md bg-foreground/[0.07] px-1.5 py-px text-[0.75rem] leading-4 text-muted-foreground">
+              {props.traits.label}
+            </span>
           ) : null}
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
@@ -303,6 +305,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               label="Starred"
               shortLabel="Starred"
               active={openTab === STARRED_TAB}
+              showIndicator={entries.length > 1}
               onSelect={() => {
                 setTab(STARRED_TAB);
                 setQuery("");
@@ -318,6 +321,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   label={ready ? entry.displayName : `${entry.displayName} is unavailable`}
                   shortLabel={entry.displayName}
                   active={openTab === entry.instanceId}
+                  showIndicator={entries.length > 1}
                   disabled={!ready}
                   onSelect={() => {
                     setTab(entry.instanceId);
@@ -435,8 +439,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     aria-label={`${row.starred ? "Unstar" : "Star"} ${row.model.name}`}
                     aria-pressed={row.starred}
                     className={cn(
-                      "-me-0.5 shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                      row.starred ? "opacity-100" : "opacity-70",
+                      // Set stars stay (filled); unset ones appear on row hover or keyboard focus.
+                      "-me-0.5 shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-data-highlighted:opacity-100",
+                      row.starred ? "opacity-100" : "opacity-0",
                     )}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -491,6 +496,8 @@ function PickerTabButton(props: {
   /** Visible name while the tab is open. */
   shortLabel: string;
   active: boolean;
+  /** The underline only helps tell providers apart; a lone provider tab goes without it. */
+  showIndicator: boolean;
   disabled?: boolean;
   onSelect: () => void;
   children: ReactNode;
@@ -507,8 +514,10 @@ function PickerTabButton(props: {
             aria-disabled={props.disabled ?? false}
             className={cn(
               TAB_CLASS_NAME,
+              props.active && "text-foreground",
               props.active &&
-                "text-foreground after:absolute after:inset-x-1.5 after:-bottom-[5px] after:h-0.5 after:rounded-full after:bg-foreground",
+                props.showIndicator &&
+                "after:absolute after:inset-x-1.5 after:-bottom-[5px] after:h-0.5 after:rounded-full after:bg-foreground",
             )}
             onClick={() => {
               if (!props.disabled) props.onSelect();

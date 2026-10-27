@@ -418,6 +418,50 @@ export function isContextMenuPointerDown(input: {
   return input.isMac && input.button === 0 && input.ctrlKey;
 }
 
+/** The parts of a project `describeProjectSource` reads; a `Project` satisfies it. */
+export interface ProjectSourceInput {
+  readonly onshapeSource?: object | undefined;
+  readonly localCadSource?: { readonly filePath: string } | undefined;
+  readonly cad?:
+    | {
+        readonly roots: ReadonlyArray<{
+          readonly kind: "assembly" | "part-studio";
+          readonly current: object | null;
+        }>;
+      }
+    | undefined;
+}
+
+const LOCAL_CAD_FORMAT_LABELS: ReadonlyArray<readonly [extension: string, label: string]> = [
+  [".step", "STEP file"],
+  [".stp", "STEP file"],
+  [".iges", "IGES file"],
+  [".igs", "IGES file"],
+  [".sldasm", "SolidWorks · Assembly"],
+  [".sldprt", "SolidWorks · Part"],
+];
+
+/**
+ * The project row's subtitle: where its CAD comes from and what kind it is ("Onshape ·
+ * Assembly", "STEP file"). Onshape element names such as "Part Studio 1" mean little at a
+ * glance, so callers keep those for the tooltip.
+ */
+export function describeProjectSource(project: ProjectSourceInput): string {
+  if (project.localCadSource) {
+    const path = project.localCadSource.filePath.toLowerCase();
+    return (
+      LOCAL_CAD_FORMAT_LABELS.find(([extension]) => path.endsWith(extension))?.[1] ?? "CAD file"
+    );
+  }
+  if (project.onshapeSource) {
+    const synced = project.cad?.roots.filter((root) => root.current !== null) ?? [];
+    const only = synced.length === 1 ? synced[0] : undefined;
+    if (only) return `Onshape · ${only.kind === "assembly" ? "Assembly" : "Part Studio"}`;
+    return synced.length > 1 ? `Onshape · ${synced.length} models` : "Onshape";
+  }
+  return "Local project";
+}
+
 const WORD_CHARACTER = /[\p{L}\p{N}]/u;
 const LEADING_TITLE_SEPARATORS = /^[\s:\-\u2013\u2014|/·,.]+/u;
 

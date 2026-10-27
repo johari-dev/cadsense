@@ -152,14 +152,14 @@ export function CadHierarchyTree({
   const { rows, offsets, hidden: hiddenParts } = tree;
   const listHeight = offsets.at(-1)!;
   const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, offsets);
-  // Fade out whichever edge has more rows past it, so the row there reads as "keep scrolling"
-  // rather than cut off.
-  const edge = (more: boolean) => (more ? "transparent" : "black");
+  // A short, shallow fade at whichever edge has more rows past it: enough to show the list
+  // continues, never enough to make the row there look disabled.
+  const edge = (more: boolean) => (more ? "rgb(0 0 0 / 60%)" : "black");
   const moreAbove = scrollTop > 0;
   const moreBelow = scrollTop + viewportHeight < listHeight - 1;
   const scrollFade =
     moreAbove || moreBelow
-      ? `linear-gradient(to bottom, ${edge(moreAbove)}, black 2rem, black calc(100% - 2.5rem), ${edge(moreBelow)})`
+      ? `linear-gradient(to bottom, ${edge(moreAbove)}, black 12px, black calc(100% - 12px), ${edge(moreBelow)})`
       : undefined;
   return (
     <div

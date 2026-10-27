@@ -293,11 +293,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
               title="Folder"
               description={project.workspaceRoot}
               control={
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => void showInExplorer()}
-                >
+                <Button variant="outline" type="button" onClick={() => void showInExplorer()}>
                   <FolderOpenIcon />
                   Open in Explorer
                 </Button>

@@ -1340,3 +1340,38 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     }
   }
 }
+
+const COLLAPSED_USER_MESSAGE_PREVIEW_LINES = 6;
+const COLLAPSED_USER_MESSAGE_PREVIEW_CHARS = 280;
+// A cut line keeps at least this much budget, so a preview never ends on a stub of a word.
+const COLLAPSED_USER_MESSAGE_MIN_CUT_CHARS = 60;
+
+/**
+ * The source text shown while a long user message is collapsed. It is cut on whole source
+ * lines (a long line at a word boundary, ending in "…"), so the collapsed bubble ends on
+ * complete rendered lines instead of a half-hidden one. An unclosed code fence is closed.
+ */
+export function collapsedUserMessagePreview(text: string): string {
+  const kept: string[] = [];
+  let budget = COLLAPSED_USER_MESSAGE_PREVIEW_CHARS;
+  for (const line of text.trimEnd().split("\n")) {
+    if (kept.length === COLLAPSED_USER_MESSAGE_PREVIEW_LINES) break;
+    if (line.length <= budget) {
+      kept.push(line);
+      budget -= line.length;
+      continue;
+    }
+    if (budget >= COLLAPSED_USER_MESSAGE_MIN_CUT_CHARS) {
+      const cut = line.slice(0, budget);
+      const space = cut.lastIndexOf(" ");
+      // Trailing punctuation before the ellipsis reads as a typo (",…"), so it goes too.
+      kept.push(`${(space > budget / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:]+$/, "")}…`);
+    }
+    break;
+  }
+  while (kept.length > 0 && kept.at(-1)?.trim() === "") kept.pop();
+  if (kept.filter((line) => line.trimStart().startsWith("```")).length % 2 === 1) {
+    kept.push("```");
+  }
+  return kept.join("\n");
+}

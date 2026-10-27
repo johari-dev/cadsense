@@ -19,7 +19,7 @@ import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { CommentBadge } from "./CadCommentsCard";
 
 const MAX_THUMBNAILS = 6;
-const MAX_LISTED_COMMENTS = 5;
+const MAX_LISTED_COMMENTS = 4;
 
 /** Opens the CAD panel's comments, optionally focused on one comment with all its locations. */
 function openCadComments(threadRef: ScopedThreadRef, commentId?: string) {
@@ -169,7 +169,7 @@ export function CadPublishedComments({
   return (
     <section
       aria-label={heading}
-      className="rounded-xl border border-border bg-muted p-2 text-[0.9333rem]"
+      className="rounded-xl border border-border bg-muted p-3 pt-2 text-[0.9333rem]"
     >
       <div className="flex min-h-8 items-center gap-1.5 px-1">
         <span className="flex size-6 shrink-0 items-center justify-center text-foreground/70">
@@ -192,6 +192,10 @@ export function CadPublishedComments({
             ) : null,
           }),
         )}
+        {unlisted > 0 ? (
+          // Lines up with the titles: row inset, badge column, and gap.
+          <p className="ps-8.5 pt-0.5 text-[0.8rem] text-muted-foreground">+{unlisted} more</p>
+        ) : null}
         {card.proposed.map((proposal) =>
           commentRow({
             key: proposal.commentId,
@@ -206,7 +210,7 @@ export function CadPublishedComments({
       {count > 0 || card.proposed.length > 0 ? (
         <Button
           variant="outline"
-          className="mt-2 h-8.5 w-full bg-transparent text-[0.8667rem] dark:bg-transparent sm:h-8.5 sm:text-[0.8667rem]"
+          className="mt-3 h-8.5 w-full bg-transparent text-[0.8667rem] dark:bg-transparent sm:h-8.5 sm:text-[0.8667rem]"
           onClick={() => openCadComments(threadRef)}
         >
           {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}

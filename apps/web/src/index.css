@@ -119,6 +119,9 @@
   --color-popover-foreground: var(--contrast-popover-foreground);
   --color-popover: var(--popover);
   --color-popover-border: var(--popover-border);
+  --color-selection-accent: var(--selection-accent);
+  --color-control-off: var(--control-off);
+  --color-control-off-border: var(--control-off-border);
   --color-card-foreground: var(--contrast-card-foreground);
   --color-card: var(--card);
   --color-foreground: var(--contrast-foreground);
@@ -1143,11 +1146,17 @@
   color-scheme: dark;
   --radius: 0.625rem;
   --app-theme-accent-text: rgb(245 128 86);
+  /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
+     for "on" and "selected" control states. */
+  --app-theme-selection: #7dbbff;
+  /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
+  --app-theme-control-off: #2e2e2e;
+  --app-theme-control-off-border: #4a4a4a;
   --app-theme-canvas: #111111;
   --app-theme-chrome: #101010;
   --app-theme-toolbar: #111111;
   --app-theme-toolbar-foreground: #fcfcfc;
-  --app-theme-toolbar-border: rgb(252 252 252 / 7.2%);
+  --app-theme-toolbar-border: rgb(252 252 252 / 8%);
   --app-theme-toolbar-control: rgb(252 252 252 / 2.6%);
   --app-theme-toolbar-control-foreground: rgb(252 252 252 / 72.2%);
   --app-theme-toolbar-control-hover: rgb(252 252 252 / 3.9%);
@@ -1165,7 +1174,9 @@
   --app-theme-text: #fcfcfc;
   --app-theme-text-muted: rgb(252 252 252 / 68%);
   --app-theme-text-tertiary: rgb(252 252 252 / 46%);
-  --app-theme-border: rgb(252 252 252 / 7.2%);
+  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split), matching
+     the sidebar edge's 8%. */
+  --app-theme-border: rgb(252 252 252 / 8%);
   --app-theme-input: rgb(252 252 252 / 11.8%);
   --app-theme-focus: rgb(245 128 86 / 63%);
   --app-theme-accent: #fcfcfc;
@@ -1202,7 +1213,7 @@
   --app-theme-sidebar-row-hover: rgb(252 252 252 / 3.9%);
   --app-theme-sidebar-row-active: rgb(252 252 252 / 5.5%);
   --app-theme-sidebar-row-selected: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-border: rgb(252 252 252 / 7.2%);
+  --app-theme-sidebar-border: rgb(252 252 252 / 8%);
 }
 
 /* Map the permanent application palette onto the semantic surface tokens. */
@@ -1258,6 +1269,9 @@
   --input: var(--app-theme-input);
   --ring: var(--app-theme-focus);
   --accent-text: var(--app-theme-accent-text);
+  --selection-accent: var(--app-theme-selection);
+  --control-off: var(--app-theme-control-off);
+  --control-off-border: var(--app-theme-control-off-border);
   --sidebar: var(--app-theme-sidebar);
   --sidebar-foreground: var(--app-theme-sidebar-foreground);
   --sidebar-muted-foreground: var(--app-theme-sidebar-muted-foreground);
@@ -1280,9 +1294,13 @@
   --chat-composer-glass-surface: var(--app-theme-surface-raised);
   --chat-composer-outline: var(--app-theme-toolbar-border);
 
+  /* Dark: a #191919 fill, a #404040 outline, and a #999 placeholder, so the composer reads as
+     its own field against the near-black canvas in the hero and in threads alike. */
   @variant dark {
-    --chat-composer-outline: color-mix(in srgb, var(--app-theme-input) 30%, var(--background));
+    --chat-composer-glass-surface: color-mix(in srgb, var(--color-white) 3.5%, var(--background));
+    --chat-composer-outline: color-mix(in srgb, var(--color-white) 20%, var(--background));
     --chat-composer-highlight: color-mix(in srgb, var(--app-theme-input) 12%, transparent);
+    --color-placeholder: rgb(252 252 252 / 56%);
   }
 }
 
@@ -1949,12 +1967,19 @@ code {
   --chat-composer-radius: 1.2rem;
 }
 :root .chat-composer-glass-shell {
-  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  background: var(--chat-composer-glass-surface);
   backdrop-filter: blur(24px);
   border-radius: var(--chat-composer-radius);
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 7%),
-    0 6px 24px -10px rgb(0 0 0 / 30%);
+  /* The outline itself is the host's 1px ::after border (--chat-composer-outline). */
+  box-shadow: 0 6px 24px -10px rgb(0 0 0 / 30%);
+}
+/* Focus stays quiet: the thread composer is focused on load, so a ring would show at rest on
+   every thread. The outline only brightens; keyboard focus on the footer controls still shows
+   their own focus rings. */
+:root .chat-composer-glass-shell:focus-within {
+  @variant dark {
+    --chat-composer-outline: color-mix(in srgb, var(--color-white) 30%, var(--background));
+  }
 }
 [data-chat-composer-footer] {
   border-top: 0;

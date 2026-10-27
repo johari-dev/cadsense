@@ -23,6 +23,7 @@ import {
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
   resolveSidebarThreadTitle,
+  describeProjectSource,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
@@ -1673,5 +1674,62 @@ describe("resolveSidebarThreadTitle", () => {
     expect(resolveSidebarThreadTitle("SUSX Cascade wiring", "[SUS] Cascade")).toBe(
       "SUSX Cascade wiring",
     );
+  });
+});
+
+describe("describeProjectSource", () => {
+  const root = (kind: "assembly" | "part-studio", current: object | null = {}) => ({
+    kind,
+    current,
+  });
+
+  it("names an Onshape project by the kind of its synced model", () => {
+    expect(describeProjectSource({ onshapeSource: {}, cad: { roots: [root("assembly")] } })).toBe(
+      "Onshape · Assembly",
+    );
+    expect(
+      describeProjectSource({ onshapeSource: {}, cad: { roots: [root("part-studio")] } }),
+    ).toBe("Onshape · Part Studio");
+  });
+
+  it("counts several synced Onshape models and ignores roots with no current snapshot", () => {
+    expect(
+      describeProjectSource({
+        onshapeSource: {},
+        cad: { roots: [root("assembly"), root("part-studio"), root("assembly", null)] },
+      }),
+    ).toBe("Onshape · 2 models");
+    expect(
+      describeProjectSource({
+        onshapeSource: {},
+        cad: { roots: [root("assembly", null), root("part-studio")] },
+      }),
+    ).toBe("Onshape · Part Studio");
+  });
+
+  it("falls back to the source alone before anything has synced", () => {
+    expect(describeProjectSource({ onshapeSource: {} })).toBe("Onshape");
+    expect(describeProjectSource({ onshapeSource: {}, cad: { roots: [] } })).toBe("Onshape");
+  });
+
+  it("names a local CAD file by its format, in any extension case", () => {
+    expect(describeProjectSource({ localCadSource: { filePath: "models/arm.step" } })).toBe(
+      "STEP file",
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "ARM.STP" } })).toBe("STEP file");
+    expect(describeProjectSource({ localCadSource: { filePath: "bracket.igs" } })).toBe(
+      "IGES file",
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "Gearbox.SLDASM" } })).toBe(
+      "SolidWorks · Assembly",
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "plate.sldprt" } })).toBe(
+      "SolidWorks · Part",
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "notes.cad" } })).toBe("CAD file");
+  });
+
+  it("calls a project with no CAD source a local project", () => {
+    expect(describeProjectSource({})).toBe("Local project");
   });
 });

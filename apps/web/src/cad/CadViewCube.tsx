@@ -11,11 +11,13 @@ import { CAD_VIEW_DIRECTIONS, cadPresetUp } from "./CadSceneModel";
 type Vec = readonly [number, number, number];
 type Preset = Extract<CadViewState["camera"], { kind: "preset" }>["preset"];
 
-/** Cube edge in px. */
-const EDGE = 42;
-/** The round backing, just wider than the cube's space diagonal (73px), its widest projection,
-    so no orientation reaches past it. */
-const BACKING = 76;
+/** Cube edge in px, wide enough for a 10px "FRONT" or "RIGHT". */
+const EDGE = 40;
+/** The cube's box: its space diagonal, the widest it can project at any angle. */
+const BOX = Math.ceil(EDGE * Math.sqrt(3));
+/** Face fill. The class names carry the #6b6b6b edge line and the hover tint, the scene's
+    selection blue #7dbbff (as in CadCommentsCard). */
+const FACE = "#2a2a2a";
 /** Share of a face edge each edge and corner zone takes. */
 const RIM = 0.2;
 
@@ -25,16 +27,18 @@ const RIM = 0.2;
  */
 const FACES = (
   [
-    { preset: "front", label: "Front", shade: 5 },
-    { preset: "back", label: "Back", shade: 5 },
-    { preset: "left", label: "Left", shade: 2 },
-    { preset: "right", label: "Right", shade: 2 },
-    { preset: "top", label: "Top", shade: 10 },
-    { preset: "bottom", label: "Bottom", shade: -30 },
+    { preset: "front", label: "Front", tag: "Front", shade: 4 },
+    { preset: "back", label: "Back", tag: "Back", shade: 4 },
+    { preset: "left", label: "Left", tag: "Left", shade: 0 },
+    { preset: "right", label: "Right", tag: "Right", shade: 0 },
+    { preset: "top", label: "Top", tag: "Top", shade: 10 },
+    { preset: "bottom", label: "Bottom", tag: "Btm", shade: -30 },
   ] as const satisfies ReadonlyArray<{
     preset: Exclude<Preset, "isometric">;
     label: string;
-    /** A fixed light from above: percent of foreground mixed into the face, or of black when
+    /** The text on the face, short enough to fit it at 10px. */
+    tag: string;
+    /** A fixed light from above: percent of white mixed into the face, or of black when
         negative. A face seen nearly edge-on still reads as a lit top or a dark underside. */
     shade: number;
   }>
@@ -146,6 +150,7 @@ export function CadViewCube({
   onChange: (view: CadViewState) => void;
 }) {
   const cube = useRef<HTMLDivElement>(null);
+  const home = useRef<HTMLButtonElement>(null);
   const labels = useRef<Array<HTMLSpanElement | null>>([]);
   // Follows the renderer's frames, coalesced in a microtask like the comment markers, so a
   // still camera costs nothing and the cube never lags the model by a frame.
@@ -155,7 +160,15 @@ export function CadViewCube({
     if (!node) return;
     const draw = () => {
       const basis = cameraBasis(current?.cameraPose() ?? storedPose(view));
-      node.style.transform = cubeTransform(basis);
+      // Drop the cube to the box's bottom, so its lowest corner or edge sits on the same 16px
+      // inset as the toolbar at any angle. The home button follows, centered on the cube and
+      // 8px from its left side, however wide it projects.
+      const extent = (axis: Vec) =>
+        (EDGE / 2) * (Math.abs(axis[0]) + Math.abs(axis[1]) + Math.abs(axis[2]));
+      const drop = BOX / 2 - extent(basis.up);
+      const slide = BOX / 2 - extent(basis.right);
+      node.style.transform = `translateY(${drop}px) ${cubeTransform(basis)}`;
+      if (home.current) home.current.style.transform = `translate(${slide}px, ${drop}px)`;
       FACES.forEach((face, index) => {
         const label = labels.current[index];
         if (label) label.style.opacity = labelOpacity(face.normal, basis.forward);
@@ -189,10 +202,11 @@ export function CadViewCube({
     <div
       role="group"
       aria-label="View cube"
-      className="pointer-events-auto flex flex-col items-center gap-2"
+      className="pointer-events-auto flex items-center gap-2"
     >
       <Tooltip>
         <TooltipTrigger
+          ref={home}
           aria-label="Reset view to isometric"
           disabled={disabled}
           className="flex size-7 cursor-pointer items-center justify-center rounded-lg border border-input bg-popover text-foreground/75 shadow-sm outline-none transition-colors hover:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_8%)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
@@ -202,11 +216,10 @@ export function CadViewCube({
         </TooltipTrigger>
         <TooltipPopup>Reset view</TooltipPopup>
       </Tooltip>
-      {/* A round backing, so the cube reads as a control at every angle, even edge-on, and
-          stands off the model behind it. */}
+      {/* The shadow lives on this flat box: a filter on the cube itself would flatten its 3D. */}
       <div
-        className="flex items-center justify-center rounded-full border border-input bg-popover/85 shadow-md"
-        style={{ width: BACKING, height: BACKING }}
+        className="flex items-center justify-center drop-shadow-[0_2px_6px_rgb(0_0_0/0.55)]"
+        style={{ width: BOX, height: BOX }}
       >
         <div
           ref={cube}
@@ -218,10 +231,10 @@ export function CadViewCube({
             return (
               <div
                 key={face.preset}
-                className="absolute inset-0 grid [backface-visibility:hidden] border border-foreground/30 transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]!"
+                className="absolute inset-0 grid [backface-visibility:hidden] border border-[#6b6b6b] transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,#2a2a2a,#7dbbff_22%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,#2a2a2a,#7dbbff_22%)]!"
                 style={{
                   transform: faceTransform(face.normal, face.up),
-                  background: `color-mix(in srgb, var(--popover), ${face.shade < 0 ? "black" : "var(--foreground)"} ${Math.abs(face.shade)}%)`,
+                  background: `color-mix(in srgb, ${FACE}, ${face.shade < 0 ? "black" : "white"} ${Math.abs(face.shade)}%)`,
                   gridTemplateColumns: [-1, 0, 1].map(size).join(" "),
                   gridTemplateRows: [-1, 0, 1].map(size).join(" "),
                 }}
@@ -237,7 +250,7 @@ export function CadViewCube({
                         <TooltipTrigger
                           aria-label={`${face.label} view`}
                           disabled={disabled}
-                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-[0.04em] text-foreground/70 uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
+                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-[0.04em] text-foreground/90 uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
                           onClick={() => snap(face.normal)}
                         >
                           {/* Wider than the center zone on long labels; clicks there still
@@ -248,7 +261,7 @@ export function CadViewCube({
                             }}
                             className="pointer-events-none whitespace-nowrap"
                           >
-                            {face.label}
+                            {face.tag}
                           </span>
                         </TooltipTrigger>
                         <TooltipPopup>{`${face.label} view`}</TooltipPopup>
@@ -263,7 +276,7 @@ export function CadViewCube({
                       className={
                         disabled
                           ? undefined
-                          : "cursor-pointer transition-colors hover:bg-foreground/12"
+                          : "cursor-pointer transition-colors hover:bg-[#7dbbff]/25"
                       }
                       onClick={() => snap(direction)}
                     />

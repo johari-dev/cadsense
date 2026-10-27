@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { MessageId, TurnId } from "@cadsense/contracts";
 import type { TimelineEntry } from "../../session-logic";
 import {
+  collapsedUserMessagePreview,
   deriveMessagesTimelineRows,
   computeMessageDurationStart,
   knownToolActionLabel,
@@ -437,5 +438,41 @@ describe("CAD review rows", () => {
       rejected: [{ publicationKey: "dropped", title: null, reason: "candidate-expired" }],
       proposed: [{ publicationKey: "fixed", commentId: "c0", number: 0, title: "Earlier" }],
     });
+  });
+});
+
+describe("collapsedUserMessagePreview", () => {
+  it("keeps whole source lines while they fit", () => {
+    const text = ["Intro line.", "", "- one", "- two", "- three", "- four", "- five"].join("\n");
+    expect(collapsedUserMessagePreview(text)).toBe(
+      ["Intro line.", "", "- one", "- two", "- three", "- four"].join("\n"),
+    );
+  });
+
+  it("cuts a long line at a word boundary and marks it with an ellipsis", () => {
+    const long = `- ${"word ".repeat(100)}`;
+    const preview = collapsedUserMessagePreview(`Short intro.\n${long}`);
+    const [intro, cut] = preview.split("\n");
+    expect(intro).toBe("Short intro.");
+    expect(cut?.endsWith("word…")).toBe(true);
+    expect(preview.length).toBeLessThanOrEqual(290);
+  });
+
+  it("drops a long line when too little budget is left to show part of it", () => {
+    const text = `${"a".repeat(240)}\n${"b ".repeat(100)}`;
+    expect(collapsedUserMessagePreview(text)).toBe("a".repeat(240));
+  });
+
+  it("closes a code fence the cut left open", () => {
+    const text = [
+      "```ts",
+      "const a = 1;",
+      "const b = 2;",
+      "const c = 3;",
+      "const d = 4;",
+      "const e = 5;",
+      "```",
+    ].join("\n");
+    expect(collapsedUserMessagePreview(text).split("\n").at(-1)).toBe("```");
   });
 });
