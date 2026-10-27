@@ -5,7 +5,7 @@ import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import type { PendingApproval, WorkLogEntry } from "../../session-logic";
 import {
   CameraIcon,
-  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon as ChevronRightIcon,
   ChatCircleIcon,
   CheckIcon,
   CubeIcon,
@@ -79,11 +79,11 @@ export const ToolCallCardView = memo(function ToolCallCardView(props: ToolCallCa
             <span className="text-destructive">{card.failedCount} failed</span>
           ) : null}
           {card.duration ? <span className="text-muted-foreground/80">{card.duration}</span> : null}
-          <ChevronDownIcon
+          <ChevronRightIcon
             aria-hidden
             className={cn(
               "size-3.5 opacity-70 transition-transform duration-200 motion-reduce:transition-none",
-              expanded && "rotate-180",
+              expanded && "rotate-90",
             )}
           />
         </span>
@@ -193,11 +193,11 @@ const ToolCallRowView = memo(function ToolCallRowView(props: {
             onClick={toggleDetails}
             className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-icon-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
           >
-            <ChevronDownIcon
+            <ChevronRightIcon
               aria-hidden
               className={cn(
                 "size-3 transition-transform duration-200 motion-reduce:transition-none",
-                detailsOpen && "rotate-180",
+                detailsOpen && "rotate-90",
               )}
             />
           </button>
