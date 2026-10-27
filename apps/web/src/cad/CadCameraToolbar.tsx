@@ -1,16 +1,16 @@
 import type { CadViewState } from "@cadsense/contracts";
 import { type RefObject, useState } from "react";
-import { ArrowUUpLeftIcon, ScanIcon, StackIcon } from "~/lib/icons";
+import { ArrowUUpLeftIcon, ComponentsIcon, SquareHalfIcon, ZoomScanIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { CadViewCube } from "./CadViewCube";
 
-/** One toolbar button, filling the bar's height. Pressed (an applied section, exploded) is
+/** One 32px toolbar button with a 16px icon. Pressed (an applied section, exploded) is
     white; an open popover gets the hover background. */
 const toolbarControl =
-  "flex h-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
+  "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
 const sectionField =
   "h-7 w-full rounded-md border border-input bg-background px-2 text-[13px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24 disabled:opacity-60";
 
@@ -58,8 +58,9 @@ export function CadCameraToolbar({
     (view.ghost?.occurrenceIds.length ?? 0) > 0;
   return (
     <>
-      {/* Bottom-right, clear of the parts chip, the comments card, and the toolbar. */}
-      <div className="pointer-events-none absolute right-2 bottom-2 z-30">
+      {/* Bottom-right of the viewport, 16px in, clear of the parts chip, the comments card,
+          and the toolbar. */}
+      <div className="pointer-events-none absolute right-4 bottom-4 z-30">
         <CadViewCube renderer={renderer} view={view} disabled={disabled} onChange={onChange} />
       </div>
       {/* Above the comment marker layer (z-20) and opaque, so markers never show through it. */}
@@ -67,7 +68,7 @@ export function CadCameraToolbar({
         <div
           role="toolbar"
           aria-label="CAD camera views"
-          className="pointer-events-auto relative flex h-(--cad-overlay-control) max-w-full items-center gap-0.5 rounded-lg border bg-popover p-0.5 shadow-sm"
+          className="pointer-events-auto relative flex max-w-full items-center gap-0.5 rounded-lg border bg-popover p-0.5 shadow-sm"
         >
           {sectionOpen && (
             <form
@@ -143,6 +144,7 @@ export function CadCameraToolbar({
                 })
               }
             >
+              <ZoomScanIcon aria-hidden="true" />
               Fit
             </TooltipTrigger>
             <TooltipPopup>Fit the whole model in view</TooltipPopup>
@@ -156,7 +158,7 @@ export function CadCameraToolbar({
               className={toolbarControl}
               onClick={() => setSectionOpen(!sectionOpen)}
             >
-              <ScanIcon aria-hidden="true" />
+              <SquareHalfIcon aria-hidden="true" />
               Section
             </TooltipTrigger>
             <TooltipPopup>
@@ -173,7 +175,7 @@ export function CadCameraToolbar({
               className={toolbarControl}
               onClick={() => onChange({ ...view, explosion: view.explosion > 0 ? 0 : 1 })}
             >
-              <StackIcon aria-hidden="true" />
+              <ComponentsIcon aria-hidden="true" />
               Explode
             </TooltipTrigger>
             <TooltipPopup>

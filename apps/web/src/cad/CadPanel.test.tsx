@@ -254,7 +254,9 @@ const harness = (
     )
       return;
     if ("displayedSnapshotId" in node.props) boundary.commentsManifest = node.props.manifest;
-    if (node.props.ref) node.props.ref.current = {};
+    // Element refs get a stand-in node; the scene row measures it to decide whether to dock.
+    if (node.props.ref)
+      node.props.ref.current = { getBoundingClientRect: () => ({ width: 800, height: 600 }) };
     attach(node.props.children);
   };
   const render = async () => {

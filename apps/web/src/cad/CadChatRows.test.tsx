@@ -7,6 +7,7 @@ import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import {
   CadPublishedComments,
   describeCadCommentRejection,
+  describeCadCommentsHeading,
   describeCadCommentsPublished,
 } from "./CadChatRows";
 import { CadSeverityIcon } from "./CadCommentsCard";
@@ -54,7 +55,7 @@ const card = {
 it("opens a published comment at its location in the CAD panel", () => {
   const tree = CadPublishedComments({ card, threadRef });
   const buttons = elements(tree).filter((element) => element.type === "button");
-  expect(text(tree)).toContain("Wrote 1 comment");
+  expect(text(tree)).toContain("1 review comment");
   expect(text(tree)).toContain('"Add bolt heads" was not published');
 
   const commentButton = buttons.find((button) => text(button).includes("roller shaft"));
@@ -90,6 +91,11 @@ it("lists resolution proposals apart from written comments and opens their comme
   };
   expect(describeCadCommentsPublished(proposals)).toBe("Proposed 1 resolution");
   expect(describeCadCommentsPublished({ ...card, proposed: proposals.proposed })).toBe(
+    "Wrote 1 comment, proposed 1 resolution",
+  );
+  // Only a comments-only turn shortens to "N review comments"; proposals keep the summary.
+  expect(describeCadCommentsHeading(card)).toBe("1 review comment");
+  expect(describeCadCommentsHeading({ ...card, proposed: proposals.proposed })).toBe(
     "Wrote 1 comment, proposed 1 resolution",
   );
   const tree = CadPublishedComments({ card: proposals, threadRef });

@@ -15,7 +15,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { getVirtualizedScrollFadeClassName, ScrollBar } from "../components/ui/scroll-area";
+import { ScrollBar } from "../components/ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../components/ui/tooltip";
 import {
   CAD_HIERARCHY_DETAIL_ROW_HEIGHT,
@@ -150,10 +150,15 @@ export function CadHierarchyTree({
   const { rows, offsets, partCount, matchCount, hiddenCount } = tree;
   const listHeight = offsets.at(-1)!;
   const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, offsets);
-  const scrollFade = getVirtualizedScrollFadeClassName({
-    top: scrollTop > 0,
-    bottom: scrollTop + viewportHeight < listHeight - 1,
-  });
+  // Dim, but never erase, the row at an edge with more rows past it, so a cut-off row reads as
+  // "keep scrolling" and its text stays legible.
+  const edge = (more: boolean) => (more ? "rgb(0 0 0 / 35%)" : "black");
+  const moreAbove = scrollTop > 0;
+  const moreBelow = scrollTop + viewportHeight < listHeight - 1;
+  const scrollFade =
+    moreAbove || moreBelow
+      ? `linear-gradient(to bottom, ${edge(moreAbove)}, black 1.25rem, black calc(100% - 1.25rem), ${edge(moreBelow)})`
+      : undefined;
   return (
     <div
       className={`flex min-h-0 flex-col ${fullHeight ? "flex-1" : "border-t"}`}
@@ -185,7 +190,8 @@ export function CadHierarchyTree({
           ref={scroller}
           role="tree"
           aria-label="Components"
-          className={cn("h-full overscroll-contain outline-none", scrollFade)}
+          className="h-full overscroll-contain outline-none"
+          style={{ maskImage: scrollFade }}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
         >
           <div style={{ height: listHeight + 4, position: "relative" }}>
@@ -251,7 +257,7 @@ export function CadHierarchyTree({
                     <TooltipPopup>{node.name}</TooltipPopup>
                   </Tooltip>
                   {/* A fixed column, so instance numbers line up down the list. */}
-                  <span className="w-7 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+                  <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
                     {row.instance && `#${row.instance}`}
                   </span>
                   <div className="pointer-events-none absolute inset-y-0 right-7 flex items-center gap-0.5 ps-6 group-hover:pointer-events-auto group-focus-within:pointer-events-auto [background:linear-gradient(to_right,transparent,var(--row)_1.25rem)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-aria-pressed:opacity-100">

@@ -660,7 +660,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
-    isServerThread: _isServerThread,
+    isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     projectSelectionRequired,
     phase,
@@ -3104,9 +3104,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ? "Choose a project above to start a thread"
                             : noProviderAvailable
                               ? "Enable a provider in Settings to send a message"
-                              : phase === "disconnected"
-                                ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                : "Describe a change or ask about your model. @ for files, / for tools."
+                              : isServerThread
+                                ? // A started thread already has its model in view, and the
+                                  // narrow docked composer leaves room for only a short prompt.
+                                  "Ask about this model…"
+                                : phase === "disconnected"
+                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
+                                  : "Describe a change or ask about your model. @ for files, / for tools."
                   }
                   disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
                 />
@@ -3212,7 +3216,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5"
+                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
                 >
                   {showMobilePendingAnswerActions ? null : inlineTasksBadge}
                   <ComposerFooterPrimaryActions

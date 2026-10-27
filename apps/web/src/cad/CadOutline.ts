@@ -95,7 +95,9 @@ export const createCadOutline = (renderer: THREE.WebGLRenderer) => {
           if (texture2D(depthTexture, sampleUv).r < 1.0 && texture2D(depthTexture, uv).r < 1.0)
             edge = max(edge, 1.0 - smoothstep(0.55, 0.8, dot(n, neighbor)));
         }
-        gl_FragColor = vec4(vec3(0.025), edge * 0.65);
+        // A charcoal line rather than black: strong on light parts, quiet on dark ones, and
+        // barely visible where a silhouette meets the dark backdrop.
+        gl_FragColor = vec4(vec3(0.14), edge * 0.65);
       }
     `,
   });

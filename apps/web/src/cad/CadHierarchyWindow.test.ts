@@ -8,14 +8,14 @@ const uniform = (count: number) =>
 describe("CAD hierarchy viewport", () => {
   it("covers tall fullscreen viewports with bounded overscan", () => {
     const { start, end } = cadHierarchyWindow(2810, 1400, uniform(10000));
-    expect(start).toBe(94);
-    expect(end).toBe(157);
-    expect(start * 28).toBeLessThanOrEqual(2810);
-    expect(end * 28).toBeGreaterThanOrEqual(4210);
+    expect(start).toBe(81);
+    expect(end).toBe(138);
+    expect(start * CAD_HIERARCHY_ROW_HEIGHT).toBeLessThanOrEqual(2810);
+    expect(end * CAD_HIERARCHY_ROW_HEIGHT).toBeGreaterThanOrEqual(4210);
   });
 
   it("keeps the sidebar window small", () => {
-    expect(cadHierarchyWindow(0, 240, uniform(10000))).toEqual({ start: 0, end: 15 });
+    expect(cadHierarchyWindow(0, 240, uniform(10000))).toEqual({ start: 0, end: 14 });
   });
 
   it("clamps stale scrolling when the component list shrinks", () => {

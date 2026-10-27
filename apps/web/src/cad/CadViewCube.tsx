@@ -11,10 +11,11 @@ import { CAD_VIEW_DIRECTIONS, cadPresetUp } from "./CadSceneModel";
 type Vec = readonly [number, number, number];
 type Preset = Extract<CadViewState["camera"], { kind: "preset" }>["preset"];
 
-/** Cube edge in px. The isometric silhouette is about 1.6 times this. */
-const EDGE = 46;
+/** Cube edge in px. The isometric silhouette is about 1.63 times as tall (FOOTPRINT). */
+const EDGE = 42;
+const FOOTPRINT = 68;
 /** Share of a face edge each edge and corner zone takes. */
-const RIM = 0.24;
+const RIM = 0.2;
 
 /**
  * Each face: the preset it applies, with its outward normal and label up taken from the preset's
@@ -36,8 +37,8 @@ const FACES = (
   }>
 ).map((face) => ({
   ...face,
-  normal: CAD_VIEW_DIRECTIONS[face.preset] as Vec,
-  up: cadPresetUp(face.preset) as Vec,
+  normal: CAD_VIEW_DIRECTIONS[face.preset],
+  up: cadPresetUp(face.preset),
 }));
 /** The isometric preset looks from the front, right, top corner. */
 const ISOMETRIC: Vec = CAD_VIEW_DIRECTIONS.isometric;
@@ -166,7 +167,8 @@ export function CadViewCube({
     <div
       role="group"
       aria-label="View cube"
-      className="pointer-events-auto relative flex size-[84px] items-center justify-center"
+      className="pointer-events-auto relative flex items-center justify-center"
+      style={{ width: FOOTPRINT, height: FOOTPRINT }}
     >
       <div
         ref={cube}
@@ -178,7 +180,7 @@ export function CadViewCube({
           return (
             <div
               key={face.preset}
-              className="absolute inset-0 grid [backface-visibility:hidden] rounded-[3px] border border-foreground/15 transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]!"
+              className="absolute inset-0 grid [backface-visibility:hidden] border border-foreground/20 transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_16%)]!"
               style={{
                 transform: faceTransform(face.normal, face.up),
                 background: `color-mix(in srgb, var(--popover), var(--foreground) ${face.tint}%)`,
@@ -197,10 +199,12 @@ export function CadViewCube({
                       <TooltipTrigger
                         aria-label={`${face.label} view`}
                         disabled={disabled}
-                        className="flex cursor-pointer items-center justify-center text-[8px] font-semibold tracking-wider text-muted-foreground uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
+                        className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-wide text-muted-foreground uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
                         onClick={() => snap(face.normal)}
                       >
-                        {face.label}
+                        {/* Wider than the center zone on long labels; clicks there still
+                            reach the edge zones under it. */}
+                        <span className="pointer-events-none whitespace-nowrap">{face.label}</span>
                       </TooltipTrigger>
                       <TooltipPopup>{`${face.label} view`}</TooltipPopup>
                     </Tooltip>
@@ -228,7 +232,7 @@ export function CadViewCube({
         <TooltipTrigger
           aria-label="Isometric view"
           disabled={disabled}
-          className="absolute top-0 right-0 flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
+          className="absolute top-0 -left-7 flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
           onClick={() => snap(ISOMETRIC)}
         >
           <CubeIcon aria-hidden="true" className="size-4" />

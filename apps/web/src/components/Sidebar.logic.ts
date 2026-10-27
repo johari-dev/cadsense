@@ -423,7 +423,9 @@ export function resolveThreadRowClassName(input: {
   isSelected: boolean;
 }): string {
   const baseClassName =
-    "h-8 w-full translate-x-0 cursor-pointer justify-start rounded-md px-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+    // 32px for one-line titles; titles that wrap to their second line grow the row to 48px.
+    // No gap: the trailing column is empty until hover, and a gap would narrow every title.
+    "h-auto min-h-8 w-full translate-x-0 cursor-pointer justify-start gap-0 rounded-md px-2 py-1.5 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
   if (input.isSelected && input.isActive) {
     return cn(

@@ -1886,10 +1886,10 @@ function ChatMarkdown({
   return (
     <div
       className={cn(
-        // Tuned for long reviews in a narrow column: a slightly tighter line height than
-        // leading-relaxed, and semibold (not bold) emphasis so run-in headings like
-        // "**Quick cleanup:**" lead their section without outshining the body text.
-        "chat-markdown w-full min-w-0 text-sm leading-[1.55] text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word] [&_strong]:font-semibold",
+        // Tuned for long reviews in the chat column: 14px on a 21px line, and semibold
+        // (not bold) emphasis so run-in headings like "**Quick cleanup:**" lead their
+        // section without outshining the body text. Block spacing lives in index.css.
+        "chat-markdown w-full min-w-0 text-[0.9333rem] leading-[1.5] text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word] [&_strong]:font-semibold",
         className,
       )}
       onCopy={handleCopy}

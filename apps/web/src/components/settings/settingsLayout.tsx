@@ -144,7 +144,7 @@ export function SettingsSection({
       className={cn("space-y-3", className)}
     >
       <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
-        <h2 className="flex items-center gap-2 text-lg font-semibold tracking-[-0.025em] text-foreground">
+        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.025em] text-foreground">
           {icon}
           {title}
         </h2>
@@ -268,11 +268,16 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        {/* Readable pages keep the label column and its control close together; wider
-            pages (diagnostics, tables) opt out through `width`. */}
+        {/* Page text starts 64px from the settings nav (48px here plus the rows' own 16px
+            inset) instead of centering in the window. Readable pages cap the form at 720px so each label stays close to its
+            control; wider pages (diagnostics, tables) opt out through `width`. */}
         <WorkspacePageContainer
           width={width}
-          className={cn("gap-10", width === "readable" && "max-w-[46rem]", className)}
+          className={cn(
+            "mx-0 gap-10 sm:ps-12",
+            width === "readable" && "max-w-[calc(45rem+4.5rem)]",
+            className,
+          )}
         >
           {children}
         </WorkspacePageContainer>

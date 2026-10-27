@@ -40,6 +40,7 @@ import {
   IconClick,
   IconCode,
   IconColorPicker,
+  IconComponents,
   IconCopy,
   IconCornerDownLeft,
   IconCpu,
@@ -105,6 +106,7 @@ import {
   IconShape,
   IconSitemap,
   IconSparkles,
+  IconSquareHalf,
   IconStack2,
   IconStar,
   IconStarFilled,
@@ -123,6 +125,7 @@ import {
   IconWifiOff,
   IconWorld,
   IconX,
+  IconZoomScan,
   createReactComponent,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
@@ -185,6 +188,7 @@ export const CodeIcon = tablerIcon(IconCode);
 export const CopyIcon = tablerIcon(IconCopy);
 export const CpuIcon = tablerIcon(IconCpu);
 export const CrosshairIcon = tablerIcon(IconCrosshair);
+export const ComponentsIcon = tablerIcon(IconComponents);
 export const CubeIcon = tablerIcon(IconCube);
 export const CursorClickIcon = tablerIcon(IconClick);
 export const CursorIcon = tablerIcon(IconPointer);
@@ -242,6 +246,7 @@ export const SidebarIcon = tablerIcon(IconLayoutSidebar);
 export const SidebarSimpleIcon = tablerIcon(IconLayoutSidebar);
 export const SlidersHorizontalIcon = tablerIcon(IconAdjustmentsHorizontal);
 export const SparkleIcon = tablerIcon(IconSparkles);
+export const SquareHalfIcon = tablerIcon(IconSquareHalf);
 export const SpeakerHighIcon = tablerIcon(IconVolume);
 export const SpeakerSlashIcon = tablerIcon(IconVolumeOff);
 export const SpinnerIcon = tablerIcon(IconLoader2);
@@ -257,6 +262,7 @@ export const WifiSlashIcon = tablerIcon(IconWifiOff);
 export const WrenchIcon = tablerIcon(IconTool);
 export const XCircleIcon = tablerIcon(IconCircleX);
 export const XIcon = tablerIcon(IconX);
+export const ZoomScanIcon = tablerIcon(IconZoomScan);
 export const RecordIcon = tablerIcon(IconCircleDot);
 export const ProhibitIcon = tablerIcon(IconBan);
 export const WarningOctagonIcon = tablerIcon(IconAlertOctagon);

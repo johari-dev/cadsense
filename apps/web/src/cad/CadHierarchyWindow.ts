@@ -1,6 +1,6 @@
 /** Parts tree row heights in px: a name alone, or a name with a muted detail line under it. */
-export const CAD_HIERARCHY_ROW_HEIGHT = 28;
-export const CAD_HIERARCHY_DETAIL_ROW_HEIGHT = 40;
+export const CAD_HIERARCHY_ROW_HEIGHT = 32;
+export const CAD_HIERARCHY_DETAIL_ROW_HEIGHT = 44;
 const OVERSCAN = 6;
 
 /** The last row whose top is at or above `y`. `offsets` holds each row's top, then the total. */

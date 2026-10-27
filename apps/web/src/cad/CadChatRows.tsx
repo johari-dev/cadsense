@@ -140,6 +140,17 @@ export function describeCadCommentsPublished(card: CadCommentsPublishedCard): st
   return summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : "No comments published";
 }
 
+/**
+ * The card's heading: "11 review comments" when the turn only wrote comments, otherwise the
+ * full summary so resolution proposals stay named.
+ */
+export function describeCadCommentsHeading(card: CadCommentsPublishedCard): string {
+  const count = card.published.length;
+  return count > 0 && card.proposed.length === 0
+    ? `${count} review comment${count === 1 ? "" : "s"}`
+    : describeCadCommentsPublished(card);
+}
+
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
   card,
@@ -151,18 +162,20 @@ export function CadPublishedComments({
   const count = card.published.length;
   const listed = card.published.slice(0, MAX_LISTED_COMMENTS);
   const unlisted = count - listed.length;
-  // A card of its own, so the review's result stands apart from the narration around it.
+  const heading = describeCadCommentsHeading(card);
+  // A card of its own with the turn's one filled button, so the review's result reads as the
+  // main outcome of the turn rather than more narration.
   return (
     <section
-      aria-label={describeCadCommentsPublished(card)}
-      className="rounded-xl border border-border bg-muted p-1.5 text-sm"
+      aria-label={heading}
+      className="rounded-xl border border-border bg-muted p-2 text-[0.9333rem]"
     >
-      <div className="flex min-h-7 items-center gap-1.5 px-1.5">
+      <div className="flex min-h-8 items-center gap-1.5 px-1">
         <span className="flex size-6 shrink-0 items-center justify-center text-foreground/70">
           <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8]" aria-hidden />
         </span>
-        <h3 className="min-w-0 flex-1 truncate text-[0.9333rem] font-semibold text-foreground">
-          {describeCadCommentsPublished(card)}
+        <h3 className="min-w-0 flex-1 truncate text-[1.0667rem] font-semibold text-foreground">
+          {heading}
         </h3>
       </div>
       <div className="mt-0.5 flex flex-col gap-0.5">
@@ -194,20 +207,15 @@ export function CadPublishedComments({
         )}
       </div>
       {count > 0 || card.proposed.length > 0 ? (
-        <Button
-          variant="outline"
-          size="xs"
-          className="mt-1.5 w-full"
-          onClick={() => openCadComments(threadRef)}
-        >
-          {unlisted > 0 ? `Show all ${count} in CAD` : "Open in CAD"}
+        <Button className="mt-2 h-8.5 w-full sm:h-8.5" onClick={() => openCadComments(threadRef)}>
+          {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}
           <ArrowRightIcon aria-hidden />
         </Button>
       ) : null}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}
-          className="flex items-baseline gap-2 px-1.5 pt-1.5 pb-0.5 text-destructive"
+          className="flex items-baseline gap-2 px-1 pt-1.5 pb-0.5 text-destructive"
         >
           <CircleAlertIcon className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
           <span className="min-w-0 flex-1">{describeCadCommentRejection(rejection)}</span>
@@ -240,7 +248,7 @@ function commentRow({
     <button
       key={key}
       type="button"
-      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
       onClick={onOpen}
     >
       <span className="flex h-5 items-center justify-center">
@@ -248,7 +256,7 @@ function commentRow({
       </span>
       <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
       {detail ? (
-        <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-xs leading-5 text-muted-foreground">
+        <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-[0.8rem] leading-5 text-muted-foreground">
           {detail}
         </span>
       ) : null}

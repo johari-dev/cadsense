@@ -382,9 +382,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
           </div>
           <div
             role="tabpanel"
-            // Six whole rows (1.875rem each, 1px gaps, plus padding) so the last visible
-            // row is never cut in half against the footer.
-            className="flex max-h-[min(calc(6*1.875rem+5px+0.5rem),40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
+            // Six whole rows (2.125rem each, set by .composer-model-row; 1px gaps, plus
+            // padding) so the last visible row is never cut in half against the footer.
+            className="flex max-h-[min(calc(6*2.125rem+5px+0.5rem),40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
           >
             {rows.map((row) => {
               const hint = jumpHintFor(row);
@@ -417,7 +417,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
                   ) : null}
                   {hint ? (
-                    <kbd className="shrink-0 font-sans text-[0.6875rem] tabular-nums text-tertiary-foreground">
+                    <kbd className="shrink-0 font-sans text-[0.8rem] tabular-nums text-muted-foreground">
                       {hint}
                     </kbd>
                   ) : null}
@@ -427,7 +427,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     aria-pressed={row.starred}
                     className={cn(
                       "-me-0.5 shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                      row.starred ? "opacity-90" : "opacity-40",
+                      row.starred ? "opacity-100" : "opacity-70",
                     )}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -437,7 +437,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   >
                     <StarIcon
                       aria-hidden="true"
-                      className="size-3.25"
+                      className="size-3.5"
                       weight={row.starred ? "fill" : "regular"}
                     />
                   </button>
@@ -451,7 +451,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                 onClick={() => setShowLegacy(true)}
               >
                 <span className="min-w-0 flex-1 truncate">More models</span>
-                <span className="shrink-0 text-[0.6875rem] tabular-nums text-tertiary-foreground">
+                <span className="shrink-0 text-[0.8rem] tabular-nums text-muted-foreground">
                   {foldedCount}
                 </span>
                 <CaretDownIcon aria-hidden="true" className="size-3.5 shrink-0" />

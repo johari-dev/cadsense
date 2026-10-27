@@ -147,7 +147,7 @@ export function DraftHeroHeadline({
   return (
     <div className="mx-auto w-full max-w-3xl text-center">
       {activeProject?.cad?.enabled ? <ProjectModelPreview project={activeProject} /> : null}
-      <h1 className="font-medium text-2xl text-foreground tracking-tight sm:text-3xl">
+      <h1 className="font-semibold text-[26px] text-foreground leading-8 tracking-tight">
         {activeProjectTitle ? (
           projectSelector
         ) : canChooseProject ? (

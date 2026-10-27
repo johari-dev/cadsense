@@ -63,7 +63,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "text-generation-model",
-    title: "Text generation model",
+    title: "Thread title model",
     to: "/settings/general",
   },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },

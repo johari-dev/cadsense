@@ -583,11 +583,20 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span
-                    className="min-w-0 flex-1 truncate text-[13px]"
-                    data-testid={`thread-title-${thread.id}`}
-                  >
-                    {thread.title}
+                  // Titles wrap to a second line instead of truncating, so threads that share
+                  // a prefix stay distinct. The active or selected row's age floats at the end
+                  // of that second line: a zero-width float holds the first line, and the age
+                  // clears below it, so the title wraps around the age instead of under it.
+                  <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] leading-[18px]">
+                    {isHighlighted ? (
+                      <>
+                        <span aria-hidden className="float-right h-[18px]" />
+                        <span className="float-right clear-right ps-2 text-[11px] text-tertiary-foreground tabular-nums">
+                          {formatCompactRelativeTime(lastActivityAt)}
+                        </span>
+                      </>
+                    ) : null}
+                    <span data-testid={`thread-title-${thread.id}`}>{thread.title}</span>
                   </span>
                 }
               />
@@ -603,7 +612,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* Takes room only on hover and focus, for the archive button, so it never covers
               the title. */}
-          <div className="flex justify-end group-focus-within/menu-sub-item:min-w-6 group-hover/menu-sub-item:min-w-6 max-sm:min-w-20">
+          <div className="flex justify-end group-focus-within/menu-sub-item:min-w-7 group-hover/menu-sub-item:min-w-7 max-sm:min-w-20">
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -656,7 +665,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               )
             ) : null}
             <span className={threadMetaClassName}>
-              <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center gap-1 empty:hidden ps-1.5">
                 {jumpLabel ? (
                   <Tooltip>
                     <TooltipTrigger
@@ -671,12 +680,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
-                ) : isHighlighted ? (
-                  // Only the active or selected row shows its age, compact ("28d", "now"),
-                  // so other titles keep the full row. The title tooltip carries it for all.
-                  <span className="text-[11px] text-muted-foreground tabular-nums">
-                    {formatCompactRelativeTime(lastActivityAt)}
-                  </span>
                 ) : null}
               </span>
             </span>
@@ -2056,7 +2059,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       <div className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
-          className={`h-auto min-h-12 pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
+          // The hover actions take their room only while shown, so project names use the
+          // full row the rest of the time.
+          className={`h-auto min-h-12 pr-2 group-focus-within/project-header:pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:pr-14 group-hover/project-header:text-sidebar-foreground max-sm:pr-14 ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}

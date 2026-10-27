@@ -12,12 +12,12 @@ import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanel
 import { THREAD_SIDEBAR_DEFAULT_WIDTH } from "./threadSidebarWidth";
 
 /** Chat column width the CAD panel's default leaves beside the default sidebar. */
-const CAD_PANEL_DEFAULT_CHAT_WIDTH = 416;
+const CAD_PANEL_DEFAULT_CHAT_WIDTH = 440;
 
 /**
  * Initial CAD panel width before the user resizes it, for `defaultWidth`. It leaves a
- * readable chat column (about 416px at 1440 wide) and never takes less than half the
- * window, so the model stays the dominant column.
+ * readable chat column (440px beside the default sidebar, so 768px of CAD at 1440 wide)
+ * and never takes less than half the window, so the model stays the dominant column.
  */
 export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
   return Math.round(

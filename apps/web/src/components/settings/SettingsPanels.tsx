@@ -348,7 +348,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit
         ? ["Quit confirmation"]
         : []),
-      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(isTextGenerationModelDirty ? ["Thread title model"] : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -1043,11 +1043,11 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("text-generation-model")}
-          description="Default model for generated text like thread titles."
+          description="Model that writes and regenerates thread titles."
           resetAction={
             isTextGenerationModelDirty ? (
               <SettingResetButton
-                label="text generation model"
+                label="thread title model"
                 onClick={() =>
                   updateSettings({
                     textGenerationModelSelection:

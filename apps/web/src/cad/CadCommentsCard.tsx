@@ -15,6 +15,7 @@ import {
   type CadSnapshotManifest,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
+import { createPortal } from "react-dom";
 import { newCommandId } from "../lib/utils";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 import {
@@ -27,6 +28,7 @@ import {
   StackIcon,
   CaretLeftIcon,
   CaretRightIcon,
+  DotsThreeIcon,
   ClockCounterClockwiseIcon,
   EyeIcon,
   InfoIcon,
@@ -39,6 +41,7 @@ import {
 } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {
   COMMENT_FOCUS_AGENT_VIEW,
@@ -78,13 +81,16 @@ const pinLabel = (comment: CadComment, target: number) =>
 /** A pin's width without measuring it: round up to two characters, a pill beyond that. */
 const pinWidth = (label: string) =>
   label.length <= 2 ? CAD_COMMENT_PIN_SIZE : 12 + 7 * label.length;
-/** Shape, placement and type shared by comment pins and group count markers. */
+/** Placement and type shared by comment pins and group count markers. */
 const PIN_SHAPE =
-  "pointer-events-auto absolute flex h-5.5 min-w-5.5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-[11px] leading-none font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full leading-none font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
 /** A single finding's pin. Yellow marks a finding ID here and in CommentBadge, nowhere else. */
-const PIN_CLASS = `${PIN_SHAPE} border-[1.5px] border-neutral-950/80 bg-amber-200 px-1.5 text-neutral-950 shadow-[0_1px_3px_rgb(0_0_0/0.45)]`;
-/** A group's count marker: a neutral surface, so it never reads as a finding ID. */
-const PIN_GROUP_CLASS = `${PIN_SHAPE} gap-1 border border-foreground/25 bg-popover ps-1.5 pe-2 text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)]`;
+const PIN_CLASS = `${PIN_SHAPE} h-5.5 min-w-5.5 border-[1.5px] border-neutral-950/80 bg-amber-200 px-1.5 text-[11px] text-neutral-950 shadow-[0_1px_3px_rgb(0_0_0/0.45)]`;
+/**
+ * A group's count marker: a neutral surface that spells out "12 comments", so it never reads
+ * as a finding ID. Expanded, it shrinks to a stack icon at the centre of its fanned-out pins.
+ */
+const PIN_GROUP_CLASS = `${PIN_SHAPE} h-7 gap-1.5 border border-foreground/30 bg-popover px-2.5 text-xs text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)] after:content-[attr(data-count)] aria-expanded:w-7 aria-expanded:px-0 aria-expanded:after:content-none`;
 /**
  * Width of the open comments card in CSS px, kept in step with CadPanel.css. The card sits
  * 12px from the viewport's right edge, so framing that avoids it reserves this plus 12px.
@@ -112,6 +118,11 @@ export interface CadCommentsCardProps {
   back: () => void;
   /** True in the picture-in-picture preview, where the open card can cover the composer. */
   floating?: boolean;
+  /**
+   * A column beside the viewport (see CadPanel). When set, the open card renders into it as a
+   * docked panel instead of floating over the model; the collapsed toggle stays in the corner.
+   */
+  dock?: HTMLElement | null;
 }
 export function CadCommentsCard({
   threadRef,
@@ -128,6 +139,7 @@ export function CadCommentsCard({
   historical,
   back,
   floating = false,
+  dock = null,
 }: CadCommentsCardProps) {
   const [filter, setFilter] = useState<"open" | "reviewed" | "history">(
     historical ? "history" : "open",
@@ -148,6 +160,7 @@ export function CadCommentsCard({
   // animating to, so the open panel stays mounted until a close has played out.
   const [settledOpen, setSettledOpen] = useState(open);
   const settling = settledOpen !== open;
+  const docked = dock !== null;
   useEffect(() => {
     if (!settling) return;
     const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -167,7 +180,8 @@ export function CadCommentsCard({
   /**
    * The part of the viewport the card leaves free, where a focused comment is framed. The
    * open card's content already has its final width and right edge while the card animates,
-   * so this stays put through the opening animation instead of changing every frame.
+   * so this stays put through the opening animation instead of changing every frame. A docked
+   * card sits beside the viewport and renders no floating surface, so the whole viewport is free.
    */
   const focusArea = () => {
     if (!host.current) return null;
@@ -254,7 +268,7 @@ export function CadCommentsCard({
       });
   }, [open, selection, renderer]);
   useEffect(() => {
-    if (!open || !host.current || !card.current) return;
+    if (!open || !host.current) return;
     // Re-frame only when the free area really changes (a panel resize, a narrow layout's card
     // growing), never for every frame of the card's own animation.
     let area = JSON.stringify(focusArea());
@@ -267,9 +281,9 @@ export function CadCommentsCard({
       }
     });
     observer.observe(host.current);
-    observer.observe(card.current);
+    if (card.current) observer.observe(card.current);
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, docked]);
   useEffect(() => {
     if (
       !open ||
@@ -299,7 +313,7 @@ export function CadCommentsCard({
           );
     setFocusNotice(notice ?? COMMENT_FOCUS_UNAVAILABLE);
     card.current?.querySelector('[aria-expanded="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [selection, descriptor, open, layoutVersion, settling]);
+  }, [selection, descriptor, open, layoutVersion, settling, docked]);
   useEffect(() => {
     let frame = 0;
     const current = renderer.current;
@@ -359,7 +373,7 @@ export function CadCommentsCard({
         const counter = counters.get(key);
         if (counter) {
           place(counter, cx, cy);
-          counter.dataset.count = String(group.length);
+          counter.dataset.count = `${group.length} comments`;
           counter.setAttribute("aria-expanded", String(expandedGroup === key));
           counter.setAttribute(
             "aria-label",
@@ -374,7 +388,8 @@ export function CadCommentsCard({
         // so wide pills never crowd their neighbours.
         const arcs = group.map((pin) => pin.width + 8);
         const circumference = arcs.reduce((sum, arc) => sum + arc, 0);
-        const radius = Math.max(CAD_COMMENT_PIN_SIZE + 6, circumference / (2 * Math.PI));
+        // At least clear of the 28px hub the expanded marker shrinks to.
+        const radius = Math.max(CAD_COMMENT_PIN_SIZE + 8, circumference / (2 * Math.PI));
         let along = -arcs[0]! / 2;
         group.forEach((pin, i) => {
           along += arcs[i]! / 2;
@@ -463,6 +478,319 @@ export function CadCommentsCard({
     discussComment(c);
     if (floating) setOpen(false);
   };
+  // The open card's tabs and list, floating in the viewport's corner or docked beside it.
+  const panel = (
+    <div
+      ref={content}
+      aria-label="CAD comments"
+      inert={!open}
+      className={
+        docked
+          ? "cad-comments-dock flex min-h-0 flex-1 flex-col"
+          : "cad-comments-content flex flex-col"
+      }
+    >
+      {/* Labelled tabs and a close button, laid out like the view changes card. */}
+      <div className="flex shrink-0 items-center gap-0.5 border-b ps-1.5 pe-1.5 pt-1.5 pb-[7px]">
+        <div role="group" aria-label="Show comments" className="flex items-center gap-0.5">
+          {COMMENT_FILTERS.map(({ id, label, tooltip }) => (
+            <Tooltip key={id}>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-pressed={filter === id}
+                    onClick={() => setFilter(id)}
+                    className={cn(
+                      "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground",
+                      filter === id &&
+                        "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
+                    )}
+                  />
+                }
+              >
+                {label}
+                {lists[id].length > 0 && (
+                  <span className="tabular-nums text-muted-foreground">{lists[id].length}</span>
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{tooltip}</TooltipPopup>
+            </Tooltip>
+          ))}
+        </div>
+        <span className="flex-1" />
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Close comments"
+          onClick={() => setOpen(false)}
+        >
+          <X className="size-4" />
+        </Button>
+      </div>
+      {reviewNotice && (
+        <div
+          role="status"
+          className={cn(
+            "flex shrink-0 items-center gap-2 border-b ps-3 pe-1.5 py-1 text-xs",
+            reviewNotice.failed ? "text-destructive-foreground" : "text-muted-foreground",
+          )}
+        >
+          <span className="min-w-0 flex-1">{reviewNotice.text}</span>
+          {reviewNotice.failed && (
+            <IconAction label="Close message" icon={<X />} onClick={() => setReviewNotice(null)} />
+          )}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        {visible.length ? (
+          visible.flatMap((c, index) => {
+            const location = selection?.id === c.id ? locationOf(c, selection.target) : null;
+            const expanded = location !== null;
+            const previousRevision = c.modelDescriptor !== descriptor;
+            const outdated = c.outdated
+              ? `Outdated: ${OUTDATED_REASONS[c.outdated.reason]} in a newer revision`
+              : null;
+            const heading =
+              filter === "open" && visible[index - 1]?.severity !== c.severity ? (
+                <h3
+                  key={`severity:${c.severity}`}
+                  className="flex gap-1.5 px-4 pt-3 pb-1 text-xs font-normal text-muted-foreground"
+                >
+                  {c.severity === null ? "Other" : SEVERITY_GROUPS[c.severity]}
+                  <span className="tabular-nums">
+                    {visible.filter((x) => x.severity === c.severity).length}
+                  </span>
+                </h3>
+              ) : null;
+            const row = (
+              <article
+                key={c.id}
+                className={cn(
+                  // Reading size: 13px titles and body on a 20px line, 12px metadata.
+                  "text-[13px] leading-5",
+                  expanded ? "bg-foreground/[0.035]" : "hover:bg-foreground/[0.03]",
+                )}
+              >
+                {/* The padding lives on the button so the whole row is clickable. */}
+                <button
+                  className={cn(
+                    "flex w-full cursor-pointer items-start gap-2 px-4 text-left",
+                    expanded ? "pt-4 pb-2" : "py-2",
+                  )}
+                  aria-expanded={expanded}
+                  onClick={() => choose(c, "all")}
+                >
+                  {/* Fixed slot so one- and two-digit badges keep titles aligned. */}
+                  <span className="flex w-5 shrink-0 pt-px">
+                    <CommentBadge number={c.number} reviewed={c.state !== "open"} />
+                  </span>
+                  <CadSeverityIcon severity={c.severity} category={c.category} />
+                  <span
+                    className={cn("min-w-0 flex-1", expanded ? "font-semibold" : "line-clamp-2")}
+                  >
+                    {c.title}
+                  </span>
+                  {c.targets.length > 1 && (
+                    <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
+                      <LocateFixed className="size-3" />
+                      {c.targets.length}
+                    </span>
+                  )}
+                  {previousRevision && (
+                    <RowStatusIcon icon={ClockCounterClockwiseIcon} label="Previous revision" />
+                  )}
+                  {outdated && (
+                    <RowStatusIcon
+                      icon={WarningCircleIcon}
+                      label={outdated}
+                      className="text-warning"
+                    />
+                  )}
+                </button>
+                {expanded && (
+                  // 16px around the expanded finding; the body lines up under the severity icon.
+                  <div className="space-y-3 ps-11 pe-4 pb-4">
+                    <p className="whitespace-pre-wrap text-foreground/85">{c.body}</p>
+                    {outdated && <p className="text-xs text-muted-foreground">{outdated}</p>}
+                    {c.link && (
+                      <button
+                        className="cursor-pointer text-left underline"
+                        onClick={() => {
+                          const old = comments.find((x) => x.id === c.link?.commentId);
+                          if (old) choose(old, 0);
+                        }}
+                      >
+                        {c.link.kind}: {c.link.explanation}
+                      </button>
+                    )}
+                    {comments
+                      .filter((x) => x.link?.commentId === c.id)
+                      .map((x) => (
+                        <button
+                          key={x.id}
+                          className="block cursor-pointer text-left underline"
+                          onClick={() => choose(x, 0)}
+                        >
+                          See {x.link?.kind}: {x.title}
+                        </button>
+                      ))}
+                    {c.proposal && c.state === "open" && (
+                      <p className="whitespace-pre-wrap">
+                        Proposed resolution: {c.proposal.explanation}
+                      </p>
+                    )}
+                    {c.state === "dismissed" && c.reviewReason && (
+                      <p className="text-xs text-muted-foreground">Dismissed: {c.reviewReason}</p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {c.targets.length > 1 && (
+                        <LocationChip
+                          label="All locations"
+                          icon={StackIcon}
+                          selected={location === "all"}
+                          notice={location === "all" ? focusNotice : ""}
+                          wholePartNote={undefined}
+                          onClick={() => choose(c, "all")}
+                        />
+                      )}
+                      {c.targets.map((t, i) => (
+                        <LocationChip
+                          key={i}
+                          label={t.label}
+                          selected={location === i}
+                          notice={location === i ? focusNotice : ""}
+                          wholePartNote={
+                            t.kind === "part" ? t.preciseLocationLimitation : undefined
+                          }
+                          onClick={() => choose(c, i)}
+                        />
+                      ))}
+                      {c.targets.length > 1 && (
+                        <>
+                          <IconAction
+                            label="Previous location"
+                            icon={<CaretLeftIcon />}
+                            disabled={location === "all"}
+                            onClick={() =>
+                              choose(c, location === "all" || location === 0 ? "all" : location - 1)
+                            }
+                          />
+                          <IconAction
+                            label="Next location"
+                            icon={<CaretRightIcon />}
+                            disabled={location === c.targets.length - 1}
+                            onClick={() => choose(c, location === "all" ? 0 : location + 1)}
+                          />
+                        </>
+                      )}
+                    </div>
+                    {/* Named review actions on their own row, below the locations. Dismiss
+                        lives in the trailing overflow menu. */}
+                    {dismissing?.id !== c.id && (
+                      <div className="flex items-center gap-1">
+                        {c.state === "open" ? (
+                          <CardAction
+                            label="Resolve"
+                            tooltip="Mark resolved: the model now addresses this"
+                            icon={<Check />}
+                            emphasis
+                            disabled={pendingReviews.has(c.id)}
+                            onClick={() => void change(c, "resolved")}
+                          />
+                        ) : (
+                          <CardAction
+                            label="Reopen"
+                            icon={<RotateCcw />}
+                            emphasis
+                            disabled={pendingReviews.has(c.id)}
+                            onClick={() => void change(c, "open")}
+                          />
+                        )}
+                        <CardAction
+                          label="Discuss"
+                          tooltip="Discuss this finding in chat"
+                          icon={<ChatCircleIcon />}
+                          onClick={() => discuss(c)}
+                        />
+                        {c.state === "open" && (
+                          <Menu>
+                            <MenuTrigger
+                              render={
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label="More actions"
+                                  className="ms-auto text-muted-foreground"
+                                />
+                              }
+                            >
+                              <DotsThreeIcon />
+                            </MenuTrigger>
+                            <MenuPopup align="end" className="w-64">
+                              <MenuAction
+                                label="Dismiss"
+                                description="No change needed. A reason teaches later reviews."
+                                icon={<ProhibitIcon />}
+                                disabled={pendingReviews.has(c.id)}
+                                onClick={() => setDismissing({ id: c.id, reason: "" })}
+                              />
+                            </MenuPopup>
+                          </Menu>
+                        )}
+                      </div>
+                    )}
+                    {c.state === "open" && dismissing?.id === c.id && (
+                      <form
+                        className="flex min-w-0 gap-1"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void change(c, "dismissed", dismissing.reason);
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          aria-label="Dismiss reason"
+                          className="h-7 min-w-0 flex-1 border-b bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground"
+                          placeholder="Why? (optional, becomes a review learning)"
+                          maxLength={500}
+                          value={dismissing.reason}
+                          disabled={pendingReviews.has(c.id)}
+                          onChange={(event) =>
+                            setDismissing({ id: c.id, reason: event.target.value })
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key !== "Escape") return;
+                            event.preventDefault();
+                            setDismissing(null);
+                          }}
+                        />
+                        <Button
+                          size="compact"
+                          variant="ghost"
+                          type="submit"
+                          disabled={pendingReviews.has(c.id)}
+                        >
+                          Confirm
+                        </Button>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+            return heading ? [heading, row] : [row];
+          })
+        ) : (
+          <p className="p-3 text-xs text-muted-foreground">
+            {filter === "open"
+              ? "No open comments. Reviewed findings remain in Reviewed."
+              : "No findings in this group."}
+          </p>
+        )}
+      </div>
+    </div>
+  );
   return (
     <div
       ref={host}
@@ -517,13 +845,9 @@ export function CadCommentsCard({
                     onClick={() => setExpandedGroup((g) => (g === key ? null : key))}
                     onPointerEnter={() => holdGroup(key)}
                     onPointerLeave={releaseGroup}
-                    className={cn(
-                      PIN_GROUP_CLASS,
-                      "after:content-[attr(data-count)]",
-                      dimmed && "opacity-70 hover:opacity-100",
-                    )}
+                    className={cn(PIN_GROUP_CLASS, dimmed && "opacity-70 hover:opacity-100")}
                   >
-                    <StackIcon aria-hidden className="size-3 text-muted-foreground" />
+                    <StackIcon aria-hidden className="size-3.5 text-muted-foreground" />
                   </button>
                 </Fragment>
               );
@@ -538,346 +862,44 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
-      <div
-        ref={card}
-        data-comments-surface
-        data-open={open}
-        data-closing={!open && settling}
-        data-historical={historical}
-        // Collapsed, the surface is as wide as the toggle chip; open, CadPanel.css sizes it.
-        style={open ? undefined : { width: toggleWidth }}
-        className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-xs text-popover-foreground shadow-lg"
-      >
-        {!open && (
-          // Collapsed, the surface itself is the toggle: this button fills its inside edge to
-          // edge with the same rounding, so hover lights up the one shape that then grows into
-          // the card. It stays pinned to the corner while the card shrinks back into it.
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={toggleLabel}
-                  aria-expanded={false}
-                  onClick={() => setOpen(true)}
-                  style={{ width: `calc(${toggleWidth} - 2px)` }}
-                  className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--radius-lg)-1px)] outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              }
-            >
-              <MessageSquare aria-hidden className="size-4 shrink-0" />
-              {openCount > 0 && <span className="tabular-nums">{openCount}</span>}
-            </TooltipTrigger>
-            <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
-          </Tooltip>
-        )}
-        {(open || settling) && (
-          <div
-            ref={content}
-            aria-label="CAD comments"
-            inert={!open}
-            className="cad-comments-content flex flex-col"
-          >
-            {/* Labelled tabs and a close button, laid out like the view changes card. */}
-            <div className="flex shrink-0 items-center gap-0.5 border-b ps-1.5 pe-1.5 pt-1.5 pb-[7px]">
-              <div role="group" aria-label="Show comments" className="flex items-center gap-0.5">
-                {COMMENT_FILTERS.map(({ id, label, tooltip }) => (
-                  <Tooltip key={id}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-pressed={filter === id}
-                          onClick={() => setFilter(id)}
-                          className={cn(
-                            "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground",
-                            filter === id &&
-                              "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
-                          )}
-                        />
-                      }
-                    >
-                      {label}
-                      {lists[id].length > 0 && (
-                        <span className="tabular-nums text-muted-foreground">
-                          {lists[id].length}
-                        </span>
-                      )}
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{tooltip}</TooltipPopup>
-                  </Tooltip>
-                ))}
-              </div>
-              <span className="flex-1" />
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Close comments"
-                onClick={() => setOpen(false)}
-              >
-                <X className="size-4" />
-              </Button>
-            </div>
-            {reviewNotice && (
-              <div
-                role="status"
-                className={cn(
-                  "flex shrink-0 items-center gap-2 border-b ps-3 pe-1.5 py-1 text-xs",
-                  reviewNotice.failed ? "text-destructive-foreground" : "text-muted-foreground",
-                )}
-              >
-                <span className="min-w-0 flex-1">{reviewNotice.text}</span>
-                {reviewNotice.failed && (
-                  <IconAction
-                    label="Close message"
-                    icon={<X />}
-                    onClick={() => setReviewNotice(null)}
+      {docked && open && createPortal(panel, dock)}
+      {!(docked && open) && (
+        <div
+          ref={card}
+          data-comments-surface
+          data-open={open}
+          data-closing={!open && settling}
+          data-historical={historical}
+          // Collapsed, the surface is as wide as the toggle chip; open, CadPanel.css sizes it.
+          style={open ? undefined : { width: toggleWidth }}
+          className="cad-comments-surface pointer-events-auto absolute right-3 top-3 rounded-lg border bg-popover text-xs text-popover-foreground shadow-lg"
+        >
+          {!open && (
+            // Collapsed, the surface itself is the toggle: this button fills its inside edge to
+            // edge with the same rounding, so hover lights up the one shape that then grows into
+            // the card. It stays pinned to the corner while the card shrinks back into it.
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={toggleLabel}
+                    aria-expanded={false}
+                    onClick={() => setOpen(true)}
+                    style={{ width: `calc(${toggleWidth} - 2px)` }}
+                    className="absolute inset-y-0 right-0 flex cursor-pointer items-center justify-center gap-1.5 rounded-[calc(var(--radius-lg)-1px)] outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
                   />
-                )}
-              </div>
-            )}
-            <div className="min-h-0 flex-1 overflow-y-auto p-1">
-              {visible.length ? (
-                visible.flatMap((c, index) => {
-                  const location = selection?.id === c.id ? locationOf(c, selection.target) : null;
-                  const expanded = location !== null;
-                  const previousRevision = c.modelDescriptor !== descriptor;
-                  const outdated = c.outdated
-                    ? `Outdated: ${OUTDATED_REASONS[c.outdated.reason]} in a newer revision`
-                    : null;
-                  const heading =
-                    filter === "open" && visible[index - 1]?.severity !== c.severity ? (
-                      <h3
-                        key={`severity:${c.severity}`}
-                        className="flex gap-1.5 px-2 pt-2 pb-1 text-[11px] font-normal text-muted-foreground"
-                      >
-                        {c.severity === null ? "Other" : SEVERITY_GROUPS[c.severity]}
-                        <span className="tabular-nums">
-                          {visible.filter((x) => x.severity === c.severity).length}
-                        </span>
-                      </h3>
-                    ) : null;
-                  const row = (
-                    <article
-                      key={c.id}
-                      className={cn(
-                        "rounded-md text-xs",
-                        expanded ? "bg-foreground/[0.035]" : "hover:bg-foreground/[0.03]",
-                      )}
-                    >
-                      {/* The padding lives on the button so the whole row is clickable. */}
-                      <button
-                        className="flex w-full cursor-pointer items-start gap-2 px-2 py-1.5 text-left"
-                        aria-expanded={expanded}
-                        onClick={() => choose(c, "all")}
-                      >
-                        {/* Fixed slot so one- and two-digit badges keep titles aligned. */}
-                        <span className="flex w-5 shrink-0">
-                          <CommentBadge number={c.number} reviewed={c.state !== "open"} />
-                        </span>
-                        <CadSeverityIcon severity={c.severity} category={c.category} />
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 leading-[18px]",
-                            expanded ? "font-semibold" : "line-clamp-2",
-                          )}
-                        >
-                          {c.title}
-                        </span>
-                        {c.targets.length > 1 && (
-                          <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
-                            <LocateFixed className="size-3" />
-                            {c.targets.length}
-                          </span>
-                        )}
-                        {previousRevision && (
-                          <RowStatusIcon
-                            icon={ClockCounterClockwiseIcon}
-                            label="Previous revision"
-                          />
-                        )}
-                        {outdated && (
-                          <RowStatusIcon
-                            icon={WarningCircleIcon}
-                            label={outdated}
-                            className="text-warning"
-                          />
-                        )}
-                      </button>
-                      {expanded && (
-                        <div className="space-y-2.5 pe-2 pb-2 ps-9 pt-0.5">
-                          <p className="whitespace-pre-wrap leading-relaxed text-foreground/85">
-                            {c.body}
-                          </p>
-                          {outdated && <p className="text-muted-foreground">{outdated}</p>}
-                          {c.link && (
-                            <button
-                              className="cursor-pointer text-left underline"
-                              onClick={() => {
-                                const old = comments.find((x) => x.id === c.link?.commentId);
-                                if (old) choose(old, 0);
-                              }}
-                            >
-                              {c.link.kind}: {c.link.explanation}
-                            </button>
-                          )}
-                          {comments
-                            .filter((x) => x.link?.commentId === c.id)
-                            .map((x) => (
-                              <button
-                                key={x.id}
-                                className="block cursor-pointer text-left underline"
-                                onClick={() => choose(x, 0)}
-                              >
-                                See {x.link?.kind}: {x.title}
-                              </button>
-                            ))}
-                          {c.proposal && c.state === "open" && (
-                            <p className="whitespace-pre-wrap">
-                              Proposed resolution: {c.proposal.explanation}
-                            </p>
-                          )}
-                          {c.state === "dismissed" && c.reviewReason && (
-                            <p className="text-muted-foreground">Dismissed: {c.reviewReason}</p>
-                          )}
-                          <div className="flex flex-wrap items-center gap-1">
-                            {c.targets.length > 1 && (
-                              <LocationChip
-                                label="All locations"
-                                icon={StackIcon}
-                                selected={location === "all"}
-                                notice={location === "all" ? focusNotice : ""}
-                                wholePartNote={undefined}
-                                onClick={() => choose(c, "all")}
-                              />
-                            )}
-                            {c.targets.map((t, i) => (
-                              <LocationChip
-                                key={i}
-                                label={t.label}
-                                selected={location === i}
-                                notice={location === i ? focusNotice : ""}
-                                wholePartNote={
-                                  t.kind === "part" ? t.preciseLocationLimitation : undefined
-                                }
-                                onClick={() => choose(c, i)}
-                              />
-                            ))}
-                            {c.targets.length > 1 && (
-                              <>
-                                <IconAction
-                                  label="Previous location"
-                                  icon={<CaretLeftIcon />}
-                                  disabled={location === "all"}
-                                  onClick={() =>
-                                    choose(
-                                      c,
-                                      location === "all" || location === 0 ? "all" : location - 1,
-                                    )
-                                  }
-                                />
-                                <IconAction
-                                  label="Next location"
-                                  icon={<CaretRightIcon />}
-                                  disabled={location === c.targets.length - 1}
-                                  onClick={() => choose(c, location === "all" ? 0 : location + 1)}
-                                />
-                              </>
-                            )}
-                          </div>
-                          {/* Named review actions on their own row, below the locations. Dismiss
-                              is the quieter trailing action. */}
-                          {dismissing?.id !== c.id && (
-                            <div className="flex items-center gap-1">
-                              {c.state === "open" ? (
-                                <CardAction
-                                  label="Resolve"
-                                  tooltip="Mark resolved: the model now addresses this"
-                                  icon={<Check />}
-                                  emphasis
-                                  disabled={pendingReviews.has(c.id)}
-                                  onClick={() => void change(c, "resolved")}
-                                />
-                              ) : (
-                                <CardAction
-                                  label="Reopen"
-                                  icon={<RotateCcw />}
-                                  emphasis
-                                  disabled={pendingReviews.has(c.id)}
-                                  onClick={() => void change(c, "open")}
-                                />
-                              )}
-                              <CardAction
-                                label="Discuss"
-                                tooltip="Discuss this finding in chat"
-                                icon={<ChatCircleIcon />}
-                                onClick={() => discuss(c)}
-                              />
-                              {c.state === "open" && (
-                                <span className="ms-auto">
-                                  <CardAction
-                                    label="Dismiss"
-                                    tooltip="Dismiss: no change needed. A reason teaches later reviews."
-                                    icon={<ProhibitIcon />}
-                                    disabled={pendingReviews.has(c.id)}
-                                    onClick={() => setDismissing({ id: c.id, reason: "" })}
-                                  />
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {c.state === "open" && dismissing?.id === c.id && (
-                            <form
-                              className="flex min-w-0 gap-1"
-                              onSubmit={(event) => {
-                                event.preventDefault();
-                                void change(c, "dismissed", dismissing.reason);
-                              }}
-                            >
-                              <input
-                                autoFocus
-                                aria-label="Dismiss reason"
-                                className="h-7 min-w-0 flex-1 border-b bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground"
-                                placeholder="Why? (optional, becomes a review learning)"
-                                maxLength={500}
-                                value={dismissing.reason}
-                                disabled={pendingReviews.has(c.id)}
-                                onChange={(event) =>
-                                  setDismissing({ id: c.id, reason: event.target.value })
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key !== "Escape") return;
-                                  event.preventDefault();
-                                  setDismissing(null);
-                                }}
-                              />
-                              <Button
-                                size="compact"
-                                variant="ghost"
-                                type="submit"
-                                disabled={pendingReviews.has(c.id)}
-                              >
-                                Confirm
-                              </Button>
-                            </form>
-                          )}
-                        </div>
-                      )}
-                    </article>
-                  );
-                  return heading ? [heading, row] : [row];
-                })
-              ) : (
-                <p className="p-3 text-xs text-muted-foreground">
-                  {filter === "open"
-                    ? "No open comments. Reviewed findings remain in Reviewed."
-                    : "No findings in this group."}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+                }
+              >
+                <MessageSquare aria-hidden className="size-4 shrink-0" />
+                {openCount > 0 && <span className="tabular-nums">{openCount}</span>}
+              </TooltipTrigger>
+              <TooltipPopup side="left">{toggleLabel}</TooltipPopup>
+            </Tooltip>
+          )}
+          {!docked && (open || settling) && panel}
+        </div>
+      )}
     </div>
   );
 }
@@ -943,7 +965,7 @@ export function CadSeverityIcon({
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<span role="img" aria-label={label} className="mt-px inline-flex shrink-0" />}
+        render={<span role="img" aria-label={label} className="mt-[3px] inline-flex shrink-0" />}
       >
         <SeverityIcon className={cn("size-3.5", className)} />
       </TooltipTrigger>
@@ -965,7 +987,7 @@ function RowStatusIcon({
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<span role="img" aria-label={label} className="mt-px inline-flex shrink-0" />}
+        render={<span role="img" aria-label={label} className="mt-[3px] inline-flex shrink-0" />}
       >
         <StatusIcon className={cn("size-3.5 text-muted-foreground", className)} />
       </TooltipTrigger>
@@ -1007,6 +1029,25 @@ function CardAction(props: {
         {props.tooltip}
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** An overflow menu entry: an icon, its label, and one line on what it does. */
+function MenuAction(props: {
+  label: string;
+  description: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <MenuItem disabled={props.disabled} onClick={props.onClick} className="items-start py-1.5">
+      {props.icon}
+      <span className="flex flex-col gap-0.5">
+        <span>{props.label}</span>
+        <span className="text-xs text-muted-foreground">{props.description}</span>
+      </span>
+    </MenuItem>
   );
 }
 

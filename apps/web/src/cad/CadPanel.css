@@ -1,6 +1,8 @@
 /* The comments card morphs between the count chip toggle and a panel sized to its content (up to a
    cap). `interpolate-size` lets height animate to and from `auto` where supported; other
-   browsers keep the size change without animating it. */
+   browsers keep the size change without animating it. Wide scenes dock the open card as a
+   column beside the viewport instead (see CadScene); that column appears without animating its
+   width, so the canvas resizes once, and only its content fades in. */
 /* Size of the viewport's corner controls: the comments toggle and the view changes chip. */
 :root {
   --cad-overlay-control: 34px;
@@ -63,6 +65,23 @@
 @media (prefers-reduced-motion: reduce) {
   .cad-comments-surface,
   .cad-comments-content {
+    transition: none;
+  }
+}
+
+/* The docked card's content fades in once when it opens. */
+.cad-comments-dock {
+  transition: opacity 150ms ease;
+}
+
+@starting-style {
+  .cad-comments-dock {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cad-comments-dock {
     transition: none;
   }
 }

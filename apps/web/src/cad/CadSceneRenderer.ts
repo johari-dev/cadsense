@@ -31,7 +31,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { prefetchCadAssets } from "./CadAssetPrefetch";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DEFAULT_CAD_APPEARANCE, type CadAppearance } from "./CadAppearance";
-import { prepareCadMaterials } from "./CadMaterials";
+import { liftDarkCadColors, prepareCadMaterials } from "./CadMaterials";
 import { creaseCadNormals } from "./CadNormals";
 import { createCadOutline, supportsCadOutline } from "./CadOutline";
 import {
@@ -77,7 +77,7 @@ const createBackdrop = (background: number, dark: boolean) => {
   const steps = 64;
   const data = new Uint8Array(steps * 4);
   const channels = [(background >> 16) & 0xff, (background >> 8) & 0xff, background & 0xff];
-  const lift = dark ? [10, 11, 14] : [6, 6, 8];
+  const lift = dark ? [12, 13, 16] : [6, 6, 8];
   for (let row = 0; row < steps; row++) {
     // Rows run bottom to top; ease so most of the lift sits in the upper half.
     const t = (row / (steps - 1)) ** 1.4;
@@ -619,6 +619,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
               defaultFinish.add(object);
           });
           prepareCadMaterials(prototype, appearancesByHash.get(asset.sha256) ?? [], defaultFinish);
+          liftDarkCadColors(prototype);
           creaseCadNormals(prototype);
           assetsByHash.set(asset.sha256, prototype);
         } else decodedBytes = budget.add(asset, complexities.get(asset.sha256)!).decodedBytes;
