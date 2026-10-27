@@ -183,11 +183,6 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   };
 
   const searchRef = useRef<HTMLInputElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  // The panel opens 8px above the whole composer box rather than the pill, so it never
-  // covers the prompt. Outside a composer it falls back to the trigger.
-  const panelAnchor = () =>
-    triggerRef.current?.closest('[data-chat-composer-main-surface="true"]') ?? triggerRef.current;
   useEffect(() => {
     if (!isMenuOpen) return;
     const frame = requestAnimationFrame(() => searchRef.current?.focus());
@@ -223,7 +218,6 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             <MenuTrigger
               render={
                 <button
-                  ref={triggerRef}
                   type="button"
                   aria-label="Change model and reasoning"
                   data-chat-provider-model-picker="true"
@@ -265,8 +259,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
+      {/* Opens from the trigger: 8px above it and aligned to its end. The positioner shifts
+          or flips it to stay on screen in narrow columns and on the home hero. */}
       <MenuPopup
-        anchor={panelAnchor}
         align="end"
         side="top"
         sideOffset={8}
