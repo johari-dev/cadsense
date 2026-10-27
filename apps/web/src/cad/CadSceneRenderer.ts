@@ -107,11 +107,13 @@ const CAD_LIGHTS = {
   light: { ambient: 1.25, key: 2.2, fill: 0.8 },
 } as const;
 /**
- * Every CAD frame (viewer, captures, thumbnails) passes through one soft tone curve,
- * `ceiling * x / (1 + x)` on the exposed linear color, per channel. It narrows the range on the
- * dark viewport: key-lit aluminum (#e8 untouched) lands near #b8 so it no longer outshines the
- * chat or swallows yellow pins, front faces near #a6, and dark plates (#48) lift to about #52
- * so they keep their shape. Overlays (backdrop, outlines, comment markers) are not tone mapped.
+ * Every CAD frame (viewer, captures, thumbnails) passes through one soft tone curve on luminance,
+ * `ceiling * L / (1 + L)` of the exposed linear color, applied by scaling all three channels
+ * alike so part colors keep the hue and saturation of their Onshape appearance. It narrows the
+ * range on the dark viewport: key-lit aluminum (#e8 untouched) lands near #b8 so it no longer
+ * outshines the chat or swallows yellow pins, front faces near #a6, and dark plates (#48) lift to
+ * about #52 so they keep their shape. Overlays (backdrop, outlines, comment markers) and faded
+ * context are not tone mapped.
  */
 const TONE_EXPOSURE = 1.81;
 const TONE_CEILING = 0.807;
@@ -121,7 +123,9 @@ if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(IDENTITY_TONE_MAPPING))
     IDENTITY_TONE_MAPPING,
     `vec3 CustomToneMapping( vec3 color ) {
       vec3 exposed = toneMappingExposure * color;
-      return ${TONE_CEILING.toFixed(4)} * exposed / ( vec3( 1.0 ) + exposed );
+      float luminance = dot( exposed, vec3( 0.2126, 0.7152, 0.0722 ) );
+      if ( luminance <= 0.0 ) return vec3( 0.0 );
+      return saturate( exposed * ( ${TONE_CEILING.toFixed(4)} / ( 1.0 + luminance ) ) );
     }`,
   );
 export interface CadSceneRendererOptions {

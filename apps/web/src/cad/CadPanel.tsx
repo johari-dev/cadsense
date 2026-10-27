@@ -74,6 +74,30 @@ const frameInsets = (compact: boolean, cardFloating: boolean) => ({
   bottom: compact ? 0 : 64,
   right: cardFloating ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
 });
+/**
+ * Whether a view change should travel to its new camera rather than jump: a new comment capture,
+ * an explosion change, a different preset, or a different fitted pose (Fit, or a view cube edge or
+ * corner). A pose without `fit` is an orbit the user already made, so it applies in place.
+ */
+export function animatesViewChange(
+  previous: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+  next: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+) {
+  if (next.captureId && next.captureId !== previous.captureId) return true;
+  if (next.explosion !== previous.explosion) return true;
+  const camera = next.camera;
+  if (camera.kind === "preset")
+    return previous.camera.kind !== "preset" || previous.camera.preset !== camera.preset;
+  return camera.fit !== null && JSON.stringify(camera) !== JSON.stringify(previous.camera);
+}
 /** Width of the docked comments column, in CSS px. */
 const DOCK_WIDTH = 320;
 /**
@@ -230,15 +254,14 @@ export function CadScene({
       applied.current = { manifest, state: serialized };
       if (manifest) {
         if (
-          ((captureId && previousCapture.current !== captureId) ||
-            previousExplosion.current !== view.explosion ||
-            (view.camera.kind === "preset" &&
-              (previousCamera.current.kind !== "preset" ||
-                previousCamera.current.preset !== view.camera.preset)) ||
-            // The toolbar's Fit: a pose that now fits its shown parts.
-            (view.camera.kind === "pose" &&
-              view.camera.fit !== null &&
-              !(previousCamera.current.kind === "pose" && previousCamera.current.fit !== null))) &&
+          animatesViewChange(
+            {
+              camera: previousCamera.current,
+              explosion: previousExplosion.current,
+              captureId: previousCapture.current,
+            },
+            { camera: view.camera, explosion: view.explosion, captureId },
+          ) &&
           !matchMedia("(prefers-reduced-motion: reduce)").matches
         )
           renderer.current?.transition(view);
