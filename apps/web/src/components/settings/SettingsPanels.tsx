@@ -89,6 +89,7 @@ import {
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
+  SETTINGS_PICKER_TRIGGER_CLASS,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
@@ -260,7 +261,6 @@ function AboutVersionSection() {
             <TooltipTrigger
               render={
                 <Button
-                  size="xs"
                   variant={action === "install" ? "default" : "outline"}
                   disabled={buttonDisabled || isUpdateActionPending}
                   onClick={handleButtonClick}
@@ -1066,7 +1066,7 @@ export function GeneralSettingsPanel() {
                 instanceEntries={textGenerationModelInstanceEntries}
                 modelOptionsByInstance={textGenerationModelOptionsByInstance}
                 triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
                 onInstanceModelChange={(instanceId, model) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
@@ -1094,7 +1094,7 @@ export function GeneralSettingsPanel() {
                 modelOptions={textGenModelOptions}
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
@@ -1129,7 +1129,7 @@ export function GeneralSettingsPanel() {
           {...searchableSetting("diagnostics")}
           description={diagnosticsDescription}
           control={
-            <Button render={<Link to="/settings/diagnostics" />} size="xs" variant="outline">
+            <Button render={<Link to="/settings/diagnostics" />} variant="outline">
               View diagnostics
             </Button>
           }
@@ -1335,8 +1335,7 @@ export function ArchivedThreadsPanel() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                    className="shrink-0 cursor-pointer gap-1.5"
                     onClick={() => {
                       void (async () => {
                         const result = await unarchiveThread(

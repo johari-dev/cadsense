@@ -220,7 +220,8 @@ export const buildCadSceneModel = (
 };
 export type CadSceneModel = ReturnType<typeof buildCadSceneModel>;
 
-const directions = {
+/** Each view preset's eye direction from the model. The view cube's faces use the same table. */
+export const CAD_VIEW_DIRECTIONS = {
   isometric: [1, -1, 1],
   front: [0, -1, 0],
   back: [0, 1, 0],
@@ -228,17 +229,65 @@ const directions = {
   right: [1, 0, 0],
   top: [0, 0, 1],
   bottom: [0, 0, -1],
-} satisfies Record<string, [number, number, number]>;
+} as const satisfies Record<string, readonly [number, number, number]>;
+/** The camera up a view preset uses: world Z, except looking straight down or up. */
+export const cadPresetUp = (preset: keyof typeof CAD_VIEW_DIRECTIONS) =>
+  preset === "top"
+    ? ([0, 1, 0] as const)
+    : preset === "bottom"
+      ? ([0, -1, 0] as const)
+      : ([0, 0, 1] as const);
+/**
+ * The eye distance from `center` along `direction` at which every corner of `box` projects within
+ * `tangents` (the tangents of the half angles available across and up the image; orthographic
+ * views use them as half extents per unit of distance). `up` sets the image roll.
+ */
+export const cadFitDistance = (
+  box: THREE.Box3,
+  center: THREE.Vector3,
+  direction: THREE.Vector3,
+  up: THREE.Vector3,
+  tangents: { x: number; y: number },
+  orthographic: boolean,
+) => {
+  const back = direction.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(up, back);
+  if (right.lengthSq() < 1e-12) right.set(1, 0, 0).cross(back);
+  if (right.lengthSq() < 1e-12) right.set(0, 1, 0).cross(back);
+  right.normalize();
+  const top = new THREE.Vector3().crossVectors(back, right);
+  const offset = new THREE.Vector3();
+  let distance = 0;
+  for (let corner = 0; corner < 8; corner++) {
+    offset
+      .set(
+        corner & 1 ? box.max.x : box.min.x,
+        corner & 2 ? box.max.y : box.min.y,
+        corner & 4 ? box.max.z : box.min.z,
+      )
+      .sub(center);
+    const z = orthographic ? 0 : offset.dot(back);
+    distance = Math.max(
+      distance,
+      z + Math.abs(offset.dot(right)) / tangents.x,
+      z + Math.abs(offset.dot(top)) / tangents.y,
+    );
+  }
+  return distance;
+};
+/** How much of the free area a box fit fills, leaving a small margin around the model. */
+const AREA_FILL = 0.9;
 /**
  * Orthographic base height is derived from eye-target distance, making pose+zoom self-contained.
- * `fill` is the share of the viewport height a fit may use, so overlay chrome along the top and
- * bottom edges does not cover the fitted model.
+ * Without `area`, a fit encloses the bounds' sphere, as agent captures and thumbnails expect.
+ * With `area` (the share of the viewport's width and height free of overlay chrome), it fits the
+ * bounds' box into that area, which frames tall or flat models far more tightly.
  */
 export const resolveCadCamera = (
   camera: CadViewState["camera"],
   bounds: THREE.Box3,
   aspect: number,
-  fill = 1,
+  area?: { width: number; height: number },
 ): ResolvedCadCamera => {
   if (camera.kind === "pose" && camera.fit === null) return camera.pose;
   const center = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
@@ -248,28 +297,35 @@ export const resolveCadCamera = (
   );
   const direction =
     camera.kind === "preset"
-      ? new THREE.Vector3(...directions[camera.preset])
+      ? new THREE.Vector3(...CAD_VIEW_DIRECTIONS[camera.preset])
       : new THREE.Vector3(...camera.pose.position).sub(new THREE.Vector3(...camera.pose.target));
+  const up = camera.kind === "pose" ? camera.pose.up : cadPresetUp(camera.preset);
+  const projection = camera.kind === "pose" ? camera.pose.projection : "perspective";
   const halfFov = THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2);
-  const limitingAngle = Math.min(
-    Math.atan(Math.tan(halfFov) * fill),
-    Math.atan(Math.tan(halfFov) * aspect),
-  );
-  const distance = (radius * 1.1) / Math.sin(limitingAngle);
+  const distance =
+    area && !bounds.isEmpty()
+      ? Math.max(
+          cadFitDistance(
+            bounds,
+            center,
+            direction,
+            new THREE.Vector3(...up),
+            {
+              x: Math.tan(halfFov) * aspect * area.width * AREA_FILL,
+              y: Math.tan(halfFov) * area.height * AREA_FILL,
+            },
+            projection === "orthographic",
+          ),
+          // An orthographic eye still sits in front of everything it shows.
+          projection === "orthographic" ? radius * 2 : 1e-6,
+        )
+      : (radius * 1.1) / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * aspect)));
   const position = direction.normalize().multiplyScalar(distance).add(center);
-  const up =
-    camera.kind === "pose"
-      ? camera.pose.up
-      : camera.preset === "top"
-        ? ([0, 1, 0] as const)
-        : camera.preset === "bottom"
-          ? ([0, -1, 0] as const)
-          : ([0, 0, 1] as const);
   return {
     position: [position.x, position.y, position.z],
     target: [center.x, center.y, center.z],
     up,
-    projection: camera.kind === "pose" ? camera.pose.projection : "perspective",
+    projection,
     zoom: 1,
   };
 };

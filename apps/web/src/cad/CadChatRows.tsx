@@ -11,13 +11,14 @@ import {
 } from "~/lib/icons";
 import { useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
+import { Button } from "../components/ui/button";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { CadSeverityIcon, CommentBadge } from "./CadCommentsCard";
 
 const MAX_THUMBNAILS = 6;
-const MAX_LISTED_COMMENTS = 6;
+const MAX_LISTED_COMMENTS = 5;
 
 /** Opens the CAD panel's comments, optionally focused on one comment with all its locations. */
 function openCadComments(threadRef: ScopedThreadRef, commentId?: string) {
@@ -150,27 +151,21 @@ export function CadPublishedComments({
   const count = card.published.length;
   const listed = card.published.slice(0, MAX_LISTED_COMMENTS);
   const unlisted = count - listed.length;
+  // A card of its own, so the review's result stands apart from the narration around it.
   return (
-    <div className="text-sm">
-      <div className="flex min-h-6 items-center gap-1.5 px-0.5">
-        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-          <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+    <section
+      aria-label={describeCadCommentsPublished(card)}
+      className="rounded-xl border border-border bg-muted p-1.5 text-sm"
+    >
+      <div className="flex min-h-7 items-center gap-1.5 px-1.5">
+        <span className="flex size-6 shrink-0 items-center justify-center text-foreground/70">
+          <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8]" aria-hidden />
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+        <h3 className="min-w-0 flex-1 truncate text-[0.9333rem] font-semibold text-foreground">
           {describeCadCommentsPublished(card)}
-        </span>
-        {/* The footer's "Show all" link takes over when the list is cut short. */}
-        {unlisted === 0 && (count > 0 || card.proposed.length > 0) ? (
-          <button
-            type="button"
-            className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
-            onClick={() => openCadComments(threadRef)}
-          >
-            Open in CAD
-          </button>
-        ) : null}
+        </h3>
       </div>
-      <div className="mt-1 flex flex-col">
+      <div className="mt-0.5 flex flex-col gap-0.5">
         {listed.map((comment) =>
           commentRow({
             key: comment.commentId,
@@ -198,26 +193,27 @@ export function CadPublishedComments({
           }),
         )}
       </div>
-      {unlisted > 0 ? (
-        <button
-          type="button"
-          className="mt-0.5 ml-[30px] flex items-center gap-1 rounded-sm py-1 text-xs font-medium text-secondary-label transition-colors hover:text-foreground"
+      {count > 0 || card.proposed.length > 0 ? (
+        <Button
+          variant="outline"
+          size="xs"
+          className="mt-1.5 w-full"
           onClick={() => openCadComments(threadRef)}
         >
-          Show all {count} in CAD
-          <ArrowRightIcon className="size-3.5" aria-hidden />
-        </button>
+          {unlisted > 0 ? `Show all ${count} in CAD` : "Open in CAD"}
+          <ArrowRightIcon aria-hidden />
+        </Button>
       ) : null}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}
-          className="flex items-baseline gap-2 py-0.5 pl-[30px] text-destructive"
+          className="flex items-baseline gap-2 px-1.5 pt-1.5 pb-0.5 text-destructive"
         >
           <CircleAlertIcon className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
           <span className="min-w-0 flex-1">{describeCadCommentRejection(rejection)}</span>
         </p>
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -225,6 +221,7 @@ export function CadPublishedComments({
  * One comment in the chat list: its number and full title on the first line, then the
  * secondary detail (severity and part, or the proposal state) on a second, quieter line.
  * The badge sits in the header icon's column so titles line up with the header text.
+ * A plain function, not a component, so each row stays a `<button>` in the element tree.
  */
 function commentRow({
   key,
@@ -243,7 +240,7 @@ function commentRow({
     <button
       key={key}
       type="button"
-      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-md px-0.5 py-1 text-left transition-colors hover:bg-accent/20"
+      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
       onClick={onOpen}
     >
       <span className="flex h-5 items-center justify-center">

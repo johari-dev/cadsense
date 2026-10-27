@@ -104,7 +104,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { formatRelativeTime } from "../timestampFormat";
+import { formatRelativeTime, formatRelativeTimeLabel } from "../timestampFormat";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -342,6 +342,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isMobile = useIsMobile();
   const isHighlighted = isActive || isSelected;
+  const lastActivityAt = thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt;
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
   const threadStatus = resolveThreadStatusPill({
@@ -583,7 +584,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-sm"
+                    className="min-w-0 flex-1 truncate text-[13px]"
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {thread.title}
@@ -592,13 +593,17 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               />
               <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
                 {thread.title}
+                <span className="mt-0.5 block text-muted-foreground">
+                  Active {formatRelativeTimeLabel(lastActivityAt)}
+                </span>
               </TooltipPopup>
             </Tooltip>
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {/* Wide enough for the hover archive button, so it never covers the title. */}
-          <div className="flex min-w-6 justify-end max-sm:min-w-20">
+          {/* Takes room only on hover and focus, for the archive button, so it never covers
+              the title. */}
+          <div className="flex justify-end group-focus-within/menu-sub-item:min-w-6 group-hover/menu-sub-item:min-w-6 max-sm:min-w-20">
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -666,18 +671,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
-                ) : (
-                  // Compact ("28d", "now") so the title keeps the row's width.
-                  <span
-                    className={`text-[11px] tabular-nums ${
-                      isHighlighted ? "text-muted-foreground" : "text-tertiary-foreground"
-                    }`}
-                  >
-                    {formatCompactRelativeTime(
-                      thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
-                    )}
+                ) : isHighlighted ? (
+                  // Only the active or selected row shows its age, compact ("28d", "now"),
+                  // so other titles keep the full row. The title tooltip carries it for all.
+                  <span className="text-[11px] text-muted-foreground tabular-nums">
+                    {formatCompactRelativeTime(lastActivityAt)}
                   </span>
-                )}
+                ) : null}
               </span>
             </span>
           </div>

@@ -250,3 +250,33 @@ it("moves faded review context onto the context layer without copying its materi
   expect(context.layers.isEnabled(0)).toBe(true);
   expect(context.layers.isEnabled(CAD_CONTEXT_LAYER)).toBe(false);
 });
+
+it("fits a box into the free area tightly where a sphere fit leaves wide margins", () => {
+  // A long tube seen from the front: its sphere is far larger than its outline.
+  const tube = new THREE.Box3(
+    new THREE.Vector3(-0.38, -0.025, -0.0125),
+    new THREE.Vector3(0.38, 0.025, 0.0125),
+  );
+  const fill = (area?: { width: number; height: number }) => {
+    const pose = resolveCadCamera({ kind: "preset", preset: "front", fit: [] }, tube, 1.5, area);
+    const camera = new THREE.PerspectiveCamera(45, 1.5, 1e-4, 100);
+    camera.position.fromArray(pose.position);
+    camera.up.fromArray(pose.up);
+    camera.lookAt(new THREE.Vector3(...pose.target));
+    camera.updateMatrixWorld();
+    let extent = 0;
+    for (let corner = 0; corner < 8; corner++) {
+      const p = new THREE.Vector3(
+        corner & 1 ? tube.max.x : tube.min.x,
+        corner & 2 ? tube.max.y : tube.min.y,
+        corner & 4 ? tube.max.z : tube.min.z,
+      ).project(camera);
+      extent = Math.max(extent, Math.abs(p.x));
+    }
+    return extent;
+  };
+  expect(fill()).toBeLessThan(0.7);
+  expect(fill({ width: 1, height: 1 })).toBeCloseTo(0.9, 5);
+  // Half the width free: the tube fills 90% of that half.
+  expect(fill({ width: 0.5, height: 1 })).toBeCloseTo(0.45, 5);
+});

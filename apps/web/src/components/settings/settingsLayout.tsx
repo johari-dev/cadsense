@@ -113,6 +113,14 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
   return nowMs;
 }
 
+/**
+ * Settings row controls share one 32px height and the control radius: buttons and selects
+ * use their `default` size, inputs are 32px, and switches have one size. Composer pickers
+ * are compact pills, so settings rows pass this as their `triggerClassName` to match.
+ */
+export const SETTINGS_PICKER_TRIGGER_CLASS =
+  "h-8 min-h-8 min-w-0 max-w-none shrink-0 rounded-[var(--control-radius)] px-2.5 text-sm text-foreground/90 hover:text-foreground sm:h-8 sm:min-h-8 sm:text-sm";
+
 export function SettingsSection({
   title,
   icon,

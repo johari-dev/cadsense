@@ -6,7 +6,14 @@ import type {
   ResolvedKeybindingsConfig,
 } from "@cadsense/contracts";
 import { resolveSelectableModel } from "@cadsense/shared/model";
-import { CheckIcon, LightningIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "~/lib/icons";
+import {
+  CaretDownIcon,
+  CheckIcon,
+  LightningIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+  StarIcon,
+} from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -116,9 +123,10 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   });
 
   // Every open starts on Starred when there is anything starred, otherwise on the
-  // composer's own provider, with an empty search.
+  // composer's own provider, with an empty search and older models folded away.
   const [tab, setTab] = useState<PickerTab>(STARRED_TAB);
   const [query, setQuery] = useState("");
+  const [showLegacy, setShowLegacy] = useState(false);
   const [wasMenuOpen, setWasMenuOpen] = useState(isMenuOpen);
   if (wasMenuOpen !== isMenuOpen) {
     setWasMenuOpen(isMenuOpen);
@@ -128,6 +136,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         : (readyEntries[0]?.instanceId ?? STARRED_TAB);
       setTab(starredRows.length > 0 ? STARRED_TAB : ownTab);
       setQuery("");
+      setShowLegacy(false);
     }
   }
   const tabEntry =
@@ -140,13 +149,23 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
     `${row.model.name} ${row.model.slug} ${row.model.subProvider ?? ""} ${tabEntry ? "" : row.entry.displayName}`
       .toLowerCase()
       .includes(normalizedQuery);
-  const rows = (
+  const matchingRows = (
     tabEntry
       ? (props.modelOptionsByInstance.get(tabEntry.instanceId) ?? []).map((model) =>
           toRow(tabEntry, model),
         )
       : starredRows
   ).filter(matchesQuery);
+  // In a provider tab, models the manifest marks legacy fold under "More models" until
+  // expanded. Searching, or having one of them selected, shows them inline instead.
+  const foldLegacy =
+    tabEntry !== null &&
+    normalizedQuery.length === 0 &&
+    !showLegacy &&
+    matchingRows.some((row) => !row.model.isLegacy) &&
+    !matchingRows.some((row) => row.selected && row.model.isLegacy);
+  const rows = foldLegacy ? matchingRows.filter((row) => !row.model.isLegacy) : matchingRows;
+  const foldedCount = matchingRows.length - rows.length;
   // Jump shortcuts and Enter in the search field address the rows that can be picked.
   const pickableRows = rows.filter((row) => row.disabledReason === null);
 
@@ -376,7 +395,10 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   aria-current={row.selected ? "true" : undefined}
                   disabled={row.disabledReason !== null}
                   title={row.disabledReason ?? undefined}
-                  className={cn("composer-model-row group", row.selected && "text-foreground")}
+                  className={cn(
+                    "composer-model-row group",
+                    row.selected && "bg-foreground/[0.05] text-foreground",
+                  )}
                   onClick={() => selectRow(row)}
                 >
                   {tabEntry ? null : (
@@ -422,6 +444,19 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                 </MenuItem>
               );
             })}
+            {foldedCount > 0 ? (
+              <MenuItem
+                closeOnClick={false}
+                className="composer-model-row text-muted-foreground"
+                onClick={() => setShowLegacy(true)}
+              >
+                <span className="min-w-0 flex-1 truncate">More models</span>
+                <span className="shrink-0 text-[0.6875rem] tabular-nums text-tertiary-foreground">
+                  {foldedCount}
+                </span>
+                <CaretDownIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              </MenuItem>
+            ) : null}
             {rows.length === 0 ? (
               <div className="px-2 py-3 text-[0.8667rem] leading-relaxed text-muted-foreground">
                 {normalizedQuery.length > 0

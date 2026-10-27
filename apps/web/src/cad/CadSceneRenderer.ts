@@ -36,6 +36,7 @@ import { creaseCadNormals } from "./CadNormals";
 import { createCadOutline, supportsCadOutline } from "./CadOutline";
 import {
   buildCadSceneModel,
+  cadFitDistance,
   CAD_CAMERA_FOV,
   CAD_CONTEXT_LAYER,
   CadRendererError,
@@ -50,8 +51,20 @@ export { CadRendererError } from "./CadSceneModel";
 const REVIEW_GHOST_OPACITY = 0.15;
 // Comment reviews mute the parts outside an isolation instead of hiding them.
 const REVIEW_APPLY = { fadeIsolatedOut: true } as const;
-/** Overlay chrome a fit keeps the model clear of, in CSS pixels. */
-export type CadFrameInsets = { readonly top: number; readonly bottom: number };
+/**
+ * Overlay chrome along the viewport's edges, in CSS pixels: the chips along the top, the toolbar
+ * along the bottom, and an open comments card (plus clearance) along the right.
+ */
+export type CadFrameInsets = {
+  readonly top: number;
+  readonly bottom: number;
+  readonly right: number;
+};
+// A right inset that would leave less than this free is dropped: a narrow panel's comments card
+// takes the full width and frames focus below itself instead.
+const MIN_FREE_WIDTH = 240;
+// A comment focus fills this much of the free area with the parts in focus.
+const FOCUS_FILL = 0.8;
 // A chosen camera pose survives small viewport changes; past this ratio in either dimension
 // (maximizing or restoring the panel) the view refits so the model stays whole and centered.
 const REFIT_RATIO = 1.25;
@@ -136,9 +149,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   // is shaded once at low opacity behind or around the solid parts in focus.
   const contextDepth = new THREE.MeshBasicMaterial({ colorWrite: false });
   const contextSurface = new THREE.MeshLambertMaterial({
-    color: 0xc4c9d0,
+    color: 0xe2e6eb,
     transparent: true,
-    opacity: 0.16,
+    opacity: 0.5,
     depthWrite: false,
   });
   let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = new THREE.PerspectiveCamera(
@@ -189,9 +202,52 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   let review: ((state: CadViewState) => CadViewState) | null = null;
   const displayed = (state: CadViewState) => (review ? review(state) : state);
   let focusOffset = { x: 0, y: 0 };
-  let insets: CadFrameInsets = { top: 0, bottom: 0 };
-  /** Share of the viewport height a fit may use around the overlay chrome. */
-  const frameFill = () => Math.max(0.25, (height - insets.top - insets.bottom) / height);
+  // Null for capture renderers, whose fits keep the sphere framing agent captures expect.
+  let insets: CadFrameInsets | null = null;
+  /** The viewport area clear of overlay chrome, in CSS pixels from the top-left corner. */
+  const freeArea = () => {
+    if (!insets) return null;
+    const right = width - insets.right >= MIN_FREE_WIDTH ? insets.right : 0;
+    const top = Math.min(insets.top, height * 0.3),
+      bottom = Math.min(insets.bottom, height * 0.3);
+    return { left: 0, top, width: width - right, height: height - top - bottom };
+  };
+  /** The free area as shares of the viewport, for box fits. */
+  const fitArea = () => {
+    const area = freeArea();
+    return area ? { width: area.width / width, height: area.height / height } : undefined;
+  };
+  /** The view offset that puts the image center in the middle of the free area. */
+  const freeOffset = () => {
+    const area = freeArea();
+    return area
+      ? {
+          x: width / 2 - (area.left + area.width / 2),
+          y: height / 2 - (area.top + area.height / 2),
+        }
+      : { x: 0, y: 0 };
+  };
+  /** Narrows the area a comment card leaves free to the part also clear of other chrome. */
+  const clearOfChrome = (safe: {
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  }) => {
+    const area = freeArea();
+    if (!area) return safe;
+    const left = Math.max(safe.centerX - safe.width / 2, area.left),
+      right = Math.min(safe.centerX + safe.width / 2, area.left + area.width),
+      top = Math.max(safe.centerY - safe.height / 2, area.top),
+      bottom = Math.min(safe.centerY + safe.height / 2, area.top + area.height);
+    if (right - left < 120 || bottom - top < 120) return safe;
+    return {
+      width: right - left,
+      height: bottom - top,
+      centerX: (left + right) / 2,
+      centerY: (top + bottom) / 2,
+    };
+  };
   // Whether the camera shows a fit (a preset, or a refit after a large resize) rather than a
   // pose someone chose, the viewport size that framing was made for, and the bounds it fit.
   let fitted = false;
@@ -210,7 +266,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (disposed || lost || renderer.getContext().isContextLost())
       throw new CadRendererError("renderer-unavailable");
   };
-  /** Draws faded context over the finished frame (see contextDepth). */
+  /** Draws faded context over the solid parts (see contextDepth). */
   const drawContext = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
     const background = scene.background;
     const autoClear = renderer.autoClear;
@@ -241,11 +297,19 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     renderer.clippingPlanes = model?.clippingPlanes() ?? [];
     scene.background = withBackdrop ? backdrop : null;
     renderer.render(scene, eye);
+    const faded = model?.hasFaded() ?? false;
+    if (faded) drawContext(eye);
     // The outline's opaque normal pass would draw cut-open or ghosted parts as solid shells.
-    // Faded context sits on its own layer, so it never gets outlines.
-    if (model && outlineSupported && !model.clippingPlanes().length && !model.hasGhosts())
-      outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
-    if (model?.hasFaded()) drawContext(eye);
+    // Edges run over faded context too, so its shapes stay readable at its quieter tone.
+    if (model && outlineSupported && !model.clippingPlanes().length && !model.hasGhosts()) {
+      const layers = eye.layers.mask;
+      if (faded) eye.layers.enable(CAD_CONTEXT_LAYER);
+      try {
+        outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
+      } finally {
+        eye.layers.mask = layers;
+      }
+    }
   };
   const render = (withBackdrop = true) => {
     assertAvailable();
@@ -381,8 +445,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!model) throw new CadRendererError("invalid-view");
     clearCommentMarkers();
     const bounds = model.apply(displayed(state), review ? REVIEW_APPLY : undefined);
-    const resolved = resolveCadCamera(state.camera, bounds, width / height, frameFill());
+    const resolved = resolveCadCamera(state.camera, bounds, width / height, fitArea());
     fitted = review === null && !(state.camera.kind === "pose" && state.camera.fit === null);
+    // A fit is made for the free area, so it centers there.
+    if (fitted) focusOffset = freeOffset();
     framedSize = { width, height };
     fitBounds = bounds;
     applying = true;
@@ -413,7 +479,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       state.camera,
       model.apply(displayed(state), review ? REVIEW_APPLY : undefined),
       width / height,
-      frameFill(),
+      fitArea(),
     );
     const fromTarget = new THREE.Vector3(...from.target);
     const toTarget = new THREE.Vector3(...to.target);
@@ -488,7 +554,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         outlineSupported = cached.outlineSupported;
         scene.add(model.group);
         review = null;
-        focusOffset = { x: 0, y: 0 };
+        focusOffset = freeOffset();
         clearCommentMarkers();
         view = null;
         activeSnapshot = manifest.snapshotId;
@@ -591,7 +657,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         disposeCadObjects(entry.prototypes);
       }
       review = null;
-      focusOffset = { x: 0, y: 0 };
+      focusOffset = freeOffset();
       clearCommentMarkers();
       view = null;
       return false;
@@ -666,11 +732,27 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!reviewStart) reviewStart = { pose: pose(), offset: { ...focusOffset }, fitted };
     fitted = false;
   };
-  /** Eases the camera to `to` and the comment framing offset to `offset`. */
+  /**
+   * The fit the current view's camera makes for the free area, seen from `from`'s direction
+   * when the view holds a pose.
+   */
+  const refitPose = (from: ResolvedCadCamera) =>
+    model && view
+      ? resolveCadCamera(
+          view.camera.kind === "pose"
+            ? { kind: "pose", pose: from, fit: view.camera.fit ?? [] }
+            : view.camera,
+          fitBounds ?? model.visibleBounds(),
+          width / height,
+          fitArea(),
+        )
+      : from;
+  /** Eases the camera to `to` and the comment framing offset to `offset`, then calls `done`. */
   const easeCameraTo = (
     to: ResolvedCadCamera,
     offset: { x: number; y: number },
     reducedMotion: boolean,
+    done?: () => void,
   ) => {
     const from = pose();
     const fromOffset = { ...focusOffset };
@@ -705,13 +787,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       applying = false;
       render();
       if (fraction < 1) animationFrame = requestAnimationFrame(move);
+      else done?.();
     };
     if (controls) controls.enabled = interactive;
     move(started);
   };
   /**
    * Ends a comment review and restores the view's own visibility. With `returnCamera`, the
-   * camera also eases back to where it was before the review began.
+   * camera also eases back to where it was before the review began (refit for the chrome now
+   * around the viewport if it was a fit); without it, the camera stays and recenters in the
+   * free area.
    */
   const endCommentReview = (returnCamera?: { reducedMotion: boolean }) => {
     cancelTransition();
@@ -719,11 +804,19 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     const start = reviewStart;
     reviewStart = null;
     if (model && view) {
-      model.apply(view);
+      fitBounds = model.apply(view);
+      if (start && !returnCamera && insets) {
+        focusOffset = freeOffset();
+        configureCamera(pose());
+      }
       render();
     }
     if (returnCamera && start && model && view) {
-      easeCameraTo(start.pose, start.offset, returnCamera.reducedMotion);
+      easeCameraTo(
+        start.fitted ? refitPose(start.pose) : start.pose,
+        insets ? freeOffset() : start.offset,
+        returnCamera.reducedMotion,
+      );
       fitted = start.fitted;
     }
   };
@@ -897,11 +990,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
      */
     focusComment: (
       t: CadCommentTarget,
-      safe: { width: number; height: number; centerX: number; centerY: number },
+      cardArea: { width: number; height: number; centerX: number; centerY: number },
       reducedMotion: boolean,
       capture?: CadViewState,
     ) => {
       cancelTransition();
+      const safe = clearOfChrome(cardArea);
       if (!model || !view) return COMMENT_FOCUS_UNAVAILABLE;
       beginCommentReview();
       const loaded = model,
@@ -977,6 +1071,37 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
             safe.height / height,
             (safe.width * CAD_CAPTURE_SIZE.height) / (CAD_CAPTURE_SIZE.width * height),
           );
+        // Move in from the agent's direction until the target part and a margin of its
+        // neighbors (a cube 1.5 times its diagonal) fill the free area, so the part reads as the
+        // subject; never move further out than the agent's own framing.
+        {
+          const orthographic = agent.projection === "orthographic";
+          const along = eye.clone().sub(point);
+          const reach = along.length();
+          const tangent = Math.tan(THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2));
+          const needed = cadFitDistance(
+            new THREE.Box3().setFromCenterAndSize(
+              bounds.getCenter(new THREE.Vector3()),
+              new THREE.Vector3().setScalar(Math.max(size * 1.5, 1e-6)),
+            ),
+            point,
+            along,
+            up,
+            {
+              x: (tangent * safe.width * FOCUS_FILL) / height,
+              y: (tangent * safe.height * FOCUS_FILL) / height,
+            },
+            orthographic,
+          );
+          // Perspective zoom narrows the field like moving in; orthographic zoom scales extents.
+          if (needed > 0 && needed < reach / zoom) {
+            if (orthographic) zoom = reach / needed;
+            else {
+              eye = point.clone().addScaledVector(along.normalize(), needed);
+              zoom = 1;
+            }
+          }
+        }
         notice = COMMENT_FOCUS_AGENT_VIEW;
       } else {
         const radius =
@@ -1058,8 +1183,29 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
           };
           loaded.apply(review(base), REVIEW_APPLY);
         }
-        eye = point.clone().addScaledVector(direction, distance);
         up = new THREE.Vector3(...from.up);
+        // A whole part fills the free area by its box, which frames long or flat parts closer
+        // than its sphere.
+        const tangent = Math.tan(THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2));
+        eye = point.clone().addScaledVector(
+          direction,
+          t.kind === "part"
+            ? Math.max(
+                cadFitDistance(
+                  bounds,
+                  point,
+                  direction,
+                  up,
+                  {
+                    x: (tangent * safe.width * FOCUS_FILL) / height,
+                    y: (tangent * safe.height * FOCUS_FILL) / height,
+                  },
+                  false,
+                ),
+                size * 0.05,
+              )
+            : distance,
+        );
         zoom = 1;
         notice = blockers.has(t.occurrenceId)
           ? "Target is occluded by its own geometry; orbit to inspect"
@@ -1089,10 +1235,11 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
      */
     focusCommentTargets: (
       targets: readonly CadCommentTarget[],
-      safe: { width: number; height: number; centerX: number; centerY: number },
+      cardArea: { width: number; height: number; centerX: number; centerY: number },
       reducedMotion: boolean,
     ) => {
       cancelTransition();
+      const safe = clearOfChrome(cardArea);
       if (!model || !view) return COMMENT_FOCUS_UNAVAILABLE;
       beginCommentReview();
       const loaded = model,
@@ -1136,20 +1283,33 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         endCommentReview();
         return COMMENT_FOCUS_UNAVAILABLE;
       }
-      const sphere = box.getBoundingSphere(new THREE.Sphere());
-      const angle = Math.atan(
-        Math.tan(Math.PI / 8) * Math.min(safe.height / height, safe.width / height),
-      );
-      const distance = (Math.max(sphere.radius, 1e-6) / Math.sin(Math.max(angle, 0.01))) * 1.15;
+      const center = box.getCenter(new THREE.Vector3());
       const direction = camera.position.clone().sub(target).normalize();
       const from = pose();
+      const up = new THREE.Vector3(...from.up);
+      const tangent = Math.tan(THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2));
+      const distance = Math.max(
+        cadFitDistance(
+          box,
+          center,
+          direction,
+          up,
+          {
+            x: (tangent * safe.width * FOCUS_FILL) / height,
+            y: (tangent * safe.height * FOCUS_FILL) / height,
+          },
+          false,
+        ),
+        box.getSize(new THREE.Vector3()).length() * 0.05,
+        1e-6,
+      );
       finishCommentFocus({
         loaded,
         base,
         from,
-        eye: sphere.center.clone().addScaledVector(direction, distance),
-        point: sphere.center.clone(),
-        up: new THREE.Vector3(...from.up),
+        eye: center.clone().addScaledVector(direction, distance),
+        point: center,
+        up,
         zoom: 1,
         safe,
         reducedMotion,
@@ -1344,17 +1504,8 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       applying = true;
       try {
         if (refit) {
-          focusOffset = { x: 0, y: 0 };
-          configureCamera(
-            resolveCadCamera(
-              shown.camera.kind === "pose"
-                ? { kind: "pose", pose: currentPose, fit: shown.camera.fit ?? [] }
-                : shown.camera,
-              fitBounds ?? loaded.visibleBounds(),
-              width / height,
-              frameFill(),
-            ),
-          );
+          focusOffset = freeOffset();
+          configureCamera(refitPose(currentPose));
           fitted = true;
           framedSize = { width, height };
         } else configureCamera(currentPose, animationFrame === null);
@@ -1363,9 +1514,39 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         applying = false;
       }
     },
-    /** Keeps fits clear of overlay chrome along the viewport's top and bottom edges. */
-    setFrameInsets: (next: CadFrameInsets) => {
+    /**
+     * Keeps fits and comment focus clear of overlay chrome along the viewport's edges. Outside a
+     * comment review, the model eases into the new free area: a fit refits, a chosen pose keeps
+     * its camera and recenters. Capture renderers never call this and keep sphere fits.
+     */
+    setFrameInsets: (next: CadFrameInsets, options: { reducedMotion: boolean }) => {
+      const changed = JSON.stringify(next) !== JSON.stringify(insets);
       insets = next;
+      if (!changed || !model || !view || review || reviewStart || animationFrame !== null) return;
+      const current = pose();
+      easeCameraTo(fitted ? refitPose(current) : current, freeOffset(), options.reducedMotion);
+    },
+    /**
+     * Eases to a tight fit of every shown part, seen from the current direction, inside the free
+     * area. Outside a comment review the result is reported like the end of an orbit, so the
+     * host saves it as the user's view.
+     */
+    fit: ({ reducedMotion }: { reducedMotion: boolean }) => {
+      assertAvailable();
+      cancelTransition();
+      if (!model || !view) return;
+      const current = pose();
+      const to = resolveCadCamera(
+        { kind: "pose", pose: current, fit: [] },
+        model.visibleBounds(),
+        width / height,
+        fitArea(),
+      );
+      const reviewing = review !== null;
+      easeCameraTo(to, reviewing ? focusOffset : freeOffset(), reducedMotion, () => {
+        framedSize = { width, height };
+        if (!reviewing && !disposed && !lost) options.onInteractionEnd?.(pose());
+      });
     },
     setInteractive: (enabled: boolean) => {
       assertAvailable();

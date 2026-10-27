@@ -78,9 +78,18 @@ const pinLabel = (comment: CadComment, target: number) =>
 /** A pin's width without measuring it: round up to two characters, a pill beyond that. */
 const pinWidth = (label: string) =>
   label.length <= 2 ? CAD_COMMENT_PIN_SIZE : 12 + 7 * label.length;
-/** The comment pin shared by single pins and group count markers; it matches CommentBadge. */
-const PIN_CLASS =
-  "pointer-events-auto absolute flex h-5.5 min-w-5.5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border-[1.5px] border-neutral-950/80 bg-amber-200 text-[11px] leading-none font-semibold tabular-nums text-neutral-950 shadow-[0_1px_3px_rgb(0_0_0/0.45)] outline-none focus-visible:ring-2 focus-visible:ring-ring";
+/** Shape, placement and type shared by comment pins and group count markers. */
+const PIN_SHAPE =
+  "pointer-events-auto absolute flex h-5.5 min-w-5.5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-[11px] leading-none font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
+/** A single finding's pin. Yellow marks a finding ID here and in CommentBadge, nowhere else. */
+const PIN_CLASS = `${PIN_SHAPE} border-[1.5px] border-neutral-950/80 bg-amber-200 px-1.5 text-neutral-950 shadow-[0_1px_3px_rgb(0_0_0/0.45)]`;
+/** A group's count marker: a neutral surface, so it never reads as a finding ID. */
+const PIN_GROUP_CLASS = `${PIN_SHAPE} gap-1 border border-foreground/25 bg-popover ps-1.5 pe-2 text-foreground shadow-[0_1px_4px_rgb(0_0_0/0.6)]`;
+/**
+ * Width of the open comments card in CSS px, kept in step with CadPanel.css. The card sits
+ * 12px from the viewport's right edge, so framing that avoids it reserves this plus 12px.
+ */
+export const CAD_COMMENTS_CARD_WIDTH = 328;
 export interface CadCommentSelection {
   id: string;
   target: CadCommentLocation;
@@ -492,8 +501,10 @@ export function CadCommentsCard({
                     onPointerLeave={releaseGroup}
                     className={cn(
                       PIN_CLASS,
-                      "px-1.5 transition-[opacity,scale] duration-150",
-                      focused && "z-10 scale-[1.18] ring-2 ring-foreground",
+                      "transition-[opacity,scale] duration-150",
+                      // A white ring, then a dark one that separates it from light geometry.
+                      focused &&
+                        "z-10 scale-[1.18] shadow-[0_0_0_2px_var(--color-white),0_0_0_3.5px_rgb(10_10_10/0.85)]",
                       dimmed && "opacity-70 hover:opacity-100",
                     )}
                   >
@@ -507,13 +518,12 @@ export function CadCommentsCard({
                     onPointerEnter={() => holdGroup(key)}
                     onPointerLeave={releaseGroup}
                     className={cn(
-                      PIN_CLASS,
-                      // A second disc peeking out behind marks a stack of comments.
-                      "gap-0.5 ps-1 pe-1.5 shadow-[3px_-3px_0_-1.5px_var(--color-amber-200),3px_-3px_0_0_rgb(10_10_10/0.8),0_1px_3px_rgb(0_0_0/0.45)] after:content-[attr(data-count)]",
+                      PIN_GROUP_CLASS,
+                      "after:content-[attr(data-count)]",
                       dimmed && "opacity-70 hover:opacity-100",
                     )}
                   >
-                    <StackIcon aria-hidden className="size-3" />
+                    <StackIcon aria-hidden className="size-3 text-muted-foreground" />
                   </button>
                 </Fragment>
               );
@@ -774,42 +784,48 @@ export function CadCommentsCard({
                                 />
                               </>
                             )}
-                            {dismissing?.id !== c.id && (
-                              <span className="ms-auto flex items-center gap-0.5">
-                                {c.state === "open" ? (
-                                  <>
-                                    <IconAction
-                                      label="Resolve"
-                                      tooltip="Resolve: the model now addresses this"
-                                      icon={<Check />}
-                                      disabled={pendingReviews.has(c.id)}
-                                      onClick={() => void change(c, "resolved")}
-                                    />
-                                    <IconAction
-                                      label="Dismiss"
-                                      tooltip="Dismiss: no change needed. A reason teaches later reviews."
-                                      icon={<ProhibitIcon />}
-                                      disabled={pendingReviews.has(c.id)}
-                                      onClick={() => setDismissing({ id: c.id, reason: "" })}
-                                    />
-                                  </>
-                                ) : (
-                                  <IconAction
-                                    label="Reopen"
-                                    icon={<RotateCcw />}
-                                    disabled={pendingReviews.has(c.id)}
-                                    onClick={() => void change(c, "open")}
-                                  />
-                                )}
-                                <IconAction
-                                  label="Discuss"
-                                  tooltip="Discuss in chat"
-                                  icon={<ChatCircleIcon />}
-                                  onClick={() => discuss(c)}
-                                />
-                              </span>
-                            )}
                           </div>
+                          {/* Named review actions on their own row, below the locations. Dismiss
+                              is the quieter trailing action. */}
+                          {dismissing?.id !== c.id && (
+                            <div className="flex items-center gap-1">
+                              {c.state === "open" ? (
+                                <CardAction
+                                  label="Resolve"
+                                  tooltip="Mark resolved: the model now addresses this"
+                                  icon={<Check />}
+                                  emphasis
+                                  disabled={pendingReviews.has(c.id)}
+                                  onClick={() => void change(c, "resolved")}
+                                />
+                              ) : (
+                                <CardAction
+                                  label="Reopen"
+                                  icon={<RotateCcw />}
+                                  emphasis
+                                  disabled={pendingReviews.has(c.id)}
+                                  onClick={() => void change(c, "open")}
+                                />
+                              )}
+                              <CardAction
+                                label="Discuss"
+                                tooltip="Discuss this finding in chat"
+                                icon={<ChatCircleIcon />}
+                                onClick={() => discuss(c)}
+                              />
+                              {c.state === "open" && (
+                                <span className="ms-auto">
+                                  <CardAction
+                                    label="Dismiss"
+                                    tooltip="Dismiss: no change needed. A reason teaches later reviews."
+                                    icon={<ProhibitIcon />}
+                                    disabled={pendingReviews.has(c.id)}
+                                    onClick={() => setDismissing({ id: c.id, reason: "" })}
+                                  />
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {c.state === "open" && dismissing?.id === c.id && (
                             <form
                               className="flex min-w-0 gap-1"
@@ -954,6 +970,42 @@ function RowStatusIcon({
         <StatusIcon className={cn("size-3.5 text-muted-foreground", className)} />
       </TooltipTrigger>
       <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * A named review action under an expanded finding: an icon and its label, with an optional
+ * tooltip explaining the outcome. `emphasis` marks the primary action of the row.
+ */
+function CardAction(props: {
+  label: string;
+  tooltip?: string;
+  icon: ReactNode;
+  emphasis?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const buttonProps = {
+    size: "compact",
+    variant: props.emphasis ? "outline" : "ghost",
+    disabled: props.disabled,
+    onClick: props.onClick,
+    className: cn("gap-1.5 [&_svg]:mx-0", !props.emphasis && "text-muted-foreground"),
+  } as const;
+  const content = (
+    <>
+      {props.icon}
+      {props.label}
+    </>
+  );
+  if (!props.tooltip) return <Button {...buttonProps}>{content}</Button>;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button {...buttonProps} />}>{content}</TooltipTrigger>
+      <TooltipPopup side="top" className="max-w-64">
+        {props.tooltip}
+      </TooltipPopup>
     </Tooltip>
   );
 }

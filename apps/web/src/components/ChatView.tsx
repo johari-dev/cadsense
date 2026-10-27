@@ -4066,17 +4066,19 @@ function ChatViewContent(props: ChatViewProps) {
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge.
-                  A solid, shadowed surface so it never reads as part of the text under it. */}
+                  A solid, shadowed surface so it never reads as part of the text under it. It
+                  sits partly in the composer backing's fade (the overlay's 1rem top padding),
+                  9px above the composer, so it covers as little readable text as possible. */}
               {showScrollToBottom && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center"
-                  style={{ bottom: scrollToEndClearance + 8 }}
+                  style={{ bottom: scrollToEndClearance - 6 }}
                 >
                   <button
                     type="button"
                     aria-label="Scroll to end"
                     onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover px-3 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="pointer-events-auto flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover ps-3 pe-3.5 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <ChevronDownIcon className="size-3.5" aria-hidden />
                     Scroll to end
@@ -4091,7 +4093,7 @@ function ChatViewContent(props: ChatViewProps) {
               data-chat-composer-overlay="true"
               className={
                 isDraftHeroState
-                  ? "pointer-events-none absolute inset-0 z-20 flex items-center"
+                  ? "pointer-events-none absolute inset-0 z-20 flex items-center pt-56"
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
               }
             >
@@ -4131,7 +4133,8 @@ function ChatViewContent(props: ChatViewProps) {
                   <div className="relative">
                     <div
                       className={cn(
-                        "chat-composer-glass-shell relative mx-auto w-full max-w-[50rem]",
+                        "chat-composer-glass-shell relative mx-auto w-full",
+                        isDraftHeroState ? "max-w-[42.5rem]" : "max-w-[50rem]",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >

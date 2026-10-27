@@ -54,14 +54,25 @@ import {
   type CadCommentLocation,
 } from "./cadCommentReviewStore";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
-import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
+import {
+  CAD_COMMENTS_CARD_WIDTH,
+  CadCommentsCard,
+  type CadCommentsCardProps,
+} from "./CadCommentsCard";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
-// Fits keep the model clear of the parts chip along the top and the camera toolbar along the
-// bottom; the compact preview shows neither.
-const PANEL_FRAME_INSETS = { top: 48, bottom: 64 } as const;
-const COMPACT_FRAME_INSETS = { top: 0, bottom: 0 } as const;
+/**
+ * Overlay chrome fits and comment focus keep the model clear of: the parts chip along the top,
+ * the camera toolbar along the bottom, and an open comments card (12px from the right edge) plus
+ * 32px of clearance. The compact preview shows no chip or toolbar.
+ */
+const frameInsets = (compact: boolean, commentsOpen: boolean) => ({
+  top: compact ? 0 : 48,
+  bottom: compact ? 0 : 64,
+  right: commentsOpen ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
+});
+const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -140,7 +151,7 @@ export function CadScene({
   // Where the primary pointer went down on the viewer, to tell a click from an orbit drag.
   const press = useRef<{ id: number; x: number; y: number } | null>(null);
   const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
-  const latest = useRef({ view, disabled, onChange, compact });
+  const latest = useRef({ view, disabled, onChange, compact, commentsOpen: commentsCard.open });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
@@ -149,8 +160,15 @@ export function CadScene({
   const previousExplosion = useRef(view.explosion);
   const applied = useRef<{ manifest: CadSnapshotManifest | null; state: string } | null>(null);
   useLayoutEffect(() => {
-    latest.current = { view, disabled, onChange, compact };
-  }, [compact, disabled, onChange, view]);
+    latest.current = { view, disabled, onChange, compact, commentsOpen: commentsCard.open };
+  }, [commentsCard.open, compact, disabled, onChange, view]);
+  // A layout effect, so the card's focus (a passive effect) already frames clear of the card it
+  // just opened. Closing the card ends its review afterwards, which recenters the model.
+  useLayoutEffect(() => {
+    renderer.current?.setFrameInsets(frameInsets(compact, commentsCard.open), {
+      reducedMotion: prefersReducedMotion(),
+    });
+  }, [commentsCard.open, compact]);
   useLayoutEffect(() => {
     try {
       renderer.current?.setInteractive(!disabled);
@@ -170,7 +188,11 @@ export function CadScene({
             previousExplosion.current !== view.explosion ||
             (view.camera.kind === "preset" &&
               (previousCamera.current.kind !== "preset" ||
-                previousCamera.current.preset !== view.camera.preset))) &&
+                previousCamera.current.preset !== view.camera.preset)) ||
+            // The toolbar's Fit: a pose that now fits its shown parts.
+            (view.camera.kind === "pose" &&
+              view.camera.fit !== null &&
+              !(previousCamera.current.kind === "pose" && previousCamera.current.fit !== null))) &&
           !matchMedia("(prefers-reduced-motion: reduce)").matches
         )
           renderer.current?.transition(view);
@@ -209,7 +231,9 @@ export function CadScene({
     const { renderer: current, canvas: node, diagnostics } = attachment;
     attachmentRef.current = attachment;
     renderer.current = current;
-    current.setFrameInsets(latest.current.compact ? COMPACT_FRAME_INSETS : PANEL_FRAME_INSETS);
+    current.setFrameInsets(frameInsets(latest.current.compact, latest.current.commentsOpen), {
+      reducedMotion: true,
+    });
     const stopLoad = attachment.watchLoad(view.snapshotId, (state) => {
       try {
         if (state.status === "idle") {
@@ -384,7 +408,12 @@ export function CadScene({
             displayedSnapshotId={view.snapshotId}
           />
           {manifest && !unavailable && !compact && (
-            <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
+            <CadCameraToolbar
+              renderer={renderer}
+              view={view}
+              disabled={disabled}
+              onChange={onChange}
+            />
           )}
           {manifest && !unavailable && !compact && (
             <CadViewChanges

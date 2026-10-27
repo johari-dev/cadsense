@@ -2,6 +2,7 @@ import { scopedProjectKey, scopeProjectRef } from "@cadsense/client-runtime/envi
 import type { ScopedProjectRef } from "@cadsense/contracts";
 import {
   CaretDownIcon,
+  CubeIcon,
   FolderPlusIcon,
   ScanIcon,
   StackIcon,
@@ -10,6 +11,9 @@ import {
 import { useCallback, useMemo } from "react";
 
 import { Button } from "../ui/button";
+import { singleCadModelName } from "~/cad/cadModelName";
+import { modelThumbnailKey, useModelThumbnails } from "~/cad/modelThumbnails";
+import type { Project } from "~/types";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useProjects } from "~/state/entities";
@@ -81,6 +85,7 @@ export function DraftHeroHeadline({
     [orderedProjects],
   );
   const canChooseProject = orderedProjects.length > 0;
+  const activeProject = projectByKey.get(activeProjectKey);
 
   const projectSelector = canChooseProject ? (
     <Menu>
@@ -141,9 +146,10 @@ export function DraftHeroHeadline({
 
   return (
     <div className="mx-auto w-full max-w-3xl text-center">
+      {activeProject?.cad?.enabled ? <ProjectModelPreview project={activeProject} /> : null}
       <h1 className="font-medium text-2xl text-foreground tracking-tight sm:text-3xl">
         {activeProjectTitle ? (
-          <>Explore {projectSelector}</>
+          projectSelector
         ) : canChooseProject ? (
           <>{projectSelector} to begin</>
         ) : (
@@ -151,7 +157,7 @@ export function DraftHeroHeadline({
         )}
       </h1>
       <p className="mt-3 text-sm text-muted-foreground">
-        Inspect the details. Work through the next change.
+        Review the model, inspect parts, or plan a change.
       </p>
       {activeProjectTitle ? (
         <div className="mt-6 flex flex-wrap items-center justify-center gap-1.5">
@@ -171,6 +177,40 @@ export function DraftHeroHeadline({
         </div>
       ) : (
         <div className="mt-4">{projectSelector}</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The active project's model above the headline: its captured thumbnail once the CAD panel
+ * has rendered it, otherwise a viewport-colored tile with the model's name. Never loads CAD
+ * just to draw it.
+ */
+function ProjectModelPreview({ project }: { readonly project: Project }) {
+  const snapshotId = project.cad?.roots.find((root) => root.current)?.current?.snapshotId;
+  const thumbnail = useModelThumbnails((state) =>
+    snapshotId ? state.images[modelThumbnailKey(project.environmentId, snapshotId)] : undefined,
+  );
+  const modelName = singleCadModelName(project.cad);
+
+  return (
+    <div
+      aria-hidden
+      className="mx-auto mb-6 flex h-33 w-44 flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-(--cad-viewport-background) shadow-sm"
+    >
+      {thumbnail ? (
+        // Thumbnails are square on the viewport color, so `contain` blends into the tile.
+        <img src={thumbnail} alt="" className="size-full object-contain" />
+      ) : (
+        <>
+          <CubeIcon className="size-8 text-tertiary-foreground" weight="thin" />
+          {modelName ? (
+            <span className="max-w-full truncate px-3 text-muted-foreground text-xs">
+              {modelName}
+            </span>
+          ) : null}
+        </>
       )}
     </div>
   );

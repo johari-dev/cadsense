@@ -8,6 +8,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  PerspectiveCamera,
   Quaternion,
   Vector3,
   type Plane,
@@ -359,6 +360,49 @@ describe("CAD renderer lifecycle without WebGL", () => {
       const reviewed = renderer.cameraPose();
       renderer.resize(800, 600);
       expect(renderer.cameraPose()).toEqual(reviewed);
+    } finally {
+      renderer.dispose();
+      parser.mockRestore();
+    }
+  });
+  it("frames fits in the area chrome leaves free and reports a fit like an orbit", async () => {
+    const scene = await new GLTFLoader().parseAsync(geometry(), "");
+    scene.scene.add(new Mesh(new BoxGeometry(0.02, 0.02, 0.02), new MeshBasicMaterial()));
+    const parser = vi.spyOn(GLTFLoader.prototype, "parseAsync").mockResolvedValueOnce(scene);
+    const onInteractionEnd = vi.fn();
+    const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, onInteractionEnd });
+    try {
+      await renderer.load(
+        {
+          ...manifest,
+          nodes: [{ ...manifest.nodes[0]!, kind: "part", sourcePartKey: geometryKey }],
+        },
+        async () => geometry(),
+      );
+      renderer.resize(800, 600);
+      renderer.setFrameInsets({ top: 40, bottom: 60, right: 300 }, { reducedMotion: true });
+      renderer.apply(state);
+      // The model centers in the free area: 500px wide from the left, 500px tall from y = 40.
+      const camera: PerspectiveCamera = calls.render.mock.calls.at(-1)![1];
+      expect(camera.view?.offsetX).toBe(150);
+      expect(camera.view?.offsetY).toBe(10);
+      // Opening chrome on the right eases a fit over; closing it eases back.
+      renderer.setFrameInsets({ top: 40, bottom: 60, right: 0 }, { reducedMotion: true });
+      const recentered: PerspectiveCamera = calls.render.mock.calls.at(-1)![1];
+      expect(recentered.view?.offsetX).toBe(0);
+      const chosen = {
+        position: [0.05, -0.3, 0.1] as const,
+        target: [0.05, 0, 0] as const,
+        up: [0, 0, 1] as const,
+        projection: "perspective" as const,
+        zoom: 1,
+      };
+      renderer.apply({ ...state, camera: { kind: "pose", pose: chosen, fit: null } });
+      renderer.fit({ reducedMotion: true });
+      const fitted = onInteractionEnd.mock.calls.at(-1)![0];
+      for (const value of fitted.target) expect(value).toBeCloseTo(0, 10);
+      const direction = new Vector3(...fitted.position).sub(new Vector3(...fitted.target));
+      expect(direction.normalize().dot(new Vector3(0, -3, 1).normalize())).toBeCloseTo(1, 10);
     } finally {
       renderer.dispose();
       parser.mockRestore();
