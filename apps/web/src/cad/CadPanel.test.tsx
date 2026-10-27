@@ -77,6 +77,12 @@ vi.mock("./CadCommentsCard", () => ({
   },
 }));
 vi.mock("./CadPanel.css", () => ({}));
+// The scene reads whether the app is inspecting through a store hook; these tests render it as
+// a plain function, so the hook reads a fixed answer instead.
+vi.mock("../components/sidebarInspection", async (original) => ({
+  ...(await original<typeof import("../components/sidebarInspection")>()),
+  useInspectionTriggersStore: () => false,
+}));
 vi.mock("./useCadActivityIndicator", () => ({ useCadActivityIndicator: () => false }));
 vi.mock("./cadCommentReviewStore", async (original) => {
   const actual = await original<typeof import("./cadCommentReviewStore")>();

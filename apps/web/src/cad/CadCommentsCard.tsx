@@ -146,6 +146,12 @@ export interface CadCommentsCardProps {
    * docked panel instead of floating over the model; the collapsed toggle stays in the corner.
    */
   dock?: HTMLElement | null;
+  /**
+   * Changes when the viewport settles at a new size because of layout outside the card (the
+   * app sidebar folding for docked comments). A focus framed against the size before it runs
+   * again, in the same frame, so the camera eases once to the final framing.
+   */
+  viewportKey?: string;
 }
 export function CadCommentsCard({
   threadRef,
@@ -163,6 +169,7 @@ export function CadCommentsCard({
   back,
   floating = false,
   dock = null,
+  viewportKey = "",
 }: CadCommentsCardProps) {
   const [filter, setFilter] = useState<"open" | "reviewed" | "history">(
     historical ? "history" : "open",
@@ -358,7 +365,7 @@ export function CadCommentsCard({
           );
     setFocusNotice(notice ?? COMMENT_FOCUS_UNAVAILABLE);
     card.current?.querySelector('[aria-expanded="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [selection, descriptor, open, layoutVersion, settling, docked]);
+  }, [selection, descriptor, open, layoutVersion, settling, docked, viewportKey]);
   useEffect(() => {
     let frame = 0;
     const current = renderer.current;

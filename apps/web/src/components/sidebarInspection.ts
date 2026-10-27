@@ -46,12 +46,15 @@ export interface SidebarInspectionState {
   readonly inspecting: boolean;
   /** An explicit open or collapse during the current inspection; null until they make one. */
   readonly override: boolean | null;
+  /** What made the latest change: entering or leaving inspection, or the user's own toggle. */
+  readonly changedBy: "inspection" | "user";
 }
 
 export const INITIAL_SIDEBAR_INSPECTION: SidebarInspectionState = {
   userOpen: true,
   inspecting: false,
   override: null,
+  changedBy: "user",
 };
 
 export type SidebarInspectionEvent =
@@ -65,9 +68,20 @@ export function reduceSidebarInspection(
   if (event.type === "inspection") {
     if (event.inspecting === state.inspecting) return state;
     // Entering or leaving inspection drops any choice made during the previous one.
-    return { ...state, inspecting: event.inspecting, override: null };
+    return { ...state, inspecting: event.inspecting, override: null, changedBy: "inspection" };
   }
-  return state.inspecting ? { ...state, override: event.open } : { ...state, userOpen: event.open };
+  return state.inspecting
+    ? { ...state, override: event.open, changedBy: "user" }
+    : { ...state, userOpen: event.open, changedBy: "user" };
+}
+
+/**
+ * How the sidebar's latest change should look. An inspection fold or restore changes the right
+ * panel's width in the same frame (it takes back the width the rail frees), so the sidebar
+ * snaps with it instead of sliding while the panel jumps. The user's own toggles animate.
+ */
+export function sidebarMotion(state: SidebarInspectionState): "instant" | "animated" {
+  return state.changedBy === "inspection" ? "instant" : "animated";
 }
 
 /** Whether the desktop sidebar is expanded (true) or folded to its icon rail (false). */

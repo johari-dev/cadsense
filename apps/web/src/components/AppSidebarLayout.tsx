@@ -30,6 +30,7 @@ import {
   isInspecting,
   reduceSidebarInspection,
   resolveSidebarOpen,
+  sidebarMotion,
   useInspectionTriggersStore,
 } from "./sidebarInspection";
 import {
@@ -173,9 +174,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     reduceSidebarInspection,
     INITIAL_SIDEBAR_INSPECTION,
   );
-  useEffect(() => {
+  // Applied while rendering, not in an effect, so the fold commits in the same frame as the
+  // panel that started the inspection (docked comments, a maximized panel) and never trails it.
+  if (sidebarInspection.inspecting !== inspecting)
     dispatchSidebarInspection({ type: "inspection", inspecting });
-  }, [inspecting]);
   const sidebarOpen = resolveSidebarOpen(sidebarInspection);
   const handleSidebarOpenChange = useCallback(
     (open: boolean) => dispatchSidebarInspection({ type: "user", open }),
@@ -243,6 +245,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       open={sidebarOpen}
       onOpenChange={handleSidebarOpenChange}
       collapsedLayout="icon"
+      // Inspection folds snap; the user's own toggles animate (see sidebarMotion).
+      data-sidebar-motion={sidebarMotion(sidebarInspection)}
       style={sidebarProviderStyle}
     >
       <ProjectProjectionRetention />
