@@ -2842,7 +2842,9 @@ function SidebarInspectionRail({
                     type="button"
                     aria-label={`Show ${project.displayName} threads`}
                     aria-current={isActiveProject ? "true" : undefined}
-                    className={`inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg hover:bg-sidebar-row-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
+                    // The same 32px square as every other rail button; the active project
+                    // differs only by its fill.
+                    className={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
                       isActiveProject ? "bg-sidebar-row-active" : ""
                     }`}
                     onClick={expand}

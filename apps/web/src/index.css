@@ -2020,6 +2020,11 @@ code {
   height: 12px;
   opacity: 0.5;
 }
+/* The menu's scroll wrapper only ever scrolls vertically: a header or row that runs long is
+   clipped, never turned into a horizontal scrollbar along the bottom of the panel. */
+.composer-model-panel > div {
+  overflow-x: hidden;
+}
 /* Model rows and trait rows in the composer model picker panel. 36px rows; with the list's
    0.25rem inset, content sits 12px from the panel edge, in line with the search field. */
 .composer-model-panel :is(.composer-model-row, .composer-trait-row) {

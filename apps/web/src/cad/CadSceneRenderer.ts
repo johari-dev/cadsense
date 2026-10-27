@@ -178,11 +178,15 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   // context surface at each pixel, so overlapping parts never stack into fog, then that surface
   // is shaded once at low opacity behind or around the solid parts in focus.
   const contextDepth = new THREE.MeshBasicMaterial({ colorWrite: false });
+  // Outside the tone curve and without edges, so context sits well below the parts in focus:
+  // about a third of a focused light part's brightness, while its shading still shows where the
+  // focus sits in the assembly.
   const contextSurface = new THREE.MeshLambertMaterial({
-    color: 0xe2e6eb,
+    color: 0x9aa0a8,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.3,
     depthWrite: false,
+    toneMapped: false,
   });
   let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = new THREE.PerspectiveCamera(
     CAD_CAMERA_FOV,
@@ -327,24 +331,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     renderer.clippingPlanes = model?.clippingPlanes() ?? [];
     scene.background = withBackdrop ? backdrop : null;
     renderer.render(scene, eye);
-    const faded = model?.hasFaded() ?? false;
-    if (faded) drawContext(eye);
     // The outline's opaque normal pass would draw cut-open or ghosted parts as solid shells.
-    // Edges run over faded context too, so its shapes stay readable at its quieter tone.
-    if (model && outlineSupported && !model.clippingPlanes().length && !model.hasGhosts()) {
-      const layers = eye.layers.mask;
-      if (faded) eye.layers.enable(CAD_CONTEXT_LAYER);
-      try {
-        outline.render(
-          scene,
-          eye,
-          model.bounds.getSize(outlineBounds).length(),
-          model.hasHighlight() ? CAD_HIGHLIGHT_LAYER : undefined,
-        );
-      } finally {
-        eye.layers.mask = layers;
-      }
-    }
+    // Faded context is on its own layer, so only the parts in focus get edges.
+    if (model && outlineSupported && !model.clippingPlanes().length && !model.hasGhosts())
+      outline.render(
+        scene,
+        eye,
+        model.bounds.getSize(outlineBounds).length(),
+        model.hasHighlight() ? CAD_HIGHLIGHT_LAYER : undefined,
+      );
+    if (model?.hasFaded()) drawContext(eye);
   };
   const render = (withBackdrop = true) => {
     assertAvailable();

@@ -47,11 +47,9 @@ type PickerRow = {
 };
 
 const JUMP_SHORTCUT_OPTIONS = { context: { modelPickerOpen: true } } as const;
-// Header controls: 28px tall, icon plus a 13px label.
+// Header controls: 28px tall; the open tab adds a 13px label, the rest are 28px squares.
 const TAB_CLASS_NAME =
   "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-[0.8667rem] text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
-// With more providers than this, inactive tabs fall back to icons so the header still fits.
-const MAX_LABELED_PROVIDER_TABS = 2;
 
 export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   /** The instance currently selected in the composer. */
@@ -299,61 +297,63 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         {/* -m-1 bleeds over the popup body padding so the dividers run edge to edge.
             data-model-picker-content tells the sidebar to yield mod+1...9 (modelPickerVisibility.ts). */}
         <div data-model-picker-content className="-m-1 flex flex-col">
-          <div
-            role="tablist"
-            aria-label="Model sources"
-            className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 pt-1.5 pb-[7px]"
-          >
-            <PickerTabButton
-              label="Favorites"
-              showLabel
-              active={openTab === STARRED_TAB}
-              onSelect={() => {
-                setTab(STARRED_TAB);
-                setQuery("");
-              }}
+          {/* Only the open tab shows its name; the rest are 28px icons with tooltips, so the
+              header fits at any provider count. The tab strip clips rather than scrolls if it
+              ever runs out of room, and "Add provider" stays pinned at the end. */}
+          <div className="flex shrink-0 items-center gap-1 border-b border-border px-1.5 pt-1.5 pb-[7px]">
+            <div
+              role="tablist"
+              aria-label="Model sources"
+              className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
             >
-              <StarIcon aria-hidden="true" weight="fill" className="size-3.5" />
-            </PickerTabButton>
-            {entries.map((entry) => {
-              const ready = isProviderInstancePickerReady(entry);
-              return (
-                <PickerTabButton
-                  key={entry.instanceId}
-                  label={entry.displayName}
-                  showLabel={entries.length <= MAX_LABELED_PROVIDER_TABS}
-                  {...(ready ? {} : { unavailableReason: `${entry.displayName} is unavailable` })}
-                  active={openTab === entry.instanceId}
-                  onSelect={() => {
-                    setTab(entry.instanceId);
-                    setQuery("");
-                  }}
-                >
-                  <ProviderInstanceIcon
-                    driverKind={entry.driverKind}
-                    displayName={entry.displayName}
-                    className="size-4"
-                    iconClassName="size-4"
-                  />
-                </PickerTabButton>
-              );
-            })}
-            <span className="flex-1" />
+              <PickerTabButton
+                label="Favorites"
+                active={openTab === STARRED_TAB}
+                onSelect={() => {
+                  setTab(STARRED_TAB);
+                  setQuery("");
+                }}
+              >
+                <StarIcon aria-hidden="true" weight="fill" className="size-3.5" />
+              </PickerTabButton>
+              {entries.map((entry) => {
+                const ready = isProviderInstancePickerReady(entry);
+                return (
+                  <PickerTabButton
+                    key={entry.instanceId}
+                    label={entry.displayName}
+                    {...(ready ? {} : { unavailableReason: `${entry.displayName} is unavailable` })}
+                    active={openTab === entry.instanceId}
+                    onSelect={() => {
+                      setTab(entry.instanceId);
+                      setQuery("");
+                    }}
+                  >
+                    <ProviderInstanceIcon
+                      driverKind={entry.driverKind}
+                      displayName={entry.displayName}
+                      className="size-4"
+                      iconClassName="size-4"
+                    />
+                  </PickerTabButton>
+                );
+              })}
+            </div>
             {/* Opens Settings > Providers, where providers are added and configured. */}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Link
                     to="/settings/providers"
-                    className={TAB_CLASS_NAME}
+                    aria-label="Add provider"
+                    className={cn(TAB_CLASS_NAME, "px-0")}
                     onClick={() => setMenuOpen(false)}
                   />
                 }
               >
                 <PlusIcon aria-hidden="true" className="size-3.5" />
-                Add provider
               </TooltipTrigger>
-              <TooltipPopup side="top">Add or set up providers in Settings</TooltipPopup>
+              <TooltipPopup side="top">Add provider (opens Settings)</TooltipPopup>
             </Tooltip>
           </div>
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-[0.8rem]">
@@ -494,21 +494,18 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
 });
 
 /**
- * One source tab: icon plus its name, with the open tab on a filled pill. When the header is
- * crowded the name is hidden on inactive tabs and the tooltip names them instead.
+ * One source tab. The open tab shows its icon and name on a filled pill; the others are 28px
+ * icons whose tooltip names them.
  */
 function PickerTabButton(props: {
   label: string;
-  /** Show the name even while the tab is not open. */
-  showLabel?: boolean;
   /** Set when the source cannot be picked right now; shown as the tooltip. */
   unavailableReason?: string;
   active: boolean;
   onSelect: () => void;
   children: ReactNode;
 }) {
-  const labelVisible = props.active || (props.showLabel ?? false);
-  const tooltip = props.unavailableReason ?? (labelVisible ? null : props.label);
+  const tooltip = props.unavailableReason ?? (props.active ? null : props.label);
   const tab = (
     <button
       type="button"
@@ -516,13 +513,16 @@ function PickerTabButton(props: {
       aria-label={props.unavailableReason ?? props.label}
       aria-selected={props.active}
       aria-disabled={props.unavailableReason !== undefined}
-      className={cn(TAB_CLASS_NAME, props.active && "bg-foreground/[0.1] text-foreground")}
+      className={cn(
+        TAB_CLASS_NAME,
+        props.active ? "min-w-0 shrink bg-foreground/[0.1] text-foreground" : "px-0",
+      )}
       onClick={() => {
         if (props.unavailableReason === undefined) props.onSelect();
       }}
     >
       {props.children}
-      {labelVisible ? <span>{props.label}</span> : null}
+      {props.active ? <span className="truncate">{props.label}</span> : null}
     </button>
   );
   if (tooltip === null) return tab;

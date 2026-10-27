@@ -25,8 +25,6 @@ import {
   CheckIcon as Check,
   ArrowCounterClockwiseIcon as RotateCcw,
   StackIcon,
-  CaretLeftIcon,
-  CaretRightIcon,
   DotsThreeIcon,
   ClockCounterClockwiseIcon,
   EyeIcon,
@@ -787,7 +785,10 @@ export function CadCommentsCard({
                         Dismissed: {c.reviewReason}
                       </p>
                     )}
-                    <div className="flex flex-wrap items-center gap-1">
+                    {/* Location chips wrap as whole chips; a long part name truncates inside its
+                        chip (the tooltip holds the full name). Every location is one click away,
+                        so there is no pager. */}
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {c.targets.length > 1 && (
                         <LocationChip
                           label="All locations"
@@ -810,24 +811,6 @@ export function CadCommentsCard({
                           onClick={() => choose(c, i)}
                         />
                       ))}
-                      {c.targets.length > 1 && (
-                        <>
-                          <IconAction
-                            label="Previous location"
-                            icon={<CaretLeftIcon />}
-                            disabled={location === "all"}
-                            onClick={() =>
-                              choose(c, location === "all" || location === 0 ? "all" : location - 1)
-                            }
-                          />
-                          <IconAction
-                            label="Next location"
-                            icon={<CaretRightIcon />}
-                            disabled={location === c.targets.length - 1}
-                            onClick={() => choose(c, location === "all" ? 0 : location + 1)}
-                          />
-                        </>
-                      )}
                     </div>
                     {/* Named review actions on their own row, below the locations. Dismiss
                         lives in the trailing overflow menu. */}
@@ -1270,7 +1253,8 @@ function IconAction(props: {
 
 /**
  * One location of a finding. The selected chip shows how the viewer framed it (the agent's
- * view, a ghosted or revealed part, or a failure) as an icon, with the details in its tooltip.
+ * view, a ghosted or revealed part, or a failure) as an icon. The tooltip holds the full label
+ * and those details.
  */
 function LocationChip(props: {
   label: string;
@@ -1288,7 +1272,12 @@ function LocationChip(props: {
       : COMMENT_FOCUS_FAILURES.has(props.notice)
         ? WarningCircleIcon
         : InfoIcon;
-  const details = [props.notice, props.wholePartNote ? `Whole part: ${props.wholePartNote}` : ""]
+  // The full label first, since a long part name truncates in the chip.
+  const details = [
+    props.label,
+    props.notice,
+    props.wholePartNote ? `Whole part: ${props.wholePartNote}` : "",
+  ]
     .filter(Boolean)
     .join(". ");
   // A bordered chip; the selected one takes the neutral active treatment. The button's negative
@@ -1297,7 +1286,7 @@ function LocationChip(props: {
     size: "compact",
     variant: "outline",
     className: cn(
-      "max-w-56 gap-1.5 font-normal [&_svg]:mx-0",
+      "max-w-full min-w-0 gap-1.5 font-normal [&_svg]:mx-0",
       props.selected && "border-foreground/30 bg-accent dark:bg-accent",
     ),
     onClick: props.onClick,
@@ -1305,19 +1294,18 @@ function LocationChip(props: {
   const ChipIcon = props.icon ?? LocateFixed;
   const content = (
     <>
-      <ChipIcon className="size-3.5 text-muted-foreground" />
+      <ChipIcon className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="truncate">{props.label}</span>
       {NoticeIcon && (
         <NoticeIcon
           className={cn(
-            "size-3.5",
+            "size-3.5 shrink-0",
             COMMENT_FOCUS_FAILURES.has(props.notice) ? "text-warning" : "text-muted-foreground",
           )}
         />
       )}
     </>
   );
-  if (!details) return <Button {...chipProps}>{content}</Button>;
   return (
     <Tooltip>
       <TooltipTrigger render={<Button {...chipProps} />}>{content}</TooltipTrigger>

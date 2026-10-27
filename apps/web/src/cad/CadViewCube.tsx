@@ -11,15 +11,27 @@ import { CAD_VIEW_DIRECTIONS, cadPresetUp } from "./CadSceneModel";
 type Vec = readonly [number, number, number];
 type Preset = Extract<CadViewState["camera"], { kind: "preset" }>["preset"];
 
-/** Cube edge in px, wide enough for a 10px "FRONT" or "RIGHT". */
-const EDGE = 40;
-/** The cube's box: its space diagonal, the widest it can project at any angle. */
-const BOX = Math.ceil(EDGE * Math.sqrt(3));
-/** Face fill. The class names carry the #6b6b6b edge line and the hover tint, the scene's
-    selection blue #7dbbff (as in CadCommentsCard). */
+/** Cube edge in px, and how far each edge and corner is chamfered off. A face keeps a flat
+    EDGE - 2 * CHAMFER square, wide enough for a 10px "FRONT" or "RIGHT". */
+const EDGE = 48;
+const CHAMFER = 6;
+const HALF = EDGE / 2;
+/** The flat face's side, and the width of the bevel strip along each edge. */
+const FLAT = EDGE - 2 * CHAMFER;
+const BEVEL = CHAMFER * Math.SQRT2;
+/** How far the chamfered cube reaches along a unit direction: its farthest corner vertex. */
+const extent = (axis: Vec) => {
+  const sizes = axis.map(Math.abs);
+  return (HALF - CHAMFER) * (sizes[0]! + sizes[1]! + sizes[2]!) + CHAMFER * Math.max(...sizes);
+};
+/** The cube's box: the widest it can project at any angle. */
+const BOX = Math.ceil(2 * Math.hypot(HALF, HALF - CHAMFER, HALF - CHAMFER));
+/** Face fill. Bevels are lighter, so edges and corners read as rounded-off geometry. */
 const FACE = "#2a2a2a";
-/** Share of a face edge each edge and corner zone takes. */
-const RIM = 0.2;
+/** The hover tint, the scene's selection blue #7dbbff (as in CadCommentsCard), on any face, edge
+    bevel, or corner facet. A class string, so Tailwind sees the literal colors. */
+const HOVER =
+  "hover:bg-[color-mix(in_srgb,#2a2a2a,#7dbbff_40%)]! focus-visible:bg-[color-mix(in_srgb,#2a2a2a,#7dbbff_40%)]!";
 
 /**
  * Each face: the preset it applies, with its outward normal and label up taken from the preset's
@@ -59,6 +71,7 @@ const normalize = (v: Vec): Vec => {
   const length = Math.hypot(...v) || 1;
   return [v[0] / length, v[1] / length, v[2] / length];
 };
+const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const same = (a: Vec, b: Vec) => {
   const [x, y] = [normalize(a), normalize(b)];
   return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 1e-6;
@@ -93,21 +106,90 @@ const labelOpacity = (normal: Vec, forward: Vec) => {
   return String(Math.min(1, Math.max(0, (facing - 0.2) / 0.3)));
 };
 
-/** Places a face div in world space: text right, text down, outward normal, then out by half. */
-function faceTransform(normal: Vec, up: Vec) {
-  const right = cross(up, normal);
-  const half = EDGE / 2;
-  return `matrix3d(${[
-    ...right,
-    0,
-    ...up.map((value) => -value),
-    0,
-    ...normal,
-    0,
-    ...normal.map((value) => value * half),
-    1,
-  ].join(",")})`;
+/** The face color with `shade` percent of white mixed in, or of black when negative. */
+const tone = (shade: number) =>
+  `color-mix(in srgb, ${FACE}, ${shade < 0 ? "black" : "white"} ${Math.abs(shade)}%)`;
+/** A bevel's color: lit from above, and `lift` percent lighter than the faces, so edges and
+    corners read as rounded-off geometry. */
+const bevelTone = (normal: Vec, lift: number) => tone(lift + 10 * normal[2]);
+
+/**
+ * Places a flat element in world space: its top-left corner at `corner`, its x axis along
+ * `across`, and its front toward `normal`. Children of the cube sit at its center with a
+ * top-left transform origin, so world coordinates apply directly. Its y axis is across x normal,
+ * the handedness the cube transform's mirror expects, so backface culling hides the far side.
+ */
+function placement(corner: Vec, across: Vec, normal: Vec) {
+  const down = cross(across, normal);
+  return `matrix3d(${[...across, 0, ...down, 0, ...normal, 0, ...corner, 1].join(",")})`;
 }
+const add = (...vectors: Vec[]): Vec => [
+  vectors.reduce((sum, v) => sum + v[0], 0),
+  vectors.reduce((sum, v) => sum + v[1], 0),
+  vectors.reduce((sum, v) => sum + v[2], 0),
+];
+const scale = (v: Vec, by: number): Vec => [v[0] * by, v[1] * by, v[2] * by];
+
+/** The six flat faces, inset from the edges by the chamfer, with text upright for the preset. */
+const FACE_PLATES = FACES.map((face) => {
+  const across = cross(face.up, face.normal);
+  const corner = add(scale(face.normal, HALF), scale(across, -FLAT / 2), scale(face.up, FLAT / 2));
+  return { ...face, transform: placement(corner, across, face.normal) };
+});
+
+/** The twelve edge bevels, one strip between each pair of adjacent faces. Clicking one looks
+    along the diagonal between the two faces. */
+const EDGE_BEVELS = FACES.flatMap((a, i) =>
+  FACES.slice(i + 1).flatMap((b) => {
+    if (a.normal[0] * b.normal[0] + a.normal[1] * b.normal[1] + a.normal[2] * b.normal[2] !== 0)
+      return [];
+    const direction = add(a.normal, b.normal);
+    const normal = normalize(direction);
+    const along = normalize(cross(a.normal, b.normal));
+    const down = cross(along, normal);
+    const corner = add(
+      scale(direction, HALF - CHAMFER / 2),
+      scale(along, -FLAT / 2),
+      scale(down, -BEVEL / 2),
+    );
+    return [
+      {
+        key: `${a.preset}-${b.preset}`,
+        direction,
+        background: bevelTone(normal, 10),
+        transform: placement(corner, along, normal),
+      },
+    ];
+  }),
+);
+
+/** The eight corner facets, small triangles where three bevels meet. Clicking one looks from
+    that corner; the front, right, top one is the isometric preset. */
+const CORNER_FACETS = [-1, 1].flatMap((x) =>
+  [-1, 1].flatMap((y) =>
+    [-1, 1].map((z) => {
+      const direction: Vec = [x, y, z];
+      const normal = normalize(direction);
+      // The facet's corners: the cube corner pulled in by the chamfer on two of its axes.
+      const vertex = (axis: 0 | 1 | 2): Vec => [
+        x * (axis === 0 ? HALF : HALF - CHAMFER),
+        y * (axis === 1 ? HALF : HALF - CHAMFER),
+        z * (axis === 2 ? HALF : HALF - CHAMFER),
+      ];
+      const [apex, left, right] = [vertex(0), vertex(1), vertex(2)];
+      // Lay the triangle out apex up: x runs along the base, y from the apex toward it.
+      let across = normalize(add(right, scale(left, -1)));
+      const base = scale(add(left, right), 0.5);
+      if (dot(cross(across, normal), add(base, scale(apex, -1))) < 0) across = scale(across, -1);
+      return {
+        key: `${x}${y}${z}`,
+        direction,
+        background: bevelTone(normal, 14),
+        transform: placement(add(apex, scale(across, -BEVEL / 2)), across, normal),
+      };
+    }),
+  ),
+);
 
 /** The camera a click applies: a preset when the direction is one, else a fitted free pose. */
 function cameraFor(direction: Vec, projection: "perspective" | "orthographic") {
@@ -163,13 +245,11 @@ export function CadViewCube({
       // Drop the cube to the box's bottom, so its lowest corner or edge sits on the same 16px
       // inset as the toolbar at any angle. The home button follows, centered on the cube and
       // 8px from its left side, however wide it projects.
-      const extent = (axis: Vec) =>
-        (EDGE / 2) * (Math.abs(axis[0]) + Math.abs(axis[1]) + Math.abs(axis[2]));
       const drop = BOX / 2 - extent(basis.up);
       const slide = BOX / 2 - extent(basis.right);
       node.style.transform = `translateY(${drop}px) ${cubeTransform(basis)}`;
       if (home.current) home.current.style.transform = `translate(${slide}px, ${drop}px)`;
-      FACES.forEach((face, index) => {
+      FACE_PLATES.forEach((face, index) => {
         const label = labels.current[index];
         if (label) label.style.opacity = labelOpacity(face.normal, basis.forward);
       });
@@ -196,8 +276,6 @@ export function CadViewCube({
     const projection = renderer?.current?.cameraPose().projection ?? "perspective";
     onChange({ ...view, camera: cameraFor(direction, projection) });
   };
-  const zones = [-1, 0, 1].flatMap((row) => [-1, 0, 1].map((column) => ({ row, column })));
-  const size = (index: number) => (index === 0 ? `${100 - 200 * RIM}%` : `${100 * RIM}%`);
   return (
     <div
       role="group"
@@ -226,65 +304,65 @@ export function CadViewCube({
           className="relative [transform-style:preserve-3d]"
           style={{ width: EDGE, height: EDGE }}
         >
-          {FACES.map((face, faceIndex) => {
-            const right = cross(face.up, face.normal);
-            return (
+          {/* World origin at the cube's center; every surface places itself from here. */}
+          <div className="absolute top-1/2 left-1/2 [transform-style:preserve-3d]">
+            {FACE_PLATES.map((face, faceIndex) => (
+              <Tooltip key={face.preset}>
+                <TooltipTrigger
+                  aria-label={`${face.label} view`}
+                  disabled={disabled}
+                  className={`absolute top-0 left-0 flex origin-top-left cursor-pointer items-center justify-center text-[10px] font-semibold tracking-[0.04em] text-foreground/90 uppercase outline-none transition-colors [backface-visibility:hidden] disabled:cursor-default ${disabled ? "" : HOVER}`}
+                  style={{
+                    width: FLAT,
+                    height: FLAT,
+                    transform: face.transform,
+                    background: tone(face.shade),
+                  }}
+                  onClick={() => snap(face.normal)}
+                >
+                  <span
+                    ref={(label) => {
+                      labels.current[faceIndex] = label;
+                    }}
+                    className="pointer-events-none whitespace-nowrap"
+                  >
+                    {face.tag}
+                  </span>
+                </TooltipTrigger>
+                <TooltipPopup>{`${face.label} view`}</TooltipPopup>
+              </Tooltip>
+            ))}
+            {/* Edge bevels and corner facets are pointer shortcuts; the face buttons and the
+                home button cover every view a keyboard needs. */}
+            {EDGE_BEVELS.map((bevel) => (
               <div
-                key={face.preset}
-                className="absolute inset-0 grid [backface-visibility:hidden] border border-[#6b6b6b] transition-colors has-[>button:hover]:bg-[color-mix(in_srgb,#2a2a2a,#7dbbff_22%)]! has-[>button:focus-visible]:bg-[color-mix(in_srgb,#2a2a2a,#7dbbff_22%)]!"
+                key={bevel.key}
+                aria-hidden="true"
+                className={`absolute top-0 left-0 origin-top-left transition-colors [backface-visibility:hidden] ${disabled ? "" : `cursor-pointer ${HOVER}`}`}
                 style={{
-                  transform: faceTransform(face.normal, face.up),
-                  background: `color-mix(in srgb, ${FACE}, ${face.shade < 0 ? "black" : "white"} ${Math.abs(face.shade)}%)`,
-                  gridTemplateColumns: [-1, 0, 1].map(size).join(" "),
-                  gridTemplateRows: [-1, 0, 1].map(size).join(" "),
+                  width: FLAT,
+                  height: BEVEL,
+                  transform: bevel.transform,
+                  background: bevel.background,
                 }}
-              >
-                {zones.map(({ row, column }) => {
-                  // Rows run top to bottom on the face, so the top row leans toward `up`.
-                  const toward = (axis: 0 | 1 | 2) =>
-                    face.normal[axis] + column * right[axis] - row * face.up[axis];
-                  const direction: Vec = [toward(0), toward(1), toward(2)];
-                  if (row === 0 && column === 0)
-                    return (
-                      <Tooltip key="face">
-                        <TooltipTrigger
-                          aria-label={`${face.label} view`}
-                          disabled={disabled}
-                          className="flex cursor-pointer items-center justify-center text-[10px] font-semibold tracking-[0.04em] text-foreground/90 uppercase outline-none transition-colors hover:text-foreground focus-visible:text-foreground disabled:cursor-default"
-                          onClick={() => snap(face.normal)}
-                        >
-                          {/* Wider than the center zone on long labels; clicks there still
-                            reach the edge zones under it. */}
-                          <span
-                            ref={(label) => {
-                              labels.current[faceIndex] = label;
-                            }}
-                            className="pointer-events-none whitespace-nowrap"
-                          >
-                            {face.tag}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipPopup>{`${face.label} view`}</TooltipPopup>
-                      </Tooltip>
-                    );
-                  // Edge and corner zones are pointer shortcuts; the face buttons and the home
-                  // button cover every view a keyboard needs.
-                  return (
-                    <div
-                      key={`${row}${column}`}
-                      aria-hidden="true"
-                      className={
-                        disabled
-                          ? undefined
-                          : "cursor-pointer transition-colors hover:bg-[#7dbbff]/25"
-                      }
-                      onClick={() => snap(direction)}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
+                onClick={() => snap(bevel.direction)}
+              />
+            ))}
+            {CORNER_FACETS.map((facet) => (
+              <div
+                key={facet.key}
+                aria-hidden="true"
+                className={`absolute top-0 left-0 origin-top-left transition-colors [backface-visibility:hidden] [clip-path:polygon(50%_0,100%_100%,0_100%)] ${disabled ? "" : `cursor-pointer ${HOVER}`}`}
+                style={{
+                  width: BEVEL,
+                  height: (BEVEL * Math.sqrt(3)) / 2,
+                  transform: facet.transform,
+                  background: facet.background,
+                }}
+                onClick={() => snap(facet.direction)}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>

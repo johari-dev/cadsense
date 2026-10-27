@@ -4069,33 +4069,22 @@ function ChatViewContent(props: ChatViewProps) {
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge.
-                  It gets its own strip above the composer: the strip continues the composer's
-                  solid backing for 2.75rem (the transcript fades out above it), and the 28px
-                  pill is centered in it, so it never sits on readable text. The strip starts
-                  1rem below the overlay's top, where the overlay's own fade turns solid, and
-                  stays under the overlay so a composer shoulder tab still draws on top. */}
+                  It floats over the transcript on its own solid, bordered, shadowed surface,
+                  0.5rem above the composer. Nothing else is drawn with it, so the area
+                  around it looks the same whether or not the pill is showing. */}
               {showScrollToBottom && (
-                <>
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute inset-x-0 z-[15] h-[3.75rem] bg-[linear-gradient(to_top,var(--background)_2.75rem,transparent)]"
-                    style={{ bottom: `calc(${scrollToEndClearance}px - 1rem)` }}
-                  />
-                  <div
-                    className="pointer-events-none absolute left-1/2 z-30 flex h-[2.75rem] -translate-x-1/2 items-center justify-center"
-                    style={{ bottom: `calc(${scrollToEndClearance}px - 1rem)` }}
-                  >
-                    <button
-                      type="button"
-                      aria-label="Scroll to end"
-                      onClick={() => scrollToEnd(true)}
-                      className="pointer-events-auto flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover ps-3 pe-3.5 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <ChevronDownIcon className="size-3.5" aria-hidden />
-                      Scroll to end
-                    </button>
-                  </div>
-                </>
+                // The overlay's top 1rem is its fade; 0.5rem below that edge leaves the pill
+                // 0.5rem above the composer itself.
+                <button
+                  type="button"
+                  aria-label="Scroll to end"
+                  onClick={() => scrollToEnd(true)}
+                  className="absolute left-1/2 z-30 flex h-7.5 -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover ps-3 pe-3.5 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  style={{ bottom: `calc(${scrollToEndClearance}px - 0.5rem)` }}
+                >
+                  <ChevronDownIcon className="size-3.5" aria-hidden />
+                  Scroll to end
+                </button>
               )}
             </div>
 

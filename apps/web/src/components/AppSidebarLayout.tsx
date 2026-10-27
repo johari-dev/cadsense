@@ -190,6 +190,12 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
+    // The inspection rail is as wide as the floating sidebar toggle plus its 0.75rem (and
+    // 1px) inset on both sides, plus the rail's 1px right border, so the rail's center line
+    // is the toggle's and every rail item lines up under it. macOS moves the toggle past the
+    // traffic lights, beyond the rail, so it has no toggle to line up with.
+    "--sidebar-width-icon":
+      "calc(2 * (0.75rem + 1px) + var(--workspace-titlebar-control-size) + 1px)",
     ...(isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
       : {}),
