@@ -3086,9 +3086,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   cursor={composerCursor}
                   skills={selectedProviderStatus?.skills ?? []}
-                  // One line tall when empty so the docked composer stays compact in a
-                  // narrow column; it grows with the text up to the editor's max height.
-                  className={cn("min-h-[1lh]", showMobilePendingAnswerActions && "max-sm:pb-11")}
+                  // Two lines tall when empty, so the composer reads as a place to write; it
+                  // grows with the text up to the editor's max height.
+                  className={cn("min-h-[2lh]", showMobilePendingAnswerActions && "max-sm:pb-11")}
                   onChange={onPromptChange}
                   onCommandKeyDown={onComposerCommandKey}
                   onPaste={onComposerPaste}
