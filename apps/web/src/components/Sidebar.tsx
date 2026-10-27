@@ -2808,8 +2808,8 @@ function SidebarRailButton({
 
 /**
  * The collapsed sidebar: an icon rail (see sidebarInspection.ts) with a new thread in the
- * current project, one tile per project, and settings. A project tile or the expand button
- * opens the full sidebar. The floating sidebar toggle sits above the rail in the titlebar row.
+ * current project, one tile per project, and settings. A project tile, or the sidebar toggle
+ * that sits above the rail in the titlebar row, opens the full sidebar.
  */
 function SidebarIconRail({
   projects,
@@ -2875,9 +2875,6 @@ function SidebarIconRail({
           );
         })}
       </div>
-      <SidebarRailButton label="Expand sidebar" onClick={expand}>
-        <ChevronRightIcon className="size-4" />
-      </SidebarRailButton>
       <SidebarRailButton label="Settings" onClick={() => void navigate({ to: "/settings" })}>
         <SettingsIcon className="size-4" />
       </SidebarRailButton>
