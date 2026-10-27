@@ -37,4 +37,5 @@ export * from "./cadStorage.ts";
 
 export * from "./cadComments.ts";
 export * from "./cadMeasure.ts";
+export * from "./cadDriveOptions.ts";
 export * from "./cadFindParts.ts";

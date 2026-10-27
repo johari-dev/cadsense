@@ -129,17 +129,17 @@ export interface CadAxisFit extends CadAxis {
   readonly boxCenter: Vector3;
 }
 
-const sub = (a: Vector3, b: Vector3): Vector3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const dot = (a: Vector3, b: Vector3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const scale = (a: Vector3, k: number): Vector3 => [a[0] * k, a[1] * k, a[2] * k];
-const norm = (a: Vector3) => Math.sqrt(dot(a, a));
+export const sub = (a: Vector3, b: Vector3): Vector3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+export const dot = (a: Vector3, b: Vector3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+export const scale = (a: Vector3, k: number): Vector3 => [a[0] * k, a[1] * k, a[2] * k];
+export const norm = (a: Vector3) => Math.sqrt(dot(a, a));
 const applyPoint = (m: Matrix, x: number, y: number, z: number): Vector3 => [
   m[0]! * x + m[1]! * y + m[2]! * z + m[3]!,
   m[4]! * x + m[5]! * y + m[6]! * z + m[7]!,
   m[8]! * x + m[9]! * y + m[10]! * z + m[11]!,
 ];
 /** Distance from point p to the infinite line through c along unit axis a. */
-const lineDistance = (p: Vector3, c: Vector3, a: Vector3) => {
+export const lineDistance = (p: Vector3, c: Vector3, a: Vector3) => {
   const d = sub(p, c);
   return norm(sub(d, scale(a, dot(d, a))));
 };
@@ -283,7 +283,7 @@ export interface CadDrivetrainPart {
 }
 
 const INCH = 0.0254;
-const PARALLEL = 0.995;
+export const PARALLEL = 0.995;
 const inches = (meters: number) => `${(meters / INCH).toFixed(3)} in`;
 const ratio = (value: number) => `${Number(value.toFixed(2))}:1`;
 
@@ -478,8 +478,26 @@ const ofKind =
 // Center distance tolerance for gear pairs: FRC practice adds about 0.003 in to the exact value,
 // while too close binds the teeth. Axes fitted from tessellated meshes carry about 0.002 in of
 // noise, so smaller errors are not reported.
-const MESH_TOO_CLOSE = 0.004 * INCH;
-const MESH_TOO_FAR = 0.006 * INCH;
+export const MESH_TOO_CLOSE = 0.004 * INCH;
+export const MESH_TOO_FAR = 0.006 * INCH;
+
+/**
+ * Belt or chain length in millimeters that two wheels `centers` meters apart need, from pitch radii
+ * `T * p / 2π`. cad_checks judges loops by it, and cad_drive_options sizes them by it.
+ */
+export const loopLengthNeededMm = (
+  centers: number,
+  teethA: number,
+  teethB: number,
+  pitchMm: number,
+) => {
+  const ra = (teethA * pitchMm) / (2 * Math.PI) / 1000;
+  const rb = (teethB * pitchMm) / (2 * Math.PI) / 1000;
+  return (2 * centers + Math.PI * (ra + rb) + (ra - rb) ** 2 / centers) * 1000;
+};
+/** Chains take up to a link of slack; belts must match within 1.5 mm. */
+export const loopLengthFits = (errorMm: number, chain: boolean, pitchMm: number) =>
+  Math.abs(errorMm) <= (chain ? pitchMm : 1.5);
 // Gear pairs this far apart along their axes are unrelated, such as mirrored sides of an arm.
 const UNRELATED_AXIAL_GAP = 0.1 * INCH;
 
@@ -854,13 +872,10 @@ export const analyzeCadDrivetrain = (
     }
     const [a, b] = [wrapped[0]!, wrapped[wrapped.length - 1]!];
     const centers = Math.abs(along(b.fit.center) - along(a.fit.center));
-    const ra = (a.role.teeth * loop.role.pitchMm) / (2 * Math.PI) / 1000;
-    const rb = (b.role.teeth * loop.role.pitchMm) / (2 * Math.PI) / 1000;
-    const needed = (2 * centers + Math.PI * (ra + rb) + (ra - rb) ** 2 / centers) * 1000;
+    const needed = loopLengthNeededMm(centers, a.role.teeth, b.role.teeth, loop.role.pitchMm);
     const error = needed - length;
-    // Chains take up up to a link of slack; belts must match closely.
     const chain = noun === "sprocket";
-    const fits = Math.abs(error) <= (chain ? loop.role.pitchMm : 1.5);
+    const fits = loopLengthFits(error, chain, loop.role.pitchMm);
     const mismatch = chain
       ? error > 0
         ? `it is ${(error / loop.role.pitchMm).toFixed(1)} links short`
