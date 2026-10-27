@@ -65,7 +65,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   /** Trait rows (effort, speed, ...) for the selected model, from renderProviderTraitsRows. */
   traitRows: ReactNode;
   activeProviderIconClassName?: string;
-  /** Narrow composer: the effort label moves to the tooltip. */
+  /** Narrow composer: the trigger gets less room, so the model name truncates sooner. */
   compact?: boolean;
   disabled?: boolean;
   open?: boolean;
@@ -225,7 +225,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     // A ghost control like the rest of the footer: no fill until hovered or
                     // open. 28px tall with 10px side padding at the default interface size.
                     "flex h-7.5 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-[var(--control-radius)] px-2.75 text-[0.8333rem] text-foreground/90 outline-none transition-colors duration-150 hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-60 data-popup-open:bg-accent data-popup-open:text-foreground motion-reduce:transition-none",
-                    props.compact ? "max-w-40" : "max-w-64",
+                    props.compact ? "max-w-52" : "max-w-64",
                   )}
                 />
               }
@@ -249,9 +249,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             </>
           ) : null}
           {props.traits?.label ? (
-            <span className={props.compact ? "sr-only" : "shrink-0 text-muted-foreground"}>
-              {props.traits.label}
-            </span>
+            // The effort always follows the model name as a muted suffix, in every composer,
+            // so the trigger matches what the picker's Reasoning row says.
+            <span className="shrink-0 text-muted-foreground">{props.traits.label}</span>
           ) : null}
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}

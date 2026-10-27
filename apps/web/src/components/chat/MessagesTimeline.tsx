@@ -154,7 +154,8 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
-const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
+// As tall as the list's 1.375rem top fade, so the first row is never faded at rest.
+const TIMELINE_LIST_HEADER = <div className="h-5.5" />;
 
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
@@ -166,7 +167,7 @@ function TimelineLoadEarlierHeader({
   onLoadEarlier: () => void;
 }) {
   return (
-    <div className="pt-3 sm:pt-4">
+    <div className="pt-5.5">
       <div className="mx-auto w-full max-w-3xl pb-2">
         <button
           type="button"
@@ -618,11 +619,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             onScroll={handleScroll}
             className={cn(
               "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              // A short fade under the header: text scrolls off with a soft edge instead
-              // of leaving a whole half-transparent line under the title. The header
-              // spacer is taller than the fade, so the first row is never faded at rest.
+              // A ~20px fade under the header, about one line tall, so a line scrolling
+              // under the title dissolves instead of reading as cut in half. The list
+              // header spacer matches it, so the first row is never faded at rest.
               topFadeEnabled &&
-                "topbar-scroll-fade [--workspace-titlebar-scroll-fade-height:0.625rem]",
+                "topbar-scroll-fade [--workspace-titlebar-scroll-fade-height:1.375rem]",
             )}
             ListHeaderComponent={
               loadEarlier !== null ? (

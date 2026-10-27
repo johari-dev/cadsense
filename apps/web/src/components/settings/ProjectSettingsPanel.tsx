@@ -294,7 +294,6 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
               description={project.workspaceRoot}
               control={
                 <Button
-                  size="xs"
                   variant="outline"
                   type="button"
                   onClick={() => void showInExplorer()}
@@ -383,7 +382,6 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
             control={
               <Button
                 variant="destructive-outline"
-                size="sm"
                 disabled={cadBusy}
                 onClick={() => void removeProject()}
               >

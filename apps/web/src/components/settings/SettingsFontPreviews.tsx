@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
+import { COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 
 // The previews use the same font variables as the composer and code viewer.
 
@@ -32,7 +32,7 @@ export function PromptFontPreview() {
         cursor={cursor}
         skills={EMPTY_SKILLS}
         disabled={false}
-        placeholder={DISCONNECTED_COMPOSER_PLACEHOLDER}
+        placeholder={COMPOSER_PLACEHOLDER}
         className="max-h-40 min-h-12"
         onChange={onChange}
         onPaste={noop}

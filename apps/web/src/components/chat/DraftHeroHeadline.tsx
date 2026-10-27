@@ -160,13 +160,14 @@ export function DraftHeroHeadline({
         Review the model, inspect parts, or plan a change.
       </p>
       {activeProjectTitle ? (
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-1.5">
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
             <Button
               key={label}
-              // The first task is the suggested start; the others stay quiet beside it.
-              variant={index === 0 ? "default" : "ghost-muted"}
-              size="sm"
+              // One 36px size for all three. The first task is the suggested start; the
+              // others sit beside it as bordered secondary actions.
+              variant={index === 0 ? "default" : "outline"}
+              size="lg"
               onClick={() => onChooseTask(prompt)}
               className="pointer-events-auto"
             >

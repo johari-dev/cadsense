@@ -21,6 +21,16 @@ export type CadApplyOptions = {
  * after the solid parts; the main pass, outlines, and raycasts (all on layer 0) skip it.
  */
 export const CAD_CONTEXT_LAYER = 1;
+/** Highlighted meshes also render on this layer, so the renderer can draw their outline rim. */
+export const CAD_HIGHLIGHT_LAYER = 2;
+/**
+ * The highlight for a selected or focused part: a blue far from the amber concern pins, mixed
+ * into the part's own color (so multi-color parts keep their faces apart) with a little glow so
+ * shadowed faces stay blue rather than navy.
+ */
+const HIGHLIGHT_COLOR = new THREE.Color(0x7dbbff);
+const HIGHLIGHT_MIX = 0.7;
+const HIGHLIGHT_GLOW = 0.15;
 
 /** GLTF hierarchy clones share immutable geometry, materials, and texture buffers. */
 export const buildCadSceneModel = (
@@ -80,6 +90,8 @@ export const buildCadSceneModel = (
   let faded: ReadonlySet<string> = new Set();
   // Whether the last applied view ghosts any part to a translucent copy.
   let ghosting = false;
+  // Whether the last applied view highlights any shown, unfaded part.
+  let highlighting = false;
   const clearOverrides = () => {
     const disposed = new Set<THREE.Material>();
     for (const [object, entry] of overrides) {
@@ -143,8 +155,12 @@ export const buildCadSceneModel = (
       entry.object.visible = visible.get(id) ?? false;
       const opacity = ghosted.has(id) ? state.ghost!.opacity : 1;
       if (changedStyle) {
-        const layer = fadedIds.has(id) ? CAD_CONTEXT_LAYER : 0;
-        entry.object.traverse((object) => object.layers.set(layer));
+        const faded = fadedIds.has(id),
+          lit = highlighted.has(id) && !faded;
+        entry.object.traverse((object) => {
+          object.layers.set(faded ? CAD_CONTEXT_LAYER : 0);
+          if (lit) object.layers.enable(CAD_HIGHLIGHT_LAYER);
+        });
       }
       if (changedStyle && (highlighted.has(id) || opacity < 1))
         entry.object.traverse((object) => {
@@ -165,8 +181,11 @@ export const buildCadSceneModel = (
             if (existing) return existing;
             const copy = material.clone();
             variants.set(style, copy);
-            if (highlighted.has(id) && "color" in copy && copy.color instanceof THREE.Color)
-              copy.color.set(0xffbf36);
+            if (highlighted.has(id) && "color" in copy && copy.color instanceof THREE.Color) {
+              copy.color.lerp(HIGHLIGHT_COLOR, HIGHLIGHT_MIX);
+              if ("emissive" in copy && copy.emissive instanceof THREE.Color)
+                copy.emissive.copy(HIGHLIGHT_COLOR).multiplyScalar(HIGHLIGHT_GLOW);
+            }
             if (opacity < 1) {
               copy.opacity = Math.min(copy.opacity, opacity);
               copy.transparent = true;
@@ -192,6 +211,9 @@ export const buildCadSceneModel = (
     group.updateMatrixWorld(true);
     faded = fadedIds;
     ghosting = ghosted.size > 0;
+    highlighting = [...highlighted].some(
+      (id) => !fadedIds.has(id) && objects.get(id)?.object.visible,
+    );
     shownBounds = visibleBounds.isEmpty() ? bounds.clone() : visibleBounds;
     // All-hidden/empty fits remain deterministic and never produce NaN camera positions.
     return fitBounds.isEmpty()
@@ -213,6 +235,8 @@ export const buildCadSceneModel = (
     isFaded: (id: string) => faded.has(id),
     /** Whether the last applied view shows any faded context (see CAD_CONTEXT_LAYER). */
     hasFaded: () => faded.size > 0,
+    /** Whether the last applied view highlights any shown part (see CAD_HIGHLIGHT_LAYER). */
+    hasHighlight: () => highlighting,
     /** Whether the last applied view, including any review on top of it, ghosts parts. */
     hasGhosts: () => ghosting,
     dispose: clearOverrides,

@@ -39,6 +39,7 @@ import {
   cadFitDistance,
   CAD_CAMERA_FOV,
   CAD_CONTEXT_LAYER,
+  CAD_HIGHLIGHT_LAYER,
   CadRendererError,
   disposeCadObjects,
   resolveCadCamera,
@@ -305,7 +306,12 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       const layers = eye.layers.mask;
       if (faded) eye.layers.enable(CAD_CONTEXT_LAYER);
       try {
-        outline.render(scene, eye, model.bounds.getSize(outlineBounds).length());
+        outline.render(
+          scene,
+          eye,
+          model.bounds.getSize(outlineBounds).length(),
+          model.hasHighlight() ? CAD_HIGHLIGHT_LAYER : undefined,
+        );
       } finally {
         eye.layers.mask = layers;
       }

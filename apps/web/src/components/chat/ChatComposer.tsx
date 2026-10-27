@@ -43,7 +43,6 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
-import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
@@ -301,6 +300,7 @@ import {
   getProviderSkillsForSlashMenu,
 } from "@cadsense/client-runtime/providerSkills";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -660,7 +660,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
-    isServerThread,
+    isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     projectSelectionRequired,
     phase,
@@ -2704,7 +2704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : prompt.trim() ||
                       (noProviderAvailable
                         ? "Enable a provider in Settings"
-                        : "Describe a design change...")}
+                        : COMPOSER_PLACEHOLDER)}
                 </button>
                 {inlineTasksBadge}
                 <button
@@ -3104,13 +3104,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ? "Choose a project above to start a thread"
                             : noProviderAvailable
                               ? "Enable a provider in Settings to send a message"
-                              : isServerThread
-                                ? // A started thread already has its model in view, and the
-                                  // narrow docked composer leaves room for only a short prompt.
-                                  "Ask about this model…"
-                                : phase === "disconnected"
-                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Describe a change or ask about your model. @ for files, / for tools."
+                              : COMPOSER_PLACEHOLDER
                   }
                   disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
                 />

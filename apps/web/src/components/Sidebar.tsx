@@ -341,7 +341,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isMobile = useIsMobile();
-  const isHighlighted = isActive || isSelected;
   const lastActivityAt = thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt;
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
@@ -583,20 +582,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             <Tooltip>
               <TooltipTrigger
                 render={
-                  // Titles wrap to a second line instead of truncating, so threads that share
-                  // a prefix stay distinct. The active or selected row's age floats at the end
-                  // of that second line: a zero-width float holds the first line, and the age
-                  // clears below it, so the title wraps around the age instead of under it.
-                  <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] leading-[18px]">
-                    {isHighlighted ? (
-                      <>
-                        <span aria-hidden className="float-right h-[18px]" />
-                        <span className="float-right clear-right ps-2 text-[11px] text-tertiary-foreground tabular-nums">
-                          {formatCompactRelativeTime(lastActivityAt)}
-                        </span>
-                      </>
-                    ) : null}
-                    <span data-testid={`thread-title-${thread.id}`}>{thread.title}</span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-[13px]"
+                    data-testid={`thread-title-${thread.id}`}
+                  >
+                    {thread.title}
                   </span>
                 }
               />
@@ -610,9 +600,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {/* Takes room only on hover and focus, for the archive button, so it never covers
-              the title. */}
-          <div className="flex justify-end group-focus-within/menu-sub-item:min-w-7 group-hover/menu-sub-item:min-w-7 max-sm:min-w-20">
+          {/* A fixed column for the row's age, so every title has the same width whether
+              or not the row is selected. Hover controls take the column's place. */}
+          <div className="flex w-6 justify-end max-sm:w-20">
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -665,7 +655,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               )
             ) : null}
             <span className={threadMetaClassName}>
-              <span className="inline-flex items-center gap-1 empty:hidden ps-1.5">
+              <span className="inline-flex items-center gap-1">
                 {jumpLabel ? (
                   <Tooltip>
                     <TooltipTrigger
@@ -680,7 +670,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
-                ) : null}
+                ) : (
+                  <span className="text-xs text-tertiary-foreground tabular-nums">
+                    {formatCompactRelativeTime(lastActivityAt)}
+                  </span>
+                )}
               </span>
             </span>
           </div>
@@ -780,9 +774,11 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
   return (
+    // The extra 0.75rem start inset lines thread titles up with the project icon's left
+    // edge: one visible tree step that still leaves titles most of the row.
     <SidebarMenuSub
       ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 px-1 py-0 sm:mx-1 sm:px-1.5"
+      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 py-0 ps-4 pe-1 sm:mx-1 sm:ps-4.5 sm:pe-1.5"
     >
       {shouldShowThreadPanel && showEmptyThreadState ? (
         <SidebarMenuSubItem className="w-full" data-thread-selection-safe>

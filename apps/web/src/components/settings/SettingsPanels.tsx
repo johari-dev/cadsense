@@ -2,6 +2,7 @@ import {
   ArchiveIcon,
   ArchiveIcon as ArchiveX,
   CaretRightIcon as ChevronRightIcon,
+  ArrowCounterClockwiseIcon as RotateCcwIcon,
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
@@ -103,7 +104,7 @@ function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
       <span>Version</span>
-      <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
+      <span className="text-muted-foreground tabular-nums">{APP_VERSION}</span>
     </span>
   );
 }
@@ -276,7 +277,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+          description="Stable follows full releases. Nightly follows nightly builds, and you can switch back anytime."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -433,7 +434,7 @@ export function AppearanceSettingsPanel() {
       <SettingsSection title="Visibility">
         <SettingsRow
           {...searchableSetting("show-permission-settings")}
-          description="Show access controls in the composer. When hidden, agents edit the project freely and an automatic reviewer checks actions that need more access."
+          description="Show access controls in the composer. When hidden, agents edit freely and an automatic reviewer checks actions that need more access."
           control={
             <Switch
               checked={settings.showPermissionSettings}
@@ -550,7 +551,7 @@ function FontSmoothingRow() {
   return (
     <SettingsRow
       {...searchableSetting("font-smoothing")}
-      description="Render text with thinner grayscale anti-aliasing instead of macOS's heavier default."
+      description="Thinner grayscale anti-aliasing instead of the heavier macOS default."
       resetAction={
         settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
           <SettingResetButton
@@ -838,7 +839,24 @@ function FontFamilySettingsRow({
   );
 }
 
-export function GeneralSettingsPanel() {
+/** Resets every setting `useSettingsRestore` tracks. Disabled while nothing differs. */
+function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void }) {
+  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+
+  return (
+    <Button
+      variant="outline"
+      disabled={changedSettingLabels.length === 0}
+      onClick={() => void restoreDefaults()}
+    >
+      <RotateCcwIcon className="size-3.5" />
+      Restore defaults
+    </Button>
+  );
+}
+
+/** General settings. `onRestored` runs after Restore defaults so the route can remount it. */
+export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () => void }) {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const observability = useAtomValue(primaryServerObservabilityAtom);
@@ -882,7 +900,10 @@ export function GeneralSettingsPanel() {
   );
   return (
     <SettingsPageContainer>
-      <SettingsSection title="General">
+      <SettingsSection
+        title="General"
+        headerAction={<RestoreDefaultsButton onRestored={onRestored} />}
+      >
         <SettingsRow
           {...searchableSetting("streaming-text")}
           description="Show assistant text as it arrives."
@@ -911,7 +932,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("provider-update-checks")}
-          description="Check installed provider CLIs for newer available versions."
+          description="Check installed provider CLIs for new versions."
           resetAction={
             settings.enableProviderUpdateChecks !==
             DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
@@ -967,7 +988,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("archive-confirmation")}
-          description="Require a second click on the inline archive action before a thread is archived."
+          description="Ask before archiving a thread."
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
@@ -1020,7 +1041,7 @@ export function GeneralSettingsPanel() {
         {isElectron ? (
           <SettingsRow
             {...searchableSetting("quit-confirmation")}
-            description="Require holding the quit shortcut before the desktop app quits. A quick tap shows a hint instead."
+            description="Hold the quit shortcut to quit. A quick tap shows a hint."
             resetAction={
               settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? (
                 <SettingResetButton

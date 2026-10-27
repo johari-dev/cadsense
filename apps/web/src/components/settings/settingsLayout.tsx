@@ -144,7 +144,9 @@ export function SettingsSection({
       className={cn("space-y-3", className)}
     >
       <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
-        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.025em] text-foreground">
+        {/* The page's first section title is the page title; later sections are groups
+            within it and take a smaller heading. */}
+        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.025em] text-foreground [section+section_&]:text-base [section+section_&]:tracking-normal">
           {icon}
           {title}
         </h2>
@@ -274,7 +276,7 @@ export function SettingsPageContainer({
         <WorkspacePageContainer
           width={width}
           className={cn(
-            "mx-0 gap-10 sm:ps-12",
+            "mx-0 gap-8 sm:ps-12",
             width === "readable" && "max-w-[calc(45rem+4.5rem)]",
             className,
           )}

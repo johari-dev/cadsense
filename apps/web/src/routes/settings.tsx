@@ -1,4 +1,3 @@
-import { ArrowCounterClockwiseIcon as RotateCcwIcon } from "~/lib/icons";
 import {
   Outlet,
   createFileRoute,
@@ -7,38 +6,17 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 
-import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
-import { Button } from "../components/ui/button";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
-
-function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
-  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
-
-  return (
-    <Button
-      size="xs"
-      variant="outline"
-      disabled={changedSettingLabels.length === 0}
-      onClick={() => void restoreDefaults()}
-    >
-      <RotateCcwIcon className="size-3.5" />
-      Restore defaults
-    </Button>
-  );
-}
 
 function SettingsContentLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
-  const [restoreSignal, setRestoreSignal] = useState(0);
-  const showRestoreDefaults = location.pathname === "/settings/general";
-  const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
       window.history.back();
@@ -74,15 +52,10 @@ function SettingsContentLayout() {
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
             <SettingsBreadcrumb pathname={location.pathname} />
-            {showRestoreDefaults ? (
-              <div className="ms-auto flex items-center gap-2">
-                <RestoreDefaultsButton onRestored={handleRestored} />
-              </div>
-            ) : null}
           </div>
         </WorkspacePageHeader>
 
-        <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
+        <div className="min-h-0 flex flex-1 flex-col">
           <Outlet />
         </div>
       </div>

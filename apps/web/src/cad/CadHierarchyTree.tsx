@@ -3,6 +3,8 @@ import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScen
 import {
   CaretDownIcon as ChevronDown,
   CaretRightIcon as ChevronRight,
+  BoxMultipleIcon,
+  CubeIcon,
   EyeIcon,
   EyeSlashIcon,
   BoundingBoxIcon as Focus,
@@ -137,27 +139,27 @@ export function CadHierarchyTree({
       offsets.push(
         offsets.at(-1)! + (row.detail ? CAD_HIERARCHY_DETAIL_ROW_HEIGHT : CAD_HIERARCHY_ROW_HEIGHT),
       );
-    // Footer counts cover parts only, not the assemblies that group them.
-    const parts = manifest.nodes.filter((node) => node.sourcePartKey !== null);
     return {
       rows: shownRows,
       offsets,
-      partCount: parts.length,
-      matchCount: query ? parts.filter((node) => matches.has(node.id)).length : null,
-      hiddenCount: parts.filter((node) => !visible.get(node.id)).length,
+      // Parts the footer can bring back: not the assemblies that group them, and not
+      // suppressed parts, which no view can show.
+      hidden: manifest.nodes
+        .filter((node) => node.sourcePartKey !== null && !node.suppressed && !visible.get(node.id))
+        .map((node) => node.id),
     };
   }, [collapsed, index, manifest, search, view]);
-  const { rows, offsets, partCount, matchCount, hiddenCount } = tree;
+  const { rows, offsets, hidden: hiddenParts } = tree;
   const listHeight = offsets.at(-1)!;
   const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, offsets);
-  // Dim, but never erase, the row at an edge with more rows past it, so a cut-off row reads as
-  // "keep scrolling" and its text stays legible.
-  const edge = (more: boolean) => (more ? "rgb(0 0 0 / 35%)" : "black");
+  // Fade out whichever edge has more rows past it, so the row there reads as "keep scrolling"
+  // rather than cut off.
+  const edge = (more: boolean) => (more ? "transparent" : "black");
   const moreAbove = scrollTop > 0;
   const moreBelow = scrollTop + viewportHeight < listHeight - 1;
   const scrollFade =
     moreAbove || moreBelow
-      ? `linear-gradient(to bottom, ${edge(moreAbove)}, black 1.25rem, black calc(100% - 1.25rem), ${edge(moreBelow)})`
+      ? `linear-gradient(to bottom, ${edge(moreAbove)}, black 2rem, black calc(100% - 2.5rem), ${edge(moreBelow)})`
       : undefined;
   return (
     <div
@@ -217,7 +219,7 @@ export function CadHierarchyTree({
                   style={{
                     top,
                     height: offsets[start + offset + 1]! - top,
-                    paddingLeft: 4 + row.depth * 12,
+                    paddingLeft: 4 + row.depth * 16,
                   }}
                 >
                   <button
@@ -236,6 +238,17 @@ export function CadHierarchyTree({
                   >
                     {branch && (!expanded ? <ChevronRight size={14} /> : <ChevronDown size={14} />)}
                   </button>
+                  {node.kind === "part" ? (
+                    <CubeIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                  ) : (
+                    <BoxMultipleIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                  )}
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -370,14 +383,27 @@ export function CadHierarchyTree({
         {/* Always shown, so the list reads as scrollable before anyone scrolls it. */}
         <ScrollBar className="opacity-100" />
       </ScrollAreaPrimitive.Root>
-      <div className="flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-muted-foreground tabular-nums">
-        <span>
-          {matchCount === null
-            ? `${partCount} ${partCount === 1 ? "part" : "parts"}`
-            : `${matchCount} of ${partCount} parts`}
-        </span>
-        {hiddenCount > 0 && <span>{hiddenCount} hidden</span>}
-      </div>
+      {/* The chip and the tab carry the part count; the footer only offers to bring hidden
+          parts back, the same reveal the row eye does. */}
+      {hiddenParts.length > 0 && (
+        <div className="flex shrink-0 items-center border-t p-1.5">
+          <Button
+            size="compact"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() =>
+              onChange({
+                ...view,
+                visibility: revealCadOccurrences(index, view, hiddenParts),
+                isolatedOccurrenceIds: [],
+              })
+            }
+          >
+            <EyeIcon />
+            Show {hiddenParts.length} hidden
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -4066,24 +4066,33 @@ function ChatViewContent(props: ChatViewProps) {
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge.
-                  A solid, shadowed surface so it never reads as part of the text under it. It
-                  sits partly in the composer backing's fade (the overlay's 1rem top padding),
-                  9px above the composer, so it covers as little readable text as possible. */}
+                  It gets its own strip above the composer: the strip continues the composer's
+                  solid backing for 2.75rem (the transcript fades out above it), and the 28px
+                  pill is centered in it, so it never sits on readable text. The strip starts
+                  1rem below the overlay's top, where the overlay's own fade turns solid, and
+                  stays under the overlay so a composer shoulder tab still draws on top. */}
               {showScrollToBottom && (
-                <div
-                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center"
-                  style={{ bottom: scrollToEndClearance - 6 }}
-                >
-                  <button
-                    type="button"
-                    aria-label="Scroll to end"
-                    onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover ps-3 pe-3.5 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                <>
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-0 z-[15] h-[3.75rem] bg-[linear-gradient(to_top,var(--background)_2.75rem,transparent)]"
+                    style={{ bottom: `calc(${scrollToEndClearance}px - 1rem)` }}
+                  />
+                  <div
+                    className="pointer-events-none absolute left-1/2 z-30 flex h-[2.75rem] -translate-x-1/2 items-center justify-center"
+                    style={{ bottom: `calc(${scrollToEndClearance}px - 1rem)` }}
                   >
-                    <ChevronDownIcon className="size-3.5" aria-hidden />
-                    Scroll to end
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      aria-label="Scroll to end"
+                      onClick={() => scrollToEnd(true)}
+                      className="pointer-events-auto flex h-7.5 cursor-pointer items-center gap-1.5 rounded-full border border-input bg-popover ps-3 pe-3.5 text-xs font-medium text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <ChevronDownIcon className="size-3.5" aria-hidden />
+                      Scroll to end
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 

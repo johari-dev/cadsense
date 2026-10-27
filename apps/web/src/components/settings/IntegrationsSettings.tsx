@@ -187,7 +187,6 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
             disabled={disabled}
           >
             <SelectTrigger
-              size="sm"
               className="w-full min-w-0 sm:w-44"
               aria-label="Default browser viewport"
             >

@@ -1,6 +1,7 @@
 import type {
   AssetResource,
   CadCaptureCard,
+  CadCommentSeverity,
   CadCommentsPublishedCard,
   ScopedThreadRef,
 } from "@cadsense/contracts";
@@ -15,7 +16,7 @@ import { Button } from "../components/ui/button";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
-import { CadSeverityIcon, CommentBadge } from "./CadCommentsCard";
+import { CommentBadge } from "./CadCommentsCard";
 
 const MAX_THUMBNAILS = 6;
 const MAX_LISTED_COMMENTS = 5;
@@ -163,8 +164,8 @@ export function CadPublishedComments({
   const listed = card.published.slice(0, MAX_LISTED_COMMENTS);
   const unlisted = count - listed.length;
   const heading = describeCadCommentsHeading(card);
-  // A card of its own with the turn's one filled button, so the review's result reads as the
-  // main outcome of the turn rather than more narration.
+  // A card of its own, so the review's result reads as the main outcome of the turn rather
+  // than more narration. Its action is outlined: the composer's send keeps the only fill.
   return (
     <section
       aria-label={heading}
@@ -184,16 +185,11 @@ export function CadPublishedComments({
             key: comment.commentId,
             number: comment.number,
             title: comment.title,
+            severity: comment.severity,
             onOpen: () => openCadComments(threadRef, comment.commentId),
-            detail:
-              comment.severity || comment.location ? (
-                <>
-                  <CadSeverityIcon severity={comment.severity} category={comment.category} />
-                  {comment.location ? (
-                    <span className="min-w-0 truncate">{comment.location}</span>
-                  ) : null}
-                </>
-              ) : null,
+            detail: comment.location ? (
+              <span className="min-w-0 truncate">{comment.location}</span>
+            ) : null,
           }),
         )}
         {card.proposed.map((proposal) =>
@@ -201,13 +197,18 @@ export function CadPublishedComments({
             key: proposal.commentId,
             number: proposal.number,
             title: proposal.title,
+            severity: null,
             onOpen: () => openCadComments(threadRef, proposal.commentId),
             detail: "Resolution proposed",
           }),
         )}
       </div>
       {count > 0 || card.proposed.length > 0 ? (
-        <Button className="mt-2 h-8.5 w-full sm:h-8.5" onClick={() => openCadComments(threadRef)}>
+        <Button
+          variant="outline"
+          className="mt-2 h-8.5 w-full bg-transparent text-[0.8667rem] dark:bg-transparent sm:h-8.5 sm:text-[0.8667rem]"
+          onClick={() => openCadComments(threadRef)}
+        >
           {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}
           <ArrowRightIcon aria-hidden />
         </Button>
@@ -226,8 +227,8 @@ export function CadPublishedComments({
 }
 
 /**
- * One comment in the chat list: its number and full title on the first line, then the
- * secondary detail (severity and part, or the proposal state) on a second, quieter line.
+ * One comment in the chat list: its severity-colored number and full title on the first line,
+ * then the secondary detail (the part, or the proposal state) on a second, quieter line.
  * The badge sits in the header icon's column so titles line up with the header text.
  * A plain function, not a component, so each row stays a `<button>` in the element tree.
  */
@@ -235,12 +236,14 @@ function commentRow({
   key,
   number,
   title,
+  severity,
   onOpen,
   detail,
 }: {
   key: string;
   number: number;
   title: string;
+  severity: CadCommentSeverity | null;
   onOpen: () => void;
   detail: ReactNode;
 }) {
@@ -252,9 +255,12 @@ function commentRow({
       onClick={onOpen}
     >
       <span className="flex h-5 items-center justify-center">
-        <CommentBadge number={number} />
+        <CommentBadge number={number} severity={severity} />
       </span>
-      <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
+      <span className="line-clamp-2 leading-5 text-foreground">
+        {severity ? <span className="sr-only">{`${severity}: `}</span> : null}
+        {title}
+      </span>
       {detail ? (
         <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-[0.8rem] leading-5 text-muted-foreground">
           {detail}

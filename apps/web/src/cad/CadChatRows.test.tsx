@@ -4,13 +4,13 @@ import { isValidElement, type ReactNode } from "react";
 import { afterEach, expect, it } from "vite-plus/test";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
+import { CommentBadge } from "./CadCommentsCard";
 import {
   CadPublishedComments,
   describeCadCommentRejection,
   describeCadCommentsHeading,
   describeCadCommentsPublished,
 } from "./CadChatRows";
-import { CadSeverityIcon } from "./CadCommentsCard";
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("env"),
@@ -59,8 +59,8 @@ it("opens a published comment at its location in the CAD panel", () => {
   expect(text(tree)).toContain('"Add bolt heads" was not published');
 
   const commentButton = buttons.find((button) => text(button).includes("roller shaft"));
-  const severity = elements(commentButton).find((element) => element.type === CadSeverityIcon);
-  expect(severity?.props.severity).toBe("blocker");
+  const badge = elements(commentButton).find((element) => element.type === CommentBadge);
+  expect(badge?.props.severity).toBe("blocker");
   (commentButton?.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-1",

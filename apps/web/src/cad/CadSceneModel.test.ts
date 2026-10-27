@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   buildCadSceneModel,
   CAD_CONTEXT_LAYER,
+  CAD_HIGHLIGHT_LAYER,
   disposeCadObjects,
   resolveCadCamera,
 } from "./CadSceneModel";
@@ -200,7 +201,17 @@ it("owns inspection materials per occurrence and per renderer, restores and disp
   const copy = first.material as THREE.MeshStandardMaterial;
   const copyDispose = vi.spyOn(copy, "dispose");
   expect(copy).not.toBe(source.material);
-  expect(copy.color.getHex()).toBe(0xffbf36);
+  // Highlights tint toward blue, away from the amber concern pins, and keep a little of the
+  // part's own color.
+  expect(copy.color.getHex()).toBe(
+    source.material.color.clone().lerp(new THREE.Color(0x7dbbff), 0.7).getHex(),
+  );
+  expect(copy.emissive.getHex()).not.toBe(0);
+  // Highlighted meshes also join the rim layer; others stay on the main layer only.
+  expect(first.layers.isEnabled(CAD_HIGHLIGHT_LAYER)).toBe(true);
+  expect(first.layers.isEnabled(0)).toBe(true);
+  expect(sibling.layers.isEnabled(CAD_HIGHLIGHT_LAYER)).toBe(false);
+  expect(model.hasHighlight()).toBe(true);
   expect(copy.opacity).toBe(0.2);
   expect(copy.depthWrite).toBe(false);
   expect(copy.map).toBe(source.material.map);

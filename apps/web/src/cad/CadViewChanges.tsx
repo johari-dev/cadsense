@@ -129,12 +129,8 @@ export function CadViewChanges({
     <div
       className={cn(
         // Spans down to just above the camera toolbar, so the card can shrink to fit.
-        "pointer-events-none absolute bottom-16 left-3 z-20 flex flex-col items-start gap-2",
+        "pointer-events-none absolute bottom-16 left-3 z-20 flex w-[min(300px,calc(100%-72px))] flex-col items-start gap-2",
         belowRevisionNotice ? "top-14" : "top-3",
-        // The parts tree gets extra width so long part names read before they truncate.
-        (open || settling) && tab === "parts"
-          ? "w-[min(352px,calc(100%-72px))]"
-          : "w-[min(304px,calc(100%-72px))]",
       )}
     >
       <div className="pointer-events-auto flex h-(--cad-overlay-control) shrink-0 items-center rounded-lg border bg-popover text-[13px] shadow-sm">
@@ -184,7 +180,7 @@ export function CadViewChanges({
           className={cn(
             "cad-view-changes-card pointer-events-auto flex min-h-0 w-full shrink flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg",
             // The tree is virtualized and needs a definite height; the change list fits its rows.
-            tab === "parts" ? "h-[440px]" : "max-h-[440px]",
+            tab === "parts" ? "h-[400px]" : "max-h-[400px]",
           )}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return;

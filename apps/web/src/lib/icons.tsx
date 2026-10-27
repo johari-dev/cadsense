@@ -24,6 +24,7 @@ import {
   IconBolt,
   IconBoltFilled,
   IconBlockquote,
+  IconBoxMultiple,
   IconBraces,
   IconBroadcast,
   IconBrush,
@@ -170,6 +171,7 @@ export const ArrowsInSimpleIcon = tablerIcon(IconArrowsDiagonalMinimize2);
 export const ArrowsOutSimpleIcon = tablerIcon(IconArrowsDiagonal);
 export const BatteryFullIcon = tablerIcon(IconBattery4);
 export const BoundingBoxIcon = tablerIcon(IconMarquee2);
+export const BoxMultipleIcon = tablerIcon(IconBoxMultiple);
 export const BracketsCurlyIcon = tablerIcon(IconBraces);
 export const BroadcastIcon = tablerIcon(IconBroadcast);
 export const CameraIcon = tablerIcon(IconCamera);

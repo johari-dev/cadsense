@@ -1,7 +1,7 @@
 export const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
-// 232px at 1440 wide leaves 440px for chat and 768px for CAD, and fits a typical
-// 30-character thread title on one line. Longer titles wrap to a second line.
-export const THREAD_SIDEBAR_DEFAULT_WIDTH = 14.5 * 16;
+// 240px at 1440 wide leaves 440px for chat and 760px for CAD, and gives one-line thread
+// titles about 160px before they truncate.
+export const THREAD_SIDEBAR_DEFAULT_WIDTH = 15 * 16;
 export const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 export const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 

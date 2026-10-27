@@ -73,11 +73,14 @@ const frameInsets = (compact: boolean, cardFloating: boolean) => ({
   bottom: compact ? 0 : 64,
   right: cardFloating ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
 });
+/** Width of the docked comments column, in CSS px. */
+const DOCK_WIDTH = 300;
 /**
  * Below this scene width the open comments card floats over the viewport; at or above it, the
- * card docks as a column beside a narrower viewport, so it never covers the model.
+ * card docks as a column beside a viewport that keeps at least 440px, so it never covers the
+ * model and the model never gets squeezed. The default 760px CAD panel at a 1440px window docks.
  */
-const DOCK_MIN_WIDTH = 720;
+const DOCK_MIN_WIDTH = DOCK_WIDTH + 440;
 const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
@@ -472,7 +475,8 @@ export function CadScene({
             <aside
               ref={setDock}
               aria-label="Comments panel"
-              className={`w-[320px] shrink-0 flex-col border-l bg-popover text-popover-foreground ${commentsCard.open ? "flex" : "hidden"}`}
+              style={{ width: DOCK_WIDTH }}
+              className={`shrink-0 flex-col border-l bg-popover text-popover-foreground ${commentsCard.open ? "flex" : "hidden"}`}
             />
           )}
         </div>
