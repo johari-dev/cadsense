@@ -337,6 +337,11 @@ describe("CAD renderer lifecycle without WebGL", () => {
       renderer.apply({ ...state, camera: { kind: "pose", pose: chosen, fit: null } });
       renderer.resize(860, 640);
       expect(renderer.cameraPose().target).toEqual(chosen.target);
+      // An animated layout change arrives as many small steps, one per frame. Following them
+      // keeps the chosen pose, so the camera never snaps partway through the animation.
+      for (let w = 880; w <= 1240; w += 40) renderer.resize(w, 640);
+      expect(renderer.cameraPose().target).toEqual(chosen.target);
+      renderer.resize(860, 640);
       // Maximizing: the model is framed whole and centered, seen from the same direction.
       renderer.resize(1400, 640);
       const refit = renderer.cameraPose();

@@ -1,8 +1,7 @@
 /* The comments card morphs between the count chip toggle and a panel sized to its content (up to a
    cap). `interpolate-size` lets height animate to and from `auto` where supported; other
    browsers keep the size change without animating it. Wide scenes dock the open card as a
-   column beside the viewport instead (see CadScene). The dock, its content, and the sidebar's
-   fold to the icon rail all land in one frame with no animation, so the canvas resizes once. */
+   column beside the viewport instead (see CadScene and .cad-comments-dock-column). */
 /* Size of the viewport's corner controls: the comments toggle and the view changes chip. */
 :root {
   --cad-overlay-control: 32px;
@@ -17,7 +16,8 @@
   transition:
     width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
     height 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    box-shadow 240ms ease;
+    box-shadow 240ms ease,
+    opacity 150ms ease;
 }
 
 .cad-comments-surface[data-open="true"] {
@@ -65,6 +65,19 @@
 @media (prefers-reduced-motion: reduce) {
   .cad-comments-surface,
   .cad-comments-content {
+    transition: none;
+  }
+}
+
+/* The docked comments column opens and closes with the same duration and easing as the app
+   sidebar's fold to its rail and the right panel's width (ui/sidebar.tsx, PreviewPanelShell),
+   which it triggers, so every edge moves as one motion and the canvas follows each frame. */
+.cad-comments-dock-column {
+  transition: width 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cad-comments-dock-column {
     transition: none;
   }
 }

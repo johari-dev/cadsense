@@ -6,7 +6,6 @@ import {
   isInspecting,
   reduceSidebarInspection,
   resolveSidebarOpen,
-  sidebarMotion,
   useInspectionTriggersStore,
 } from "./sidebarInspection";
 
@@ -55,14 +54,6 @@ describe("reduceSidebarInspection and resolveSidebarOpen", () => {
 
   it("collapses back when the user collapses it again during inspection", () => {
     expect(resolveSidebarOpen(userSets(userSets(start(), true), false))).toBe(false);
-  });
-
-  it("folds and restores instantly for inspection, but animates the user's own toggles", () => {
-    // Inspection changes land with the panel layout in one frame; the user's clicks animate.
-    expect(sidebarMotion(start())).toBe("instant");
-    expect(sidebarMotion(userSets(start(), true))).toBe("animated");
-    expect(sidebarMotion(end(userSets(start(), true)))).toBe("instant");
-    expect(sidebarMotion(userSets(INITIAL_SIDEBAR_INSPECTION, false))).toBe("animated");
   });
 
   it("returns the same state object when nothing changes", () => {

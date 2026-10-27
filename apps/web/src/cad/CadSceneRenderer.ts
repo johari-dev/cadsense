@@ -69,6 +69,8 @@ const FOCUS_FILL = 0.8;
 // A chosen camera pose survives small viewport changes; past this ratio in either dimension
 // (maximizing or restoring the panel) the view refits so the model stays whole and centered.
 const REFIT_RATIO = 1.25;
+/** A single resize step at least this large is a jump (maximizing), not one animation frame. */
+const RESIZE_JUMP = 1.1;
 /**
  * The interactive viewport's backdrop: a cool lift at the top falling to just above the themed
  * background at the bottom, so the canvas reads as its own space against the app chrome.
@@ -1529,13 +1531,20 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       )
         throw new CadRendererError("invalid-view");
       const currentPose = pose();
+      // How far this one step moved, against the size the camera was last drawn for.
+      const step = Math.max(
+        Math.abs(Math.log(nextWidth / width)),
+        Math.abs(Math.log(nextHeight / height)),
+      );
       width = nextWidth;
       height = nextHeight;
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height, false);
       frameRevision++;
       // A comment review keeps the pose it flew to; otherwise fits follow the viewport, and a
-      // chosen pose refits once the viewport has grown or shrunk a lot since it was framed.
+      // chosen pose refits once the viewport has jumped to a much larger or smaller size since
+      // it was framed. An animated layout change (or a dragged window edge) arrives as small
+      // steps, one per frame; those keep the pose, so the camera never snaps mid-animation.
       const resized = Math.max(
         Math.abs(Math.log(width / framedSize.width)),
         Math.abs(Math.log(height / framedSize.height)),
@@ -1548,7 +1557,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         animationFrame === null &&
         review === null &&
         reviewStart === null &&
-        (fitted || resized > Math.log(REFIT_RATIO));
+        (fitted || (step > Math.log(RESIZE_JUMP) && resized > Math.log(REFIT_RATIO)));
       applying = true;
       try {
         if (refit) {

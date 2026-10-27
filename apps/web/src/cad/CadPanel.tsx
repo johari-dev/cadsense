@@ -59,11 +59,7 @@ import {
   CadCommentsCard,
   type CadCommentsCardProps,
 } from "./CadCommentsCard";
-import {
-  holdInspection,
-  isInspecting,
-  useInspectionTriggersStore,
-} from "../components/sidebarInspection";
+import { holdInspection } from "../components/sidebarInspection";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
@@ -218,28 +214,9 @@ export function CadScene({
   const docked = commentsCard.open && dock !== null;
   // Docked comments are an inspection: the app sidebar folds to its icon rail. The hold
   // re-renders the app layout synchronously, so the fold (and the width this panel takes back
-  // from it) commits right after the dock, before anything paints.
+  // from it) starts animating in the same frame as the dock column. The canvas follows every
+  // frame of that animation through its ResizeObserver below.
   useLayoutEffect(() => (docked ? holdInspection("cad-comments-docked") : undefined), [docked]);
-  // Resize the renderer once the canvas has its final size: after the dock mounts, and again
-  // when the fold it triggered commits (this subscription re-renders the scene in that same
-  // synchronous pass). The frame that paints then already has the new size drawn, so the model
-  // moves once with the layout instead of stretching and then jumping. It also runs before the
-  // card's focus (a passive effect), which frames the comment in the final canvas.
-  const shellInspecting = useInspectionTriggersStore(isInspecting);
-  useLayoutEffect(() => {
-    const attachment = attachmentRef.current;
-    if (!attachment) return;
-    try {
-      const bounds = attachment.canvas.getBoundingClientRect();
-      attachment.renderer.resize(
-        Math.max(1, bounds.width),
-        Math.max(1, bounds.height),
-        Math.min(devicePixelRatio, 2),
-      );
-    } catch {
-      setError("The CAD viewer is unavailable.");
-    }
-  }, [docked, shellInspecting]);
   // A layout effect, so the card's focus (a passive effect) already frames clear of the card it
   // just opened. Closing the card ends its review afterwards, which recenters the model.
   useLayoutEffect(() => {
@@ -487,7 +464,6 @@ export function CadScene({
               manifest={manifest}
               displayedSnapshotId={view.snapshotId}
               dock={dock}
-              viewportKey={String(shellInspecting)}
             />
             {manifest && !unavailable && !compact && (
               <CadCameraToolbar
@@ -507,14 +483,24 @@ export function CadScene({
               />
             )}
           </div>
-          {dockable && !compact && (
-            <aside
-              ref={setDock}
-              aria-label="Comments panel"
-              style={{ width: DOCK_WIDTH }}
-              className={`shrink-0 flex-col border-l bg-popover text-popover-foreground ${commentsCard.open ? "flex" : "hidden"}`}
-            />
-          )}
+          {dockable &&
+            !compact && (
+              // The column animates its width (CadPanel.css); its content keeps the full width
+              // from the first frame, rides the column's moving left edge, and is clipped, so it
+              // slides in without reflowing. The card portals into the inner surface.
+              <aside
+                aria-label="Comments panel"
+                data-open={commentsCard.open}
+                style={{ width: commentsCard.open ? DOCK_WIDTH : 0 }}
+                className="cad-comments-dock-column shrink-0 overflow-hidden"
+              >
+                <div
+                  ref={setDock}
+                  style={{ width: DOCK_WIDTH }}
+                  className="flex h-full flex-col border-l bg-popover text-popover-foreground"
+                />
+              </aside>
+            )}
         </div>
         {lockStatus && <CadLockStrip status={lockStatus} />}
       </div>

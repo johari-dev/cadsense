@@ -294,8 +294,9 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            // `data-sidebar-motion="instant"` on the provider (an inspection fold) skips the slide.
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-150 ease-out motion-reduce:transition-none in-data-[sidebar-motion=instant]:transition-none",
+            // Same duration and easing as the right panel's width (PreviewPanelShell), which takes
+            // back the width the folded rail frees, so the chat column slides as one piece.
+            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -306,7 +307,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-150 ease-out motion-reduce:transition-none in-data-[sidebar-motion=instant]:transition-none",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
