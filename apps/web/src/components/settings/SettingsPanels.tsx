@@ -81,7 +81,6 @@ import { PromptFontPreview } from "./SettingsFontPreviews";
 import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { GlassOpacitySetting } from "./GlassOpacitySetting";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -323,7 +322,6 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...getChangedTypographySettingLabels(settings),
-      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Transparency"] : []),
       ...(settings.showPermissionSettings !== DEFAULT_UNIFIED_SETTINGS.showPermissionSettings
         ? ["Permission settings visibility"]
         : []),
@@ -369,7 +367,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAgentBrowserAccess,
       settings.streamAssistantText,
       settings.showPermissionSettings,
-      settings.glassOpacity,
       settings.showContextWindowIndicator,
       settings.enableProviderUpdateChecks,
       settings.fontFamilyCode,
@@ -395,7 +392,6 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       streamAssistantText: DEFAULT_UNIFIED_SETTINGS.streamAssistantText,
       showPermissionSettings: DEFAULT_UNIFIED_SETTINGS.showPermissionSettings,
-      glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       showContextWindowIndicator: DEFAULT_UNIFIED_SETTINGS.showContextWindowIndicator,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -429,9 +425,6 @@ export function AppearanceSettingsPanel() {
   return (
     <SettingsPageContainer>
       <TypographySection />
-      <SettingsSection title="Surfaces">
-        <GlassOpacitySetting />
-      </SettingsSection>
       <SettingsSection title="Visibility">
         <SettingsRow
           {...searchableSetting("show-permission-settings")}

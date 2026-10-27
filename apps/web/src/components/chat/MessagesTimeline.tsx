@@ -245,6 +245,12 @@ interface MessagesTimelineProps {
    */
   liveFollowEnabled: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  /**
+   * Reported on every scroll: whether any text of the last row sits below the visible
+   * transcript (under the composer or its fade). The last message's hover actions do not
+   * count. Drives the "Scroll to end" button.
+   */
+  onEndTextCoveredChange: (covered: boolean) => void;
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
@@ -285,6 +291,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   contentInsetEndAdjustment,
   liveFollowEnabled,
   onIsAtEndChange,
+  onEndTextCoveredChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
@@ -519,6 +526,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     // While a width change settles, scroll positions come from the reflow, not the user.
     if (isAtEnd !== undefined && !reflowRef.current?.isSettling()) {
       onIsAtEndChange(isAtEnd);
+      const lastRowId = rows.at(-1)?.id;
+      onEndTextCoveredChange(
+        timelineViewportElement !== null && lastRowId !== undefined
+          ? (resolveEndTextCovered(timelineViewportElement, lastRowId, contentInsetEndAdjustment) ??
+              !isAtEnd)
+          : false,
+      );
     }
     if (!state || minimapItems.length === 0) {
       return;
@@ -542,7 +556,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [contentInsetEndAdjustment, listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [
+    contentInsetEndAdjustment,
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onEndTextCoveredChange,
+    onIsAtEndChange,
+    rows,
+    timelineViewportElement,
+  ]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -699,6 +722,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     </TimelineRowCtx>
   );
 });
+
+/**
+ * Whether the last row's text reaches below the visible transcript bottom: the viewport
+ * bottom minus the composer overlay (which starts with its fade). Text means the last
+ * markdown block in the row, or the row's content when it has none, so the hover actions
+ * under an assistant message never count. Undefined while the row is not rendered (far from
+ * the end), so the caller can fall back to the list's own end state.
+ */
+function resolveEndTextCovered(
+  viewport: HTMLElement,
+  lastRowId: string,
+  endInset: number,
+): boolean | undefined {
+  const row = viewport.querySelector<HTMLElement>(
+    `[data-timeline-row-id="${CSS.escape(lastRowId)}"]`,
+  );
+  if (!row) return undefined;
+  const blocks = row.querySelectorAll<HTMLElement>(".chat-markdown");
+  const text = blocks[blocks.length - 1] ?? row.firstElementChild ?? row;
+  const visibleBottom = viewport.getBoundingClientRect().bottom - endInset;
+  return text.getBoundingClientRect().bottom > visibleBottom + 1;
+}
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;

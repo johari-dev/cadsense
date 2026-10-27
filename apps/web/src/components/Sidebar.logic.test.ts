@@ -1682,14 +1682,16 @@ describe("describeProjectSource", () => {
     kind,
     current,
   });
+  const onshape = (label: string) => ({ logo: "onshape", label });
+  const local = (label: string) => ({ logo: null, label });
 
-  it("names an Onshape project by the kind of its synced model", () => {
-    expect(describeProjectSource({ onshapeSource: {}, cad: { roots: [root("assembly")] } })).toBe(
-      "Onshape · Assembly",
-    );
+  it("names an Onshape project by the kind of its synced model, beside the Onshape logo", () => {
+    expect(
+      describeProjectSource({ onshapeSource: {}, cad: { roots: [root("assembly")] } }),
+    ).toEqual(onshape("Assembly"));
     expect(
       describeProjectSource({ onshapeSource: {}, cad: { roots: [root("part-studio")] } }),
-    ).toBe("Onshape · Part Studio");
+    ).toEqual(onshape("Part Studio"));
   });
 
   it("counts several synced Onshape models and ignores roots with no current snapshot", () => {
@@ -1698,38 +1700,44 @@ describe("describeProjectSource", () => {
         onshapeSource: {},
         cad: { roots: [root("assembly"), root("part-studio"), root("assembly", null)] },
       }),
-    ).toBe("Onshape · 2 models");
+    ).toEqual(onshape("2 models"));
     expect(
       describeProjectSource({
         onshapeSource: {},
         cad: { roots: [root("assembly", null), root("part-studio")] },
       }),
-    ).toBe("Onshape · Part Studio");
+    ).toEqual(onshape("Part Studio"));
   });
 
-  it("falls back to the source alone before anything has synced", () => {
-    expect(describeProjectSource({ onshapeSource: {} })).toBe("Onshape");
-    expect(describeProjectSource({ onshapeSource: {}, cad: { roots: [] } })).toBe("Onshape");
+  it("says an Onshape project has not synced, rather than repeating the logo's name", () => {
+    expect(describeProjectSource({ onshapeSource: {} })).toEqual(onshape("Not synced yet"));
+    expect(describeProjectSource({ onshapeSource: {}, cad: { roots: [] } })).toEqual(
+      onshape("Not synced yet"),
+    );
   });
 
   it("names a local CAD file by its format, in any extension case", () => {
-    expect(describeProjectSource({ localCadSource: { filePath: "models/arm.step" } })).toBe(
-      "STEP file",
+    expect(describeProjectSource({ localCadSource: { filePath: "models/arm.step" } })).toEqual(
+      local("STEP file"),
     );
-    expect(describeProjectSource({ localCadSource: { filePath: "ARM.STP" } })).toBe("STEP file");
-    expect(describeProjectSource({ localCadSource: { filePath: "bracket.igs" } })).toBe(
-      "IGES file",
+    expect(describeProjectSource({ localCadSource: { filePath: "ARM.STP" } })).toEqual(
+      local("STEP file"),
     );
-    expect(describeProjectSource({ localCadSource: { filePath: "Gearbox.SLDASM" } })).toBe(
-      "SolidWorks · Assembly",
+    expect(describeProjectSource({ localCadSource: { filePath: "bracket.igs" } })).toEqual(
+      local("IGES file"),
     );
-    expect(describeProjectSource({ localCadSource: { filePath: "plate.sldprt" } })).toBe(
-      "SolidWorks · Part",
+    expect(describeProjectSource({ localCadSource: { filePath: "Gearbox.SLDASM" } })).toEqual(
+      local("SolidWorks · Assembly"),
     );
-    expect(describeProjectSource({ localCadSource: { filePath: "notes.cad" } })).toBe("CAD file");
+    expect(describeProjectSource({ localCadSource: { filePath: "plate.sldprt" } })).toEqual(
+      local("SolidWorks · Part"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "notes.cad" } })).toEqual(
+      local("CAD file"),
+    );
   });
 
   it("calls a project with no CAD source a local project", () => {
-    expect(describeProjectSource({})).toBe("Local project");
+    expect(describeProjectSource({})).toEqual(local("Local project"));
   });
 });
