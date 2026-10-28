@@ -302,6 +302,7 @@ const toolActionLabels: Readonly<Record<string, string>> = {
   cad_diff: "Comparing CAD versions",
   cad_measure: "Measuring CAD",
   cad_find_parts: "Finding CAD parts",
+  cad_drive_options: "Finding drive options",
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",
   cad_comments_list: "Reading CAD comments",

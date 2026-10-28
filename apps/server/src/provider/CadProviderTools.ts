@@ -67,6 +67,14 @@ const descriptions = {
     'Read bounded measurements at {expectedRevision,snapshotId}. For points use {mode:"point-distance",from:{space:"world",point:[x,y,z]},to:{space:"part",occurrenceId,point:[x,y,z]}}. Coordinates are meters in original assembled Z-up world or part CAD coordinates before the occurrence transform. Points are caller-specified and unverified; never copy exploded display coordinates. For approximate unsigned triangle-surface separation use {mode:"surface-clearance",fromOccurrenceId,toOccurrenceId}, with part occurrence IDs from cad_hierarchy. Geometry uses original assembled placements regardless of visibility or explosion. Check status: unknown has no measurement. Positive surface distance does not exclude solid containment, and zero does not prove penetration. Results provide mesh provenance and uncertainty, not manufacturing tolerance.',
   cad_find_parts:
     "Search the selected cached snapshot using snapshotId and expectedRevision from cad_context. nameQuery and materialName are case-insensitive substrings; bodyType is a case-insensitive exact match. sourcePartKey finds repeated instances of the same source/configuration. kind defaults to part; use all to include assemblies. visibility defaults to all and uses effective visibility, including hidden ancestors, isolation and suppression. All supplied filters combine. Results contain stable occurrence IDs, source identity, assembly paths, and bounds, the part's world box {min,max,size} in meters at its assembled placement (Z up, explosion ignored; null when suppressed, not a part, or unknown). No filters returns a bounded page. limit defaults to 25, maximum 50. Serialized results are capped at 64 KiB, so pages may contain fewer entries than limit. Continue with nextCursor and the same filters, limit, snapshot and revision. Order follows the immutable manifest. Missing metadata and material names are explicit; massKg is per occurrence and null means unknown, not zero. Text fields are capped at 256 characters; paths retain the nearest 16 ancestors, with truncation indicators. Reads only stored part bounds, never the network; the view is unchanged.",
+  cad_drive_options: [
+    "Find stock FRC gears, pulleys and belts, or sprockets and chain that reach a target ratio, sized to the model. Call it whenever the user asks what ratio, gears, belts, or chain to use or how fast something will spin, even when the model has no drive parts yet; do not work out ratios or center distances yourself.",
+    'Input: {expectedRevision, target, driverOccurrenceId?, drivenOccurrenceId?, centerInches?, motor?, rollerDiameterInches?, families?, driverBore?, maxStages?, tolerancePercent?, limit?}. target is {kind:"reduction",reduction} (above 1 slows the output), {kind:"output-rpm",rpm}, or {kind:"surface-speed",feetPerSecond}. Speed targets use the motor\'s free speed, from motor or from the driver part\'s name.',
+    "Pass the motor, or the shaft it drives, as driverOccurrenceId and the driven shaft or roller as drivenOccurrenceId, both part occurrence IDs from cad_find_parts. The tool measures the center distance between their axes, which must be parallel, reads the roller's diameter for a surface speed, and keeps only drives that fit that center the way cad_checks judges gear spacing and belt length once they are modeled. Without parts, centerInches fixes the center; with neither, gears get their center and belt and chain stages are left open.",
+    "Options that fit come first, fewest stages and closest ratio first. Single stages that miss a fixed center by under 0.5 in come last with fits:false and centerErrorInches, for a user who can move a shaft. Two-stage options at a center from the model give jackshaftPositions: the two places, in world meters, where the jackshaft axis can go. families defaults to all of gear-20dp, gear-32dp, htd-5mm, gt2-3mm, rt25, chain-25, and chain-35; driverBore keeps only first wheels sold in that bore, such as a motor shaft's (SplineXS, Falcon, 8mm).",
+    "Parts come from ReCalc's current vendor catalog, downloaded from GitHub on first use and refreshed daily; capability-unavailable with details means it could not be downloaded and no earlier copy is saved, so tell the user rather than working out a drive yourself.",
+    "Each stage gives the center distance to model, the belt's teeth or the chain's links, vendor parts with SKUs and URLs, and a ReCalc link that opens the same stage. Answer in chat with the top options, their centers, parts, and links, and the free-speed note; these are design suggestions, not CAD comments. Reads only the pinned snapshot; the view is unchanged.",
+  ].join(" "),
   cad_update_view: [
     'Atomically update your private CAD view at expectedRevision. operations is an ordered array of tagged objects: {type:"select-root",rootId}, {type:"camera-preset",preset}, {type:"camera-pose",pose}, {type:"fit",occurrenceIds:[]}, {type:"show"|"hide"|"isolate",occurrenceIds:[id]}, {type:"reset-visibility"}, or {type:"explode",amount:0..1}.',
     'You can use arbitrary camera angles and origins beyond the toolbar presets. camera-pose accepts {position:[x,y,z],target:[x,y,z],up:[x,y,z],projection:"perspective"|"orthographic",zoom:number}. Coordinates are CAD world coordinates in meters, with Z up. position is the camera eye; target is the point centered in the image and the orbit pivot. up controls image roll and must not be parallel to target-position.',
@@ -89,6 +97,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_diff",
   "cad_measure",
   "cad_find_parts",
+  "cad_drive_options",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -173,6 +182,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.measure(input) };
     case "cad_find_parts":
       return { result: yield* tools.findParts(input) };
+    case "cad_drive_options":
+      return { result: yield* tools.driveOptions(input) };
     case "cad_update_view":
       return { result: yield* tools.updateView(input) };
     case "cad_capture":

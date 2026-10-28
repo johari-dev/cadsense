@@ -1,4 +1,6 @@
 import { measureCad } from "./CadMeasure.ts";
+import { CadDriveCatalog } from "./CadDriveCatalog.ts";
+import { readCadDriveOptions } from "./CadDriveOptions.ts";
 import { findCadParts } from "./CadFindParts.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
@@ -18,6 +20,7 @@ import {
   type CadContextResult,
   type CadHierarchyResult,
   type CadMeasureResult,
+  type CadDriveOptionsResult,
   type CadFindPartsResult,
   type CadSnapshotManifest,
   type OrchestrationCommand,
@@ -79,6 +82,7 @@ export interface CadAgentTools {
   readonly diff: (input: unknown) => Effect.Effect<CadDiffResult, CadViewError>;
   readonly measure: (input: unknown) => Effect.Effect<CadMeasureResult, CadViewError>;
   readonly findParts: (input: unknown) => Effect.Effect<CadFindPartsResult, CadViewError>;
+  readonly driveOptions: (input: unknown) => Effect.Effect<CadDriveOptionsResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
 }
@@ -115,6 +119,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
+  const driveCatalog = yield* Effect.serviceOption(CadDriveCatalog);
   const commentService = yield* Effect.serviceOption(CadComments);
   const active = new Set<string>();
   const activity = yield* makeCadToolActivity;
@@ -482,6 +487,24 @@ export const make = Effect.gen(function* () {
               );
             }),
           );
+        // Triangles feed axis fits only when the input names parts, so they are read per call.
+        const driveOptions: CadAgentTools["driveOptions"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized || Option.isNone(driveCatalog)) return yield* unavailable();
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* readCadDriveOptions(
+                binding.snapshot,
+                state,
+                (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                driveCatalog.value.current,
+                input,
+              );
+            }),
+          );
         const findParts: CadAgentTools["findParts"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -605,6 +628,7 @@ export const make = Effect.gen(function* () {
           diff: (input) => activity.track(session.threadId, turnId, diff(input)),
           measure: (input) => activity.track(session.threadId, turnId, measure(input)),
           findParts: (input) => activity.track(session.threadId, turnId, findParts(input)),
+          driveOptions: (input) => activity.track(session.threadId, turnId, driveOptions(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
         });

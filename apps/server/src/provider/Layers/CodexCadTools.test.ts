@@ -260,6 +260,7 @@ it.effect(
           "cad_diff",
           "cad_measure",
           "cad_find_parts",
+          "cad_drive_options",
           "cad_update_view",
           "cad_capture",
         ],

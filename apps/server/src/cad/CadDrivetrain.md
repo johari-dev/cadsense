@@ -57,7 +57,8 @@ for problems but never for `loop-length`, whose fix depends on parts it cannot s
 - Axes come from tessellated meshes, so center distances carry about 0.002 in of noise. Pairs up
   to 0.004 in too close or 0.006 in too far are reported as meshing.
 - Belt length uses pitch radius `T * p / 2π` for both belts and chains, which is close for chain
-  sprockets above about 15 teeth.
+  sprockets above about 15 teeth. [`cad_drive_options`](CadDriveOptions.md) sizes belts and chains
+  with the same `loopLengthNeededMm` and `loopLengthFits`, so a drive it suggests passes this check.
 - It does not know whether a tensioner exists, so chain slack is a lead.
 - A shaft carried only by a custom-named bushing or a bearing block is reported unsupported. Bushings
   with `bushing` in their name count as bearings; agents decline such a draft after inspecting it.
