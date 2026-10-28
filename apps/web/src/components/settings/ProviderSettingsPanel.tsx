@@ -193,10 +193,12 @@ function SelectedEnvironmentProviderSettings({
     return <EnvironmentUnavailableRow environment={environment} deviceTabs={deviceTabs} />;
   }
   return (
-    <EnvironmentProviderSettings environmentId={environment.environmentId} deviceTabs={deviceTabs} />
+    <EnvironmentProviderSettings
+      environmentId={environment.environmentId}
+      deviceTabs={deviceTabs}
+    />
   );
 }
-
 
 /**
  * Settings for the two built-in provider slots on one environment. Each row
@@ -272,7 +274,8 @@ function EnvironmentProviderSettings({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: action === "install" ? `Could not install ${label}` : `Could not sign in to ${label}`,
+          title:
+            action === "install" ? `Could not install ${label}` : `Could not sign in to ${label}`,
           description: error instanceof Error ? error.message : "The provider command failed.",
         }),
       );

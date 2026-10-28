@@ -1329,13 +1329,9 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.serverRunProviderSetup]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.serverRunProviderSetup,
-            providerSetupRunner.run(input),
-            {
-              "rpc.aggregate": "server",
-            },
-          ),
+          observeRpcEffect(WS_METHODS.serverRunProviderSetup, providerSetupRunner.run(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverUpsertKeybinding,

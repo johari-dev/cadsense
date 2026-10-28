@@ -253,10 +253,7 @@ const httpClientLayer = (handler: () => Response) =>
     HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handler()))),
   );
 
-const serviceLayers = (input: {
-  readonly prefix: string;
-  readonly response: () => Response;
-}) =>
+const serviceLayers = (input: { readonly prefix: string; readonly response: () => Response }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(httpClientLayer(input.response)),

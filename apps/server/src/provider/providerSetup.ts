@@ -124,11 +124,7 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
         exitCode: Number(exitCode),
         output: [stderr.text, stdout.text].filter(Boolean).join("\n"),
       } satisfies CommandResult;
-    }).pipe(
-      Effect.scoped,
-      Effect.timeoutOption(timeout),
-      Effect.map(Option.getOrNull),
-    );
+    }).pipe(Effect.scoped, Effect.timeoutOption(timeout), Effect.map(Option.getOrNull));
 
   const run: ProviderSetupRunnerShape["run"] = Effect.fn("ProviderSetupRunner.run")(
     function* (input) {
