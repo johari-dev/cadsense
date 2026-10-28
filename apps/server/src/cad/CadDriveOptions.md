@@ -13,10 +13,11 @@ drives that fit it.
    the target, and a surface speed first becomes a roller speed from the roller's diameter. Free
    speeds are ReCalc's. The motor comes from the input or from the driver part's name (`Kraken X44`,
    `NEO 550`). Loaded speed is lower than free speed, and the result says so.
-2. **Catalog.** `driveCatalog.json` holds the stock gears, pulleys, belts, and sprockets from
-   ReCalc's vendor data (MIT), written by `apps/server/scripts/sync-drive-catalog.ts` at a pinned
-   commit. Gears under 10 teeth are left out: those pinions are usually profile shifted, and the
-   catalog does not say their center distance.
+2. **Catalog.** `CadDriveCatalog.ts` fetches the stock gears, pulleys, belts, and sprockets from
+   ReCalc's vendor data on GitHub (`tervay/recalc`, `app/genData/<vendor>/<kind>.json` on `main`)
+   the first time the tool runs, so the parts stay as current as ReCalc's. Gears under 10 teeth are
+   left out: those pinions are usually profile shifted, and the catalog does not say their center
+   distance.
 3. **Axes.** With `driverOccurrenceId` and `drivenOccurrenceId`, both parts' axes come from
    `fitCadAxis`, snapped onto a shaft through them the same way `cad_checks` does it. The axes must
    be parallel. The center is measured at the driver's middle, where the drive sits, across the
@@ -42,6 +43,8 @@ drives that fit it.
 
 ## Limits
 
+- The first call needs GitHub. Parts come from ReCalc's `main` branch, so a change to ReCalc's file
+  layout drops the entries it no longer recognizes until the tool is updated.
 - It does not check wheels against other parts. After modeling a suggestion, run `cad_checks`.
 - Axes fitted from tessellated meshes tilt slightly, so a center measured far along a tilted axis
   drifts: a Kraken 9 in along the axis from its roller read 0.010 in short across the motor's axis
@@ -53,6 +56,24 @@ drives that fit it.
   sprockets above about 15 teeth.
 - Bores are listed, not chosen: `driverBore` filters the first wheel only.
 - Free speed, not loaded speed.
+
+## Catalog
+
+`CadDriveCatalog` downloads every vendor's four files in parallel and keeps the result for a day.
+It writes the last good copy to `drive-catalog.json` in the server state directory, so a restart
+without a network still has parts. After a failed download it waits five minutes before trying
+again, so an offline server does not pay the timeout on every call. With no copy at all, the tool
+fails with `capability-unavailable` and says why, and never answers from an empty catalog.
+
+`CadDriveCatalog.test.ts` covers each of these ways it can fail:
+
+- A vendor that sells no sprockets (a 404 for that file) fails the whole catalog.
+- One malformed entry, such as a gear with no tooth count, throws out its whole file.
+- A failed first download is answered from an empty catalog instead of failing.
+- A failed download after a good one loses the parts the server already had.
+- Every call downloads the catalog again.
+- An offline server waits on the network on every call.
+- A restart without a network loses the last good copy.
 
 ## Ways this can fail
 

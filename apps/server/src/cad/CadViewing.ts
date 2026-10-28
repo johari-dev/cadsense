@@ -1,4 +1,5 @@
 import { measureCad } from "./CadMeasure.ts";
+import { CadDriveCatalog } from "./CadDriveCatalog.ts";
 import { readCadDriveOptions } from "./CadDriveOptions.ts";
 import { findCadParts } from "./CadFindParts.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
@@ -118,6 +119,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
+  const driveCatalog = yield* Effect.serviceOption(CadDriveCatalog);
   const commentService = yield* Effect.serviceOption(CadComments);
   const active = new Set<string>();
   const activity = yield* makeCadToolActivity;
@@ -490,7 +492,7 @@ export const make = Effect.gen(function* () {
           fifo.withPermits(1)(
             Effect.gen(function* () {
               const initialized = yield* initialize();
-              if (!initialized) return yield* unavailable();
+              if (!initialized || Option.isNone(driveCatalog)) return yield* unavailable();
               const { binding, state } = initialized;
               const readAsset = (sha256: string) =>
                 binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
@@ -498,6 +500,7 @@ export const make = Effect.gen(function* () {
                 binding.snapshot,
                 state,
                 (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                driveCatalog.value.current,
                 input,
               );
             }),

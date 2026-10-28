@@ -16,7 +16,6 @@ import {
   type CadViewState,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
-import catalogJson from "./driveCatalog.json" with { type: "json" };
 import { partOccurrences, type CadTriangleMesh } from "./CadChecks.ts";
 import {
   MESH_TOO_CLOSE,
@@ -33,6 +32,7 @@ import {
   sub,
   type CadAxis,
 } from "./CadDrivetrain.ts";
+import type { DriveCatalog } from "./CadDriveCatalog.ts";
 import { decodeCadToolInput } from "./CadViewState.ts";
 
 type Vector3 = readonly [number, number, number];
@@ -49,19 +49,6 @@ interface WheelListing extends Listing {
 interface BeltListing extends Listing {
   readonly widthMm: number | null;
 }
-/** ReCalc's vendor data, trimmed by apps/server/scripts/sync-drive-catalog.ts. */
-export interface DriveCatalog {
-  readonly source: string;
-  readonly gears: ReadonlyArray<WheelListing & { readonly dp: number }>;
-  readonly pulleys: ReadonlyArray<
-    WheelListing & { readonly profile: string; readonly pitchMm: number }
-  >;
-  readonly belts: ReadonlyArray<
-    BeltListing & { readonly profile: string; readonly pitchMm: number }
-  >;
-  readonly sprockets: ReadonlyArray<WheelListing & { readonly chain: string }>;
-}
-export const DRIVE_CATALOG: DriveCatalog = catalogJson;
 
 /** Free speeds from ReCalc's motor data. */
 export const DRIVE_MOTOR_FREE_RPM: Record<CadDriveMotor, number> = {
@@ -143,38 +130,46 @@ const byTeeth = <T extends Listing>(listings: readonly T[], keep: (teeth: number
   return map;
 };
 // Pinions under 10 teeth are usually profile shifted, and the catalog does not say their spacing.
-const FAMILIES: ReadonlyMap<CadDriveFamily, Family> = new Map(
-  CAD_DRIVE_FAMILIES.map((name, order): [CadDriveFamily, Family] => {
-    const shape = SHAPES[name];
-    const wheels =
-      shape.kind === "gear"
-        ? byTeeth(
-            DRIVE_CATALOG.gears.filter((gear) => gear.dp === shape.dp),
-            (teeth) => teeth >= 10 && teeth <= 84,
-          )
-        : shape.kind === "belt"
+const familiesOf = (catalog: DriveCatalog): ReadonlyMap<CadDriveFamily, Family> =>
+  new Map(
+    CAD_DRIVE_FAMILIES.map((name, order): [CadDriveFamily, Family] => {
+      const shape = SHAPES[name];
+      const wheels =
+        shape.kind === "gear"
           ? byTeeth(
-              DRIVE_CATALOG.pulleys.filter(
-                (pulley) => pulley.profile === shape.profile && pulley.pitchMm === shape.pitchMm,
-              ),
-              (teeth) => teeth >= 8 && teeth <= 84,
+              catalog.gears.filter((gear) => gear.dp === shape.dp),
+              (teeth) => teeth >= 10 && teeth <= 84,
             )
-          : byTeeth(
-              DRIVE_CATALOG.sprockets.filter((sprocket) => sprocket.chain === shape.chain),
-              (teeth) => teeth >= 8 && teeth <= 84,
-            );
-    const belts =
-      shape.kind === "belt"
-        ? byTeeth(
-            DRIVE_CATALOG.belts.filter(
-              (belt) => belt.profile === shape.profile && belt.pitchMm === shape.pitchMm,
-            ),
-            () => true,
-          )
-        : new Map<number, BeltListing[]>();
-    return [name, { name, order, shape, wheels, belts }];
-  }),
-);
+          : shape.kind === "belt"
+            ? byTeeth(
+                catalog.pulleys.filter(
+                  (pulley) => pulley.profile === shape.profile && pulley.pitchMm === shape.pitchMm,
+                ),
+                (teeth) => teeth >= 8 && teeth <= 84,
+              )
+            : byTeeth(
+                catalog.sprockets.filter((sprocket) => sprocket.chain === shape.chain),
+                (teeth) => teeth >= 8 && teeth <= 84,
+              );
+      const belts =
+        shape.kind === "belt"
+          ? byTeeth(
+              catalog.belts.filter(
+                (belt) => belt.profile === shape.profile && belt.pitchMm === shape.pitchMm,
+              ),
+              () => true,
+            )
+          : new Map<number, BeltListing[]>();
+      return [name, { name, order, shape, wheels, belts }];
+    }),
+  );
+// One catalog serves many calls between downloads, so its families are built once.
+const families = new WeakMap<DriveCatalog, ReadonlyMap<CadDriveFamily, Family>>();
+const familiesFor = (catalog: DriveCatalog) => {
+  let found = families.get(catalog);
+  if (!found) families.set(catalog, (found = familiesOf(catalog)));
+  return found;
+};
 
 /** Pitch radius in meters. */
 const pitchRadius = (shape: Shape, teeth: number) =>
@@ -302,6 +297,7 @@ const jackshaftBuilds = (first: readonly Build[], second: readonly Build[], cent
 };
 
 export interface DriveSearch {
+  readonly catalog: DriveCatalog;
   /** Above 1 slows the output. */
   readonly reduction: number;
   /** Fraction, not percent. */
@@ -439,8 +435,9 @@ export const searchDriveOptions = (
   search: DriveSearch,
 ): { readonly options: FoundDriveOption[]; readonly notes: string[] } => {
   const { reduction, tolerance, centerMeters, driverBore } = search;
+  const catalogFamilies = familiesFor(search.catalog);
   const families = CAD_DRIVE_FAMILIES.filter((name) => search.families.includes(name)).map(
-    (name) => FAMILIES.get(name)!,
+    (name) => catalogFamilies.get(name)!,
   );
   const reduces = reduction >= 1;
   const stages = families
@@ -641,13 +638,17 @@ const meters = (point: Vector3): Vector3 => [
   round(point[2], 5),
 ];
 
-/** Tool entry point. Reads part geometry only when the input names parts. */
+/**
+ * Tool entry point. Reads part geometry only when the input names parts, and the catalog only
+ * once the input is valid.
+ */
 export const readCadDriveOptions = Effect.fn("readCadDriveOptions")(function* (
   manifest: CadSnapshotManifest,
   state: CadViewState,
   meshes: (
     geometryKeys: ReadonlySet<string>,
   ) => Effect.Effect<ReadonlyMap<string, CadTriangleMesh | null>, CadViewError>,
+  driveCatalog: Effect.Effect<DriveCatalog, CadViewError>,
   rawInput: unknown,
 ): Effect.fn.Return<CadDriveOptionsResult, CadViewError> {
   const input = yield* decodeCadToolInput(CadDriveOptionsInput, rawInput);
@@ -726,7 +727,9 @@ export const readCadDriveOptions = Effect.fn("readCadDriveOptions")(function* (
       `Speeds use the ${motor}'s free speed of ${freeRpm} rpm. Under load the output turns slower.`,
     );
 
+  const catalog = yield* driveCatalog;
   const found = searchDriveOptions({
+    catalog,
     reduction,
     tolerance: (input.tolerancePercent ?? 3) / 100,
     families: input.families ?? CAD_DRIVE_FAMILIES,
@@ -767,6 +770,6 @@ export const readCadDriveOptions = Effect.fn("readCadDriveOptions")(function* (
     }),
     notes: [...found.notes, ...notes],
     recalcUrl: recalcRatioUrl(reduction),
-    catalog: DRIVE_CATALOG.source,
+    catalog: catalog.source,
   };
 });

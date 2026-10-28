@@ -8,8 +8,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { CadTriangleMesh } from "./CadChecks.ts";
 import type { CadDrivetrainFinding } from "./CadDrivetrain.ts";
+import { testDriveCatalog } from "./CadDriveCatalog.testFixtures.ts";
 import {
-  DRIVE_CATALOG,
   driveMotorFromName,
   jackshaftPositions,
   readCadDriveOptions,
@@ -32,6 +32,7 @@ const ALL: readonly CadDriveFamily[] = [
 ];
 const search = (overrides: Partial<DriveSearch>) =>
   searchDriveOptions({
+    catalog: testDriveCatalog,
     reduction: 3,
     tolerance: 0.03,
     families: ALL,
@@ -92,13 +93,13 @@ describe("catalog parts", () => {
     const fam = family;
     if (fam === "gear-20dp" || fam === "gear-32dp")
       return new Set(
-        DRIVE_CATALOG.gears
+        testDriveCatalog.gears
           .filter((g) => g.dp === (fam === "gear-20dp" ? 20 : 32))
           .map((g) => g.teeth),
       );
     if (fam === "chain-25" || fam === "chain-35")
       return new Set(
-        DRIVE_CATALOG.sprockets
+        testDriveCatalog.sprockets
           .filter((s) => s.chain === (fam === "chain-25" ? "#25" : "#35"))
           .map((s) => s.teeth),
       );
@@ -106,7 +107,7 @@ describe("catalog parts", () => {
       fam
     ];
     return new Set(
-      DRIVE_CATALOG.pulleys
+      testDriveCatalog.pulleys
         .filter((p) => p.profile === profile && p.pitchMm === pitch)
         .map((p) => p.teeth),
     );
@@ -116,7 +117,7 @@ describe("catalog parts", () => {
       family
     ];
     return new Set(
-      DRIVE_CATALOG.belts
+      testDriveCatalog.belts
         .filter((b) => b.profile === profile && b.pitchMm === pitch)
         .map((b) => b.teeth),
     );
@@ -407,10 +408,16 @@ const cad = (build: (s: ReturnType<typeof scene>) => void) => {
   });
   const state = initialCadView(manifest, 4);
   return (input: object) =>
-    readCadDriveOptions(manifest, state, () => Effect.succeed(meshes), {
-      expectedRevision: 4,
-      ...input,
-    });
+    readCadDriveOptions(
+      manifest,
+      state,
+      () => Effect.succeed(meshes),
+      Effect.succeed(testDriveCatalog),
+      {
+        expectedRevision: 4,
+        ...input,
+      },
+    );
 };
 const intake = (rollerAxis: "y" | "z" = "y") => {
   const ids = { motor: "", roller: "" };
