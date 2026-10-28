@@ -295,7 +295,7 @@ describe("CAD review rows", () => {
     location: "Motor mount",
   });
 
-  it("summarizes a CAD group by views and shows its captures once as a filmstrip", () => {
+  it("splits a CAD group at each capture, so its images show in capture order", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         tool("context", "cad_context"),
@@ -308,34 +308,35 @@ describe("CAD review rows", () => {
       activeTurnStartedAt: null,
       expandedTurnIds: new Set([turnId]),
     });
-    expect(rows.map((row) => row.kind)).toEqual(["turn-fold", "work-toggle", "cad-filmstrip"]);
-    expect(rows[1]).toMatchObject({
-      summary: "Checked CAD in 2 views",
-      summaryKind: "cad",
-      hiddenCount: 3,
-    });
-    const filmstrip = rows[2];
-    expect(filmstrip?.kind === "cad-filmstrip" && filmstrip.captures.length).toBe(2);
+    expect(rows.map((row) => row.kind)).toEqual([
+      "turn-fold",
+      "tool-card",
+      "cad-filmstrip",
+      "tool-card",
+      "cad-filmstrip",
+    ]);
+    expect(rows[1]).toMatchObject({ expanded: false, card: { title: "Used 2 tools" } });
+    expect(rows[3]).toMatchObject({ expanded: false, card: { title: "Used 1 tool" } });
+    expect(
+      rows.flatMap((row) =>
+        row.kind === "cad-filmstrip" ? row.captures.map((capture) => capture.captureId) : [],
+      ),
+    ).toEqual(["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"]);
   });
 
-  it("names CAD work alongside other tools in a mixed group", () => {
+  it("shows each kind of tool in a mixed card's header", () => {
     const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
-        tool("capture-tool", "cad_capture"),
-        capture("capture-03"),
-        tool("read", "Read File"),
-      ],
+      timelineEntries: [tool("capture-tool", "cad_capture"), tool("read", "Read File")],
       isWorking: false,
       activeTurnStartedAt: null,
       expandedTurnIds: new Set([turnId]),
     });
-    expect(rows.find((row) => row.kind === "work-toggle")).toMatchObject({
-      summary: "Checked CAD in 1 view and read 1 file",
-      summaryKind: "mixed",
+    expect(rows.find((row) => row.kind === "tool-card")).toMatchObject({
+      card: { kinds: ["cad-capture", "read"] },
     });
   });
 
-  it("shows the captures so far under live CAD work", () => {
+  it("shows the captures so far in order, with the live card after them", () => {
     const entries = [
       tool("capture-tool", "cad_capture"),
       capture("capture-04"),
@@ -347,9 +348,19 @@ describe("CAD review rows", () => {
       runningTurnId: turnId,
       activeTurnStartedAt: entries[0]!.createdAt,
     });
-    expect(rows.map((row) => row.kind)).toEqual(["working", "work-live", "cad-filmstrip"]);
-    const live = rows[1];
-    expect(live?.kind === "work-live" && live.entry.toolTitle).toBe("cad_update_view");
+    expect(rows.map((row) => row.kind)).toEqual([
+      "working",
+      "tool-card",
+      "cad-filmstrip",
+      "tool-card",
+    ]);
+    // The capture ended the first card; the call after the image is the live one.
+    expect(rows[1]?.kind === "tool-card" && rows[1].expanded).toBe(false);
+    const live = rows[3];
+    expect(live?.kind === "tool-card" && live.expanded).toBe(true);
+    expect(live?.kind === "tool-card" && live.card.calls.at(-1)?.label).toBe(
+      "Updating the CAD view",
+    );
   });
 
   it("keeps rejections that no later publication fixed", () => {
@@ -379,20 +390,16 @@ describe("CAD review rows", () => {
     ]);
   });
 
-  it("lists an expanded group's steps before its filmstrip", () => {
+  it("lists an opened card before its filmstrip", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [tool("look", "cad_capture"), capture("capture-07")],
       isWorking: false,
       activeTurnStartedAt: null,
       expandedTurnIds: new Set([turnId]),
-      expandedWorkGroupIds: new Set(["work-group:look"]),
+      toolCardOpenOverrides: new Map([["work-group:look", true]]),
     });
-    expect(rows.map((row) => row.kind)).toEqual([
-      "turn-fold",
-      "work-toggle",
-      "work",
-      "cad-filmstrip",
-    ]);
+    expect(rows.map((row) => row.kind)).toEqual(["turn-fold", "tool-card", "cad-filmstrip"]);
+    expect(rows[1]?.kind === "tool-card" && rows[1].expanded).toBe(true);
   });
 
   it("merges a turn's publications into one comments row that stays visible when folded", () => {
@@ -431,7 +438,7 @@ describe("CAD review rows", () => {
       activeTurnStartedAt: null,
       expandedTurnIds: new Set([turnId]),
     });
-    expect(unfolded.map((row) => row.kind)).toEqual(["turn-fold", "work-toggle", "cad-comments"]);
+    expect(unfolded.map((row) => row.kind)).toEqual(["turn-fold", "tool-card", "cad-comments"]);
     const comments = rows[1];
     expect(comments?.kind === "cad-comments" && comments.card).toEqual({
       published: [comment("first", 1), comment("retried", 2)],

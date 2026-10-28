@@ -4084,6 +4084,9 @@ function ChatViewContent(props: ChatViewProps) {
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
                 onRedoWithFeedback={onRedoWithFeedback}
+                pendingApprovals={pendingApprovals}
+                respondingApprovalIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApproval}
               />
 
               {/* Scroll to end: shown once any text of the last message is covered (see

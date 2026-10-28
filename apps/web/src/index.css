@@ -349,6 +349,22 @@
   }
 }
 
+/* A tool call row's entrance into a live card: plays once on mount, never loops. */
+@keyframes tool-call-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@utility tool-call-enter {
+  animation: tool-call-enter 180ms ease-out both;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 @utility live-activity-focus-aligned {
   width: calc(100% - var(--live-activity-focus-width) - var(--live-activity-focus-width));
   margin-left: var(--live-activity-focus-width);

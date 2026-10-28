@@ -171,6 +171,7 @@ describe("projectActivityPayload", () => {
           arguments: { query: "activity projection" },
         },
       },
+      toolCall: { name: "search", server: "repository", input: { query: "activity projection" } },
     });
   });
 
@@ -503,5 +504,215 @@ describe("context-window snapshot dedup", () => {
       thread: makeThread([fixtures[4]!]),
     });
     expect(projected.thread.activities).toEqual([projectActivityPayload(fixtures[4]!)]);
+  });
+});
+
+// Payload shapes are copied from real Claude and Codex runs in the Elevator Cascade fixture.
+
+function projectToolActivity(
+  kind: OrchestrationThreadActivity["kind"],
+  payload: Record<string, unknown>,
+) {
+  return projectActivityPayload({
+    id: EventId.make("activity"),
+    createdAt: "2026-09-28T18:10:00.000Z",
+    kind,
+    summary: "Tool call",
+    tone: "tool",
+    payload,
+    turnId: TurnId.make("turn-1"),
+  }).payload as Record<string, unknown>;
+}
+
+const claude = (
+  toolName: string,
+  input: Record<string, unknown>,
+  content: unknown,
+  status = "completed",
+) =>
+  projectToolActivity("tool.completed", {
+    itemType: toolName.startsWith("mcp__") ? "mcp_tool_call" : "dynamic_tool_call",
+    toolCallId: `toolu_${toolName}`,
+    status,
+    data: { toolName, input, result: { tool_use_id: "toolu", type: "tool_result", content } },
+  });
+
+const codex = (tool: string, args: Record<string, unknown>, text: string, status = "completed") =>
+  projectToolActivity("tool.completed", {
+    itemType: "dynamic_tool_call",
+    toolCallId: `exec-${tool}`,
+    status,
+    data: {
+      item: {
+        arguments: args,
+        contentItems: [{ type: "inputText", text }],
+        status,
+        success: status === "completed",
+        tool,
+        type: "dynamicToolCall",
+      },
+    },
+  });
+
+const summaryOf = (payload: Record<string, unknown>) =>
+  (payload.toolCall as { resultSummary?: string } | undefined)?.resultSummary;
+const cad = (tool: string) => `mcp__cadsense_cad__${tool}`;
+
+describe("tool call facts", () => {
+  it("keeps a Codex call's name and inputs, which slimming otherwise drops", () => {
+    const payload = codex(
+      "cad_update_view",
+      { expectedRevision: 0, operations: [{ type: "isolate", occurrenceIds: ["a", "b"] }] },
+      JSON.stringify({ revision: 1 }),
+    );
+    expect(payload.data).toEqual({});
+    expect(payload.toolCall).toEqual({
+      name: "cad_update_view",
+      input: { operations: [{ type: "isolate", partCount: 2 }] },
+    });
+  });
+
+  it("splits Claude's MCP name and keeps only the inputs labels use", () => {
+    const payload = projectToolActivity("tool.updated", {
+      itemType: "file_change",
+      toolCallId: "toolu_write",
+      status: "inProgress",
+      data: {
+        toolName: "Write",
+        input: { file_path: "/repo/notes.md", content: "x".repeat(5000) },
+      },
+    });
+    expect(payload.toolCall).toEqual({ name: "Write", input: { path: "/repo/notes.md" } });
+    expect(claude(cad("cad_capture"), { expectedRevision: 0 }, "[Image]").toolCall).toEqual({
+      name: "cad_capture",
+      server: "cadsense_cad",
+    });
+  });
+
+  it("keeps facts a persisted, already projected update carries", () => {
+    const facts = { name: "Bash" };
+    const payload = projectToolActivity("tool.updated", {
+      itemType: "command_execution",
+      toolCallId: "toolu_bash",
+      status: "inProgress",
+      toolCall: facts,
+      data: { command: "git status" },
+    });
+    expect(payload.toolCall).toBe(facts);
+  });
+
+  it("summarizes only counts the full output states", () => {
+    expect(summaryOf(claude(cad("cad_find_parts"), {}, JSON.stringify({ totalMatches: 3 })))).toBe(
+      "3 matches",
+    );
+    expect(summaryOf(codex("cad_find_parts", {}, JSON.stringify({ totalMatches: 1 })))).toBe(
+      "1 match",
+    );
+    expect(
+      summaryOf(
+        claude(cad("cad_hierarchy"), {}, JSON.stringify({ entries: [{}, {}], nextCursor: "n" })),
+      ),
+    ).toBe("2+ components");
+    expect(
+      summaryOf(
+        codex("cad_checks", {}, JSON.stringify({ findings: [], summary: { totalFindings: 206 } })),
+      ),
+    ).toBe("206 findings");
+    expect(summaryOf(claude(cad("cad_comments_list"), {}, JSON.stringify({ comments: [] })))).toBe(
+      "0 comments",
+    );
+    expect(
+      summaryOf(claude(cad("cad_comments_publish"), {}, JSON.stringify({ results: [{}, {}] }))),
+    ).toBe("2 published");
+    expect(
+      summaryOf(
+        claude(
+          cad("cad_measure"),
+          {},
+          JSON.stringify({ status: "measured", distanceMeters: 0.0475640488 }),
+        ),
+      ),
+    ).toBe("47.6 mm");
+    expect(
+      summaryOf(claude("Read", { file_path: "/a.ts" }, "     1\tone\n     2\ttwo\n     3\tthree")),
+    ).toBe("3 lines");
+    expect(summaryOf(claude("Grep", { pattern: "x" }, "Found 4 files\na\nb\nc\nd"))).toBe(
+      "4 files",
+    );
+    expect(
+      summaryOf(
+        claude(
+          "WebSearch",
+          { query: "q" },
+          'Links: [{"title":"a","url":"u1"},{"title":"b","url":"u2"}]',
+        ),
+      ),
+    ).toBe("2 results");
+  });
+
+  it("states no summary when the output has no count", () => {
+    expect(
+      summaryOf(claude(cad("cad_capture"), {}, [{ type: "text", text: "[Image: x.png]" }])),
+    ).toBeUndefined();
+    expect(
+      summaryOf(claude(cad("cad_find_parts"), {}, '{"totalMatches":3,"entr…')),
+    ).toBeUndefined();
+    expect(
+      summaryOf(claude(cad("cad_measure"), {}, JSON.stringify({ status: "failed" }))),
+    ).toBeUndefined();
+    expect(summaryOf(claude("Grep", { pattern: "x" }, "src/a.ts:12: match"))).toBeUndefined();
+    // Results come only from the completion; an update's output is a truncated preview.
+    const update = projectToolActivity("tool.updated", {
+      itemType: "mcp_tool_call",
+      toolCallId: "toolu_find",
+      status: "inProgress",
+      data: {
+        toolName: cad("cad_find_parts"),
+        input: {},
+        result: { content: JSON.stringify({ totalMatches: 3 }) },
+      },
+    });
+    expect(summaryOf(update)).toBeUndefined();
+  });
+
+  it("keeps the first line of a failure for the row's error line", () => {
+    const errorOf = (payload: Record<string, unknown>) =>
+      (payload.toolCall as { errorText?: string } | undefined)?.errorText;
+    const cadError = JSON.stringify({
+      _tag: "CadViewError",
+      reason: "invalid-operation",
+      details: 'Expected a value between 1 and 100\n  at ["limit"]',
+    });
+    expect(errorOf(codex("cad_checks", { limit: 200 }, cadError, "failed"))).toBe(
+      "Expected a value between 1 and 100",
+    );
+    expect(errorOf(claude(cad("cad_checks"), {}, cadError, "failed"))).toBe(
+      "Expected a value between 1 and 100",
+    );
+    expect(
+      errorOf(
+        claude(
+          cad("cad_find_parts"),
+          {},
+          JSON.stringify({ _tag: "CadViewError", reason: "revision-conflict" }),
+          "failed",
+        ),
+      ),
+    ).toBe("Revision conflict");
+    expect(
+      errorOf(
+        claude(
+          "Bash",
+          { command: "jq ." },
+          "Exit code 127\n/bin/bash: line 4: jq: command not found",
+          "failed",
+        ),
+      ),
+    ).toBe("/bin/bash: line 4: jq: command not found");
+    expect(
+      errorOf(claude(cad("preview_status"), {}, "User cancelled tool execution.", "declined")),
+    ).toBe("User cancelled tool execution.");
+    // A successful call has no error line.
+    expect(errorOf(codex("cad_update_view", {}, JSON.stringify({ revision: 1 })))).toBeUndefined();
   });
 });

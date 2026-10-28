@@ -1742,7 +1742,10 @@ describe("deriveWorkLogEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "tool-complete",
-      createdAt: "2026-02-23T00:00:03.000Z",
+      // The call stays at its first update, so parallel calls keep their order.
+      createdAt: "2026-02-23T00:00:01.000Z",
+      startedAt: "2026-02-23T00:00:01.000Z",
+      completedAt: "2026-02-23T00:00:03.000Z",
       label: "Tool call completed",
       detail: 'Read: {"file_path":"/tmp/app.ts"}',
       command: "sed -n 1,40p /tmp/app.ts",

@@ -14,6 +14,7 @@ import {
   ProviderDriverKind,
   ProviderApprovalOption,
   ProviderRequestKind,
+  ToolCallFacts,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type ThreadId,
@@ -24,6 +25,7 @@ import type { ChatMessage, ProposedPlan, SessionPhase, Thread, ThreadSession } f
 
 export type ProviderPickerKind = ProviderDriverKind;
 const decodeCadCaptureCard = Schema.decodeUnknownOption(CadCaptureCard);
+const decodeToolCallFacts = Schema.decodeUnknownOption(ToolCallFacts);
 const decodeCadCommentsPublished = Schema.decodeUnknownOption(CadCommentsPublishedCard);
 
 export const PROVIDER_OPTIONS: Array<{
@@ -53,6 +55,14 @@ export interface WorkLogEntry {
   turnId?: TurnId | null;
   /** Stable provider identity across in-progress and completed lifecycle updates. */
   toolCallId?: string;
+  /** When a tool call started. Absent when only its completion was seen. */
+  startedAt?: string;
+  /** When a tool call completed. */
+  completedAt?: string;
+  /** Tool name, input, and result facts the server read from the full provider payload. */
+  toolCall?: ToolCallFacts;
+  /** The approval request an `approval.*` entry opened or resolved. */
+  approvalRequestId?: ApprovalRequestId;
   label: string;
   detail?: string;
   command?: string;
@@ -854,7 +864,10 @@ export function deriveWorkLogEntries(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
-    if (activity.kind === "tool.started") continue;
+    // A start shows a call while it runs (Codex sends nothing else until completion), so it is
+    // kept only when its call id lets the completion merge into the same row.
+    if (activity.kind === "tool.started" && extractToolCallId(asRecord(activity.payload)) === null)
+      continue;
     // Agent task.started rows are CTA seeds: they carry the true spawn turn,
     // which is the batch key (completions of background subagents arrive
     // under later synthetic turns and must not start new batches). They
@@ -1010,6 +1023,18 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
   }
+  if (isToolLifecycleActivityKind(activity.kind)) {
+    if (activity.kind === "tool.completed") entry.completedAt = activity.createdAt;
+    else entry.startedAt = activity.createdAt;
+    const toolCall = decodeToolCallFacts(payload?.toolCall);
+    if (Option.isSome(toolCall)) entry.toolCall = toolCall.value;
+  }
+  if (
+    (activity.kind === "approval.requested" || activity.kind === "approval.resolved") &&
+    typeof payload?.requestId === "string"
+  ) {
+    entry.approvalRequestId = ApprovalRequestId.make(payload.requestId);
+  }
   if (isTaskActivity && typeof payload?.taskId === "string" && payload.taskId.length > 0) {
     entry.taskId = payload.taskId;
   }
@@ -1060,11 +1085,12 @@ function agentSpawnGroupKey(entry: DerivedWorkLogEntry): string {
   return entry.turnId ? `direct:${entry.turnId}` : `direct:task:${taskId}`;
 }
 
+function isToolLifecycleActivityKind(kind: OrchestrationThreadActivity["kind"]): boolean {
+  return kind === "tool.started" || kind === "tool.updated" || kind === "tool.completed";
+}
+
 function toolLifecycleCollapseMapKey(entry: DerivedWorkLogEntry): string | undefined {
-  if (
-    entry.sourceActivityKind !== "tool.updated" &&
-    entry.sourceActivityKind !== "tool.completed"
-  ) {
+  if (!isToolLifecycleActivityKind(entry.sourceActivityKind)) {
     return undefined;
   }
   return entry.toolCallId ? `tool:${entry.turnId ?? "no-turn"}:${entry.toolCallId}` : undefined;
@@ -1169,10 +1195,7 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
-  if (
-    previous.sourceActivityKind !== "tool.updated" &&
-    previous.sourceActivityKind !== "tool.completed"
-  ) {
+  if (!isToolLifecycleActivityKind(previous.sourceActivityKind)) {
     return false;
   }
   if (next.sourceActivityKind !== "tool.updated" && next.sourceActivityKind !== "tool.completed") {
@@ -1214,9 +1237,15 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const startedAt = previous.startedAt ?? next.startedAt;
+  const completedAt = next.completedAt ?? previous.completedAt;
+  const toolCall =
+    previous.toolCall || next.toolCall ? { ...previous.toolCall, ...next.toolCall } : undefined;
   return {
     ...previous,
     ...next,
+    // A call stays where it started, so parallel calls keep their order as updates arrive.
+    createdAt: previous.createdAt,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
@@ -1228,6 +1257,9 @@ function mergeDerivedWorkLogEntries(
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
+    ...(toolCall ? { toolCall } : {}),
   };
 }
 
@@ -1251,10 +1283,7 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
   ) {
     return `task${entry.taskId}`;
   }
-  if (
-    entry.sourceActivityKind !== "tool.updated" &&
-    entry.sourceActivityKind !== "tool.completed"
-  ) {
+  if (!isToolLifecycleActivityKind(entry.sourceActivityKind)) {
     return undefined;
   }
   if (entry.toolCallId) {
