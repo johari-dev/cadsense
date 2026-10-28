@@ -12,7 +12,7 @@ import { useCallback, useMemo } from "react";
 
 import { Button } from "../ui/button";
 import { singleCadModelName } from "~/cad/cadModelName";
-import { modelThumbnailKey, useModelThumbnails } from "~/cad/modelThumbnails";
+import { useModelThumbnail } from "~/cad/modelThumbnails";
 import type { Project } from "~/types";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
@@ -184,15 +184,13 @@ export function DraftHeroHeadline({
 }
 
 /**
- * The active project's model above the headline: its captured thumbnail once the CAD panel
- * has rendered it, otherwise a viewport-colored tile with the model's name. Never loads CAD
- * just to draw it.
+ * The active project's model above the headline: the thumbnail the server saved when the CAD
+ * panel first rendered this snapshot, otherwise a viewport-colored tile with the model's name.
+ * Never loads CAD just to draw it.
  */
 function ProjectModelPreview({ project }: { readonly project: Project }) {
   const snapshotId = project.cad?.roots.find((root) => root.current)?.current?.snapshotId;
-  const thumbnail = useModelThumbnails((state) =>
-    snapshotId ? state.images[modelThumbnailKey(project.environmentId, snapshotId)] : undefined,
-  );
+  const thumbnail = useModelThumbnail(project.environmentId, snapshotId).url;
   const modelName = singleCadModelName(project.cad);
 
   return (

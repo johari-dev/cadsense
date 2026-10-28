@@ -35,7 +35,8 @@ import {
 } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
-import { captureModelThumbnail } from "./modelThumbnails";
+import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
+import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
 import { CadLocalSyncButton } from "./CadLocalSyncButton";
@@ -259,6 +260,19 @@ export function CadScene({
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
   }, [captureId, manifest, view]);
+  // The server keeps one thumbnail per snapshot. Capture it only when the server has none.
+  const environmentId = threadRef.environmentId;
+  const thumbnailMissing = useModelThumbnail(environmentId, view.snapshotId).missing;
+  const saveThumbnail = useAtomCommand(cadThumbnailEnvironment.save, { reportFailure: false });
+  useLayoutEffect(() => {
+    const current = renderer.current;
+    const snapshotId = view.snapshotId;
+    if (!thumbnailMissing || !current || manifest?.snapshotId !== snapshotId) return;
+    void saveModelThumbnail(environmentId, snapshotId, current, async (image) => {
+      const result = await saveThumbnail({ environmentId, input: { snapshotId, image } });
+      return result._tag === "Success";
+    });
+  }, [environmentId, manifest, saveThumbnail, thumbnailMissing, view.snapshotId]);
   // OrbitControls disconnects from canvas.getRootNode(); dispose before React detaches that root.
   useLayoutEffect(() => {
     if (!baseUrl || !canvas.current) return;
@@ -326,7 +340,6 @@ export function CadScene({
         setLoadProgress(null);
         setError(null);
         setManifest(state.manifest);
-        void captureModelThumbnail(threadRef.environmentId, view.snapshotId, current);
       } catch {
         setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
       }
