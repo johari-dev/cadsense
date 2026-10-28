@@ -2,6 +2,8 @@ import {
   ArchiveIcon,
   ArchiveIcon as ArchiveX,
   CaretRightIcon as ChevronRightIcon,
+  ArrowUUpLeftIcon as Undo2Icon,
+  FolderOpenIcon,
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
@@ -79,7 +81,6 @@ import { PromptFontPreview } from "./SettingsFontPreviews";
 import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { GlassOpacitySetting } from "./GlassOpacitySetting";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -89,6 +90,7 @@ import {
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
+  SETTINGS_PICKER_TRIGGER_CLASS,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
@@ -102,7 +104,7 @@ function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
       <span>Version</span>
-      <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
+      <span className="text-muted-foreground tabular-nums">{APP_VERSION}</span>
     </span>
   );
 }
@@ -260,7 +262,6 @@ function AboutVersionSection() {
             <TooltipTrigger
               render={
                 <Button
-                  size="xs"
                   variant={action === "install" ? "default" : "outline"}
                   disabled={buttonDisabled || isUpdateActionPending}
                   onClick={handleButtonClick}
@@ -276,7 +277,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+          description="Stable follows full releases. Nightly follows nightly builds, and you can switch back anytime."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -321,7 +322,6 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...getChangedTypographySettingLabels(settings),
-      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Transparency"] : []),
       ...(settings.showPermissionSettings !== DEFAULT_UNIFIED_SETTINGS.showPermissionSettings
         ? ["Permission settings visibility"]
         : []),
@@ -337,7 +337,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Provider update checks"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
+        ? ["Default project folder"]
         : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
@@ -348,7 +348,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit
         ? ["Quit confirmation"]
         : []),
-      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(isTextGenerationModelDirty ? ["Thread title model"] : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -367,7 +367,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAgentBrowserAccess,
       settings.streamAssistantText,
       settings.showPermissionSettings,
-      settings.glassOpacity,
       settings.showContextWindowIndicator,
       settings.enableProviderUpdateChecks,
       settings.fontFamilyCode,
@@ -393,7 +392,6 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       streamAssistantText: DEFAULT_UNIFIED_SETTINGS.streamAssistantText,
       showPermissionSettings: DEFAULT_UNIFIED_SETTINGS.showPermissionSettings,
-      glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       showContextWindowIndicator: DEFAULT_UNIFIED_SETTINGS.showContextWindowIndicator,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -427,13 +425,10 @@ export function AppearanceSettingsPanel() {
   return (
     <SettingsPageContainer>
       <TypographySection />
-      <SettingsSection title="Surfaces">
-        <GlassOpacitySetting />
-      </SettingsSection>
       <SettingsSection title="Visibility">
         <SettingsRow
           {...searchableSetting("show-permission-settings")}
-          description="Show access controls in the composer. When hidden, agents edit the project freely and an automatic reviewer checks actions that need more access."
+          description="Show access controls in the composer. When hidden, agents edit freely and an automatic reviewer checks actions that need more access."
           control={
             <Switch
               checked={settings.showPermissionSettings}
@@ -550,7 +545,7 @@ function FontSmoothingRow() {
   return (
     <SettingsRow
       {...searchableSetting("font-smoothing")}
-      description="Render text with thinner grayscale anti-aliasing instead of macOS's heavier default."
+      description="Thinner grayscale anti-aliasing instead of the heavier macOS default."
       resetAction={
         settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
           <SettingResetButton
@@ -838,7 +833,29 @@ function FontFamilySettingsRow({
   );
 }
 
-export function GeneralSettingsPanel() {
+/**
+ * Resets every setting `useSettingsRestore` tracks. While nothing differs it is disabled but
+ * keeps the secondary text color instead of fading, so it reads as an available page action.
+ * The undo glyph matches the per-row reset buttons.
+ */
+function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void }) {
+  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+
+  return (
+    <Button
+      variant="outline"
+      className="text-muted-foreground not-disabled:text-foreground disabled:opacity-100"
+      disabled={changedSettingLabels.length === 0}
+      onClick={() => void restoreDefaults()}
+    >
+      <Undo2Icon className="size-3.5" />
+      Restore defaults
+    </Button>
+  );
+}
+
+/** General settings. `onRestored` runs after Restore defaults so the route can remount it. */
+export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () => void }) {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const observability = useAtomValue(primaryServerObservabilityAtom);
@@ -846,6 +863,13 @@ export function GeneralSettingsPanel() {
   const serverConfig = useAtomValue(primaryServerConfigAtom);
   const defaultProjectDirectory =
     serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/";
+  // Opens the desktop folder picker Add Project uses, starting at the current folder.
+  const chooseDefaultProjectFolder = async () => {
+    const picked = await readLocalApi()?.dialogs.pickFolder({
+      initialPath: settings.addProjectBaseDirectory || defaultProjectDirectory,
+    });
+    if (picked) updateSettings({ addProjectBaseDirectory: picked });
+  };
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -882,7 +906,10 @@ export function GeneralSettingsPanel() {
   );
   return (
     <SettingsPageContainer>
-      <SettingsSection title="General">
+      <SettingsSection
+        title="General"
+        headerAction={<RestoreDefaultsButton onRestored={onRestored} />}
+      >
         <SettingsRow
           {...searchableSetting("streaming-text")}
           description="Show assistant text as it arrives."
@@ -911,7 +938,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("provider-update-checks")}
-          description="Check installed provider CLIs for newer available versions."
+          description="Check installed AI provider tools for updates."
           resetAction={
             settings.enableProviderUpdateChecks !==
             DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
@@ -938,12 +965,13 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("add-project-starts-in")}
-          description={`Leave empty to use "${defaultProjectDirectory}" when the Add Project browser opens.`}
+          // The input's placeholder shows the folder used while this is empty.
+          description="Start in this folder when adding a project."
           resetAction={
             settings.addProjectBaseDirectory !==
             DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
               <SettingResetButton
-                label="add project base directory"
+                label="default project folder"
                 onClick={() =>
                   updateSettings({
                     addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -953,20 +981,47 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <DraftInput
-              className="w-full sm:w-72"
-              value={settings.addProjectBaseDirectory}
-              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-              placeholder={defaultProjectDirectory}
-              spellCheck={false}
-              aria-label="Add project base directory"
-            />
+            <div className="flex w-full items-center gap-1.5 sm:w-auto">
+              <DraftInput
+                className="w-full sm:w-60"
+                value={settings.addProjectBaseDirectory}
+                onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+                placeholder={
+                  defaultProjectDirectory === "~/"
+                    ? "~/ (home folder)"
+                    : `${defaultProjectDirectory} (default)`
+                }
+                spellCheck={false}
+                aria-label="Default project folder"
+              />
+              {/* The native picker needs the desktop app; the browser build can only type a path. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="inline-flex shrink-0">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        aria-label="Choose folder"
+                        disabled={!isElectron}
+                        onClick={() => void chooseDefaultProjectFolder()}
+                      >
+                        <FolderOpenIcon className="size-4" />
+                      </Button>
+                    </span>
+                  }
+                />
+                <TooltipPopup side="top">
+                  {isElectron ? "Choose folder" : "Choosing a folder needs the desktop app"}
+                </TooltipPopup>
+              </Tooltip>
+            </div>
           }
         />
 
         <SettingsRow
           {...searchableSetting("archive-confirmation")}
-          description="Require a second click on the inline archive action before a thread is archived."
+          description="Ask before archiving a thread."
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
@@ -1019,7 +1074,7 @@ export function GeneralSettingsPanel() {
         {isElectron ? (
           <SettingsRow
             {...searchableSetting("quit-confirmation")}
-            description="Require holding the quit shortcut before the desktop app quits. A quick tap shows a hint instead."
+            description="Hold the quit shortcut to quit. A quick tap shows a hint."
             resetAction={
               settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? (
                 <SettingResetButton
@@ -1042,11 +1097,11 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("text-generation-model")}
-          description="Default model for generated text like thread titles."
+          description="Model that writes and regenerates thread titles."
           resetAction={
             isTextGenerationModelDirty ? (
               <SettingResetButton
-                label="text generation model"
+                label="thread title model"
                 onClick={() =>
                   updateSettings({
                     textGenerationModelSelection:
@@ -1065,7 +1120,7 @@ export function GeneralSettingsPanel() {
                 instanceEntries={textGenerationModelInstanceEntries}
                 modelOptionsByInstance={textGenerationModelOptionsByInstance}
                 triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
                 onInstanceModelChange={(instanceId, model) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
@@ -1093,7 +1148,7 @@ export function GeneralSettingsPanel() {
                 modelOptions={textGenModelOptions}
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
@@ -1128,7 +1183,7 @@ export function GeneralSettingsPanel() {
           {...searchableSetting("diagnostics")}
           description={diagnosticsDescription}
           control={
-            <Button render={<Link to="/settings/diagnostics" />} size="xs" variant="outline">
+            <Button render={<Link to="/settings/diagnostics" />} variant="outline">
               View diagnostics
             </Button>
           }
@@ -1334,8 +1389,7 @@ export function ArchivedThreadsPanel() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                    className="shrink-0 cursor-pointer gap-1.5"
                     onClick={() => {
                       void (async () => {
                         const result = await unarchiveThread(

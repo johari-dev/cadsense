@@ -4,12 +4,13 @@ import { isValidElement, type ReactNode } from "react";
 import { afterEach, expect, it } from "vite-plus/test";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
+import { CommentBadge } from "./CadCommentsCard";
 import {
   CadPublishedComments,
   describeCadCommentRejection,
+  describeCadCommentsHeading,
   describeCadCommentsPublished,
 } from "./CadChatRows";
-import { CadSeverityLabel } from "./CadCommentsCard";
 
 const threadRef: ScopedThreadRef = {
   environmentId: EnvironmentId.make("env"),
@@ -54,12 +55,12 @@ const card = {
 it("opens a published comment at its location in the CAD panel", () => {
   const tree = CadPublishedComments({ card, threadRef });
   const buttons = elements(tree).filter((element) => element.type === "button");
-  expect(text(tree)).toContain("Wrote 1 comment");
+  expect(text(tree)).toContain("1 review comment");
   expect(text(tree)).toContain('"Add bolt heads" was not published');
 
   const commentButton = buttons.find((button) => text(button).includes("roller shaft"));
-  const label = elements(commentButton).find((element) => element.type === CadSeverityLabel);
-  expect(label?.props.severity).toBe("blocker");
+  const badge = elements(commentButton).find((element) => element.type === CommentBadge);
+  expect(badge?.props.severity).toBe("blocker");
   (commentButton?.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-1",
@@ -92,8 +93,13 @@ it("lists resolution proposals apart from written comments and opens their comme
   expect(describeCadCommentsPublished({ ...card, proposed: proposals.proposed })).toBe(
     "Wrote 1 comment, proposed 1 resolution",
   );
+  // Only a comments-only turn shortens to "N review comments"; proposals keep the summary.
+  expect(describeCadCommentsHeading(card)).toBe("1 review comment");
+  expect(describeCadCommentsHeading({ ...card, proposed: proposals.proposed })).toBe(
+    "Wrote 1 comment, proposed 1 resolution",
+  );
   const tree = CadPublishedComments({ card: proposals, threadRef });
-  expect(text(tree)).toContain("resolution proposed");
+  expect(text(tree)).toContain("Resolution proposed");
   const button = elements(tree)
     .filter((element) => element.type === "button")
     .find((element) => text(element).includes("Loose cable"));

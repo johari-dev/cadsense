@@ -98,7 +98,7 @@ export function PreviewPanelShell(props: {
         },
         { width: `${open ? naturalWidth : 0}px`, flex: "0 0 auto", overflow: "hidden" },
       ],
-      { duration: 150, easing: "ease-out", fill: "both" },
+      { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "both" },
     );
     animationRef.current = animation;
     animation.onfinish = () => {
@@ -128,6 +128,24 @@ export function PreviewPanelShell(props: {
     maxWidth,
     edge: "left",
   });
+  // While the user drags the edge the panel follows the pointer directly; otherwise width
+  // changes (the app sidebar folding or expanding) animate.
+  const [resizing, setResizing] = useState(false);
+  const resizeHandlers = {
+    ...handlers,
+    onPointerDown: (event: Parameters<typeof handlers.onPointerDown>[0]) => {
+      if (event.button === 0) setResizing(true);
+      handlers.onPointerDown(event);
+    },
+    onPointerUp: (event: Parameters<typeof handlers.onPointerUp>[0]) => {
+      setResizing(false);
+      handlers.onPointerUp(event);
+    },
+    onPointerCancel: (event: Parameters<typeof handlers.onPointerCancel>[0]) => {
+      setResizing(false);
+      handlers.onPointerCancel(event);
+    },
+  };
 
   return (
     <div
@@ -139,13 +157,24 @@ export function PreviewPanelShell(props: {
             ? "flex-1 border-l border-border"
             : "shrink-0 border-l border-border"
           : "w-full",
+        // The same duration and easing as the app sidebar's fold (ui/sidebar.tsx): the panel
+        // takes back exactly the width the rail frees, so the chat column slides as one piece.
+        isInline &&
+          !props.maximized &&
+          !resizing &&
+          "transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
       )}
-      style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
+      // The width the app sidebar frees by folding to its rail goes to this panel, never stored.
+      style={
+        isInline && !props.maximized
+          ? { width: `calc(${width}px + var(--sidebar-rail-reclaimed-width, 0px))` }
+          : undefined
+      }
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
       inert={!open}
     >
-      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
+      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
       <div
         ref={contentRef}
         className="flex h-full min-h-0 w-full shrink-0 flex-col"

@@ -34,6 +34,10 @@ interface ChatHeaderProps {
   activeProjectOnshapeSource?: OnshapeProjectSource | undefined;
   openInCwd: string | null;
   rightPanelOpen: boolean;
+  /** The open CAD panel already names the project in its header, so the chip would repeat it. */
+  projectShownInRightPanel: boolean;
+  /** The draft hero's large heading already names the project. */
+  isDraftHero: boolean;
   onNewThreadInProject: () => void;
 }
 
@@ -69,6 +73,8 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectOnshapeSource,
   openInCwd,
   rightPanelOpen,
+  projectShownInRightPanel,
+  isDraftHero,
   onNewThreadInProject,
 }: ChatHeaderProps) {
   const activeThreadRef = useMemo(
@@ -202,12 +208,22 @@ export const ChatHeader = memo(function ChatHeader({
     [commitRename],
   );
   return (
+    // ps-2.5 lines the title up with the transcript's text edge (list padding plus the
+    // scrollbar gutter) instead of the header's own inset.
     <div
-      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
+      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 ps-2.5 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
     >
       <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">
-        <WorkspaceBreadcrumbItem current className={renamingTitle !== null ? "flex-1" : ""}>
+        {/* The title is 14px semibold (about #f2f2f2) so it reads as a title, not body text,
+            and capped so a long one leaves room for the project; the tooltip shows it all. */}
+        <WorkspaceBreadcrumbItem
+          current
+          className={cn(
+            "text-[0.9333rem] font-semibold text-foreground/95",
+            renamingTitle !== null ? "flex-1" : "max-w-[min(26rem,70%)]",
+          )}
+        >
           {renamingTitle !== null ? (
             <input
               autoFocus
@@ -254,10 +270,11 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           )}
         </WorkspaceBreadcrumbItem>
-        {/* The project follows the thread title in muted text, so the title reads first
-            and the project still answers which one the thread lives in. */}
-        {activeProjectName ? (
-          <WorkspaceBreadcrumbItem>
+        {/* The project follows the thread title as a quiet 12px chip, set apart by a wider
+            gap, so the two never read as one long title. It hides while the CAD panel is
+            open or the draft hero shows, because their headings already name the project. */}
+        {activeProjectName && !projectShownInRightPanel && !isDraftHero ? (
+          <WorkspaceBreadcrumbItem className="ps-1">
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -265,7 +282,7 @@ export const ChatHeader = memo(function ChatHeader({
                     type="button"
                     aria-label={`New thread in ${activeProjectName}`}
                     onClick={onNewThreadInProject}
-                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-[0.8rem] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 }
               >

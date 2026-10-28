@@ -54,10 +54,59 @@ import {
   type CadCommentLocation,
 } from "./cadCommentReviewStore";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
-import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
+import {
+  CAD_COMMENTS_CARD_WIDTH,
+  CadCommentsCard,
+  type CadCommentsCardProps,
+} from "./CadCommentsCard";
+import { holdInspection } from "../components/sidebarInspection";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
+/**
+ * Overlay chrome fits and comment focus keep the model clear of: the parts chip along the top,
+ * the camera toolbar along the bottom, and a floating comments card (12px from the right edge)
+ * plus 32px of clearance. A docked card sits beside the canvas, so it needs no inset. The
+ * compact preview shows no chip or toolbar.
+ */
+const frameInsets = (compact: boolean, cardFloating: boolean) => ({
+  top: compact ? 0 : 48,
+  bottom: compact ? 0 : 64,
+  right: cardFloating ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
+});
+/**
+ * Whether a view change should travel to its new camera rather than jump: a new comment capture,
+ * an explosion change, a different preset, or a different fitted pose (Fit, or a view cube edge or
+ * corner). A pose without `fit` is an orbit the user already made, so it applies in place.
+ */
+export function animatesViewChange(
+  previous: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+  next: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+) {
+  if (next.captureId && next.captureId !== previous.captureId) return true;
+  if (next.explosion !== previous.explosion) return true;
+  const camera = next.camera;
+  if (camera.kind === "preset")
+    return previous.camera.kind !== "preset" || previous.camera.preset !== camera.preset;
+  return camera.fit !== null && JSON.stringify(camera) !== JSON.stringify(previous.camera);
+}
+/** Width of the docked comments column, in CSS px. */
+const DOCK_WIDTH = 320;
+/**
+ * Below this scene width the open comments card floats over the viewport; at or above it, the
+ * card docks as a column beside a viewport that keeps at least 420px, so it never covers the
+ * model. The default CAD panel in a 1440px window (about 760px) docks.
+ */
+const DOCK_MIN_WIDTH = DOCK_WIDTH + 420;
+const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -136,7 +185,13 @@ export function CadScene({
   // Where the primary pointer went down on the viewer, to tell a click from an orbit drag.
   const press = useRef<{ id: number; x: number; y: number } | null>(null);
   const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
-  const latest = useRef({ view, disabled, onChange });
+  // The docked comments column, mounted while the scene is wide enough to dock (hidden while the
+  // card is closed), so the card can portal into it from the moment it opens.
+  const [dock, setDock] = useState<HTMLElement | null>(null);
+  const [dockable, setDockable] = useState(false);
+  const sceneRow = useRef<HTMLDivElement>(null);
+  const cardFloating = commentsCard.open && !dock;
+  const latest = useRef({ view, disabled, onChange, compact, cardFloating });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
@@ -145,8 +200,30 @@ export function CadScene({
   const previousExplosion = useRef(view.explosion);
   const applied = useRef<{ manifest: CadSnapshotManifest | null; state: string } | null>(null);
   useLayoutEffect(() => {
-    latest.current = { view, disabled, onChange };
-  }, [disabled, onChange, view]);
+    latest.current = { view, disabled, onChange, compact, cardFloating };
+  }, [cardFloating, compact, disabled, onChange, view]);
+  useLayoutEffect(() => {
+    const row = sceneRow.current;
+    if (compact || !row) return;
+    const measure = () => setDockable(row.getBoundingClientRect().width >= DOCK_MIN_WIDTH);
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    measure();
+    return () => observer.disconnect();
+  }, [compact]);
+  const docked = commentsCard.open && dock !== null;
+  // Docked comments are an inspection: the app sidebar folds to its icon rail. The hold
+  // re-renders the app layout synchronously, so the fold (and the width this panel takes back
+  // from it) starts animating in the same frame as the dock column. The canvas follows every
+  // frame of that animation through its ResizeObserver below.
+  useLayoutEffect(() => (docked ? holdInspection("cad-comments-docked") : undefined), [docked]);
+  // A layout effect, so the card's focus (a passive effect) already frames clear of the card it
+  // just opened. Closing the card ends its review afterwards, which recenters the model.
+  useLayoutEffect(() => {
+    renderer.current?.setFrameInsets(frameInsets(compact, cardFloating), {
+      reducedMotion: prefersReducedMotion(),
+    });
+  }, [cardFloating, compact]);
   useLayoutEffect(() => {
     try {
       renderer.current?.setInteractive(!disabled);
@@ -162,11 +239,14 @@ export function CadScene({
       applied.current = { manifest, state: serialized };
       if (manifest) {
         if (
-          ((captureId && previousCapture.current !== captureId) ||
-            previousExplosion.current !== view.explosion ||
-            (view.camera.kind === "preset" &&
-              (previousCamera.current.kind !== "preset" ||
-                previousCamera.current.preset !== view.camera.preset))) &&
+          animatesViewChange(
+            {
+              camera: previousCamera.current,
+              explosion: previousExplosion.current,
+              captureId: previousCapture.current,
+            },
+            { camera: view.camera, explosion: view.explosion, captureId },
+          ) &&
           !matchMedia("(prefers-reduced-motion: reduce)").matches
         )
           renderer.current?.transition(view);
@@ -205,6 +285,9 @@ export function CadScene({
     const { renderer: current, canvas: node, diagnostics } = attachment;
     attachmentRef.current = attachment;
     renderer.current = current;
+    current.setFrameInsets(frameInsets(latest.current.compact, latest.current.cardFloating), {
+      reducedMotion: true,
+    });
     const stopLoad = attachment.watchLoad(view.snapshotId, (state) => {
       try {
         if (state.status === "idle") {
@@ -341,55 +424,83 @@ export function CadScene({
     <div className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}>
       {/* The wrapper holds the viewer's minimum height so the strip never pushes it over the tree. */}
       <div className={`flex ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 flex-col`}>
-        <div
-          className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
-        >
+        {/* The viewport and, when docked, the comments column beside it. Viewport overlays stay
+            inside the viewport, so they follow its narrower width. */}
+        <div ref={sceneRow} className="flex min-h-0 min-w-0 flex-1">
           <div
-            ref={canvas}
-            className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
-            style={{ pointerEvents: disabled ? "none" : "auto" }}
-            onPointerDown={(event) => {
-              press.current =
-                event.isPrimary && event.button === 0
-                  ? { id: event.pointerId, x: event.clientX, y: event.clientY }
-                  : null;
-            }}
-            onPointerUp={(event) => {
-              // A click (not a drag) on empty space leaves the focused comment.
-              const start = press.current;
-              press.current = null;
-              if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
-              if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
-              const box = event.currentTarget.getBoundingClientRect();
-              if (renderer.current?.isEmptyAt(event.clientX - box.left, event.clientY - box.top))
-                commentsCard.clearSelection();
-            }}
-          />
-          {(!manifest || unavailable) && (
+            className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
+          >
             <div
-              className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
-              role="status"
-            >
-              {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
-            </div>
-          )}
-          <CadCommentsCard
-            {...commentsCard}
-            manifest={manifest}
-            displayedSnapshotId={view.snapshotId}
-          />
-          {manifest && !unavailable && !compact && (
-            <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
-          )}
-          {manifest && !unavailable && !compact && (
-            <CadViewChanges
-              manifest={manifest}
-              view={view}
-              disabled={disabled}
-              onChange={onChange}
-              belowRevisionNotice={commentsCard.historical}
+              ref={canvas}
+              className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
+              style={{ pointerEvents: disabled ? "none" : "auto" }}
+              onPointerDown={(event) => {
+                press.current =
+                  event.isPrimary && event.button === 0
+                    ? { id: event.pointerId, x: event.clientX, y: event.clientY }
+                    : null;
+              }}
+              onPointerUp={(event) => {
+                // A click (not a drag) on empty space leaves the focused comment.
+                const start = press.current;
+                press.current = null;
+                if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
+                if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+                const box = event.currentTarget.getBoundingClientRect();
+                if (renderer.current?.isEmptyAt(event.clientX - box.left, event.clientY - box.top))
+                  commentsCard.clearSelection();
+              }}
             />
-          )}
+            {(!manifest || unavailable) && (
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
+                role="status"
+              >
+                {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
+              </div>
+            )}
+            <CadCommentsCard
+              {...commentsCard}
+              manifest={manifest}
+              displayedSnapshotId={view.snapshotId}
+              dock={dock}
+            />
+            {manifest && !unavailable && !compact && (
+              <CadCameraToolbar
+                renderer={renderer}
+                view={view}
+                disabled={disabled}
+                onChange={onChange}
+              />
+            )}
+            {manifest && !unavailable && !compact && (
+              <CadViewChanges
+                manifest={manifest}
+                view={view}
+                disabled={disabled}
+                onChange={onChange}
+                belowRevisionNotice={commentsCard.historical}
+              />
+            )}
+          </div>
+          {dockable &&
+            !compact && (
+              // The column animates its width (CadPanel.css); its content keeps the full width
+              // from the first frame, rides the column's moving left edge, and is clipped, so it
+              // slides in without reflowing. The card portals into the inner surface.
+              <aside
+                aria-label="Comments panel"
+                data-open={commentsCard.open}
+                style={{ width: commentsCard.open ? DOCK_WIDTH : 0 }}
+                className="cad-comments-dock-column shrink-0 overflow-hidden"
+              >
+                <div
+                  ref={setDock}
+                  style={{ width: DOCK_WIDTH }}
+                  className="flex h-full flex-col border-l bg-popover text-popover-foreground"
+                />
+              </aside>
+            )}
         </div>
         {lockStatus && <CadLockStrip status={lockStatus} />}
       </div>

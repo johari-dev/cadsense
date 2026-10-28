@@ -3,8 +3,13 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { resolveStorage } from "../lib/storage";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 
-const MAX_THUMBNAILS = 24;
-const THUMBNAIL_SIZE = 128;
+// Each thumbnail stays under THUMBNAIL_BUDGET, so the whole set stays near 1 MB of
+// localStorage.
+const MAX_THUMBNAILS = 16;
+/** Largest side a thumbnail is shown at, in CSS pixels (the 176x132 home preview's height). */
+const DISPLAY_SIZE = 132;
+/** Longest data URL kept, in characters: about 60 KB of image. */
+const THUMBNAIL_BUDGET = 80_000;
 /** Longest side the overview is scaled to before scanning it for the model's pixels. */
 const SCAN_SIZE = 256;
 /** Summed RGB difference from the background that counts as part of the model. */
@@ -20,8 +25,9 @@ export const useModelThumbnails = create(
     name: "cadsense:model-thumbnails",
     // Version 0 thumbnails copied the live camera, so many were off-center. Version 1 baked in
     // the old lighter viewport background, which shows as a box inside the sidebar's darker
-    // icon tile. Drop both so they are captured again.
-    version: 2,
+    // icon tile. Version 2 was 128px and looked pixelated in the home preview. Drop them all so
+    // they are captured again.
+    version: 3,
     migrate: () => ({ images: {} }),
     storage: createJSONStorage(() =>
       resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
@@ -53,29 +59,24 @@ export async function captureModelThumbnail(
     try {
       const frame = modelFrame(bitmap);
       if (!frame) return;
+      // Twice the displayed size in device pixels, so the preview stays sharp when scaled.
+      const size = Math.min(640, Math.max(256, Math.round(DISPLAY_SIZE * 2 * devicePixelRatio)));
       const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = THUMBNAIL_SIZE;
+      canvas.width = canvas.height = size;
       const context = canvas.getContext("2d");
       if (!context) return;
       context.fillStyle = frame.background;
-      context.fillRect(0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+      context.fillRect(0, 0, size, size);
+      context.imageSmoothingQuality = "high";
       // Source rectangles past the image edge are clipped, leaving the background fill there.
-      context.drawImage(
-        bitmap,
-        frame.x,
-        frame.y,
-        frame.size,
-        frame.size,
-        0,
-        0,
-        THUMBNAIL_SIZE,
-        THUMBNAIL_SIZE,
-      );
+      context.drawImage(bitmap, frame.x, frame.y, frame.size, frame.size, 0, 0, size, size);
+      const image = encodeThumbnail(canvas);
+      if (!image) return;
       const entries = Object.entries(useModelThumbnails.getState().images).slice(
         -(MAX_THUMBNAILS - 1),
       );
       useModelThumbnails.setState({
-        images: { ...Object.fromEntries(entries), [key]: canvas.toDataURL("image/jpeg", 0.85) },
+        images: { ...Object.fromEntries(entries), [key]: image },
       });
     } finally {
       bitmap.close();
@@ -85,6 +86,21 @@ export async function captureModelThumbnail(
   } finally {
     pending.delete(key);
   }
+}
+
+/**
+ * WebP where the browser encodes it (Chromium and Electron do), else JPEG, at the best quality
+ * that fits THUMBNAIL_BUDGET. Null if even the lowest quality is too large.
+ */
+function encodeThumbnail(canvas: HTMLCanvasElement) {
+  const type = canvas.toDataURL("image/webp", 0.5).startsWith("data:image/webp")
+    ? "image/webp"
+    : "image/jpeg";
+  for (const quality of [0.88, 0.75, 0.6]) {
+    const image = canvas.toDataURL(type, quality);
+    if (image.length <= THUMBNAIL_BUDGET) return image;
+  }
+  return null;
 }
 
 /**

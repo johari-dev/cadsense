@@ -36,7 +36,7 @@ vi.mock("three", async (original) => {
 });
 
 describe("CAD outline overlay", () => {
-  it("does not draw opaque-shell outlines over translucent, cutout or double-sided surfaces", () => {
+  it("does not draw opaque-shell outlines over translucent, cutout or back-sided surfaces", () => {
     const geometry = new THREE.BoxGeometry();
     expect(supportsCadOutline(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial()))).toBe(
       true,
@@ -44,12 +44,18 @@ describe("CAD outline overlay", () => {
     for (const props of [
       { transparent: true, opacity: 0.4 },
       { alphaTest: 0.5 },
-      { side: THREE.DoubleSide },
+      { side: THREE.BackSide },
       { depthWrite: false },
     ])
       expect(
         supportsCadOutline(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial(props))),
       ).toBe(false);
+    // Every Onshape and local CAD asset is double-sided.
+    expect(
+      supportsCadOutline(
+        new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ side: THREE.DoubleSide })),
+      ),
+    ).toBe(true);
   });
   it("bounds normal/depth targets to 16 MiB without upscaling small panels", () => {
     expect(cadOutlineSize(320, 200)).toEqual({ width: 320, height: 200 });

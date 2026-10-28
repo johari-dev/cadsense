@@ -100,6 +100,7 @@ import {
   resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapTopPercent,
   shouldPreserveAssistantLineBreaks,
+  collapsedUserMessagePreview,
   toolGroupAction,
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
@@ -154,24 +155,26 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
-const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
-const TIMELINE_LIST_FADE_HEADER = (
-  <div className="h-[var(--workspace-titlebar-scroll-fade-height)]" />
-);
+// As tall as the list's 2.125rem top fade, so the first row is never faded at rest.
+const TIMELINE_LIST_HEADER = <div className="h-8.5" />;
+// The fade under the chat header's divider: the first 0.8rem (12px) is fully masked, so no
+// glyph fragment shows against the divider, then a ramp that stays faint until about 24px and
+// is clear by 2.125rem (32px), so a line passing through reads as gone rather than ghosted.
+// The second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
+const TIMELINE_TOP_FADE_CLASS_NAME =
+  "[mask-image:linear-gradient(to_bottom,transparent_0.8rem,rgb(0_0_0/0.08)_1.4rem,rgb(0_0_0/0.45)_1.8rem,black_2.125rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
 
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
 function TimelineLoadEarlierHeader({
   loading,
   onLoadEarlier,
-  fade,
 }: {
   loading: boolean;
   onLoadEarlier: () => void;
-  fade: boolean;
 }) {
   return (
-    <div className={fade ? "pt-[var(--workspace-titlebar-scroll-fade-height)]" : "pt-3 sm:pt-4"}>
+    <div className="pt-8.5">
       <div className="mx-auto w-full max-w-3xl pb-2">
         <button
           type="button"
@@ -229,6 +232,12 @@ interface MessagesTimelineProps {
    */
   liveFollowEnabled: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  /**
+   * Reported on every scroll: whether any text of the last row sits below the visible
+   * transcript (under the composer or its fade). The last message's hover actions do not
+   * count. Drives the "Scroll to end" button.
+   */
+  onEndTextCoveredChange: (covered: boolean) => void;
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
@@ -265,6 +274,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   contentInsetEndAdjustment,
   liveFollowEnabled,
   onIsAtEndChange,
+  onEndTextCoveredChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
@@ -481,6 +491,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     // While a width change settles, scroll positions come from the reflow, not the user.
     if (isAtEnd !== undefined && !reflowRef.current?.isSettling()) {
       onIsAtEndChange(isAtEnd);
+      const lastRowId = rows.at(-1)?.id;
+      onEndTextCoveredChange(
+        timelineViewportElement !== null && lastRowId !== undefined
+          ? (resolveEndTextCovered(timelineViewportElement, lastRowId, contentInsetEndAdjustment) ??
+              !isAtEnd)
+          : false,
+      );
     }
     if (!state || minimapItems.length === 0) {
       return;
@@ -504,7 +521,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [contentInsetEndAdjustment, listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [
+    contentInsetEndAdjustment,
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onEndTextCoveredChange,
+    onIsAtEndChange,
+    rows,
+    timelineViewportElement,
+  ]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -623,17 +649,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             onScroll={handleScroll}
             className={cn(
               "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
+              topFadeEnabled && TIMELINE_TOP_FADE_CLASS_NAME,
             )}
             ListHeaderComponent={
               loadEarlier !== null ? (
                 <TimelineLoadEarlierHeader
                   loading={loadEarlier.loading}
                   onLoadEarlier={loadEarlier.onLoadEarlier}
-                  fade={topFadeEnabled}
                 />
-              ) : topFadeEnabled ? (
-                TIMELINE_LIST_FADE_HEADER
               ) : (
                 TIMELINE_LIST_HEADER
               )
@@ -660,6 +683,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     </TimelineRowCtx>
   );
 });
+
+/**
+ * Whether the last row's text reaches below the visible transcript bottom: the viewport
+ * bottom minus the composer overlay (which starts with its fade). Text means the last
+ * markdown block in the row, or the row's content when it has none, so the hover actions
+ * under an assistant message never count. Undefined while the row is not rendered (far from
+ * the end), so the caller can fall back to the list's own end state.
+ */
+function resolveEndTextCovered(
+  viewport: HTMLElement,
+  lastRowId: string,
+  endInset: number,
+): boolean | undefined {
+  const row = viewport.querySelector<HTMLElement>(
+    `[data-timeline-row-id="${CSS.escape(lastRowId)}"]`,
+  );
+  if (!row) return undefined;
+  const blocks = row.querySelectorAll<HTMLElement>(".chat-markdown");
+  const text = blocks[blocks.length - 1] ?? row.firstElementChild ?? row;
+  const visibleBottom = viewport.getBoundingClientRect().bottom - endInset;
+  return text.getBoundingClientRect().bottom > visibleBottom + 1;
+}
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
@@ -1054,7 +1099,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div className="relative max-w-[80%] rounded-2xl bg-message px-3.5 py-2.5 text-message-foreground">
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (
@@ -1207,7 +1252,9 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    // No divider under the fold: the turn's result (often the review card, which has its own
+    // border) follows directly, and a second line above it read as a double rule.
+    <div className="pb-2 pt-1">
       <button
         type="button"
         aria-expanded={row.expanded}
@@ -1795,8 +1842,6 @@ function UserMessagePreviewAnnotationCard(props: {
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
 const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
-const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
 
 function shouldCollapseUserMessage(text: string): boolean {
   if (text.trim().length === 0) {
@@ -1820,26 +1865,19 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;
 
+  // Collapsed, the bubble renders a preview cut on whole lines (no fade, no half-hidden line),
+  // and the toggle sits on its own footer row under a hairline.
   return (
     <div>
       {hasVisibleBody ? (
         <div
-          className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
+          className="relative"
           data-user-message-body="true"
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
-          data-user-message-fade={isCollapsed ? "true" : "false"}
-          style={
-            isCollapsed
-              ? {
-                  WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                  maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                }
-              : undefined
-          }
         >
           <UserMessageBody
-            text={props.text}
+            text={isCollapsed ? collapsedUserMessagePreview(props.text) : props.text}
             skills={props.skills}
             markdownCwd={props.markdownCwd}
           />
@@ -1848,8 +1886,9 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
       {canCollapse || props.footer ? (
         <div
           className={cn(
-            "mt-1.5 flex items-center gap-2",
-            canCollapse && props.footer ? "justify-between" : "justify-end",
+            "flex items-center gap-2",
+            canCollapse ? "mt-2.5 -mb-1 h-8 border-t border-foreground/10 pt-1" : "mt-1.5",
+            canCollapse ? "justify-between" : "justify-end",
           )}
           data-user-message-footer="true"
         >
@@ -1861,7 +1900,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               aria-expanded={expanded}
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
-              className="-ml-1 h-6 rounded-md px-1.5 text-secondary-label text-xs hover:bg-muted/55 hover:text-message-foreground"
+              className="-ml-1.5 h-7 rounded-md px-1.5 text-xs font-medium text-secondary-label hover:bg-muted/55 hover:text-message-foreground sm:text-xs"
             >
               {expanded ? "Show less" : "Show full message"}
             </Button>

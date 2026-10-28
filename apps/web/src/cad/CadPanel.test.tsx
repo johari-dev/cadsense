@@ -14,7 +14,7 @@ import {
   type EffectCallback,
   type DependencyList,
 } from "react";
-import { afterEach, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { reactHookHarness as hooks } from "../test/reactHookHarness";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import type { Project } from "../types";
@@ -90,7 +90,7 @@ vi.mock("./cadCommentReviewStore", async (original) => {
   };
 });
 
-import { CadPanel, CadScene } from "./CadPanel";
+import { animatesViewChange, CadPanel, CadScene } from "./CadPanel";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 
 afterEach(() => {
@@ -159,6 +159,7 @@ const harness = (
     cachedManifest: () => (cached ? manifest : null),
     displayedManifest: () => (active ? manifest : null),
     setInteractive() {},
+    setFrameInsets() {},
     resize() {},
     apply,
     transition,
@@ -253,7 +254,9 @@ const harness = (
     )
       return;
     if ("displayedSnapshotId" in node.props) boundary.commentsManifest = node.props.manifest;
-    if (node.props.ref) node.props.ref.current = {};
+    // Element refs get a stand-in node; the scene row measures it to decide whether to dock.
+    if (node.props.ref)
+      node.props.ref.current = { getBoundingClientRect: () => ({ width: 800, height: 600 }) };
     attach(node.props.children);
   };
   const render = async () => {
@@ -515,4 +518,46 @@ it("keeps this chat's viewer usable while another chat in the project runs", () 
   expect(scene.disabled).toBe(false);
   expect(scene.cadDimmed).toBe(false);
   expect(scene.lockStatus).toBeNull();
+});
+
+describe("animatesViewChange", () => {
+  const pose = (position: readonly [number, number, number], fit: readonly string[] | null) => ({
+    kind: "pose" as const,
+    pose: {
+      position: [...position] as [number, number, number],
+      target: [0, 0, 0] as [number, number, number],
+      up: [0, 0, 1] as [number, number, number],
+      projection: "perspective" as const,
+      zoom: 1,
+    },
+    fit: fit === null ? null : [...fit],
+  });
+  const state = (
+    camera: ReturnType<typeof pose> | { kind: "preset"; preset: "front" | "top"; fit: string[] },
+  ) => ({
+    camera,
+    explosion: 0,
+    captureId: null,
+  });
+
+  it("animates a fitted pose that follows another fitted pose, as the view cube's edges do", () => {
+    expect(animatesViewChange(state(pose([1, -1, 0], [])), state(pose([-1, -1, 0], [])))).toBe(
+      true,
+    );
+  });
+
+  it("animates a fitted pose after a preset and a preset after a fitted pose", () => {
+    const front = { kind: "preset" as const, preset: "front" as const, fit: [] };
+    expect(animatesViewChange(state(front), state(pose([1, -1, 1], [])))).toBe(true);
+    expect(animatesViewChange(state(pose([1, -1, 1], [])), state(front))).toBe(true);
+  });
+
+  it("applies an orbit in place and does not replay an unchanged camera", () => {
+    expect(animatesViewChange(state(pose([1, -1, 0], [])), state(pose([2, -1, 0], null)))).toBe(
+      false,
+    );
+    expect(animatesViewChange(state(pose([1, -1, 0], [])), state(pose([1, -1, 0], [])))).toBe(
+      false,
+    );
+  });
 });

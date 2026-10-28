@@ -186,11 +186,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
             onValueChange={selectViewport}
             disabled={disabled}
           >
-            <SelectTrigger
-              size="sm"
-              className="w-full min-w-0 sm:w-44"
-              aria-label="Default browser viewport"
-            >
+            <SelectTrigger className="w-full min-w-0 sm:w-44" aria-label="Default browser viewport">
               <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false} className="min-w-64">
@@ -450,7 +446,7 @@ function DesktopOnlyBrowserDefaults({ children }: { readonly children: ReactNode
         <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <p>Only available in the desktop app.</p>
       </div>
-      <div className="[&_h3]:opacity-64 [&_p]:opacity-64">{children}</div>
+      <div className="[&_h3]:opacity-50 [&_p]:opacity-50">{children}</div>
     </div>
   );
 }

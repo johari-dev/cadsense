@@ -95,6 +95,8 @@ export function CadViewChanges({
   const changeCount = changes.reduce((sum, group) => sum + group.ids.length, 0);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"changes" | "parts">("changes");
+  // The Changes tab hides while there are none, so the card shows parts then.
+  const shownTab = changeCount ? tab : "parts";
   const [expanded, setExpanded] = useState<ReadonlySet<ChangeKind>>(new Set());
   // The card stays mounted while its close transition plays.
   const [settledOpen, setSettledOpen] = useState(open);
@@ -128,26 +130,27 @@ export function CadViewChanges({
   return (
     <div
       className={cn(
-        // Spans down to just above the camera toolbar, so the card can shrink to fit.
-        "pointer-events-none absolute bottom-16 left-3 z-20 flex w-[min(304px,calc(100%-72px))] flex-col items-start gap-2",
+        // Spans down to 16px above the camera toolbar (16px inset, 38px tall), so the card can
+        // grow or shrink to fit.
+        "pointer-events-none absolute bottom-[70px] left-3 z-20 flex w-[min(300px,calc(100%-72px))] flex-col items-start gap-2",
         belowRevisionNotice ? "top-14" : "top-3",
       )}
     >
-      <div className="pointer-events-auto flex h-(--cad-overlay-control) shrink-0 items-center rounded-lg border bg-popover text-xs shadow-sm">
+      <div className="pointer-events-auto flex h-8 shrink-0 items-center rounded-[8px] border border-input bg-popover text-[13px] font-medium shadow-sm">
         <button
           type="button"
           aria-expanded={open}
           aria-label={changeCount ? `View changes: ${summary.join(", ")}` : "Parts"}
           className={cn(
-            "flex h-full cursor-pointer items-center gap-2 rounded-lg px-2.5 transition-colors hover:bg-accent",
-            !changeCount && "text-muted-foreground",
+            "flex h-full cursor-pointer items-center gap-2 rounded-[7px] px-3 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:text-foreground",
+            !changeCount && "text-foreground/75",
           )}
           onClick={toggle}
         >
           {changeCount ? (
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-[var(--accent-text)]" />
+            <span aria-hidden="true" className="mx-[5px] size-1.5 rounded-full bg-foreground" />
           ) : (
-            <ListTreeIcon aria-hidden="true" className="size-3.5" />
+            <ListTreeIcon aria-hidden="true" className="size-4" />
           )}
           <span className="whitespace-nowrap">{chipLabel}</span>
         </button>
@@ -158,7 +161,7 @@ export function CadViewChanges({
                 <Button
                   size="icon-xs"
                   variant="ghost"
-                  aria-label="Reset view"
+                  aria-label="Show every part"
                   disabled={disabled}
                   className="me-0.5"
                   onClick={reset}
@@ -167,7 +170,7 @@ export function CadViewChanges({
             >
               <ArrowUUpLeftIcon />
             </TooltipTrigger>
-            <TooltipPopup side="bottom">Reset view: show every part normally</TooltipPopup>
+            <TooltipPopup side="bottom">Show every part normally</TooltipPopup>
           </Tooltip>
         )}
       </div>
@@ -179,8 +182,9 @@ export function CadViewChanges({
           data-closing={!open}
           className={cn(
             "cad-view-changes-card pointer-events-auto flex min-h-0 w-full shrink flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg",
-            // The tree is virtualized and needs a definite height; the change list fits its rows.
-            tab === "parts" ? "h-[440px]" : "max-h-[440px]",
+            // The tree is virtualized and needs a definite height, so it takes the room down to
+            // the toolbar (up to a cap); the change list fits its rows.
+            shownTab === "parts" ? "max-h-[640px] flex-1" : "max-h-[400px]",
           )}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return;
@@ -189,27 +193,37 @@ export function CadViewChanges({
           }}
         >
           <div className="flex shrink-0 items-center gap-0.5 border-b ps-1.5 pe-1.5 pt-1.5 pb-[7px]">
-            {(
-              [
-                ["changes", "Changes", changeCount],
-                ["parts", "All parts", partCount],
-              ] as const
-            ).map(([id, label, count]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={tab === id}
-                className={cn(
-                  "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-foreground",
-                  tab === id &&
-                    "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-[var(--accent-text)]",
-                )}
-                onClick={() => setTab(id)}
-              >
-                {label}
-                <span className="tabular-nums text-muted-foreground">{count}</span>
-              </button>
-            ))}
+            {/* With nothing changed, the card is only the parts list: a plain title, no tabs. */}
+            {changeCount === 0 ? (
+              <h2 className="flex h-7 items-center gap-2 px-2 text-[13px] font-medium">
+                Parts
+                <span className="rounded-md bg-foreground/8 px-1.5 text-xs leading-5 font-normal text-muted-foreground tabular-nums">
+                  {partCount}
+                </span>
+              </h2>
+            ) : (
+              (
+                [
+                  ["changes", "Changes", changeCount],
+                  ["parts", "All parts", partCount],
+                ] as const
+              ).map(([id, label, count]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={shownTab === id}
+                  className={cn(
+                    "relative flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                    shownTab === id &&
+                      "text-foreground after:absolute after:inset-x-2 after:-bottom-[7px] after:h-0.5 after:rounded-full after:bg-foreground",
+                  )}
+                  onClick={() => setTab(id)}
+                >
+                  {label}
+                  <span className="tabular-nums text-muted-foreground">{count}</span>
+                </button>
+              ))
+            )}
             <span className="flex-1" />
             <Button
               size="icon-xs"
@@ -220,7 +234,7 @@ export function CadViewChanges({
               <XIcon />
             </Button>
           </div>
-          {tab === "parts" ? (
+          {shownTab === "parts" ? (
             <CadHierarchyTree
               manifest={manifest}
               view={view}
@@ -228,11 +242,6 @@ export function CadViewChanges({
               onChange={onChange}
               fullHeight
             />
-          ) : changeCount === 0 ? (
-            <p className="p-3 text-xs text-muted-foreground">
-              Every part shows normally. When you or the agent isolate, hide, ghost, or highlight
-              parts, they are listed here.
-            </p>
           ) : (
             <>
               <div className="min-h-0 flex-1 overflow-y-auto p-1">
@@ -247,7 +256,7 @@ export function CadViewChanges({
                       {shown.map((id) => (
                         <div
                           key={id}
-                          className="group flex h-7 items-center gap-2 rounded-md ps-2 pe-1 text-xs hover:bg-accent"
+                          className="group flex h-7 items-center gap-2 rounded-md ps-2 pe-1 text-[13px] hover:bg-accent"
                         >
                           <Tooltip>
                             <TooltipTrigger
@@ -286,7 +295,7 @@ export function CadViewChanges({
                       {!showAll && (
                         <button
                           type="button"
-                          className="h-6 cursor-pointer ps-2 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-7 cursor-pointer ps-2 text-[13px] text-muted-foreground hover:text-foreground"
                           onClick={() => setExpanded(new Set([...expanded, group.kind]))}
                         >
                           and {group.ids.length - GROUP_PREVIEW} more
@@ -299,7 +308,7 @@ export function CadViewChanges({
               <div className="flex shrink-0 justify-end border-t p-1.5">
                 <Button size="compact" variant="ghost" disabled={disabled} onClick={reset}>
                   <ArrowUUpLeftIcon />
-                  Reset view
+                  Show every part
                 </Button>
               </div>
             </>

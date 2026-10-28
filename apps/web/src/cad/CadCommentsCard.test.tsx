@@ -43,7 +43,13 @@ vi.mock("../composerHandleContext", () => ({
   useComposerHandleContext: () => ({ current: chat.composer }),
 }));
 
-import { CadCommentsCard, CadSeverityIcon, CadSeverityLabel } from "./CadCommentsCard";
+import {
+  CadCommentsCard,
+  CadSeverityIcon,
+  CadSeverityLabel,
+  CommentBadge,
+  SeverityBadge,
+} from "./CadCommentsCard";
 
 afterEach(() => {
   hooks.reset();
@@ -410,7 +416,7 @@ it("opens the finding's thread from the floating card for a whole-part finding",
   expect(chat.composer.focusAt).not.toHaveBeenCalled();
 });
 
-it("orders open findings by severity then number and labels each one", () => {
+it("lists open findings by number and carries severity in each badge", () => {
   vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
@@ -453,16 +459,35 @@ it("orders open findings by severity then number and labels each one", () => {
   hooks.beginRender();
   const tree = CadCommentsCard(props);
   const listed = elements(tree).filter((element) => element.type === "article");
-  expect(listed.map((element) => element.key)).toEqual(["c2", "c5", "c4", "c1", "c3"]);
-  const icons = elements(tree).filter((element) => element.type === CadSeverityIcon);
-  // Each listed finding shows its severity once, as an icon whose tooltip names it.
-  expect(icons.map((element) => element.props.severity)).toEqual([
-    "blocker",
-    "blocker",
-    "concern",
-    "nit",
-    null,
+  // Numbers are the IDs the agent cites in chat, so the list keeps them in order.
+  expect(listed.map((element) => element.key)).toEqual(["c1", "c2", "c3", "c4", "c5"]);
+  // Each listed finding's badge is filled with its severity color and names it for tooltips
+  // and screen readers; one without a severity shows a plain badge.
+  const badges = elements(tree)
+    .filter((element) => element.type === SeverityBadge)
+    .map((element) => SeverityBadge({ comment: element.props.comment as CadComment }));
+  const badgeParts = badges.flatMap((badge) => [
+    ...elements(badge),
+    ...elements(badge).flatMap((element) => elements(element.props.render as ReactNode)),
   ]);
+  const fills = badgeParts
+    .filter((element) => element.type === CommentBadge)
+    .map(
+      (element) =>
+        elements(CommentBadge(element.props as Parameters<typeof CommentBadge>[0]))[0]!.props
+          .className,
+    );
+  expect(fills).toEqual([
+    expect.stringContaining("bg-[#262626]"),
+    expect.stringContaining("bg-red-300"),
+    expect.stringContaining("bg-amber-200"),
+    expect.stringContaining("bg-amber-200"),
+    expect.stringContaining("bg-red-300"),
+  ]);
+  const severities = badgeParts
+    .map((element) => element.props["data-severity"])
+    .filter((severity) => severity !== undefined);
+  expect(severities).toEqual(["nit", "blocker", "concern", "blocker"]);
   expect(CadSeverityIcon({ severity: null, category: null })).toBeNull();
   expect(CadSeverityLabel({ severity: "blocker" })?.props.className).toContain("text-foreground");
   expect(CadSeverityLabel({ severity: "nit" })?.props.className).toContain(
@@ -472,11 +497,12 @@ it("orders open findings by severity then number and labels each one", () => {
   hooks.reset();
   hooks.beginRender();
   const closed = elements(CadCommentsCard({ ...props, open: false, selection: null }));
-  // The collapsed toggle is the tooltip trigger's rendered button; its tooltip repeats the label.
+  // The collapsed toggle is the tooltip trigger's rendered button.
   const toggle = closed
     .flatMap((element) => elements(element.props.render as ReactNode))
     .find((element) => element.props["aria-expanded"] === false);
-  expect(toggle?.props["aria-label"]).toBe("Comments (5 unresolved, 2 blocking)");
+  // Its accessible name is its visible label; the tooltip adds what the count means.
+  expect(toggle?.props["aria-label"]).toBe("5 comments");
   expect(
     closed.some((element) => element.props.children === "Comments (5 unresolved, 2 blocking)"),
   ).toBe(true);

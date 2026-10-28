@@ -600,10 +600,14 @@ export const TraitsMenuRows = memo(function TraitsMenuRows(
   );
 });
 
+// The picker's footer rows say what the value is a level of: "Reasoning level: Medium"
+// rather than a bare "Reasoning" that read like a feature toggle.
+const TRAIT_ROW_LABELS: Readonly<Record<string, string>> = { Reasoning: "Reasoning level" };
+
 function TraitRowLabel(props: { label: string; value: string }) {
   return (
     <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-      <span className="truncate">{props.label}</span>
+      <span className="truncate">{TRAIT_ROW_LABELS[props.label] ?? props.label}</span>
       <span className="truncate text-muted-foreground">{props.value}</span>
     </span>
   );

@@ -1,7 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
+  useCallback,
   useEffect,
+  useReducer,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -23,6 +25,13 @@ import {
   useSidebarStageBackdropVariant,
 } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
+import {
+  INITIAL_SIDEBAR_INSPECTION,
+  isInspecting,
+  reduceSidebarInspection,
+  resolveSidebarOpen,
+  useInspectionTriggersStore,
+} from "./sidebarInspection";
 import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
@@ -156,6 +165,24 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
     setSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth));
   };
+  // Collapsing folds the sidebar to its icon rail (see sidebarInspection.ts). Inspection mode,
+  // a maximized CAD panel or docked comments, folds an expanded sidebar too, and the user's
+  // own state returns afterwards.
+  const inspecting = useInspectionTriggersStore(isInspecting);
+  const [sidebarInspection, dispatchSidebarInspection] = useReducer(
+    reduceSidebarInspection,
+    INITIAL_SIDEBAR_INSPECTION,
+  );
+  // Applied while rendering, not in an effect, so the fold starts in the same frame as the
+  // panel change that started the inspection (docked comments, a maximized panel) and both
+  // animate together instead of one trailing the other.
+  if (sidebarInspection.inspecting !== inspecting)
+    dispatchSidebarInspection({ type: "inspection", inspecting });
+  const sidebarOpen = resolveSidebarOpen(sidebarInspection);
+  const handleSidebarOpenChange = useCallback(
+    (open: boolean) => dispatchSidebarInspection({ type: "user", open }),
+    [],
+  );
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"
@@ -164,6 +191,12 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
+    // The icon rail is as wide as the floating sidebar toggle plus its 0.75rem (and
+    // 1px) inset on both sides, plus the rail's 1px right border, so the rail's center line
+    // is the toggle's and every rail item lines up under it. macOS moves the toggle past the
+    // traffic lights, beyond the rail, so it has no toggle to line up with.
+    "--sidebar-width-icon":
+      "calc(2 * (0.75rem + 1px) + var(--workspace-titlebar-control-size) + 1px)",
     ...(isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
       : {}),
@@ -207,11 +240,18 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
+    <SidebarProvider
+      className="h-dvh! min-h-0!"
+      open={sidebarOpen}
+      onOpenChange={handleSidebarOpenChange}
+      collapsedLayout="icon"
+      style={sidebarProviderStyle}
+    >
       <ProjectProjectionRetention />
       <Sidebar
         side="left"
-        collapsible="offcanvas"
+        // Collapsing on desktop always folds to the icon rail; it never hides the sidebar.
+        collapsible="icon"
         data-app-sidebar=""
         className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         resizable={{
