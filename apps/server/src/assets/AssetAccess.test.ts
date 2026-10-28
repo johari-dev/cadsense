@@ -371,4 +371,35 @@ describe("AssetAccess", () => {
       expect(error.cause).toBe(resolutionCause);
     }).pipe(Effect.provide(testLayer)),
   );
+
+  it.effect("issues CAD thumbnail capabilities only once the thumbnail is saved", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const snapshotId = "00000000-0000-4000-8000-000000000001";
+      const resource = { _tag: "cad-thumbnail", snapshotId } as const;
+
+      const missing = yield* issueAssetUrl({ resource }).pipe(Effect.flip);
+      expect(missing._tag).toBe("AssetCadThumbnailNotFoundError");
+
+      const directory = path.join(config.stateDir, "cad", "thumbnails");
+      const thumbnailPath = path.join(directory, `${snapshotId}.webp`);
+      yield* fileSystem.makeDirectory(directory, { recursive: true });
+      yield* fileSystem.writeFile(thumbnailPath, new Uint8Array([1, 2, 3]));
+      const result = yield* issueAssetUrl({ resource });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      expect(suffix.slice(separatorIndex + 1)).toBe(`${snapshotId}.webp`);
+      expect(
+        yield* resolveAsset(suffix.slice(0, separatorIndex), suffix.slice(separatorIndex + 1)),
+      ).toEqual({ kind: "file", path: thumbnailPath });
+
+      // Removing the snapshot removes its thumbnail; the issued URL stops resolving.
+      yield* fileSystem.remove(thumbnailPath);
+      expect(
+        yield* resolveAsset(suffix.slice(0, separatorIndex), suffix.slice(separatorIndex + 1)),
+      ).toBeNull();
+    }).pipe(Effect.provide(testLayer)),
+  );
 });

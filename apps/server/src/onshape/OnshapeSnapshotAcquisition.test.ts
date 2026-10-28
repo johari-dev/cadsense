@@ -137,6 +137,7 @@ const harness = Effect.fn(function* (options?: {
     readAsset: unused,
     list: unused,
     remove: unused,
+    putThumbnail: unused,
     withPinned: unused,
     withAcquisition: (effect) =>
       Effect.acquireUseRelease(

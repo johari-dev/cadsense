@@ -1,6 +1,7 @@
 import type { AssetResource } from "@cadsense/contracts";
 import {
   AssetAttachmentNotFoundError,
+  AssetCadThumbnailNotFoundError,
   AssetPreviewTypeValidationError,
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
@@ -38,6 +39,7 @@ import {
 } from "./signing.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
+import { cadThumbnailPaths } from "../cad/CadThumbnails.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -96,6 +98,12 @@ const AssetClaimsSchema = Schema.Union([
     relativePath: Schema.NullOr(Schema.String),
     expiresAt: Schema.Number,
   }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("cad-thumbnail"),
+    snapshotId: Schema.String,
+    expiresAt: Schema.Number,
+  }),
 ]);
 type AssetClaims = typeof AssetClaimsSchema.Type;
 
@@ -137,6 +145,18 @@ const optionOnNotFound = <A, R>(
         error.reason._tag === "NotFound" ? Effect.succeed(Option.none<A>()) : Effect.fail(error),
     }),
   );
+
+/** The saved thumbnail file for a snapshot, if any. */
+const findCadThumbnail = Effect.fn("AssetAccess.findCadThumbnail")(function* (snapshotId: string) {
+  const config = yield* ServerConfig.ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  for (const candidate of cadThumbnailPaths(path, config.stateDir, snapshotId)) {
+    const info = yield* optionOnNotFound(fileSystem.stat(candidate));
+    if (Option.isSome(info) && info.value.type === "File") return candidate;
+  }
+  return null;
+});
 
 const resolveCanonicalWorkspaceFile = Effect.fn("AssetAccess.resolveCanonicalWorkspaceFile")(
   function* (input: { readonly workspaceRoot: string; readonly relativePath: string }) {
@@ -389,6 +409,22 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       break;
     }
+    case "cad-thumbnail": {
+      const thumbnailPath = yield* findCadThumbnail(input.resource.snapshotId).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (!thumbnailPath) {
+        return yield* new AssetCadThumbnailNotFoundError({ resource: input.resource });
+      }
+      claims = {
+        version: 1,
+        kind: "cad-thumbnail",
+        snapshotId: input.resource.snapshotId,
+        expiresAt,
+      };
+      fileName = path.basename(thumbnailPath);
+      break;
+    }
   }
 
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -401,7 +437,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         }),
     ),
   );
-  if (claims.kind === "project-favicon") {
+  // Favicon and thumbnail URLs stay the same within a bucket, so browsers reuse cached images.
+  if (claims.kind === "project-favicon" || claims.kind === "cad-thumbnail") {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
       (Math.floor(issuedAt / PROJECT_FAVICON_TOKEN_BUCKET_MS) + 2) *
@@ -462,6 +499,13 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
           ...(claims.mimeType !== undefined ? { mimeType: claims.mimeType } : {}),
         } satisfies ResolvedAsset)
       : null;
+  }
+
+  if (claims.kind === "cad-thumbnail") {
+    const thumbnailPath = yield* findCadThumbnail(claims.snapshotId).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    return thumbnailPath ? ({ kind: "file", path: thumbnailPath } satisfies ResolvedAsset) : null;
   }
 
   if (claims.kind === "project-favicon") {

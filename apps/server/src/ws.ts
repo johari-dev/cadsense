@@ -101,6 +101,7 @@ import { LocalCadProjects } from "./localCad/LocalCadProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
 import { CadStorage } from "./cad/CadStorage.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
+import { saveCadThumbnail } from "./cad/CadThumbnails.ts";
 import { CadPanel } from "./cad/CadPanel.ts";
 import { CadViewing } from "./cad/CadViewing.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -925,6 +926,8 @@ const makeWsRpcLayer = (
           observeRpcStream(WS_METHODS.cadStorageWatch, cadStorage.watch),
         [WS_METHODS.cadStorageRun]: (input) =>
           observeRpcEffect(WS_METHODS.cadStorageRun, cadStorage.run(input)),
+        [WS_METHODS.cadThumbnailSave]: (input) =>
+          observeRpcEffect(WS_METHODS.cadThumbnailSave, saveCadThumbnail(input)),
         [WS_METHODS.cadPanelScene]: (input) =>
           observeRpcStream(
             WS_METHODS.cadPanelScene,
@@ -1542,7 +1545,7 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
-              if (input.resource._tag === "attachment") {
+              if (input.resource._tag === "attachment" || input.resource._tag === "cad-thumbnail") {
                 return yield* issueAssetUrl({ resource: input.resource });
               }
               if (input.resource._tag === "project-favicon") {
