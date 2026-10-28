@@ -529,6 +529,29 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  // A signed-out CLI still initializes, but reports no token source. Only
+  // first-party auth can be signed out; Bedrock and Vertex use cloud creds.
+  if (
+    capabilities.tokenSource === "none" &&
+    (capabilities.apiProvider ?? "firstParty") === "firstParty"
+  ) {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      skills,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Claude is not signed in.",
+      },
+    });
+  }
+
   const authMetadata =
     claudeAuthMetadata({
       subscriptionType: capabilities.subscriptionType,

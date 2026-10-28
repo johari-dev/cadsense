@@ -332,10 +332,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.streamAssistantText !== DEFAULT_UNIFIED_SETTINGS.streamAssistantText
         ? ["Streaming text"]
         : []),
-      ...(settings.enableProviderUpdateChecks !==
-      DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
-        ? ["Provider update checks"]
-        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Default project folder"]
         : []),
@@ -368,7 +364,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.streamAssistantText,
       settings.showPermissionSettings,
       settings.showContextWindowIndicator,
-      settings.enableProviderUpdateChecks,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
       settings.fontFamilySans,
@@ -393,7 +388,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       streamAssistantText: DEFAULT_UNIFIED_SETTINGS.streamAssistantText,
       showPermissionSettings: DEFAULT_UNIFIED_SETTINGS.showPermissionSettings,
       showContextWindowIndicator: DEFAULT_UNIFIED_SETTINGS.showContextWindowIndicator,
-      enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -932,33 +926,6 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
                 updateSettings({ streamAssistantText: Boolean(checked) })
               }
               aria-label="Streaming text"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("provider-update-checks")}
-          description="Check installed AI provider tools for updates."
-          resetAction={
-            settings.enableProviderUpdateChecks !==
-            DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
-              <SettingResetButton
-                label="provider update checks"
-                onClick={() =>
-                  updateSettings({
-                    enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.enableProviderUpdateChecks}
-              onCheckedChange={(checked) =>
-                updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
-              }
-              aria-label="Check provider versions"
             />
           }
         />

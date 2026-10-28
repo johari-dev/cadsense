@@ -75,7 +75,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
-import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
+import * as ProviderSetup from "./provider/providerSetup.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -365,7 +365,7 @@ const makeWsRpcLayer = (
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const providerService = yield* ProviderService.ProviderService;
-      const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
+      const providerSetupRunner = yield* ProviderSetup.ProviderSetupRunner;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -1328,10 +1328,10 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "provider" },
           ),
-        [WS_METHODS.serverUpdateProvider]: (input) =>
+        [WS_METHODS.serverRunProviderSetup]: (input) =>
           observeRpcEffect(
-            WS_METHODS.serverUpdateProvider,
-            providerMaintenanceRunner.updateProvider(input),
+            WS_METHODS.serverRunProviderSetup,
+            providerSetupRunner.run(input),
             {
               "rpc.aggregate": "server",
             },
@@ -1817,10 +1817,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientOrigin,
               clientAnalyticsProps,
               previewAutomationBroker,
-            ).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(ProviderMaintenanceRunner.layer),
-            ),
+            ).pipe(Layer.provideMerge(RpcSerialization.layerJson)),
           ),
         );
         return yield* rpcWebSocketHttpEffect;
