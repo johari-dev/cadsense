@@ -673,6 +673,74 @@ describe("mesh interference", () => {
         for (const finding of found) assert.closeTo(finding.intersectionVolume, 2e-6, 1e-12);
       }),
   );
+  it.effect("keeps WASM objects per pair, not per pair checked so far", () =>
+    Effect.gen(function* () {
+      // A full robot has thousands of candidate pairs and threaded fasteners near 250k triangles,
+      // so anything kept past its pair (placed copies, intersection results) fills the 4 GB heap.
+      const kernel = yield* loadCadSolidKernel;
+      const live = new Set<object>();
+      let peak = 0;
+      const track = <T extends object>(solid: T) => {
+        live.add(solid);
+        peak = Math.max(peak, live.size);
+        return solid;
+      };
+      // Embind keeps these methods up the instance's prototype chain (delete on ClassHandle), so
+      // each is wrapped where it is defined and restored afterwards.
+      type Solid = InstanceType<typeof kernel.Manifold>;
+      const sample = kernel.Manifold.cube([1, 1, 1]);
+      const owner = (name: "transform" | "intersect" | "delete") => {
+        let proto: Record<string, unknown> | null = Object.getPrototypeOf(sample);
+        while (proto && !Object.hasOwn(proto, name)) proto = Object.getPrototypeOf(proto);
+        return proto!;
+      };
+      const wrapped = (["transform", "intersect", "delete"] as const).map((name) => {
+        const proto = owner(name);
+        const original = proto[name] as (this: Solid, ...args: unknown[]) => unknown;
+        proto[name] = function (this: Solid, ...args: unknown[]) {
+          if (name === "delete") live.delete(this);
+          const result = original.apply(this, args);
+          return name === "delete" ? result : track(result as Solid);
+        };
+        return () => {
+          proto[name] = original;
+        };
+      });
+      sample.delete();
+      const counted = {
+        ...kernel,
+        Manifold: new Proxy(kernel.Manifold, {
+          construct: (target, args) => track(Reflect.construct(target, args)),
+        }),
+      } as typeof kernel;
+      try {
+        const cube = solidBox([0, 0, 0], [0.1, 0.1, 0.1]);
+        // Twelve cubes in a row, each overlapping the next by half: eleven intersecting pairs.
+        const occurrences = Array.from({ length: 12 }, (_, i) => ({
+          number: i + 1,
+          part: 10,
+          transform: translate(i * 0.05, 0, 0),
+        }));
+        const snapshot = manifest(occurrences, [10]);
+        const result = runCadChecks(
+          snapshot,
+          new Map([[id(10), readCadGeometryBounds(cube)]]),
+          checks,
+          undefined,
+          { meshes: new Map([[id(10), readCadTriangleMesh(cube)]]), kernel: counted },
+        );
+        const found = interference(result);
+        assert.lengthOf(found, 11);
+        for (const finding of found)
+          assert.closeTo(finding.intersectionVolume, 0.05 * 0.1 * 0.1, 1e-10);
+        // The asset's solid, both placed copies, and their intersection.
+        assert.isAtMost(peak, 4);
+        assert.equal(live.size, 0);
+      } finally {
+        for (const restore of wrapped) restore();
+      }
+    }),
+  );
   it.effect("counts open, unreadable, and suppressed parts without reporting them clear", () =>
     Effect.gen(function* () {
       const cube = solidBox([0, 0, 0], [0.1, 0.1, 0.1]);
