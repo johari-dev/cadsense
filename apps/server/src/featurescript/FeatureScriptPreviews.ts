@@ -353,6 +353,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         base: base?.bytes ?? null,
         editing: null,
         manipulatorChange: null,
+        rollback: null,
         output: { kind: "agent", view, outDir },
       });
       yield* pruneRuns(runsDir).pipe(Effect.ignore);
@@ -426,6 +427,11 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       const earlier = yield* Effect.forEach(input.before ?? [], (step, i) =>
         readStep(root, `before[${i}].path`, step),
       );
+      const rollback = input.rollback ?? null;
+      if (rollback !== null && rollback > earlier.length)
+        return yield* invalid(
+          `rollback ${rollback} is past the ${earlier.length} earlier ${earlier.length === 1 ? "step" : "steps"}.`,
+        );
       const step = {
         path: yield* workspacePath(root, "path", input.path),
         source: input.source,
@@ -446,14 +452,20 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       yield* fs
         .makeDirectory(config.attachmentsDir, { recursive: true })
         .pipe(Effect.mapError(unavailable));
+      // A rollback still sends the file's own step, whose text wins for an earlier step of the
+      // same file, but nothing of its dialog: picked points, editing state, a drag.
       const outcome = yield* runJob({
         id: nextJob++,
         steps: [...earlier, step],
         workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
-        connectors: input.connectors ?? [],
+        connectors: rollback === null ? (input.connectors ?? []) : [],
         base,
-        editing: { previous: input.editing ?? null, touched: input.touched ?? [] },
-        manipulatorChange: input.manipulatorChange ?? null,
+        editing:
+          rollback === null
+            ? { previous: input.editing ?? null, touched: input.touched ?? [] }
+            : null,
+        manipulatorChange: rollback === null ? (input.manipulatorChange ?? null) : null,
+        rollback,
         output: { kind: "panel", after: file(after), before: file(before) },
       });
       yield* prunePanelModels().pipe(Effect.ignore);
@@ -465,6 +477,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         manipulators: [],
         parameters: null,
         featureStatus: null,
+        steps: [],
         features: [],
         feature: null,
         inputs: [],
@@ -495,6 +508,13 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         manipulators: ran.panel?.manipulators ?? [],
         parameters: ran.panel?.parameters ?? null,
         featureStatus: ran.panel?.featureStatus ?? null,
+        steps: ran.features.map(({ path, feature, typeName, status, message, cause }) => ({
+          path,
+          feature,
+          typeName,
+          status,
+          message: cause ?? message,
+        })),
         features: ran.panel?.features ?? [],
         feature: ran.panel?.feature ?? null,
         inputs: ran.panel?.inputs ?? [],

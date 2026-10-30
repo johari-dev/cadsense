@@ -506,6 +506,91 @@ export function block(context is Context, id is Id)
     ),
   );
 
+  /**
+   * The rail's rollback bar. Ways it goes wrong: a rollback runs later steps or the file's own
+   * feature; rollback 0 isn't the base alone; a rollback past the steps quietly runs them all; the
+   * file's broken text fails a rollback it takes no part in; a rolled-back result keeps a
+   * dialog, change or manipulators that belong to the feature; step statuses come back out of
+   * order, or a step after one that stopped the run reads as OK.
+   */
+  it.live("panel: rolls back to before an earlier step, and reports each step's status", () =>
+    run(
+      Effect.gen(function* () {
+        const block = (name: string, x: number, size: number) =>
+          feature(
+            `fCuboid(context, id + "c", { "corner1" : vector(${x}, 0, 0) * millimeter, "corner2" : vector(${x + size}, ${size}, ${size}) * millimeter });`,
+          ).replace('"Test"', `"${name}"`);
+        const h = yield* harness({
+          "plate.step": plateStep,
+          "steps/small.fs": block("Small", 200, 10),
+          "steps/large.fs": block("Large", 300, 20),
+          "steps/stops.fs": feature('opMergeContexts(context, id + "merge", {});'),
+        });
+        const before = [{ path: "steps/small.fs" }, { path: "steps/large.fs" }];
+        const total = (preview: { readonly solids: readonly { readonly volumeMm3: number }[] }) =>
+          Math.round(preview.solids.reduce((sum, solid) => sum + solid.volumeMm3, 0));
+        const panel = (rollback?: number, source = cube(5)) =>
+          h.panel({
+            path: "cube.fs",
+            source,
+            base: "plate.step",
+            before,
+            ...(rollback === undefined ? {} : { rollback }),
+          });
+
+        const full = yield* panel();
+        assert.equal(total(full), 60000 + 1000 + 8000 + 125);
+        assert.deepEqual(
+          full.steps.map((step) => [step.path, step.typeName, step.status]),
+          [
+            ["steps/small.fs", "Small", "OK"],
+            ["steps/large.fs", "Large", "OK"],
+            ["cube.fs", "Test", "OK"],
+          ],
+        );
+
+        const beforeLarge = yield* panel(1);
+        assert.equal(total(beforeLarge), 60000 + 1000);
+        assert.deepEqual(
+          beforeLarge.steps.map((step) => step.path),
+          ["steps/small.fs"],
+        );
+        assert.isTrue(isGlb(h.attachment(beforeLarge.model!.after!)));
+        assert.isNull(beforeLarge.model!.before);
+        assert.deepEqual(
+          [beforeLarge.inputs, beforeLarge.features, beforeLarge.manipulators, beforeLarge.changes],
+          [[], [], [], null],
+        );
+        assert.isNull(beforeLarge.feature);
+
+        const baseAlone = yield* panel(0);
+        assert.equal(baseAlone.status, "OK");
+        assert.equal(total(baseAlone), 60000);
+        assert.deepEqual(baseAlone.steps, []);
+
+        // The file's own feature doesn't run, so its broken text doesn't matter.
+        const broken = yield* panel(2, feature("var x = ;"));
+        assert.equal(broken.status, "OK");
+        assert.equal(total(broken), 60000 + 1000 + 8000);
+
+        const past = yield* Effect.flip(panel(3));
+        assert.equal(past.reason, "invalid-operation");
+        assert.include(past.details, "past the 2 earlier steps");
+
+        const stopped = yield* h.panel({
+          path: "cube.fs",
+          source: cube(5),
+          before: [{ path: "steps/stops.fs" }, { path: "steps/small.fs" }],
+        });
+        assert.deepEqual(
+          stopped.steps.map((step) => step.status),
+          ["ERROR", "NOT_RUN", "NOT_RUN"],
+        );
+        assert.include(stopped.steps[0]!.message, "opMergeContexts");
+      }),
+    ),
+  );
+
   it.live("agent: builds the chat card with the failure's line and thread image attachments", () =>
     run(
       Effect.gen(function* () {

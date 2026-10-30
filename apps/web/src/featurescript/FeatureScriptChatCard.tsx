@@ -14,7 +14,7 @@ import { failureLocationLabel, formatVolumeChange, NOTICE_TONES } from "./Featur
 import {
   featureScriptFileKey,
   useFeatureScriptPanelStore,
-  withDefaultInputs,
+  withAgentRun,
 } from "./featureScriptPanelStore";
 
 const FAILED = new Set(["ERROR", "INVALID", "STOPPED"]);
@@ -59,13 +59,7 @@ export function FeatureScriptChatCard(props: {
         .getState()
         .update(
           featureScriptFileKey(threadRef.environmentId, props.workspaceRoot, card.path),
-          ({ feature: _feature, ...current }) => ({
-            ...withDefaultInputs(current),
-            ...(card.feature === null ? {} : { feature: card.feature }),
-            parameters: card.parameters,
-            before: card.before,
-            base: card.base,
-          }),
+          (current) => withAgentRun(current, card),
         );
     useRightPanelStore
       .getState()

@@ -67,6 +67,11 @@ export interface PreviewJob {
   readonly editing: PreviewOptions["editing"] | null;
   /** A manipulator of the last feature was dragged; see `runPreview`'s `manipulatorChange`. */
   readonly manipulatorChange: PreviewOptions["manipulatorChange"] | null;
+  /**
+   * Panel jobs rolled back: only this many steps run, and the model they leave is the "after"
+   * GLB, with no dialog; see `runPreview`'s `rollback`.
+   */
+  readonly rollback: number | null;
   readonly output: PreviewOutput;
 }
 
@@ -195,6 +200,7 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
       connectors: job.connectors,
       ...(job.editing ? { editing: job.editing } : {}),
       ...(job.manipulatorChange ? { manipulatorChange: job.manipulatorChange } : {}),
+      ...(job.rollback === null ? {} : { rollback: job.rollback }),
     });
   } catch (error) {
     const summary = describeFailure(error);
@@ -218,6 +224,22 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
       steps: job.steps.map(({ path, feature, parameters }) => ({ path, feature, parameters })),
     });
     png = NodeFS.readFileSync(NodePath.join(output.outDir, `${output.view}.png`));
+  } else if (job.rollback !== null) {
+    // Rolled back, the previewed feature didn't run: just the model, which may be the base alone.
+    if (result.meshes.length) NodeFS.writeFileSync(output.after, toGlb(result.meshes));
+    panel = {
+      features: [],
+      feature: null,
+      inputs: [],
+      notice: null,
+      errorEntities: 0,
+      editing: null,
+      manipulators: [],
+      featureStatus: null,
+      parameters: null,
+      after: result.meshes.length > 0,
+      before: false,
+    };
   } else if (last) {
     const meshesBefore = result.meshesBefore ?? [];
     if (result.meshes.length) NodeFS.writeFileSync(output.after, toGlb(result.meshes));

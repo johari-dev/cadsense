@@ -103,6 +103,12 @@ export const FeatureScriptPanelPreviewInput = Schema.Struct({
    * before it, then the feature runs with the inputs it set, which the result's `parameters` holds.
    */
   manipulatorChange: Schema.optionalKey(FeatureScriptManipulatorChange),
+  /**
+   * Roll back, as Onshape's rollback bar does: the run stops after the first `rollback` steps of
+   * `before` (0: the base alone) and meshes the model as they left it, nothing highlighted. The
+   * file's own feature doesn't run, so the result has no dialog, change or manipulators.
+   */
+  rollback: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 16 }))),
 });
 export type FeatureScriptPanelPreviewInput = typeof FeatureScriptPanelPreviewInput.Type;
 
@@ -178,6 +184,20 @@ export const FeatureScriptPanelPreview = Schema.Struct({
    * every step); null when it didn't run.
    */
   featureStatus: Schema.NullOr(Schema.Literals(["OK", "INFO", "WARNING", "ERROR"])),
+  /**
+   * Each step the run took, in order: the earlier steps, then the previewed feature (not in a
+   * rollback). After a step that stopped the run, the rest are `NOT_RUN`; empty when the scripts
+   * didn't load. `message` is why a step failed, or what it reported.
+   */
+  steps: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      feature: Schema.String,
+      typeName: Schema.String,
+      status: Schema.Literals(["OK", "INFO", "WARNING", "ERROR", "NOT_RUN"]),
+      message: Schema.NullOr(Schema.String),
+    }),
+  ),
   /** Every feature the file defines; empty when it didn't load. */
   features: Schema.Array(Schema.Struct({ name: Schema.String, typeName: Schema.String })),
   /** The previewed feature's constant, and its dialog. */

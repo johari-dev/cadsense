@@ -83,6 +83,27 @@ export const withoutInputs = ({
   ...settings
 }: FeatureScriptFileSettings): FeatureScriptFileSettings => withDefaultInputs(settings);
 
+/**
+ * The settings that show an agent's run of this file: its feature and inputs, the steps it ran
+ * first, and its base, in a fresh dialog. The chat card's "Open file" and the rail's earlier
+ * steps open a file this way, so the panel runs what the agent ran.
+ */
+export const withAgentRun = (
+  { feature: _feature, ...current }: FeatureScriptFileSettings,
+  run: {
+    readonly feature: string | null;
+    readonly parameters: Readonly<Record<string, string>>;
+    readonly before: readonly CadFeatureScriptPreviewStep[];
+    readonly base: string | null;
+  },
+): FeatureScriptFileSettings => ({
+  ...withDefaultInputs(current),
+  ...(run.feature === null ? {} : { feature: run.feature }),
+  parameters: run.parameters,
+  before: run.before,
+  base: run.base,
+});
+
 /** Whether the person changed any input or picked a feature, either of which can be what fails. */
 export const inputsChanged = (settings: FeatureScriptFileSettings) =>
   Object.keys(settings.parameters).length > 0 ||
