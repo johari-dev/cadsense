@@ -1,10 +1,14 @@
+import type { FeatureScriptDialogInput, FeatureScriptDialogItemInput } from "@cadsense/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   DEFAULT_FEATURESCRIPT_SETTINGS,
+  previewInputs,
   withDefaultInputs,
+  withManipulated,
   withRunEditing,
   withTouched,
   withValue,
+  type FeatureScriptFileSettings,
 } from "./featureScriptPanelStore";
 
 /**
@@ -69,5 +73,152 @@ describe("editing state in the panel's settings", () => {
       withTouched({ ...DEFAULT_FEATURESCRIPT_SETTINGS, editing: logicState }, "depth"),
     );
     expect([reset.editing, reset.touched]).toEqual([undefined, undefined]);
+  });
+});
+
+/**
+ * Keeping a manipulator drag's result as the person's inputs. The run that took the drag ran the
+ * change function and then the feature with the inputs it set, returned as expressions. Ways this
+ * goes wrong: an input the change set isn't kept, so the next run puts the model back; a list
+ * edited item by item becomes one expression, so its items can't be edited or reordered any more;
+ * the run's items are matched to the list's by position, not key; an item's inputs the change
+ * didn't touch are rewritten, or lose their picks; a failed change (no inputs back) changes
+ * anything; the run's dialog state isn't kept, or the inputs it took stay marked, so the next run
+ * takes them again; the settings don't change their edit count, so the panel can't tell its own
+ * update from the person's next edit.
+ */
+describe("withManipulated", () => {
+  const item = (z: string, extra: Partial<FeatureScriptDialogItemInput> = {}) => [
+    field("point", "1 point", { kind: "query" }),
+    field("x", "0 mm"),
+    field("z", z),
+    ...(extra.id ? [field(extra.id, extra.value ?? "", extra)] : []),
+  ];
+  function field(
+    id: string,
+    value: string,
+    extra: Partial<FeatureScriptDialogItemInput> = {},
+  ): FeatureScriptDialogItemInput {
+    return {
+      id,
+      label: id,
+      kind: "length",
+      value,
+      options: [],
+      visible: true,
+      faulty: false,
+      group: null,
+      filter: null,
+      maxPicks: null,
+      ...extra,
+    };
+  }
+  const list = (items: FeatureScriptDialogItemInput[][]): FeatureScriptDialogInput => ({
+    ...field("waypoints", "", { kind: "array" }),
+    itemName: "Waypoint",
+    items,
+  });
+  const lead = (value: string): FeatureScriptDialogInput => ({
+    ...field("lead", value),
+    itemName: null,
+    items: [],
+  });
+  const picked = 'qCreatedBy(makeId("Picked") + "p1", EntityType.BODY)';
+  const waypoints = [
+    { key: "a", parameters: { point: picked }, picks: { point: [[0, 0, 0]] as const } },
+    { key: "b", parameters: { z: "5 * millimeter" }, picks: {} },
+  ];
+  const settings: FeatureScriptFileSettings = {
+    ...DEFAULT_FEATURESCRIPT_SETTINGS,
+    parameters: { lead: "15 * millimeter" },
+    lists: { waypoints },
+    touched: ["lead"],
+    edits: 3,
+  };
+  const from = {
+    inputs: [lead("15 mm"), list([item("0 mm"), item("5 mm")])],
+    listKeys: { waypoints: ["a", "b"] },
+  };
+  // Waypoint b dragged to z = 40.5 mm; the change function wrote the whole list back.
+  const ran = {
+    inputs: [lead("15 mm"), list([item("0 mm"), item("40.5 mm")])],
+    listKeys: { waypoints: ["a", "b"] },
+    parameters: {
+      lead: "15 * millimeter",
+      waypoints: `[{ "point" : ${picked}, "x" : 0 * meter, "z" : 0 * meter }, { "x" : 0 * meter, "z" : 0.0405 * meter }]`,
+    },
+    editing: { parameters: {}, edited: { lead: "0.015 * meter" } },
+  };
+
+  it("sets the dragged item's changed inputs and leaves the rest as they were", () => {
+    const kept = withManipulated(settings, from, ran);
+    expect(kept.lists?.waypoints).toEqual([
+      waypoints[0],
+      { key: "b", parameters: { z: "40.5 * millimeter" }, picks: {}, points: {}, queries: {} },
+    ]);
+    expect(kept.parameters).toEqual(settings.parameters);
+  });
+
+  it("matches the run's items by key", () => {
+    const moved = {
+      ...settings,
+      lists: { waypoints: waypoints.toReversed() },
+    };
+    const kept = withManipulated(moved, from, ran);
+    expect(kept.lists?.waypoints?.map((entry) => [entry.key, entry.parameters.z])).toEqual([
+      ["b", "40.5 * millimeter"],
+      ["a", undefined],
+    ]);
+  });
+
+  it("keeps a top-level input the change set, and a list set as one expression, exactly", () => {
+    const longer = {
+      ...ran,
+      inputs: [lead("20 mm"), ran.inputs[1]!],
+      parameters: { ...ran.parameters, lead: "0.02 * meter" },
+    };
+    const asExpression = { ...settings, lists: {} };
+    const kept = withManipulated(asExpression, from, longer);
+    expect(kept.parameters).toEqual({
+      lead: "0.02 * meter",
+      waypoints: longer.parameters.waypoints,
+    });
+  });
+
+  it("falls back to the run's expression for a changed item input it can't write", () => {
+    const named = {
+      ...ran,
+      inputs: [
+        lead("15 mm"),
+        list([item("0 mm"), item("5 mm", { id: "tag", value: "x", kind: "other" })]),
+      ],
+    };
+    const before = {
+      ...from,
+      inputs: [
+        lead("15 mm"),
+        list([item("0 mm"), item("5 mm", { id: "tag", value: "y", kind: "other" })]),
+      ],
+    };
+    const kept = withManipulated(settings, before, named);
+    expect(kept.lists?.waypoints).toBeUndefined();
+    expect(kept.parameters.waypoints).toBe(ran.parameters.waypoints);
+  });
+
+  it("keeps the run's dialog state for the inputs it now sends, and counts the edit", () => {
+    const kept = withManipulated(settings, from, ran);
+    expect(kept.touched).toBeUndefined();
+    expect(kept.edits).toBe(4);
+    expect(kept.editing).toEqual({
+      parameters: previewInputs(kept).parameters,
+      edited: ran.editing.edited,
+    });
+    // So storing that run's state again changes nothing.
+    expect(withRunEditing(kept, ran.editing)).toBe(kept);
+    expect(withManipulated(settings, from, { ...ran, editing: null }).editing).toBeUndefined();
+  });
+
+  it("changes nothing for a change that failed", () => {
+    expect(withManipulated(settings, from, { ...ran, parameters: null })).toBe(settings);
   });
 });

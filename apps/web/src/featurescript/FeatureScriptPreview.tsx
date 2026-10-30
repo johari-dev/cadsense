@@ -4,6 +4,7 @@ import type {
   FeatureScriptDialogInput,
   FeatureScriptDialogItemInput,
   FeatureScriptFailure,
+  FeatureScriptManipulatorChange,
   FeatureScriptNotice,
   FeatureScriptPanelPreview,
   FeatureScriptPreviewStatus,
@@ -25,7 +26,7 @@ import {
   WarningIcon as TriangleAlertIcon,
   XIcon,
 } from "~/lib/icons";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -61,7 +62,12 @@ import {
   type FeatureScriptFileSettings,
   type FeatureScriptListItem,
 } from "./featureScriptPanelStore";
-import { FeatureScriptViewport } from "./FeatureScriptViewport";
+import { manipulatorRow, readManipulator } from "./featureScriptManipulators";
+import {
+  FeatureScriptViewport,
+  type ManipulatorDrag,
+  type ViewManipulator,
+} from "./FeatureScriptViewport";
 import type { FeatureScriptPanelRun, FeatureScriptPreviewState } from "./useFeatureScriptPreview";
 
 const NO_BASE = "";
@@ -99,6 +105,12 @@ const FAULTY_ROW = {
   WARNING: "rounded-md bg-warning/8 ring-1 ring-warning/50 ring-inset",
   INFO: "rounded-md bg-info/8 ring-1 ring-info/50 ring-inset",
 } as const;
+
+/** The dialog row a dragged manipulator drives: the faulty-row outline in the pick color. */
+const DRIVEN_ROW = FAULTY_ROW.INFO;
+
+/** The dialog row a manipulator drives, if the dialog shows it; see `manipulatorRow`. */
+type DrivenRow = ReturnType<typeof manipulatorRow>;
 
 /** What a dialog row needs to show that the feature's status blames it. */
 interface Fault {
@@ -211,6 +223,8 @@ export interface FeatureScriptPreviewProps {
   readonly base: string | null;
   readonly onShowLine: (path: string, line: number) => void;
   readonly onAskAgent: (failure: FeatureScriptFailure) => void;
+  /** A manipulator was dragged and released: run its change. */
+  readonly onManipulate: (change: FeatureScriptManipulatorChange) => void;
 }
 
 /** Where an input's value lives: a top-level input, or an input inside one item of a list. */
@@ -286,6 +300,25 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
   const before = shown?.model?.before ?? null;
   const showing =
     (picking !== null && before) || (view === "before" && before) ? "before" : "after";
+  const dialogShown = dialog !== null && (dialog.inputs.length > 0 || dialog.features.length > 1);
+  // The latest run's manipulators, drawn while its dialog is open on its own model, as Onshape
+  // draws them; not over a greyed last good run, the model before, or while picking.
+  const isPicking = picking !== null;
+  const manipulators = useMemo(
+    (): readonly (ViewManipulator & { readonly row: DrivenRow })[] =>
+      latest && shown === latest && dialogShown && !isPicking && showing === "after"
+        ? latest.manipulators.flatMap((fields) => {
+            const manipulator = readManipulator(fields);
+            if (!manipulator) return [];
+            const row = manipulatorRow(manipulator, latest.inputs, latest.listKeys);
+            return [{ manipulator, row, name: row && "input" in row ? row.name : null }];
+          })
+        : [],
+    [latest, shown, dialogShown, isPicking, showing],
+  );
+  const [dragging, setDragging] = useState<(ManipulatorDrag & { readonly row: DrivenRow }) | null>(
+    null,
+  );
 
   useEffect(() => {
     if (picking === null) return;
@@ -377,17 +410,39 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
         picks={allPicks}
         fitRequest={fitRequest}
         onLoadFailed={setMissingModel}
+        manipulators={manipulators}
+        onDrag={(drag) =>
+          setDragging(
+            drag && {
+              ...drag,
+              row: manipulators.find((drawn) => drawn.manipulator.key === drag.key)?.row ?? null,
+            },
+          )
+        }
+        onRelease={(manipulator, changes) =>
+          props.onManipulate({ key: manipulator.key, manipulator: manipulator.expression, changes })
+        }
       />
+      {dragging ? (
+        <span
+          className="pointer-events-none absolute rounded-md border border-border bg-background/92 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-foreground"
+          style={{ left: dragging.at[0] + 14, top: dragging.at[1] - 30 }}
+          data-testid="featurescript-manipulator-value"
+        >
+          {dragging.label}
+        </span>
+      ) : null}
       {emptyMessage ? (
         <div className="absolute inset-0 flex items-center justify-center px-8 text-center text-xs text-muted-foreground">
           {emptyMessage}
         </div>
       ) : null}
-      {dialog && (dialog.inputs.length > 0 || dialog.features.length > 1) ? (
+      {dialog && dialogShown ? (
         <FeatureDialog
           preview={dialog}
           settings={settings}
           picking={picking}
+          driven={dragging?.row ?? null}
           onPick={(target) =>
             setPicking((current) =>
               current !== null && sameSlot(current.slot, target.slot) ? null : target,
@@ -453,6 +508,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
           view={before ? showing : null}
           onView={setView}
           onFit={() => setFitRequest((count) => count + 1)}
+          dragging={dragging ? (dragging.row?.name ?? dragging.key) : null}
         />
       </div>
     </div>
@@ -463,6 +519,8 @@ function FeatureDialog(props: {
   readonly preview: FeatureScriptPanelRun;
   readonly settings: FeatureScriptFileSettings;
   readonly picking: PickTarget | null;
+  /** The row a dragged manipulator drives, lit up while it's dragged. */
+  readonly driven: DrivenRow;
   readonly onPick: (target: PickTarget) => void;
   readonly onSetParameter: (slot: InputSlot, expression: string | null) => void;
   readonly onList: (
@@ -497,6 +555,12 @@ function FeatureDialog(props: {
         parameter={values?.parameters[input.id]}
         picks={values?.picks[input.id]?.length ?? 0}
         picking={slotPicking(slot)}
+        driven={
+          !("list" in slot) &&
+          props.driven !== null &&
+          "input" in props.driven &&
+          props.driven.input === input.id
+        }
         onPick={(target) => props.onPick({ slot, ...target })}
         onSet={(expression) => props.onSetParameter(slot, expression)}
       />
@@ -573,6 +637,11 @@ function FeatureDialog(props: {
                 runKeys={preview.listKeys[input.id] ?? null}
                 items={settings.lists?.[input.id] ?? null}
                 expression={settings.parameters[input.id] ?? null}
+                driven={
+                  props.driven && "list" in props.driven && props.driven.list === input.id
+                    ? props.driven
+                    : null
+                }
                 onList={(change) => props.onList(input.id, change)}
                 onClearExpression={() => props.onSetParameter({ input: input.id }, null)}
                 row={(inner, item) => row(inner, { input: inner.id, list: input.id, item })}
@@ -600,6 +669,8 @@ function ListInput(props: {
   readonly items: readonly FeatureScriptListItem[] | null;
   /** The list set as one expression (by the agent), when it hasn't been edited here. */
   readonly expression: string | null;
+  /** The item a dragged manipulator drives, by its key; null for the whole list. */
+  readonly driven: { readonly item: string | null } | null;
   readonly onList: (
     change: (items: readonly FeatureScriptListItem[]) => readonly FeatureScriptListItem[],
   ) => void;
@@ -623,11 +694,16 @@ function ListInput(props: {
   const fromExpression = props.items === null && props.expression !== null;
   return (
     <div
-      className={cn("px-2.5 py-1", input.faulty && props.fault.row)}
+      className={cn(
+        "px-2.5 py-1",
+        input.faulty && props.fault.row,
+        props.driven?.item === null && DRIVEN_ROW,
+      )}
       role="group"
       aria-label={input.label}
       aria-invalid={(input.faulty && props.fault.invalid) || undefined}
       data-faulty={input.faulty || undefined}
+      data-manipulated={props.driven?.item === null || undefined}
     >
       <div className="flex min-h-8 items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-muted-foreground">{input.label}</span>
@@ -657,12 +733,17 @@ function ListInput(props: {
         // order is the old one until the next run.
         const ran = props.runKeys?.indexOf(item.key) ?? -1;
         const inner = ran >= 0 ? input.items[ran] : undefined;
+        const driven = props.driven?.item === item.key;
         return (
           <div
             key={item.key}
-            className="mt-1 rounded-lg border border-border/70 bg-background/40"
+            className={cn(
+              "mt-1 rounded-lg border border-border/70 bg-background/40",
+              driven && "bg-info/8 ring-1 ring-info/50 ring-inset",
+            )}
             role="group"
             aria-label={`${name} ${index + 1}`}
+            data-manipulated={driven || undefined}
           >
             <div className="flex h-7 items-center gap-0.5 pr-1 pl-2">
               <span className="min-w-0 flex-1 truncate font-medium text-foreground">
@@ -714,6 +795,8 @@ function InputRow(props: {
   readonly parameter: string | undefined;
   readonly picks: number;
   readonly picking: boolean;
+  /** A dragged manipulator drives this input. */
+  readonly driven: boolean;
   readonly onPick: (target: NonNullable<ReturnType<typeof pickKind>>) => void;
   readonly onSet: (expression: string | null) => void;
 }) {
@@ -721,12 +804,21 @@ function InputRow(props: {
   const label = (
     <span className="min-w-0 flex-1 truncate text-muted-foreground">{input.label}</span>
   );
-  const row = cn("flex min-h-8 items-center gap-2 px-2.5", input.faulty && props.fault.row);
+  const row = cn(
+    "flex min-h-8 items-center gap-2 px-2.5",
+    input.faulty && props.fault.row,
+    props.driven && DRIVEN_ROW,
+  );
   const invalid = (input.faulty && props.fault.invalid) || undefined;
   const faulty = input.faulty || undefined;
+  const manipulated = props.driven || undefined;
   if (input.kind === "boolean")
     return (
-      <label className={cn(row, "cursor-pointer")} data-faulty={faulty}>
+      <label
+        className={cn(row, "cursor-pointer")}
+        data-faulty={faulty}
+        data-manipulated={manipulated}
+      >
         {label}
         <Checkbox
           checked={input.value === "true"}
@@ -738,7 +830,7 @@ function InputRow(props: {
     );
   if (input.kind === "enum" && input.options.length > 0)
     return (
-      <div className={row} data-faulty={faulty}>
+      <div className={row} data-faulty={faulty} data-manipulated={manipulated}>
         {label}
         <Select
           value={input.value}
@@ -767,7 +859,7 @@ function InputRow(props: {
   const target = input.kind === "query" ? pickKind(input.filter) : null;
   if (target)
     return (
-      <div className={row} data-faulty={faulty}>
+      <div className={row} data-faulty={faulty} data-manipulated={manipulated}>
         {label}
         <Button
           variant={props.picking ? "secondary" : "outline"}
@@ -802,7 +894,7 @@ function InputRow(props: {
       </div>
     );
   return (
-    <div className={row} data-faulty={faulty}>
+    <div className={row} data-faulty={faulty} data-manipulated={manipulated}>
       {label}
       <ValueField input={input} invalid={invalid} parameter={props.parameter} onSet={props.onSet} />
     </div>
@@ -964,6 +1056,8 @@ function Footer(props: {
   readonly view: "after" | "before" | null;
   readonly onView: (view: "after" | "before") => void;
   readonly onFit: () => void;
+  /** What's being dragged (the row a manipulator drives), which the outcome gives way to. */
+  readonly dragging: string | null;
 }) {
   const { preview } = props;
   const changes = !props.failed ? preview?.changes : null;
@@ -996,8 +1090,16 @@ function Footer(props: {
           <FocusIcon />
         </Button>
       </span>
-      {preview && !props.failed ? <FooterStatus status={preview.status} /> : null}
-      {changes ? (
+      {props.dragging !== null ? (
+        <>
+          <span className="text-info-foreground">Dragging {props.dragging}</span>
+          <span className="text-muted-foreground">Esc cancels</span>
+        </>
+      ) : null}
+      {preview && !props.failed && props.dragging === null ? (
+        <FooterStatus status={preview.status} />
+      ) : null}
+      {changes && props.dragging === null ? (
         <>
           <span className="text-muted-foreground">
             Volume <span className="text-foreground">{formatVolumeChange(changes.volumeMm3)}</span>
