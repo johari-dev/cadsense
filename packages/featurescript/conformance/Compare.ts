@@ -162,24 +162,25 @@ function distance(a: PlainMap, b: PlainMap): number {
 
 /**
  * Pairs Onshape's bodies with the local ones. Query order is itself unconfirmed, so bodies pair by
- * kind (types, sketch, construction) and then by nearest box; bodies of different kinds pair only
- * if their boxes nearly coincide (within 0.1 mm in total). Returns pairs of indices, and the
- * indices left over on each side.
+ * kind (types, sketch, construction) and then by nearest box, and bodies tied on box and measure by
+ * fewest differing fields, so the order either side lists them in doesn't matter; bodies of
+ * different kinds pair only if their boxes nearly coincide (within 0.1 mm in total). Returns pairs
+ * of indices, and the indices left over on each side.
  */
 function pairBodies(onshape: readonly PlainMap[], local: readonly PlainMap[]) {
   const pairs: [number, number][] = [];
   const usedOnshape = new Set<number>();
   const usedLocal = new Set<number>();
   for (const sameKind of [true, false]) {
-    const candidates: [number, number, number][] = [];
+    const candidates: [number, number, number, number][] = [];
     onshape.forEach((a, i) =>
       local.forEach((b, j) => {
         if (usedOnshape.has(i) || usedLocal.has(j) || (flags(a) === flags(b)) !== sameKind) return;
         const d = distance(a, b);
-        if (sameKind || d < 1e-4) candidates.push([d, i, j]);
+        if (sameKind || d < 1e-4) candidates.push([d, differences(a, b), i, j]);
       }),
     );
-    for (const [, i, j] of candidates.sort((x, y) => x[0] - y[0])) {
+    for (const [, , i, j] of candidates.sort((x, y) => x[0] - y[0] || x[1] - y[1])) {
       if (usedOnshape.has(i) || usedLocal.has(j)) continue;
       usedOnshape.add(i);
       usedLocal.add(j);
@@ -191,6 +192,14 @@ function pairBodies(onshape: readonly PlainMap[], local: readonly PlainMap[]) {
     onshapeOnly: onshape.map((_, i) => i).filter((i) => !usedOnshape.has(i)),
     localOnly: local.map((_, j) => j).filter((j) => !usedLocal.has(j)),
   };
+}
+
+/** How many of two bodies' fields differ beyond their tolerances. */
+function differences(a: PlainMap, b: PlainMap): number {
+  let count = 0;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)]))
+    compareValues(a[key], b[key], key, BODY_TOLERANCES[key] ?? EXACT, () => count++);
+  return count;
 }
 
 /** Dialog inputs reduced to their ids and item ids, the part both specs agree on how to say. */

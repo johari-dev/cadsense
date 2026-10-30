@@ -17,10 +17,14 @@ export interface ContextState {
   readonly operations: ReadonlyMap<string, OperationRecord>;
 }
 
-/** An operation that ran: the `op*` builtin and the definition it was given. */
+/**
+ * An operation that ran: the `op*` builtin, the definition it was given, and the geometry it was
+ * given it in (its queries resolve there, as they did when it ran).
+ */
 export interface OperationRecord {
   readonly builtin: string;
   readonly definition: FsValue;
+  readonly before: GeometryState;
 }
 
 /**
@@ -234,6 +238,7 @@ export class ModelContext {
     const operations = new Map(this.state.operations).set(keyOf(operation), {
       builtin,
       definition,
+      before,
     });
     operationsAt.set(after, operations);
     this.state = { ...this.state, lastOperation: operation, modifiedBy, operations };

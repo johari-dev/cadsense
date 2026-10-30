@@ -1057,16 +1057,32 @@ export class Interpreter {
     const args = argExpressions.map((arg) => this.eval(arg, env));
     this.builtinsCalled.add(name);
     const module = env.module;
-    return impl(args, {
-      interpreter: this,
-      module,
-      span,
-      fail: (message: string) => this.fail(message, module, span),
-      unsupported: (message: string) => this.fault("unsupported-builtin", message, module, span),
-      raise: (value: FsValue) => {
-        throw new FsThrow(value, this.frames(module.path, span));
-      },
-    });
+    try {
+      return impl(args, {
+        interpreter: this,
+        module,
+        span,
+        fail: (message: string) => this.fail(message, module, span),
+        unsupported: (message: string) => this.fault("unsupported-builtin", message, module, span),
+        raise: (value: FsValue) => {
+          throw new FsThrow(value, this.frames(module.path, span));
+        },
+      });
+    } catch (error) {
+      // FeatureScript errors and faults pass through, and so does running out of stack (a limit).
+      // Anything else is the kernel or a builtin throwing (OpenCascade throws WebAssembly
+      // exceptions on input it rejects): a fault std's `try` can't swallow, so the feature fails as
+      // a regen error would instead of the exception ending the whole run.
+      if (error instanceof FsFault || error instanceof FsThrow || error instanceof RangeError)
+        throw error;
+      const detail = error instanceof Error ? error.message : "an OpenCascade exception";
+      return this.fault(
+        "internal",
+        `@${name} failed in the local kernel: ${detail}.`,
+        module,
+        span,
+      );
+    }
   }
 
   private satisfies(

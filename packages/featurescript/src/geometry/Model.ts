@@ -1,5 +1,5 @@
 import { FsFault } from "../runtime/Errors.ts";
-import type { FsValue } from "../runtime/Value.ts";
+import { FsTagged, type FsValue } from "../runtime/Value.ts";
 import { fromList, seamEdges, ShapeSet, subShapes, type Oc, type Shape } from "./occt.ts";
 
 /** A FeatureScript attribute on an entity. Unnamed ones are std's legacy form. */
@@ -27,6 +27,13 @@ export interface SketchOrigin {
   readonly entityId: string | null;
 }
 
+/**
+ * Whether two legacy unnamed attributes count as one type, so an entity holds only one of them
+ * (std's attributes.fs): the same type tag, or both untagged.
+ */
+export const sameAttributeType = (a: FsValue, b: FsValue): boolean =>
+  (a instanceof FsTagged ? a.tag : null) === (b instanceof FsTagged ? b.tag : null);
+
 /** A body, face, edge or vertex with a transient id that lasts for the life of the context. */
 export interface Entity {
   readonly id: string;
@@ -37,6 +44,11 @@ export interface Entity {
   readonly bodyType: BodyType;
   /** Id components of the operation that created it. `qCreatedBy` matches by prefix. */
   readonly createdBy: readonly string[];
+  /**
+   * Its other creators, per std's `qCreatedBy`: a split piece is also created by the split (and its
+   * original's creator), and a merged entity by every merged entity's creators and the merge.
+   */
+  readonly alsoCreatedBy?: readonly (readonly string[])[];
   readonly construction: boolean;
   readonly sketch: SketchOrigin | null;
   /** Extrude caps, for `qCapEntity`. */
@@ -44,8 +56,8 @@ export interface Entity {
   /** Attributes follow the entity through operations, and split pieces inherit them. */
   readonly attributes: readonly EntityAttribute[];
   /**
-   * A body's properties from `setProperty`, keyed by `PropertyType` member (`"NAME"`) or
-   * `CUSTOM:<id>`. They stay with the body's id through operations. Empty on faces, edges, vertices.
+   * Properties from `setProperty`, keyed by `PropertyType` member (`"NAME"`) or `CUSTOM:<id>`: a
+   * body's, or a face's appearance and name. They follow the entity through operations.
    */
   readonly properties: ReadonlyMap<string, FsValue>;
   /** Creation order; query results follow it. */
@@ -326,6 +338,115 @@ export function replaceBodies(
   for (const { faces, edges, vertices } of topologies)
     for (const shape of [...faces, ...edges, ...vertices]) inAnyResult.set(shape, true);
 
+  // For qCreatedBy's split and merge rules: the kept bodies each result continues, the bodies split
+  // across results, and the faces, edges and vertices split into several pieces.
+  const presentIn = topologies.map(({ faces, edges, vertices }) => {
+    const set = new ShapeSet<true>(oc);
+    for (const shape of [...faces, ...edges, ...vertices]) set.set(shape, true);
+    return set;
+  });
+  // A result continues a kept body when it holds an image that only that body's entities made and
+  // no other result holds. Where bodies touch (two plates cut by one hole, a union's coplanar
+  // sides) the images are both bodies', so they decide nothing; each body's own faces do.
+  const imageBodies = new ShapeSet<Set<string>>(oc);
+  const images: Shape[] = [];
+  for (const entity of old) {
+    if (!replacement.keepIds.includes(entity.body)) continue;
+    for (const image of [entity.shape, ...replacement.history.modified(entity.shape)]) {
+      if (!inAnyResult.has(image)) continue;
+      const bodies = imageBodies.get(image);
+      if (bodies) bodies.add(entity.body);
+      else {
+        imageBodies.set(image, new Set([entity.body]));
+        images.push(image);
+      }
+    }
+  }
+  // A body's own image in one result makes that result continue it. An image several bodies made
+  // (coincident faces) counts too, unless one of those bodies continues in another result: that's
+  // two bodies touching (the plates), not one made of both (identical cubes united).
+  const holdersOf = (image: Shape) =>
+    presentIn.flatMap((set, index) => (set.has(image) ? [index] : []));
+  const ownSources = presentIn.map(() => new Set<string>());
+  for (const image of images) {
+    const bodies = imageBodies.get(image)!;
+    const holders = holdersOf(image);
+    if (bodies.size === 1 && holders.length === 1) ownSources[holders[0]!]!.add([...bodies][0]!);
+  }
+  // Only a body's own images place it elsewhere; shared ones don't (coincident bodies cut into
+  // pieces continue in every piece).
+  const ownedElsewhere = (body: string, index: number) =>
+    ownSources.some((set, other) => other !== index && set.has(body));
+  const sourceBodies = ownSources.map((set) => new Set(set));
+  for (const image of images) {
+    const bodies = [...imageBodies.get(image)!];
+    const holders = holdersOf(image);
+    if (bodies.length < 2 || holders.length !== 1) continue;
+    const index = holders[0]!;
+    if (bodies.some((body) => ownedElsewhere(body, index))) continue;
+    for (const body of bodies) sourceBodies[index]!.add(body);
+  }
+  /**
+   * Every source's attributes, each once: what a merged entity carries. A name several sources set
+   * keeps the primary entity's value, and so does an unnamed attribute's type, one per entity
+   * (std's attributes.fs).
+   */
+  const mergedAttributes = (sources: readonly Entity[], first: readonly EntityAttribute[]) => {
+    const merged = [...first];
+    for (const attribute of sources.flatMap((source) => source.attributes))
+      if (
+        !merged.includes(attribute) &&
+        !merged.some((kept) =>
+          attribute.name === null
+            ? kept.name === null && sameAttributeType(kept.value, attribute.value)
+            : kept.name === attribute.name,
+        )
+      )
+        merged.push(attribute);
+    return merged;
+  };
+  /** Sources ordered primary first: the operation's `keepIds` order (a boolean's tools). */
+  const byPrimary = (sources: readonly Entity[]) =>
+    [...sources].sort((a, b) => rank(a.body) - rank(b.body));
+  const rank = (body: string) => {
+    const index = replacement.keepIds.indexOf(body);
+    return index < 0 ? replacement.keepIds.length : index;
+  };
+  const splitBodies = new Set(
+    replacement.keepIds.filter((body) => sourceBodies.filter((set) => set.has(body)).length > 1),
+  );
+  const splitEntities = new Set(
+    old
+      .filter(
+        (entity) =>
+          replacement.history.modified(entity.shape).filter((shape) => inAnyResult.has(shape))
+            .length > 1,
+      )
+      .map((entity) => entity.id),
+  );
+  /** An entity's other creators: none, or `sources`' creators and this operation (see Entity). */
+  const alsoCreatedBy = (
+    sources: readonly Entity[],
+    split: boolean,
+    createdBy: readonly string[],
+  ): { alsoCreatedBy?: readonly (readonly string[])[] } => {
+    const creators =
+      sources.length > 1 || split
+        ? [
+            ...sources.flatMap((source) => [source.createdBy, ...(source.alsoCreatedBy ?? [])]),
+            replacement.createdBy,
+          ]
+        : (sources[0]?.alsoCreatedBy ?? []);
+    const seen = new Set([createdBy.join(".")]);
+    const unique = creators.filter((creator) => {
+      const key = creator.join(".");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return unique.length ? { alsoCreatedBy: unique } : {};
+  };
+
   replacement.results.forEach((result, index) => {
     const { faces, edges, vertices } = topologies[index]!;
     const present = new ShapeSet<"FACE" | "EDGE" | "VERTEX">(oc);
@@ -339,6 +460,11 @@ export function replaceBodies(
     const cameFrom = (shape: Shape, entity: Entity) => {
       if (present.has(shape)) origins.set(shape, [...(origins.get(shape) ?? []), entity]);
     };
+    // New sub-shape -> the old entities it continues (itself or modified, not generated).
+    const continues = new ShapeSet<Entity[]>(oc);
+    const continued = (shape: Shape, entity: Entity) => {
+      if (present.has(shape)) continues.set(shape, [...(continues.get(shape) ?? []), entity]);
+    };
     for (const entity of old) {
       for (const shape of replacement.history.generated(entity.shape)) cameFrom(shape, entity);
       // A shape still in the result wasn't deleted, whatever the history says: OpenCascade's
@@ -348,7 +474,10 @@ export function replaceBodies(
         .modified(entity.shape)
         .filter((shape) => inAnyResult.has(shape));
       const modified = allModified.filter((shape) => present.has(shape));
-      for (const shape of modified.length ? modified : [entity.shape]) cameFrom(shape, entity);
+      for (const shape of modified.length ? modified : [entity.shape]) {
+        cameFrom(shape, entity);
+        continued(shape, entity);
+      }
       // An entity an earlier body continued can't continue here too; another may claim the shape.
       if (usedIds.has(entity.id)) continue;
       if (modified.length === 0 && present.has(entity.shape) && !assigned.has(entity.shape))
@@ -384,17 +513,28 @@ export function replaceBodies(
         shapes.flatMap((shape) => (origins.get(shape) ?? []).map((origin) => origin.body)),
       ),
     );
+    const bodyCreatedBy = keptEntity?.createdBy ?? replacement.createdBy;
+    const sources = [...sourceBodies[index]!].flatMap((body) => state.entities.get(body) ?? []);
     entities.set(bodyId, {
       id: bodyId,
       type: "BODY",
       shape: result.shape,
       body: bodyId,
       bodyType: result.bodyType,
-      createdBy: keptEntity?.createdBy ?? replacement.createdBy,
+      createdBy: bodyCreatedBy,
+      ...alsoCreatedBy(
+        sources,
+        sources.some((source) => splitBodies.has(source.id)),
+        bodyCreatedBy,
+      ),
       construction: keptEntity?.construction ?? false,
       sketch: null,
       cap: null,
-      attributes: keptEntity?.attributes ?? [],
+      // A split piece carries its body's attributes, kept id or not (attributes.fs).
+      attributes:
+        sources.length > 1
+          ? mergedAttributes(sources, keptEntity?.attributes ?? [])
+          : ((keptEntity ?? sources[0])?.attributes ?? []),
       properties: keptEntity?.properties ?? NO_PROPERTIES,
       order: keptEntity?.order ?? next,
       ...(result.frame ? { frame: result.frame } : {}),
@@ -412,22 +552,37 @@ export function replaceBodies(
           ...(origins.get(shape) ?? []).map((origin) => origin.id),
           ...(replacement.sources?.(shape, type) ?? []),
         ]);
+        const createdBy = link?.from?.createdBy ?? replacement.createdBy;
+        const from = (continues.get(shape) ?? []).filter((source) =>
+          sourceBodies[index]!.has(source.body),
+        );
         entities.set(id, {
           id,
           type,
           shape,
           body: bodyId,
           bodyType: result.bodyType,
-          createdBy: link?.from?.createdBy ?? replacement.createdBy,
+          createdBy,
+          ...alsoCreatedBy(
+            from,
+            from.some((source) => splitEntities.has(source.id)),
+            createdBy,
+          ),
           construction: link?.from?.construction ?? false,
           sketch: link?.from?.sketch ?? null,
           cap: link?.from?.cap ?? null,
-          attributes: link?.from?.attributes ?? [],
-          properties: NO_PROPERTIES,
+          attributes:
+            from.length > 1
+              ? mergedAttributes(byPrimary(from).slice(1), byPrimary(from)[0]!.attributes)
+              : (link?.from?.attributes ?? []),
+          properties: link?.from?.properties ?? NO_PROPERTIES,
           order: link?.id ? link.from!.order : next,
           ...(result.frame && type === "VERTEX" ? { frame: result.frame } : {}),
           ...replacement.annotate?.(shape, type),
         });
+        // Operation names (opHole's) follow the entity to what continues it, like its attributes.
+        if (link?.from)
+          for (const name of topologyNamesOf(oc, link.from.shape)) nameTopology(oc, shape, name);
       }
   });
   return { state: { entities, next, lineage }, ids };
@@ -511,9 +666,9 @@ export interface TopologyName {
 const topologyNames = new WeakMap<Oc, ShapeSet<TopologyName[]>>();
 
 /**
- * Records `name` on `shape` (once). Names belong to that exact face, edge or vertex, so a later
- * operation that rebuilds it drops them; rolling a feature back can't leave stale names, since its
- * shapes are gone with it. A boolean can share one face between a kept tool and its target; both
+ * Records `name` on `shape` (once). Names belong to that exact face, edge or vertex; replaceBodies
+ * copies them to whatever continues it, so they follow the entity through later operations, and
+ * rolling a feature back can't leave stale names, since its shapes are gone with it. A boolean can share one face between a kept tool and its target; both
  * then carry the name.
  */
 export function nameTopology(oc: Oc, shape: Shape, name: TopologyName): void {

@@ -387,7 +387,8 @@ describe("history queries", () => {
 
   it("stop the run where they'd need operation provenance", () => {
     for (const [query, message] of [
-      ['qDependency(qCreatedBy(id + "a", EntityType.BODY))', /qDependency/],
+      // An extruded body's dependency is known (its profile); a patterned copy's isn't.
+      ['qDependency(qCreatedBy(id + "pattern", EntityType.BODY))', /qDependency/],
       ['qLaminarDependency(qCreatedBy(id + "a", EntityType.EDGE))', /qLaminarDependency/],
       ['qMatching(qNthElement(qCreatedBy(id + "a", EntityType.FACE), 0))', /qMatching/],
     ] as const) {

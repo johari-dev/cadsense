@@ -31,6 +31,7 @@ import {
   planeAround,
   seamsClear,
   shellCheck,
+  shellOf,
   shellSolid,
   smoothSheet,
   surfaceType,
@@ -1414,10 +1415,14 @@ export const OPERATION_BUILTINS = {
           createdBy: [...idOf(id), names[i]!],
           construction: body.construction,
           ...(body.frame ? { frame: movedFrame(oc, trsf, body.frame) } : {}),
-          annotate: (_: Shape, type: string) =>
-            type === "BODY" && untag(definition.getField("copyPropertiesAndAttributes")) !== false
-              ? { attributes: body.attributes, properties: body.properties }
-              : {},
+          // Each copy carries what it copies: the body's attributes and properties, and each face's,
+          // edge's and vertex's, as std's opPattern documents.
+          annotate: (shape: Shape, type: string) => {
+            if (untag(definition.getField("copyPropertiesAndAttributes")) === false) return {};
+            const seedId = seeds.get(shape);
+            const seed = type === "BODY" ? body : seedId && model.geometry.entities.get(seedId);
+            return seed ? { attributes: seed.attributes, properties: seed.properties } : {};
+          },
         };
       });
     });
@@ -1751,9 +1756,15 @@ export const OPERATION_BUILTINS = {
     const definition = map(call, value, "definition");
     if (untag(definition.getField("useTrimmed")) === true)
       return call.unsupported("useTrimmed is not supported locally yet.");
+    // std splits solid, sheet and wire bodies; the default planes and origin (construction) and
+    // points stay as they are, never split or deleted.
     const targets = [
       ...byBody(model, resolve(call, model, oc, definition.getField("targets"))).keys(),
-    ];
+    ].filter(
+      (body) =>
+        !body.construction &&
+        (body.bodyType === "SOLID" || body.bodyType === "SHEET" || body.bodyType === "WIRE"),
+    );
     if (targets.length === 0) return regenError(call, "SPLIT_SELECT_TARGETS");
     // Planes and planar faces cut as unbounded planes: a patch on the plane covering every target.
     const across = (plane: { origin: Vec3; normal: Vec3 }) =>
@@ -1793,19 +1804,62 @@ export const OPERATION_BUILTINS = {
       splitter.SetTools(toList(oc, [tool]));
       splitter.Build(new oc.Message_ProgressRange());
       if (splitter.HasErrors()) return regenError(call, "SPLIT_FAILED");
-      const kind = target.bodyType === "SOLID" ? "SOLID" : "SHELL";
-      const pieces = subShapes(oc, splitter.Shape(), kind).filter((piece) => {
-        if (keep === "KEEP_ALL" || !side) return true;
+      /** Whether `shape`'s centroid is in front of the planar tool. */
+      const ahead = (shape: Shape, plane: { origin: Vec3; normal: Vec3 }) => {
         const props = new oc.GProp_GProps();
-        oc.BRepGProp.VolumeProperties(piece, props, false, false, false);
+        if (target.bodyType === "SOLID")
+          oc.BRepGProp.VolumeProperties(shape, props, false, false, false);
+        else if (target.bodyType === "SHEET")
+          oc.BRepGProp.SurfaceProperties(shape, props, false, false);
+        else oc.BRepGProp.LinearProperties(shape, props, false, false);
         const c = xyz(props.CentreOfMass());
-        const ahead =
-          (c[0] - side.origin[0]) * side.normal[0] +
-            (c[1] - side.origin[1]) * side.normal[1] +
-            (c[2] - side.origin[2]) * side.normal[2] >
-          0;
-        return keep === "KEEP_FRONT" ? ahead : !ahead;
-      });
+        return (
+          (c[0] - plane.origin[0]) * plane.normal[0] +
+            (c[1] - plane.origin[1]) * plane.normal[1] +
+            (c[2] - plane.origin[2]) * plane.normal[2] >
+          0
+        );
+      };
+      const kept = (piece: Shape) =>
+        keep === "KEEP_ALL" || !side || (keep === "KEEP_FRONT") === ahead(piece, side);
+      let pieces: Shape[];
+      if (target.bodyType === "SOLID") pieces = subShapes(oc, splitter.Shape(), "SOLID");
+      else if (target.bodyType === "SHEET" || target.bodyType === "WIRE") {
+        // The splitter only imprints a sheet or wire, so its halves still touch along the cut:
+        // the pieces are the faces (edges) on each side of the plane that touch each other.
+        if (!side)
+          return call.unsupported(
+            "Splitting a sheet or wire body with a tool that isn't planar is not supported locally yet.",
+          );
+        const plane = side;
+        const items = subShapes(
+          oc,
+          splitter.Shape(),
+          target.bodyType === "SHEET" ? "FACE" : "EDGE",
+        );
+        pieces = [];
+        for (const front of [true, false]) {
+          const onSide = items.filter((item) => ahead(item, plane) === front);
+          if (target.bodyType === "SHEET")
+            pieces.push(...connectedGroups(oc, onSide).map((faces) => shellOf(oc, faces)));
+          else {
+            const chains = chainsOf(oc, onSide);
+            if (!chains)
+              return call.unsupported(
+                "Splitting a wire body whose edges branch is not supported locally yet.",
+              );
+            for (const chain of chains) {
+              const wire = new oc.BRepBuilderAPI_MakeWire();
+              for (const { edge } of chain) wire.Add(oc.TopoDS.Edge(edge));
+              pieces.push(wire.Wire());
+            }
+          }
+        }
+      } else
+        return call.unsupported(
+          `Splitting a ${target.bodyType.toLowerCase()} body is not supported locally yet.`,
+        );
+      pieces = pieces.filter(kept);
       model.geometry = replaceBodies(oc, model.geometry, {
         consumed: [target.id],
         keepIds: [target.id],
