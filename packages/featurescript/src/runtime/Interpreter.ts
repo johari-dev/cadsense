@@ -92,6 +92,10 @@ export interface BuiltinCall {
   readonly span: Span;
   /** Raises a catchable FeatureScript exception with a string message. */
   fail(message: string): never;
+  /** Stops the run: something this runtime can't do locally (not catchable by FeatureScript). */
+  unsupported(message: string): never;
+  /** Raises a catchable FeatureScript exception carrying `value` (e.g. a regen error map). */
+  raise(value: FsValue): never;
 }
 export type BuiltinImpl = (args: readonly FsValue[], call: BuiltinCall) => FsValue;
 /** Builtins by name. `"unsupported"` marks a std builtin this runtime knowingly lacks. */
@@ -1028,6 +1032,10 @@ export class Interpreter {
       module,
       span,
       fail: (message: string) => this.fail(message, module, span),
+      unsupported: (message: string) => this.fault("unsupported-builtin", message, module, span),
+      raise: (value: FsValue) => {
+        throw new FsThrow(value, this.frames(module.path, span));
+      },
     });
   }
 
