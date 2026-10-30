@@ -741,10 +741,13 @@ export class Interpreter {
         env.module,
         node.span,
       );
-    const callables = found.filter((entry): entry is Callable => entry.kind === "callable");
-    if (callables.length) return this.overloadValue(node.name, callables);
+    // Functions overload across imports, but a module's own constant or enum shadows whatever it
+    // imports under that name.
     const own = found.filter((entry) => entry.module === env.module);
-    const candidates = own.length ? own : found;
+    const visible = own.some((entry) => entry.kind !== "callable") ? own : found;
+    const callables = visible.filter((entry): entry is Callable => entry.kind === "callable");
+    if (callables.length) return this.overloadValue(node.name, callables);
+    const candidates = own.length ? own : visible;
     if (candidates.length > 1)
       return this.fault(
         "unresolved-name",

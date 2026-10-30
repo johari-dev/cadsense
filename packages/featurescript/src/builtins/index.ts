@@ -1,5 +1,6 @@
 import type { Oc } from "../geometry/occt.ts";
 import type { BuiltinImpl, BuiltinTable } from "../runtime/Interpreter.ts";
+import { CONSTRUCTION_BUILTINS } from "./construction.ts";
 import { contextBuiltins } from "./context.ts";
 import { CORE_BUILTINS } from "./core.ts";
 import { EVALUATOR_BUILTINS } from "./evaluators.ts";
@@ -51,7 +52,6 @@ export const UNSUPPORTED = [
   "opHole",
   "opImportForeign",
   "opIntersectFaces",
-  "opLoft",
   "opMateConnector",
   "opMergeContexts",
   "opModifyCompositePart",
@@ -62,28 +62,20 @@ export const UNSUPPORTED = [
   "opOffsetCurveOnFace",
   "opOffsetFace",
   "opOffsetWire",
-  "opPlane",
-  "opPoint",
   "opPolyline",
   "opReplaceFace",
   "opRuledSurface",
   "opSMFlatOperation",
-  "opSphere",
   "opSplineThroughEdges",
   "opSplitByIsocline",
   "opSplitBySelfShadow",
   "opSplitEdges",
   "opSplitFace",
-  "opSplitPart",
-  "opSweep",
   "opTessellatedLoft",
-  "opThicken",
   "opWrap",
   // Geometry evaluation
   "evApproximateBSplineCurve",
   "evApproximateBSplineSurface",
-  "evApproximateCentroid",
-  "evApproximateMassProperties",
   "evCollisionDetection",
   "evCornerType",
   "evEdgeConvexity",
@@ -166,6 +158,7 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
     ...GEOMETRY_BUILTINS,
     ...EVALUATOR_BUILTINS,
     ...OPERATION_BUILTINS,
+    ...CONSTRUCTION_BUILTINS,
   }) satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">;
 
 /** Names with an implementation, for the test that nothing is both implemented and unsupported. */
@@ -175,4 +168,5 @@ export const IMPLEMENTED: readonly string[] = [
   ...Object.keys(GEOMETRY_BUILTINS),
   ...Object.keys(EVALUATOR_BUILTINS),
   ...Object.keys(OPERATION_BUILTINS),
+  ...Object.keys(CONSTRUCTION_BUILTINS),
 ];

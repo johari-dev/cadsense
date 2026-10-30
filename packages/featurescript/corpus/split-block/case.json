@@ -1,0 +1,13 @@
+{
+  "description": "opSplitPart of a 20 mm cube by the plane z = 5 mm.",
+  "steps": [{ "file": "feature.fs", "feature": "splitBlock" }],
+  "expect": {
+    "source": "analytic: 20 x 20 x 5 and 20 x 20 x 15; the lower piece keeping the cube's id is unconfirmed",
+    "statuses": ["OK"],
+    "solids": [
+      { "volumeMm3": 2000, "faces": 6, "edges": 12, "vertices": 8 },
+      { "volumeMm3": 6000, "faces": 6, "edges": 12, "vertices": 8 }
+    ],
+    "variables": { "pieces": 2, "lowerVolume": 2000 }
+  }
+}

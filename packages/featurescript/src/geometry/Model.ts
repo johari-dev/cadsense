@@ -197,9 +197,15 @@ export function replaceBodies(
   let next = state.next;
   const ids: string[] = [];
   const usedBodyIds = new Set<string>();
+  const topologies = replacement.results.map((result) => topology(oc, result.shape));
+  // Sub-shapes across every result: a face split between two result bodies is a 1:n change, so
+  // neither piece may continue its id, even though each body holds only one of them.
+  const inAnyResult = new ShapeSet<true>(oc);
+  for (const { faces, edges, vertices } of topologies)
+    for (const shape of [...faces, ...edges, ...vertices]) inAnyResult.set(shape, true);
 
-  for (const result of replacement.results) {
-    const { faces, edges, vertices } = topology(oc, result.shape);
+  replacement.results.forEach((result, index) => {
+    const { faces, edges, vertices } = topologies[index]!;
     const present = new ShapeSet<"FACE" | "EDGE" | "VERTEX">(oc);
     for (const face of faces) present.set(face, "FACE");
     for (const edge of edges) present.set(edge, "EDGE");
@@ -208,18 +214,15 @@ export function replaceBodies(
     const assigned = new ShapeSet<{ id: string | null; from: Entity | null }>(oc);
     for (const entity of old) {
       if (replacement.history.deleted(entity.shape)) continue;
-      const modified = replacement.history
+      const allModified = replacement.history
         .modified(entity.shape)
-        .filter((shape) => present.has(shape));
+        .filter((shape) => inAnyResult.has(shape));
+      const modified = allModified.filter((shape) => present.has(shape));
       if (modified.length === 0 && present.has(entity.shape) && !assigned.has(entity.shape))
         assigned.set(entity.shape, { id: entity.id, from: entity });
-      modified.forEach((shape, i) => {
+      for (const shape of modified)
         if (!assigned.has(shape))
-          assigned.set(shape, {
-            id: i === 0 && modified.length === 1 ? entity.id : null,
-            from: entity,
-          });
-      });
+          assigned.set(shape, { id: allModified.length === 1 ? entity.id : null, from: entity });
     }
     // The body keeps the id of the target it mostly came from.
     const votes = new Map<string, number>();
@@ -273,7 +276,7 @@ export function replaceBodies(
           ...replacement.annotate?.(shape, type),
         });
       }
-  }
+  });
   return { state: { entities, next }, ids };
 }
 

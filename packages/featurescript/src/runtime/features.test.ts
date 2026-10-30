@@ -78,12 +78,12 @@ describe("feature runs", () => {
 
   it("an unsupported builtin stops the run with a located fault, even under try silent", () => {
     const run = runtime.runFeature(
-      feature('try silent\n{\n    opLoft(context, id + "loft", {});\n}'),
+      feature('try silent\n{\n    opHelix(context, id + "helix", {});\n}'),
       "test",
     );
     expect(run.status).toBe("ERROR");
     expect(run.fault?.reason).toBe("unsupported-builtin");
-    expect(run.fault?.message).toContain("@opLoft");
+    expect(run.fault?.message).toContain("@opHelix");
     expect(run.fault?.stack.some((frame) => frame.file.startsWith("test/feature"))).toBe(true);
   });
 });
