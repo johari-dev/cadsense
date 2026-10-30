@@ -50,6 +50,7 @@ describe("precedence and associativity", () => {
     ["a?[0]", "(?[] a 0)"],
     ["x[]", "(deref x)"],
     ["x[][0]", "([] (deref x) 0)"],
+    ["x?[]", "(?deref x)"],
     ["@size(a)", "(call @size a)"],
     ["ns::f(1)", "(call ns::f 1)"],
   ])("%s", (source, tree) => expect(expression(source)).toBe(tree));
@@ -60,6 +61,9 @@ describe("literals and names", () => {
     ["1e-5", "0.00001"],
     ["3e9", "3000000000"],
     [".5", "0.5"],
+    ["1.e-4", "0.0001"],
+    ["1.", "1"],
+    ["2.E3", "2000"],
     ["inf", "inf"],
     ["-inf", "-inf"],
     ['"a\\tb\\u0041"', JSON.stringify("a\tbA")],
@@ -67,8 +71,8 @@ describe("literals and names", () => {
     ["definition.type", "(. definition type)"],
     ["x.in", "(. x in)"],
     [
-      '{ type : 1, "b" : 2, (meter) : 3, E.V : 4 }',
-      '(map ("type" 1) ("b" 2) (meter 3) ((. E V) 4))',
+      '{ a : 1, "b" : 2, (meter) : 3, E.V : 4, true : 5 }',
+      '(map ("a" 1) ("b" 2) (meter 3) ((. E V) 4) (true 5))',
     ],
     ["[1, 2]", "(array 1 2)"],
     ["[]", "(array)"],

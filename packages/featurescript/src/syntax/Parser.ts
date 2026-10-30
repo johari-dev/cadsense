@@ -718,8 +718,8 @@ class Parser {
         };
       } else if (this.isPunct("[") || this.isPunct("?[")) {
         const optional = this.advance().value === "?[";
-        if (!optional && this.eatPunct("]")) {
-          expression = { kind: "Deref", object: expression, span: this.spanFrom(start) };
+        if (this.eatPunct("]")) {
+          expression = { kind: "Deref", object: expression, optional, span: this.spanFrom(start) };
           continue;
         }
         const index = this.expression();
@@ -949,8 +949,9 @@ class Parser {
       do {
         const t = this.token;
         let key: Expression;
-        // Bare identifiers and keywords are string keys: `{ a : 1 }` is `{ "a" : 1 }`.
-        if ((t.kind === "identifier" || t.kind === "keyword") && this.isPunct(":", this.peek())) {
+        // A bare identifier is a string key: `{ a : 1 }` is `{ "a" : 1 }`. Reserved words aren't,
+        // so `{ true : 1 }` has the boolean key `true`.
+        if (t.kind === "identifier" && this.isPunct(":", this.peek())) {
           this.advance();
           key = { kind: "String", value: t.value, span: t };
         } else key = this.binary(1);
