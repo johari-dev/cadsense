@@ -219,7 +219,8 @@ Failure modes:
 - How `~` prints tagged values, numbers and nested containers. The docs show
   `ValueWithUnits(27) : { "unit" : ... , "value" : 2 }`; we print the same shape without the internal
   type number, and plain decimal numbers.
-- Trailing commas in arrays, maps, argument lists and enums. Std never uses them, so the parser rejects them.
+- Trailing commas in arrays, argument lists and enums. Std never uses them, so the parser rejects
+  them; maps take one, since community scripts that run in Onshape use it.
 
 ## M3 status: interpreter
 
@@ -245,7 +246,10 @@ Std's own features run unmodified on OpenCascade: `fCuboid`, `fCylinder`, `extru
 `opBoolean`, `opDeleteBodies`. Custom features can also call `opSphere`, `opPlane` and `opPoint`
 (construction geometry, left out of preview images), `opThicken` (planar faces both ways, curved
 faces one way), `opLoft` (solid or surface, without guides or connections), `opSweep` (the profile
-turns with the path) and `opSplitPart` (by a plane, a planar face or a sheet).
+turns with the path), `opSplitPart` (by a plane, a planar face or a sheet), `opFitSpline` (open or
+closed, with end and inner derivatives, without second derivatives or a target length) and
+`opMateConnector` with `evMateConnector` (a point body carrying its coordinate system; `evVertexPoint`
+reads its origin).
 
 - Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
   helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
@@ -259,7 +263,8 @@ turns with the path) and `opSplitPart` (by a plane, a planar face or a sheet).
   count matches Parasolid's conventions. Each case runs in 5-100 ms.
 
 Not supported locally yet (each stops the run with the calling line): draft, hole, helix, loft guides
-and connections, sweeps that lock or keep the profile's orientation, mate connectors, sheet metal,
+and connections, sweeps that lock or keep the profile's orientation, mate connectors that move
+with their owner (a transformed part leaves its connectors behind), sheet metal,
 variable/partial/conic fillets, chamfers other than equal offsets, face patterns, evaluators on
 B-spline geometry, and sketch constraint solving.
 
@@ -276,6 +281,9 @@ To confirm against Onshape recordings:
 - `opPlane` without a size makes a 1 m plane, like std's plane feature; `opPoint` points are
   construction entities.
 - `qContainsPoint` on solid bodies matches points on their boundary, not inside them.
+- `opFitSpline` without `parameters` spaces its points by chord length over [0, 1], so a derivative
+  is a length per unit parameter, comparable to the curve's length. Std doesn't say how Onshape spaces
+  them; if it differs, end derivatives (a wire's "straightness") will bend differently.
 - `qClosestTo` returns every entity within `TOLERANCE.zeroLength` (1e-8 m) of the nearest. The file
   panel uses it for picked faces, because a click lands on the tessellation, which can sit tens of
   microns off a curved face, beyond `qContainsPoint`'s 1e-7 m.

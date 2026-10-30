@@ -82,8 +82,19 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
   switch (type) {
     case "NOTHING":
       return [];
-    case "EVERYTHING":
-      return all((entity) => entityType === null || entity.type === entityType);
+    case "EVERYTHING": {
+      // std's qBodyType folds body types into an EVERYTHING query rather than wrapping it.
+      const bodyTypes = map.getField("bodyType");
+      const wanted =
+        bodyTypes === undefined
+          ? null
+          : new Set((untag(bodyTypes) as FsArray).map((value) => text(value)));
+      return all(
+        (entity) =>
+          (entityType === null || entity.type === entityType) &&
+          (wanted === null || wanted.has(entity.bodyType)),
+      );
+    }
     case "TRANSIENT": {
       const entity = env.state.entities.get(String(field(map, "transientId")));
       return entity ? [entity] : [];
