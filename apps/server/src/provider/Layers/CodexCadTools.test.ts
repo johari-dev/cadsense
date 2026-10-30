@@ -263,6 +263,7 @@ it.effect(
           "cad_drive_options",
           "cad_update_view",
           "cad_capture",
+          "cad_featurescript_preview",
         ],
       );
       yield* runtime.close;

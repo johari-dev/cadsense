@@ -86,6 +86,7 @@ import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
 import * as CadRenderLifecycle from "./cad/CadRenderLifecycle.ts";
 import * as CadCaptureArtifacts from "./cad/CadCaptureArtifacts.ts";
 import * as CadDriveCatalog from "./cad/CadDriveCatalog.ts";
+import * as FeatureScriptPreviews from "./featurescript/FeatureScriptPreviews.ts";
 import * as CadViewing from "./cad/CadViewing.ts";
 import * as CadPanel from "./cad/CadPanel.ts";
 import { routeLayer as cadPanelRouteLayer } from "./cad/panelHttp.ts";
@@ -274,6 +275,7 @@ const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadComments.layer),
   Layer.provideMerge(ClaudeCadCapabilities.layer),
   Layer.provideMerge(CadCaptureArtifacts.layer),
+  Layer.provideMerge(FeatureScriptPreviews.layer()),
   Layer.provideMerge(CadRenderBroker.layer),
   Layer.provideMerge(CadSnapshotStoreLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),

@@ -38,7 +38,13 @@ export default mergeConfig(
       },
     },
     pack: {
-      entry: ["src/bin.ts"],
+      // FeatureScript previews run in a worker thread with its own entry. It reads the vendored std
+      // from dist/featurescript-std (see FeatureScriptPreviews.ts).
+      entry: {
+        bin: "src/bin.ts",
+        "featurescript-worker": "src/featurescript/FeatureScriptWorker.ts",
+      },
+      copy: [{ from: "../../packages/featurescript/std", to: "dist", rename: "featurescript-std" }],
       outDir: "dist",
       sourcemap: true,
       clean: true,

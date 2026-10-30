@@ -171,6 +171,20 @@ export class ModuleLoader {
     return this.modules.values();
   }
 
+  /**
+   * Forgets every user module and its operators, so a long-lived loader reads edited sources (and
+   * drops modules a failed load left half-registered) while std stays loaded. Std never imports
+   * user modules, so nothing that stays refers to what goes.
+   */
+  unloadUserModules(): void {
+    for (const [path, module] of this.modules) if (!module.isStd) this.modules.delete(path);
+    for (const [operator, list] of this.operators)
+      this.operators.set(
+        operator,
+        list.filter((entry) => entry.module.isStd),
+      );
+  }
+
   private addDeclaration(module: ModuleInstance, node: Declaration) {
     const add = (name: string, entry: TopLevel) => {
       const list = module.own.get(name);
