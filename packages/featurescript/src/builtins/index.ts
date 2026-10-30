@@ -118,8 +118,6 @@ export const UNSUPPORTED = [
   "skText",
   // Attributes and properties
   "getHoleAttributes",
-  "getProperty",
-  "setProperty",
   // Patterns and sheet metal
   "computeCircularPatternTransforms",
   "computeCurvePatternTransforms",

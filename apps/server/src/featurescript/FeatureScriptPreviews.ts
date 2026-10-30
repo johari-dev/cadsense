@@ -309,6 +309,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       threadId?: ThreadId,
     ) {
       const request = yield* decodeCadToolInput(CadFeatureScriptPreviewInput, input);
+      const root = yield* fs.realPath(workspaceRoot).pipe(Effect.mapError(unavailable));
       const readStep = Effect.fn(function* (
         field: string,
         step: typeof CadFeatureScriptPreviewStep.Type,
@@ -337,6 +338,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       const outcome = yield* runJob({
         id: nextJob++,
         steps,
+        workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
         base: base?.bytes ?? null,
         output: { kind: "agent", view, outDir },
       });
@@ -427,6 +429,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       const outcome = yield* runJob({
         id: nextJob++,
         steps: [step],
+        workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
         base,
         output: { kind: "panel", after: file(after), before: file(before) },
       });

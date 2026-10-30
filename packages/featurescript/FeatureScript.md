@@ -109,6 +109,9 @@ Sources: [Lexical conventions](https://cad.onshape.com/FsDoc/tokens.html),
   `document/version/element`) bring in icons, images and other documents' code. They can't be
   fetched locally, so they load as unavailable modules: annotations that use them (icons) are
   skipped, and a name or type that may have come from one fails where it's used, naming the element.
+- Any other import path is a file in the workspace, relative to the importing file:
+  `import(path : "wire-run.fs", version : "")` in `wiring/robot.fs` loads `wiring/wire-run.fs`. The
+  version is ignored. Onshape has no such paths; a script pasted into Onshape imports by element id.
 - `x->f(a)` is `f(x, a)`; `f` must be an identifier. `x[]` reads a box. `x?.y`, `x?[i]` and `a ?? b`
   are undefined-safe.
 - Lambdas: `function (params) returns T precondition ... { body }`, or `x => expr`,
@@ -249,7 +252,13 @@ faces one way), `opLoft` (solid or surface, without guides or connections), `opS
 turns with the path), `opSplitPart` (by a plane, a planar face or a sheet), `opFitSpline` (open or
 closed, with end and inner derivatives, without second derivatives or a target length) and
 `opMateConnector` with `evMateConnector` (a point body carrying its coordinate system; `evVertexPoint`
-reads its origin).
+reads its origin). A transformed or patterned connector's coordinate system moves with it; one whose
+owner part moves stays behind, as in Onshape, unless the transform selects it too. (`attachTo` is
+ignored: an attached connector should follow later transforms of what it's attached to, and doesn't
+yet.) `setProperty`
+names bodies (or sets any other property), and the name follows the body through operations and into
+the preview's solid summaries. `getProperty` fails: std says it "cannot be called on the current
+context inside custom features", and a preview has no other context.
 
 - Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
   helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
@@ -263,8 +272,7 @@ reads its origin).
   count matches Parasolid's conventions. Each case runs in 5-100 ms.
 
 Not supported locally yet (each stops the run with the calling line): draft, hole, helix, loft guides
-and connections, sweeps that lock or keep the profile's orientation, mate connectors that move
-with their owner (a transformed part leaves its connectors behind), sheet metal,
+and connections, sweeps that lock or keep the profile's orientation, sheet metal,
 variable/partial/conic fillets, chamfers other than equal offsets, face patterns, evaluators on
 B-spline geometry, and sketch constraint solving.
 
@@ -284,6 +292,9 @@ To confirm against Onshape recordings:
 - `opFitSpline` without `parameters` spaces its points by chord length over [0, 1], so a derivative
   is a length per unit parameter, comparable to the curve's length. Std doesn't say how Onshape spaces
   them; if it differs, end derivatives (a wire's "straightness") will bend differently.
+- `getProperty` inside a custom feature raises an error rather than returning undefined.
+- A wire or point body (a mate connector) keeps its id through `opTransform`, carried by its edges
+  or vertices since it has no faces.
 - `qClosestTo` returns every entity within `TOLERANCE.zeroLength` (1e-8 m) of the nearest. The file
   panel uses it for picked faces, because a click lands on the tessellation, which can sit tens of
   microns off a curved face, beyond `qContainsPoint`'s 1e-7 m.

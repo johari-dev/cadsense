@@ -65,10 +65,26 @@ export interface FeatureRun {
   readonly console: readonly string[];
   readonly fault: RunFault | null;
   /**
-   * Exceptions raised and caught during the feature (std reports these as notices). When a feature
-   * fails with a generic `REGEN_ERROR`, the first one is usually the cause.
+   * Exceptions raised and caught during the feature (std reports these as notices), in order, each
+   * once where it was first thrown. The one that failed the feature is caught last, by std.
    */
   readonly exceptions: readonly { readonly message: string; readonly stack: readonly FsFrame[] }[];
+}
+
+/**
+ * What a thrown value says: a `regenError`'s custom message or `ErrorStringEnum` member, a thrown
+ * string as is, anything else formatted.
+ */
+function thrownMessage(value: FsValue): string {
+  const thrown = untag(value);
+  if (typeof thrown === "string") return thrown;
+  if (thrown instanceof FsMap) {
+    const custom = untag(thrown.getField("customMessage"));
+    if (typeof custom === "string") return custom;
+    const message = untag(thrown.getField("message"));
+    if (typeof message === "string") return message;
+  }
+  return formatValue(value);
 }
 
 /** A feature to run: a `defineFeature` constant, its definition, and its feature id. */
@@ -98,7 +114,11 @@ export class FeatureScriptRuntime {
 
   constructor(options: RuntimeOptions = {}) {
     const { readModule, stdDir } = options;
-    this.loader = new ModuleLoader((path) => readStd(path, stdDir) ?? readModule?.(path));
+    // A std path only ever reads the vendored std, so no other file can become std (which stays
+    // loaded across runs and may call builtins).
+    this.loader = new ModuleLoader((path) =>
+      path.startsWith(STD_PREFIX) ? readStd(path, stdDir) : readModule?.(path),
+    );
     this.interpreter = new Interpreter(
       this.loader,
       createBuiltins(options.oc ?? null),
@@ -196,10 +216,19 @@ export class FeatureScriptRuntime {
         variables: model.variables(),
         console: this.interpreter.console.slice(consoleStart),
         fault,
-        exceptions: this.interpreter.notices.slice(noticesStart).map((notice) => ({
-          message: typeof notice.value === "string" ? notice.value : formatValue(notice.value),
-          stack: notice.stack,
-        })),
+        exceptions: this.interpreter.notices
+          .slice(noticesStart)
+          // A rethrown error (`catch (error) { ...; throw error; }`) is the same value caught
+          // again; keep it once, where it was first thrown.
+          .filter(
+            (notice, i, notices) =>
+              typeof notice.value !== "object" ||
+              notices.findIndex((other) => other.value === notice.value) === i,
+          )
+          .map((notice) => ({
+            message: thrownMessage(notice.value),
+            stack: notice.stack,
+          })),
       });
       if (fault) {
         // A fault skips std's own rollback; undo the feature's partial geometry the same way.

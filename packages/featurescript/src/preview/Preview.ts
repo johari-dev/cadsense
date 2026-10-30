@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodePerfHooks from "node:perf_hooks";
 import { toGlb } from "../geometry/Glb.ts";
 import { ordered, startsWith, type GeometryState } from "../geometry/Model.ts";
-import type { Oc } from "../geometry/occt.ts";
+import type { Oc, Shape } from "../geometry/occt.ts";
 import { isDrawnBody, tessellate, type BodyMesh } from "../geometry/Tessellate.ts";
 import type { FeatureRun, FeatureScriptRuntime } from "../Runtime.ts";
 import type { FsFrame } from "../runtime/Errors.ts";
@@ -27,7 +27,14 @@ export interface PreviewStep {
 export interface SolidSummary {
   readonly id: string;
   readonly createdBy: string;
+  /** The name a feature gave it with `setProperty`. */
+  readonly name: string | null;
   readonly volumeMm3: number;
+  /** Its axis-aligned bounding box, up to the tessellation's deflection (0.05 mm) too large. */
+  readonly boundsMm: {
+    readonly min: readonly [number, number, number];
+    readonly max: readonly [number, number, number];
+  };
   readonly faces: number;
   readonly edges: number;
   readonly vertices: number;
@@ -103,20 +110,21 @@ export function runPreview(
   );
   const elapsedMs = NodePerfHooks.performance.now() - started;
   const { oc, geometry, geometryBeforeLast } = run;
-  const solids = oc && geometry ? summarizeSolids(oc, geometry) : [];
   const lastFeature = [`Feature${steps.length}`];
   const createdByLast = (face: { readonly createdBy: readonly string[] }) =>
     startsWith(face.createdBy, lastFeature);
+  // Tessellating first leaves each face's triangulation for the bounds below.
   const meshes = oc && geometry ? tessellate(oc, geometry, { highlight: createdByLast }) : [];
+  const solids = oc && geometry ? summarizeSolids(oc, geometry) : [];
   const meshesBefore =
     options.before && oc && geometryBeforeLast ? tessellate(oc, geometryBeforeLast) : null;
-  const totalVolume = (summaries: readonly SolidSummary[]) =>
-    summaries.reduce((sum, solid) => sum + solid.volumeMm3, 0);
   // Only when the previewed (last) feature ran; a fault earlier stops the run before it.
   const changes =
     oc && geometry && geometryBeforeLast && run.features.length === steps.length
       ? {
-          volumeMm3: totalVolume(solids) - totalVolume(summarizeSolids(oc, geometryBeforeLast)),
+          volumeMm3:
+            solids.reduce((sum, solid) => sum + solid.volumeMm3, 0) -
+            solidVolumeMm3(oc, geometryBeforeLast),
           // Only faces the preview draws, so the count matches the amber faces on screen.
           createdFaces: ordered(geometry, (body) => isDrawnBody(geometry, body)).reduce(
             (sum, body) =>
@@ -146,24 +154,45 @@ export function runPreview(
   };
 }
 
-/** Volume and topology counts of every solid body, in creation order. */
+const solidBodies = (geometry: GeometryState) =>
+  ordered(geometry, (entity) => entity.type === "BODY" && entity.bodyType === "SOLID");
+
+const volumeMm3 = (oc: Oc, shape: Shape) => {
+  const props = new oc.GProp_GProps();
+  oc.BRepGProp.VolumeProperties(shape, props, false, false, false);
+  return props.Mass() * 1e9;
+};
+
+/** Total volume of the solid bodies. */
+const solidVolumeMm3 = (oc: Oc, geometry: GeometryState) =>
+  solidBodies(geometry).reduce((sum, body) => sum + volumeMm3(oc, body.shape), 0);
+
+/**
+ * Volume, bounds and topology counts of every solid body, in creation order. Bounds come from the
+ * faces' triangulation when they're tessellated (exact bounds of curved faces take about a
+ * thousand times longer), so they can sit up to the tessellation's deflection outside the solid.
+ */
 function summarizeSolids(oc: Oc, geometry: GeometryState): SolidSummary[] {
-  return ordered(geometry, (entity) => entity.type === "BODY" && entity.bodyType === "SOLID").map(
-    (body) => {
-      const props = new oc.GProp_GProps();
-      oc.BRepGProp.VolumeProperties(body.shape, props, false, false, false);
-      const count = (type: string) =>
-        ordered(geometry, (entity) => entity.body === body.id && entity.type === type).length;
-      return {
-        id: body.id,
-        createdBy: body.createdBy.join("."),
-        volumeMm3: props.Mass() * 1e9,
-        faces: count("FACE"),
-        edges: count("EDGE"),
-        vertices: count("VERTEX"),
-      };
-    },
-  );
+  return solidBodies(geometry).map((body) => {
+    const count = (type: string) =>
+      ordered(geometry, (entity) => entity.body === body.id && entity.type === type).length;
+    const box = new oc.Bnd_Box();
+    oc.BRepBndLib.AddOptimal(body.shape, box, true, false);
+    const name = untag(body.properties.get("NAME") ?? "");
+    return {
+      id: body.id,
+      createdBy: body.createdBy.join("."),
+      name: typeof name === "string" && name !== "" ? name : null,
+      volumeMm3: volumeMm3(oc, body.shape),
+      boundsMm: {
+        min: [box.GetXMin() * 1e3, box.GetYMin() * 1e3, box.GetZMin() * 1e3],
+        max: [box.GetXMax() * 1e3, box.GetYMax() * 1e3, box.GetZMax() * 1e3],
+      },
+      faces: count("FACE"),
+      edges: count("EDGE"),
+      vertices: count("VERTEX"),
+    };
+  });
 }
 
 /**
@@ -183,16 +212,34 @@ export function userLocation(
   return null;
 }
 
-/** Why a feature failed, and where: the fault that stopped it, or the first exception std caught. */
+/**
+ * The exception behind a failed feature, if it was raised. Std catches it last, so it's the last
+ * one carrying the reported error (its `regenError` message or enum), or for std's generic
+ * `REGEN_ERROR` the last one raised from the user's code; anything std throws while reporting it
+ * comes after and has no user frame.
+ */
+function failureCause(
+  runtime: FeatureScriptRuntime,
+  run: FeatureRun,
+): FeatureRun["exceptions"][number] | undefined {
+  const reported = run.message ?? (run.statusEnum === "REGEN_ERROR" ? null : run.statusEnum);
+  if (reported !== null)
+    return run.exceptions.findLast((exception) => exception.message === reported);
+  return (
+    run.exceptions.findLast((exception) => userLocation(runtime, exception.stack) !== null) ??
+    run.exceptions.at(-1)
+  );
+}
+
+/** Why a feature failed, and where: the fault that stopped it, or the exception it raised. */
 export function featureFailure(
   runtime: FeatureScriptRuntime,
   run: FeatureRun | null,
 ): { readonly message: string; readonly location: SourceLocation | null } | null {
-  const cause = run?.fault ?? (run?.status === "ERROR" ? run.exceptions[0] : undefined);
+  if (run?.status !== "ERROR") return null;
+  const cause = run.fault ?? failureCause(runtime, run);
   if (cause) return { message: cause.message, location: userLocation(runtime, cause.stack) };
-  return run?.status === "ERROR"
-    ? { message: run.message ?? run.statusEnum ?? "The feature failed.", location: null }
-    : null;
+  return { message: run.message ?? run.statusEnum ?? "The feature failed.", location: null };
 }
 
 export const VIEWS: readonly View[] = ["iso", "top", "front", "right"];
@@ -279,7 +326,7 @@ export function describePreview(runtime: FeatureScriptRuntime, result: PreviewRe
       for (const frame of run.fault.stack.slice(0, 6))
         lines.push(`    at ${locateFrame(runtime, frame)}`);
     }
-    const cause = run?.status === "ERROR" && !run.fault ? run.exceptions[0] : undefined;
+    const cause = run?.status === "ERROR" && !run.fault ? failureCause(runtime, run) : undefined;
     if (cause) {
       lines.push(`  cause: ${cause.message}`);
       for (const frame of cause.stack.slice(0, 4))
@@ -287,9 +334,10 @@ export function describePreview(runtime: FeatureScriptRuntime, result: PreviewRe
     }
     for (const output of run?.console ?? []) lines.push(`  print: ${output.trimEnd()}`);
   }
+  const point = (xyz: readonly number[]) => `(${xyz.map((n) => n.toFixed(2)).join(", ")})`;
   for (const solid of result.solids)
     lines.push(
-      `solid ${solid.id} from ${solid.createdBy}: ${solid.volumeMm3.toFixed(3)} mm^3, ${solid.faces} faces, ${solid.edges} edges, ${solid.vertices} vertices`,
+      `solid ${solid.id}${solid.name ? ` "${solid.name}"` : ""} from ${solid.createdBy}: ${solid.volumeMm3.toFixed(3)} mm^3, ${solid.faces} faces, ${solid.edges} edges, ${solid.vertices} vertices, bounds ${point(solid.boundsMm.min)} to ${point(solid.boundsMm.max)} mm`,
     );
   lines.push(`ran in ${Math.round(result.elapsedMs)} ms`);
   return lines.join("\n");
