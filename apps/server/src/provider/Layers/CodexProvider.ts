@@ -433,9 +433,13 @@ const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvi
 
 const makePendingCodexProvider = (
   codexSettings: CodexSettings,
-): Effect.Effect<ServerProviderDraft> =>
+  environment: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<ServerProviderDraft, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
+    // Report whether the binary is on PATH before the first probe lands, so
+    // settings does not offer Install for a CLI that is already there.
+    const installed = yield* isCommandAvailable(codexSettings.binaryPath, { env: environment });
     const models = emptyCodexModelsFromSettings(codexSettings);
 
     if (!codexSettings.enabled) {
@@ -446,7 +450,7 @@ const makePendingCodexProvider = (
         models,
         skills: [],
         probe: {
-          installed: false,
+          installed,
           version: null,
           status: "warning",
           auth: { status: "unknown" },
@@ -462,7 +466,7 @@ const makePendingCodexProvider = (
       models,
       skills: [],
       probe: {
-        installed: false,
+        installed,
         version: null,
         status: "warning",
         auth: { status: "unknown" },

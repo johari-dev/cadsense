@@ -185,10 +185,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
           Effect.zipWith(
-            makePendingCodexProvider(settings),
+            makePendingCodexProvider(settings, processEnv),
             modelManifest.current,
             (draft, manifest) =>
               stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
+          ).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           ),
         checkProvider,
       }).pipe(

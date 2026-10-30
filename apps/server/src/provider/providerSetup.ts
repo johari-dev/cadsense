@@ -94,6 +94,9 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
   // Codex's login server holds a fixed port, and a user who closed the
   // browser tab should not have to wait out the old attempt.
   const signIns = yield* FiberMap.make<ProviderInstanceId, CommandResult | null, string>();
+  // A repeat Install for an instance (say, after the page reloaded mid-install)
+  // joins the install already running instead of queuing a second one.
+  const installs = yield* FiberMap.make<ProviderInstanceId, CommandResult | null, string>();
 
   /** Run a command to completion. Fails with a user-facing reason; `null` means timed out. */
   const runCommand = (command: ProviderSetupCommand, timeout: Duration.Duration) =>
@@ -141,9 +144,17 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
 
       const result =
         input.action === "install"
-          ? yield* installLock
-              .withPermits(1)(runCommand(commands.install, INSTALL_TIMEOUT))
-              .pipe(Effect.mapError(fail))
+          ? yield* Effect.suspend(() =>
+              Option.match(FiberMap.getUnsafe(installs, input.instanceId), {
+                onSome: Effect.succeed,
+                onNone: () =>
+                  FiberMap.run(
+                    installs,
+                    input.instanceId,
+                    installLock.withPermits(1)(runCommand(commands.install, INSTALL_TIMEOUT)),
+                  ),
+              }),
+            ).pipe(Effect.flatMap(Fiber.join), Effect.mapError(fail))
           : yield* FiberMap.run(
               signIns,
               input.instanceId,

@@ -22,11 +22,13 @@ import {
   MonitorIcon,
   ArrowsClockwiseIcon as RefreshCwIcon,
 } from "~/lib/icons";
+import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { resolveAppModelSelectionState } from "../../modelSelection";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import {
   useEnvironments,
   usePrimaryEnvironmentId,
@@ -200,6 +202,26 @@ function SelectedEnvironmentProviderSettings({
   );
 }
 
+// Setup commands still running, keyed by environment and instance. Kept outside
+// the component so leaving Settings or switching device tabs does not lose them.
+const pendingProviderSetupsAtom = Atom.make<ReadonlyMap<string, ServerProviderSetupAction>>(
+  new Map(),
+).pipe(Atom.keepAlive, Atom.withLabel("pending-provider-setups"));
+// Latest attempt per key. Restarting a sign-in replaces the server's login
+// process, and only the newest attempt may settle the row.
+const providerSetupAttempts = new Map<string, number>();
+
+function providerSetupKey(environmentId: EnvironmentId, instanceId: ProviderInstanceId): string {
+  return `${environmentId}\u0000${instanceId}`;
+}
+
+function setPendingProviderSetup(key: string, action: ServerProviderSetupAction | null) {
+  const next = new Map(appAtomRegistry.get(pendingProviderSetupsAtom));
+  if (action === null) next.delete(key);
+  else next.set(key, action);
+  appAtomRegistry.set(pendingProviderSetupsAtom, next);
+}
+
 /**
  * Settings for the two built-in provider slots on one environment. Each row
  * shows the CLI's status, a one-click Install or Sign in when the CLI needs
@@ -223,13 +245,8 @@ function EnvironmentProviderSettings({
     reportFailure: false,
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
-  const [pendingSetups, setPendingSetups] = useState<
-    ReadonlyMap<ProviderInstanceId, ServerProviderSetupAction>
-  >(() => new Map());
+  const pendingSetups = useAtomValue(pendingProviderSetupsAtom);
   const refreshingRef = useRef(false);
-  // Latest attempt per instance. Restarting a sign-in replaces the server's
-  // login process, and only the newest attempt may settle the row.
-  const setupAttemptsRef = useRef(new Map<ProviderInstanceId, number>());
   const textGenInstanceId = resolveAppModelSelectionState(settings, serverProviders).instanceId;
 
   const refreshProviders = useCallback(() => {
@@ -258,17 +275,14 @@ function EnvironmentProviderSettings({
     action: ServerProviderSetupAction,
     label: string,
   ) => {
-    const attempt = (setupAttemptsRef.current.get(instanceId) ?? 0) + 1;
-    setupAttemptsRef.current.set(instanceId, attempt);
-    setPendingSetups((previous) => new Map(previous).set(instanceId, action));
+    const key = providerSetupKey(environmentId, instanceId);
+    const attempt = (providerSetupAttempts.get(key) ?? 0) + 1;
+    providerSetupAttempts.set(key, attempt);
+    setPendingProviderSetup(key, action);
 
     const result = await runProviderSetup({ environmentId, input: { instanceId, action } });
-    if (setupAttemptsRef.current.get(instanceId) !== attempt) return;
-    setPendingSetups((previous) => {
-      const next = new Map(previous);
-      next.delete(instanceId);
-      return next;
-    });
+    if (providerSetupAttempts.get(key) !== attempt) return;
+    setPendingProviderSetup(key, null);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       toastManager.add(
@@ -325,7 +339,7 @@ function EnvironmentProviderSettings({
           option={option}
           enabled={instance === undefined || resolveProviderInstanceEnabled(instance)}
           liveProvider={liveProvider}
-          pendingSetup={pendingSetups.get(instanceId)}
+          pendingSetup={pendingSetups.get(providerSetupKey(environmentId, instanceId))}
           onEnabledChange={
             instance === undefined
               ? undefined

@@ -191,9 +191,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         initialSnapshot: (settings) =>
           modelManifest.current.pipe(
             Effect.flatMap((manifest) =>
-              makePendingClaudeProvider(settings, resolveClaudeModelCatalog(manifest)),
+              makePendingClaudeProvider(settings, resolveClaudeModelCatalog(manifest), processEnv),
             ),
             Effect.map(stampIdentity),
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           ),
         checkProvider,
       }).pipe(

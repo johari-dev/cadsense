@@ -587,9 +587,13 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 export const makePendingClaudeProvider = (
   claudeSettings: ClaudeSettings,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
-): Effect.Effect<ServerProviderDraft> =>
+  environment: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<ServerProviderDraft, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const checkedAt = yield* nowIso;
+    // Report whether the binary is on PATH before the first probe lands, so
+    // settings does not offer Install for a CLI that is already there.
+    const installed = yield* isCommandAvailable(claudeSettings.binaryPath, { env: environment });
     const models = providerModelsFromSettings(
       modelCatalog.models.map((entry) => entry.model),
       claudeSettings.customModels,
@@ -603,7 +607,7 @@ export const makePendingClaudeProvider = (
         checkedAt,
         models,
         probe: {
-          installed: false,
+          installed,
           version: null,
           status: "warning",
           auth: { status: "unknown" },
@@ -618,7 +622,7 @@ export const makePendingClaudeProvider = (
       checkedAt,
       models,
       probe: {
-        installed: false,
+        installed,
         version: null,
         status: "warning",
         auth: { status: "unknown" },
