@@ -1,8 +1,19 @@
+import { startsWith } from "../geometry/Model.ts";
 import type { Oc } from "../geometry/occt.ts";
 import type { BuiltinImpl } from "../runtime/Interpreter.ts";
 import { ModelContext } from "../runtime/ModelContext.ts";
-import { FsBuiltin, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
+import {
+  equals,
+  formatValue,
+  FsBuiltin,
+  FsMap,
+  FsTagged,
+  untag,
+  type FsValue,
+} from "../runtime/Value.ts";
 import { context, map, string } from "./args.ts";
+import { idOf, kernel, resolve } from "./geometryArgs.ts";
+import { stdEnum, stdTagged } from "./std.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 /** The token `@startFeature` returns. std stores it in `var token is map`, so it has to be a map. */
@@ -68,7 +79,11 @@ export const contextBuiltins = (oc: Oc | null) =>
     newContext: ([version]) => new FsBuiltin(new ModelContext(version, oc)),
     isContext: ([value]) => value instanceof FsBuiltin && value.native instanceof ModelContext,
 
-    startFeature: ([ctx, id], call) => FsMap.fromEntries([["token", context(call, ctx).start(id)]]),
+    startFeature: ([ctx, id, definition], call) => {
+      const fields = untag(definition);
+      const asVersion = fields instanceof FsMap ? fields.getField("asVersion") : undefined;
+      return FsMap.fromEntries([["token", context(call, ctx).start(id, asVersion)]]);
+    },
     endFeature: ([ctx, id, token], call) => {
       context(call, ctx).end(tokenOf(token), id);
       return undefined;
@@ -78,17 +93,41 @@ export const contextBuiltins = (oc: Oc | null) =>
       return undefined;
     },
 
+    // A missing name returns `defaultValue` when std passes one, and throws otherwise.
     getVariable: ([ctx, args], call) => {
-      const name = string(call, map(call, args, "definition").getField("name"), "name");
+      const definition = map(call, args, "definition");
+      const name = string(call, definition.getField("name"), "name");
       const c = context(call, ctx);
-      if (!c.hasVariable(name)) call.fail(`Variable "${name}" not found.`);
-      return c.getVariable(name);
+      if (c.hasVariable(name)) return c.getVariable(name);
+      if (definition.has("defaultValue")) return definition.getField("defaultValue");
+      return call.fail(`Variable "${name}" not found.`);
     },
     setVariable: ([ctx, args], call) => {
       const definition = map(call, args, "definition");
       context(call, ctx).setVariable(
         string(call, definition.getField("name"), "name"),
         definition.getField("value"),
+        definition.getField("description"),
+      );
+      return undefined;
+    },
+    // std's Variable feature probes this without a default (in `try silent`) to keep query and
+    // plain variable names apart, so a missing name must throw.
+    getQueryVariable: ([ctx, args], call) => {
+      const definition = map(call, args, "definition");
+      const name = string(call, definition.getField("name"), "name");
+      const query = context(call, ctx).getQueryVariable(name);
+      if (query !== undefined) return query;
+      if (definition.has("defaultValue")) return definition.getField("defaultValue");
+      return call.fail(`Query variable "${name}" not found.`);
+    },
+    setQueryVariable: ([ctx, args], call) => {
+      const definition = map(call, args, "definition");
+      const value = definition.getField("value");
+      if (!(untag(value) instanceof FsMap)) return call.fail("value must be a Query.");
+      context(call, ctx).setQueryVariable(
+        string(call, definition.getField("name"), "name"),
+        value,
         definition.getField("description"),
       );
       return undefined;
@@ -106,8 +145,10 @@ export const contextBuiltins = (oc: Oc | null) =>
       return true;
     },
 
-    isAtVersionOrLater: ([ctx, version], call) => {
-      const current = context(call, ctx).version;
+    // The active feature's version, or `asVersion` when given (sketch.fs passes its own before the
+    // sketch's subfeature holds the context back).
+    isAtVersionOrLater: ([ctx, version, asVersion], call) => {
+      const current = asVersion ?? context(call, ctx).activeVersion;
       if (
         !(current instanceof FsTagged) ||
         !(version instanceof FsTagged) ||
@@ -119,12 +160,82 @@ export const contextBuiltins = (oc: Oc | null) =>
         (version.tag.ordinals.get(version.value as string) ?? Number.POSITIVE_INFINITY)
       );
     },
-    getCurrentVersion: ([ctx], call) => untag(context(call, ctx).version),
+    getCurrentVersion: ([ctx], call) => untag(context(call, ctx).activeVersion),
     getLastActiveId: ([ctx], call) => untag(context(call, ctx).lastActiveId),
+    // The real id of the last operation (recorded around every op* builtin in createBuiltins).
+    lastOperationId: ([ctx], call) =>
+      context(call, ctx).lastOperation ??
+      call.unsupported("lastOperationId: no operation has run in this context yet."),
+    /** The id of the last operation that created or changed the first entity of `entity`. */
+    lastModifyingOperationId: ([ctx, args], call) => {
+      const { model, oc } = kernel(call, ctx);
+      const entity = resolve(call, model, oc, map(call, args, "definition").getField("entity"))[0];
+      if (!entity) return call.fail("lastModifyingOperationId: entity resolves to nothing.");
+      return model.lastModifyingOperation(entity.id, entity.createdBy);
+    },
+    valuesSortedById: ([ctx, idToValue], call) => {
+      const c = context(call, ctx);
+      return map(call, idToValue, "idToValue")
+        .entries()
+        .map(([id, value]) => ({
+          order:
+            c.startOrder(id) ??
+            call.unsupported(`valuesSortedById: ${formatValue(id)} never started in this context.`),
+          value,
+        }))
+        .sort((a, b) => a.order - b.order)
+        .map(({ value }) => value);
+    },
+    /** True when a key is the id of a sketch (the id passed to `newSketch`), not just a feature with one. */
+    containsSketch: ([ctx, idToValue], call) => {
+      const model = context(call, ctx);
+      const sketches = [...model.geometry.entities.values()].flatMap((entity) =>
+        entity.sketch ? [entity.sketch.sketchId] : [],
+      );
+      return map(call, idToValue, "idToValue")
+        .entries()
+        .some(([key]) => {
+          if (!Array.isArray(untag(key)))
+            return call.fail("containsSketch needs a map keyed by Id.");
+          const id = idOf(key);
+          return sketches.some(
+            (sketchId) => sketchId.length === id.length && startsWith(sketchId, id),
+          );
+        });
+    },
+    // Std: "Only accessible during tables, editing logic and manipulator change function"; std's
+    // callers catch the error and fall back.
+    getFeatureName: (_args, call) =>
+      call.fail(
+        "getFeatureName can't be called inside a feature. Onshape allows it only in table functions, editing logic and manipulator change functions.",
+      ),
+    /** The `FeatureScript <version>;` of the module making the call, as std documents. */
+    getLanguageVersion: (_args, call) =>
+      call.module.ast.version ?? call.fail("The calling module has no FeatureScript version."),
+    // Order disambiguation names entities across regenerations; a local run has only one.
+    skipOrderDisambiguation: noop,
+    // Converting to the current version (no version) changes nothing.
+    convert: ([value, version], call) =>
+      version === undefined
+        ? value
+        : call.unsupported("@convert to a FeatureScript version is not supported locally yet."),
+    clampContextVersion: ([ctx, args], call) => {
+      const loaded = context(call, map(call, args, "definition").getField("loadedContext"));
+      if (!equals(loaded.version, context(call, ctx).version))
+        return call.unsupported(
+          "Clamping a context made at another FeatureScript version is not supported locally yet.",
+        );
+      return undefined;
+    },
     isInFeaturePattern: () => false,
     isInSheetMetalFeature: () => false,
     // Parameter tolerances only exist in Onshape's feature dialog; locally no parameter is tolerant.
     getTolerantParameterIds: () => FsMap.empty,
+    getParameterToleranceInfo: (_args, call) =>
+      stdTagged(call, "toleranceTypes.fs", "ToleranceInfo", [
+        ["toleranceType", stdEnum(call, "toleranceTypes.fs", "ToleranceType", "NONE")],
+        ["usePrecisionOverride", false],
+      ]),
     // Outside a feature pattern, both pattern transforms are the identity.
     getFullPatternTransform: () => IDENTITY_TRANSFORM,
     getRemainderPatternTransform: () => IDENTITY_TRANSFORM,
