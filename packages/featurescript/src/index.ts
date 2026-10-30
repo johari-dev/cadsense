@@ -25,13 +25,19 @@ export {
 } from "./Runtime.ts";
 export {
   describePreview,
+  featureFailure,
   runPreview,
+  userLocation,
   VIEWS,
   writePreview,
+  type PreviewChanges,
   type PreviewResult,
   type PreviewStep,
   type SolidSummary,
+  type SourceLocation,
 } from "./preview/Preview.ts";
+export { dialogInputs, type DialogInput } from "./preview/Inputs.ts";
+export { toGlb } from "./geometry/Glb.ts";
 export type { View } from "./preview/Render.ts";
 export { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
 export { ModuleLoadError, type ModuleInstance } from "./runtime/Modules.ts";

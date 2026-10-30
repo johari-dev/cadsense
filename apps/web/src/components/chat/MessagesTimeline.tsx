@@ -53,6 +53,7 @@ import {
 } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { CadFilmstrip, CadPublishedComments } from "../../cad/CadChatRows";
+import { FeatureScriptChatCard } from "../../featurescript/FeatureScriptChatCard";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
   RobotIcon as BotIcon,
@@ -1049,6 +1050,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
               row.kind === "cad-filmstrip" ||
               row.kind === "cad-comments" ||
               row.kind === "tool-card" ||
+              row.kind === "featurescript-preview" ||
               row.kind === "work-toggle" ||
               row.kind === "turn-plan"
             ? "pb-2"
@@ -1064,6 +1066,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "tool-card" ? <ToolCardTimelineRow row={row} /> : null}
       {row.kind === "cad-filmstrip" ? <CadFilmstripTimelineRow row={row} /> : null}
       {row.kind === "cad-comments" ? <CadCommentsTimelineRow row={row} /> : null}
+      {row.kind === "featurescript-preview" ? <FeatureScriptPreviewTimelineRow row={row} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
@@ -1110,6 +1113,23 @@ function CadCommentsTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "ca
   const { threadRef } = use(TimelineRowCtx);
   if (!threadRef) return null;
   return <CadPublishedComments card={row.card} threadRef={threadRef} />;
+}
+
+function FeatureScriptPreviewTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "featurescript-preview" }>;
+}) {
+  const { threadRef, workspaceRoot, onImageExpand } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return (
+    <FeatureScriptChatCard
+      card={row.card}
+      threadRef={threadRef}
+      workspaceRoot={workspaceRoot}
+      onImageExpand={onImageExpand}
+    />
+  );
 }
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {

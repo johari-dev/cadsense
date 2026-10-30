@@ -34,8 +34,23 @@ Codex; not the standalone `cadsense mcp` server, whose review workspaces an outs
 write to). Input is `{path, feature?, parameters?, before?, base?, view?}`, with `path`, `before[].path`
 and `base` relative to the project workspace. It returns a status (`OK`, `INFO`, `WARNING`, `ERROR`,
 or `INVALID` when the script doesn't load, or `STOPPED` on a timeout or crash), the same summary as
-the CLI, the solids, and the chosen view as a PNG. Artifacts for each run go to
-`<state>/attachments/featurescript-previews/<time>-<id>/`, and the newest 50 are kept.
+the CLI, the first failure with its line in the user's script (a failure inside std is reported at
+the user's line that called into it), the volume change and the number of faces the feature made,
+the solids, and the chosen view as a PNG. Artifacts for each run go to
+`<state>/attachments/featurescript-previews/<time>-<id>/`, and the newest 50 are kept. Each call also
+shows in the chat as a card (`cad.featurescript.previewed` activity) with the status, the failing
+line, the views (copied into the thread's attachments) and the change; its links open the script in
+the file panel with the agent's inputs.
+
+People get the same loop in the file panel. A `.fs` file there has a Code/Preview toggle like
+markdown. Preview shows the model after the feature, with the faces it made in amber and a
+Before/After switch, under an Onshape-style dialog of the feature's inputs (read from its
+precondition; inputs its `if`s hide are hidden). Editing an input, picking a face in the model, or
+saving the file runs it again; a run takes about a tenth of a second. A failure keeps the last good
+model on screen, greyed out, under the cause, a "Show line" link and an "Ask the agent to fix it"
+button. The base is the workspace's only STEP file until someone picks another. The panel calls
+`featurescript.preview` with the editor's text; its before/after GLBs are `fspanel-*.bin`
+attachments, and the newest 40 are kept.
 
 The server runs previews in one worker thread (`apps/server/src/featurescript/`), one at a time.
 It loads std and OpenCascade on first use (about half a second), stops after 10 idle minutes,
@@ -63,8 +78,9 @@ The base is a STEP file the user exports from Onshape for now. Syncing it from t
   survive operations through OpenCascade's history), `Sketch.ts` sketches and regions, `Query.ts`
   query evaluation, `Tessellate.ts` and `Glb.ts` preview meshes.
 - `src/Runtime.ts`: loads std and runs features in a fresh context, optionally on a STEP base.
-- `src/preview/`: runs a preview and writes its artifacts (`Preview.ts`), and a small software
-  renderer for PNGs (`Render.ts`). `scripts/preview.ts` is the CLI.
+- `src/preview/`: runs a preview and writes its artifacts (`Preview.ts`), the feature dialog's rows
+  (`Inputs.ts`), and a small software renderer for PNGs (`Render.ts`). `scripts/preview.ts` is the
+  CLI.
 - `corpus/<case>/`: end-to-end cases. `case.json` lists the features to run, their parameters as
   FeatureScript expressions, and the expected statuses, volumes and topology counts (and where the
   expectations come from). `test/corpus.e2e.test.ts` runs them and writes
@@ -175,7 +191,8 @@ Failure modes:
 16. **Lost errors.** A feature that throws reports success, or the error loses its message and location.
     Guard: feature-run tests that check status, `ErrorStringEnum`, custom message and FS stack.
 17. **Rollback.** `@abortFeature` leaves a failed feature's variables in the context, or drops the
-    error status it should keep. Guard: feature-run tests.
+    error status it should keep. A fault (an unsupported builtin) skips std's rollback and leaves the
+    feature's partial geometry behind. Guard: feature-run tests, and a geometry test for faults.
 18. **Std drift.** Some std top-level constant needs a builtin or construct we lack. Guard: a test that
     evaluates every top-level constant in std and lists any that fail, with an allowlist that has to
     shrink, never grow silently.
@@ -254,6 +271,9 @@ To confirm against Onshape recordings:
 - `opPlane` without a size makes a 1 m plane, like std's plane feature; `opPoint` points are
   construction entities.
 - `qContainsPoint` on solid bodies matches points on their boundary, not inside them.
+- `qClosestTo` returns every entity within `TOLERANCE.zeroLength` (1e-8 m) of the nearest. The file
+  panel uses it for picked faces, because a click lands on the tessellation, which can sit tens of
+  microns off a curved face, beyond `qContainsPoint`'s 1e-7 m.
 
 ## M0 spike results
 
