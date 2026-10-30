@@ -20,6 +20,7 @@ import { PROBE_BUILTINS } from "./probes.ts";
 import { TOPOLOGY_BUILTINS } from "./topology.ts";
 import { HOLE_BUILTINS } from "./hole.ts";
 import { SURFACE_BUILTINS } from "./surfaces.ts";
+import { SKETCH_BUILTINS } from "./sketch.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 /**
@@ -32,7 +33,6 @@ export const UNSUPPORTED = [
   "evFaults",
   "evMaxTolerance",
   "evOffsetDetection",
-  "evOwnerSketchPlane",
   "evRuledSurfaceBases",
   "evSheetMetalBendUp",
   "evSheetMetalFlatTransformation",
@@ -62,15 +62,9 @@ export const UNSUPPORTED = [
   "opTessellatedLoft",
   "opWrap",
   "sheetMetalApplyInFlat",
-  "skBezier",
-  "skConicSegment",
-  "skEllipse",
-  "skEllipticalArc",
-  "skFitSpline",
   "skImage",
   "skInterpolatedSpline",
   "skInterpolatedSplineSegment",
-  "skSetInitialGuess",
   "skSpline",
   "skSplineSegment",
   "skText",
@@ -140,6 +134,7 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
     ...CURVE_BUILTINS,
     ...BSPLINE_BUILTINS,
     ...SURFACE_BUILTINS,
+    ...SKETCH_BUILTINS,
   } satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">);
 
 /** Names with an implementation, for the test that nothing is both implemented and unsupported. */
@@ -162,4 +157,5 @@ export const IMPLEMENTED: readonly string[] = [
   ...Object.keys(CURVE_BUILTINS),
   ...Object.keys(BSPLINE_BUILTINS),
   ...Object.keys(SURFACE_BUILTINS),
+  ...Object.keys(SKETCH_BUILTINS),
 ];
