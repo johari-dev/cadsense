@@ -1,6 +1,6 @@
 import type { Expression, MapLiteral, Statement } from "../syntax/Ast.ts";
 import type { Span } from "../syntax/Source.ts";
-import { FsThrow } from "../runtime/Errors.ts";
+import { FsFault, FsThrow } from "../runtime/Errors.ts";
 import type { Interpreter } from "../runtime/Interpreter.ts";
 import type { ModuleInstance } from "../runtime/Modules.ts";
 import { equals, FsMap, FsTagged, untag, type FsValue, type TypeDef } from "../runtime/Value.ts";
@@ -140,7 +140,14 @@ function evaluateAnnotations(
           interpreter.evaluate(entry.value, module),
         );
       } catch (error) {
-        if (!(error instanceof FsThrow)) throw error;
+        // An icon from another Onshape document isn't available locally; the dialog doesn't need it.
+        if (
+          !(
+            error instanceof FsThrow ||
+            (error instanceof FsFault && error.reason === "unresolved-name")
+          )
+        )
+          throw error;
       }
     }
   return merged;

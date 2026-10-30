@@ -81,6 +81,10 @@ describe("literals and names", () => {
     ["try(f())", "(try (call f))"],
     ["try silent(f())", "(try-silent (call f))"],
     ["switch (m) { E.A : 0, E.B : 1 }", "(switch m (map ((. E A) 0) ((. E B) 1)))"],
+    // Onshape accepts a trailing comma in maps; community scripts (Wiring, Freeform spline) use it.
+    // Arrays don't take one: see test/broken/trailing-comma.fs.
+    ["{ a : 1, b : 2, }", '(map ("a" 1) ("b" 2))'],
+    ["switch (m) { E.A : 0, E.B : 1, }", "(switch m (map ((. E A) 0) ((. E B) 1)))"],
   ])("%s", (source, tree) => expect(expression(source)).toBe(tree));
 });
 
