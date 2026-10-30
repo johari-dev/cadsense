@@ -1,20 +1,42 @@
 import {
   addBodies,
+  chainHistory,
   historyOf,
+  imagesOf,
+  LOOSEST_TOLERANCE,
+  loosestTolerance,
   removeBodies,
   replaceBodies,
   type Entity,
   type Frame,
   type History,
 } from "../geometry/Model.ts";
+import { distance } from "../geometry/Query.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
 import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, untag, type FsValue } from "../runtime/Value.ts";
 import { array, map } from "./args.ts";
-import { planeFace, planeOf } from "./construction.ts";
+import { planeOf } from "./construction.ts";
 import { idOf, kernel, magnitude, normalized, resolve, vector } from "./geometryArgs.ts";
+import {
+  collapseRadius,
+  connectedGroups,
+  edgePoints,
+  fillAndCut,
+  interiorPoint,
+  planeAround,
+  seamsClear,
+  shellCheck,
+  shellSolid,
+  smoothSheet,
+  surfaceType,
+  thickenFace,
+  TIGHT_TOLERANCE,
+  touchesSeam,
+} from "./faceEdit.ts";
+import { patternFaces, tangentEdges } from "./faces.ts";
 import { regenError } from "./std.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
@@ -23,8 +45,15 @@ import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
  * transform, thicken, loft, sweep and split.
  */
 
-/** std's `Transform` (3x3 `linear`, length `translation`) as an OpenCascade transformation. */
-function toTrsf(call: BuiltinCall, oc: Oc, value: FsValue): InstanceType<Oc["gp_Trsf"]> {
+/**
+ * std's `Transform` (3x3 `linear`, length `translation`) as an OpenCascade transformation, for
+ * every operation that moves or copies geometry by one. A gp_Trsf holds only rotations, mirrors and
+ * one scale; given a matrix that scales the axes differently it makes the scale uniform without
+ * saying so, so a transform it can't hold exactly stops here. Scaling unevenly takes a general
+ * transformation (the geometry becoming B-splines), which this OpenCascade build doesn't bind (no
+ * BRepBuilderAPI_GTransform).
+ */
+export function toTrsf(call: BuiltinCall, oc: Oc, value: FsValue): InstanceType<Oc["gp_Trsf"]> {
   const transform = map(call, value, "transform");
   const linear = array(call, transform.getField("linear"), "transform.linear").map((row) =>
     array(call, row, "transform.linear").map((x) => magnitude(call, x, "transform.linear")),
@@ -46,6 +75,14 @@ function toTrsf(call: BuiltinCall, oc: Oc, value: FsValue): InstanceType<Oc["gp_
     m(2, 2),
     t[2],
   );
+  const size = Math.max(1, ...linear.flat().map(Math.abs));
+  const exact = [0, 1, 2].every((i) =>
+    [0, 1, 2].every((j) => Math.abs(trsf.Value(i + 1, j + 1) - m(i, j)) <= 1e-9 * size),
+  );
+  if (!exact)
+    return call.unsupported(
+      "Transforms that scale unevenly (by different amounts along different axes) are not supported locally yet.",
+    );
   return trsf;
 }
 
@@ -63,8 +100,88 @@ function movedFrame(oc: Oc, trsf: InstanceType<Oc["gp_Trsf"]>, frame: Frame): Fr
   };
 }
 
+/**
+ * True when OpenCascade's full check (geometry included) accepts `shape`, its tolerances are ones a
+ * body may have, and no face has (next to) no area. Offsets deeper than a curved face's radius come
+ * back as shapes only the check catches (a tube on the wrong side); folded-up offsets pass it with
+ * 1 mm tolerances; a blend offset by its radius can pass as a face of no area.
+ */
+const sound = (oc: Oc, shape: Shape) =>
+  new oc.BRepCheck_Analyzer(shape, true, false).IsValid() &&
+  loosestTolerance(oc, shape) <= LOOSEST_TOLERANCE &&
+  subShapes(oc, shape, "FACE").every((face) => {
+    const props = new oc.GProp_GProps();
+    oc.BRepGProp.SurfaceProperties(face, props, false, false);
+    return props.Mass() > 1e-12;
+  });
+
+/** A length in meters as millimeters for a message: up to three decimals, no trailing zeros. */
+const millimeters = (meters: number) => String(+(Math.abs(meters) * 1000).toFixed(3));
+
+/** `face` for a message: its surface and a point on it, in millimeters. */
+function located(oc: Oc, face: Shape): string {
+  const point = interiorPoint(oc, face);
+  const at = point ? ` at (${point.map((v) => +(v * 1000).toFixed(3)).join(", ")}) mm` : "";
+  return `the ${surfaceType(oc, face).toLowerCase()} face${at}`;
+}
+
+/** `face` for a message, with its `radius` in millimeters. */
+const described = (oc: Oc, face: Shape, radius: number) =>
+  `${located(oc, face)} (radius ${millimeters(radius)} mm)`;
+
+/**
+ * OpenCascade's shell of `body` open at `removed` faces; null when it throws, or for a hollow
+ * body (it can't make one).
+ */
+function thickSolid(
+  oc: Oc,
+  body: Shape,
+  removed: readonly Shape[],
+  thickness: number,
+): { shape: Shape; history: History } | null {
+  if (removed.length === 0) return null;
+  try {
+    const shell = new oc.BRepOffsetAPI_MakeThickSolid();
+    // The binding's defaults; spelling out a join type here changed results (a chamfered box's
+    // shell lost 108 mm^3).
+    shell.MakeThickSolidByJoin(body, toList(oc, removed), thickness, 1e-6);
+    return shell.IsDone() ? { shape: shell.Shape(), history: historyOf(oc, shell) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `result` is really `body` shelled: every removed face is gone, a hollow body (nothing
+ * removed) gained an inner shell, and an inward shell lost volume. OpenCascade can hand back the
+ * body unchanged and call it done.
+ */
+function shelled(
+  oc: Oc,
+  body: Shape,
+  removed: readonly Shape[],
+  thickness: number,
+  result: Shape,
+): boolean {
+  const volume = (shape: Shape) => {
+    const props = new oc.GProp_GProps();
+    oc.BRepGProp.VolumeProperties(shape, props, false, false, false);
+    return props.Mass();
+  };
+  // The walls leave a rim in the removed face's plane; its middle is the opening.
+  const remains = (face: Shape) => {
+    const point = interiorPoint(oc, face, true);
+    if (!point) return true;
+    const probe = new oc.BRepBuilderAPI_MakeVertex(new oc.gp_Pnt(...point)).Vertex();
+    return subShapes(oc, result, "FACE").some((kept) => distance(oc, probe, kept) < 1e-7);
+  };
+  if (removed.some(remains)) return false;
+  if (removed.length === 0 && subShapes(oc, result, "SHELL").length < 2) return false;
+  return thickness > 0 || volume(result) < volume(body) * (1 - 1e-9);
+}
+
 /** Runs an OpenCascade algorithm, raising std's error enum if the kernel throws or reports failure. */
-function attempt<T>(call: BuiltinCall, error: string, run: () => T): T {
+export function attempt<T>(call: BuiltinCall, error: string, run: () => T): T {
   try {
     return run();
   } catch {
@@ -72,8 +189,45 @@ function attempt<T>(call: BuiltinCall, error: string, run: () => T): T {
   }
 }
 
+/**
+ * The fillet or chamfer `make` builds on `shape` along `edges`. OpenCascade's can't run along or end
+ * on a seam (where a cylinder's parameter wraps; Parasolid has none), so when it fails there the
+ * seams move clear and it runs again. If that can't work it's a local limitation; any other failure
+ * is std's `error`.
+ */
+function blended(
+  call: BuiltinCall,
+  oc: Oc,
+  body: Shape,
+  edges: readonly Shape[],
+  error: string,
+  make: (shape: Shape, edges: readonly Shape[]) => { shape: Shape; history: History },
+): { shape: Shape; history: History } {
+  try {
+    return make(body, edges);
+  } catch {
+    // Retried below with the seams moved.
+  }
+  const cleared = seamsClear(oc, body, edges);
+  if (cleared)
+    try {
+      const made = make(
+        cleared.shape,
+        edges.flatMap((edge) => imagesOf(cleared.history, edge)),
+      );
+      return { shape: made.shape, history: chainHistory(cleared.history, made.history) };
+    } catch {
+      // Reported below.
+    }
+  if (subShapes(oc, body, "FACE").some((face) => touchesSeam(oc, face, edges)))
+    return call.unsupported(
+      "Filleting or chamfering an edge along or ending on a cylinder's seam is not supported locally yet.",
+    );
+  return regenError(call, error);
+}
+
 /** Distinct bodies of the resolved entities, keeping the entities grouped by body. */
-function byBody(model: ModelContext, entities: readonly Entity[]): Map<Entity, Entity[]> {
+export function byBody(model: ModelContext, entities: readonly Entity[]): Map<Entity, Entity[]> {
   const groups = new Map<Entity, Entity[]>();
   for (const entity of entities) {
     const body = model.geometry.entities.get(entity.body)!;
@@ -98,6 +252,27 @@ function modifyBody(
     history,
     createdBy: idOf(id),
   }).state;
+}
+
+/**
+ * OpenCascade fillets and chamfers a selected edge's whole tangent chain. Without
+ * tangentPropagation, Onshape stops at the selected edges, so a selection with an unselected
+ * tangent continuation stops the run instead of rounding more than asked.
+ */
+function rejectUnpropagated(
+  call: BuiltinCall,
+  oc: Oc,
+  model: ModelContext,
+  definition: FsMap,
+  edges: readonly Entity[],
+) {
+  if (
+    untag(definition.getField("tangentPropagation")) !== true &&
+    tangentEdges(oc, model, edges).length > edges.length
+  )
+    return call.unsupported(
+      "Filleting or chamfering an edge without the edges tangent to it is not supported locally yet; set tangentPropagation.",
+    );
 }
 
 /** Edges selected directly, plus the edges of selected faces. */
@@ -209,22 +384,43 @@ export const OPERATION_BUILTINS = {
     const full = Math.abs(forward + back) < 1e-12 || Math.abs(forward + back - 2 * Math.PI) < 1e-12;
     const total = full ? 2 * Math.PI : forward + back;
     const caps = new ShapeSet<"START" | "END">(oc);
+    // A profile reaching both sides of the axis would sweep through itself.
+    const across = (p: Vec3) => {
+      const n = planarNormal(oc, faces[0]!.shape);
+      if (!n) return 0;
+      const side = [
+        n[1] * direction[2] - n[2] * direction[1],
+        n[2] * direction[0] - n[0] * direction[2],
+        n[0] * direction[1] - n[1] * direction[0],
+      ];
+      return (
+        (p[0] - origin[0]) * side[0]! +
+        (p[1] - origin[1]) * side[1]! +
+        (p[2] - origin[2]) * side[2]!
+      );
+    };
+    for (const face of faces) {
+      const offsets = subShapes(oc, face.shape, "EDGE")
+        .flatMap((edge) => edgePoints(oc, edge, 9))
+        .map(across);
+      if (Math.min(...offsets) < -1e-9 && Math.max(...offsets) > 1e-9)
+        return regenError(call, "REVOLVE_FAILED");
+    }
     const solids = faces.map((face) => {
       const start = new oc.gp_Trsf();
       start.SetRotation(ax1, -back);
       const base = back
         ? new oc.BRepBuilderAPI_Transform(face.shape, start, true, false).Shape()
         : face.shape;
-      const revol = attempt(
-        call,
-        "REVOLVE_FAILED",
-        () => new oc.BRepPrimAPI_MakeRevol(base, ax1, total, true),
-      );
-      if (!full) {
-        for (const cap of subShapes(oc, revol.FirstShape(), "FACE")) caps.set(cap, "START");
-        for (const cap of subShapes(oc, revol.LastShape(), "FACE")) caps.set(cap, "END");
-      }
-      return revol.Shape();
+      return attempt(call, "REVOLVE_FAILED", () => {
+        const revol = new oc.BRepPrimAPI_MakeRevol(base, ax1, total, true);
+        const shape = revol.Shape();
+        if (!full) {
+          for (const cap of subShapes(oc, revol.FirstShape(), "FACE")) caps.set(cap, "START");
+          for (const cap of subShapes(oc, revol.LastShape(), "FACE")) caps.set(cap, "END");
+        }
+        return shape;
+      });
     });
     model.geometry = addBodies(
       oc,
@@ -247,19 +443,36 @@ export const OPERATION_BUILTINS = {
       untag(definition.getField("crossSection")) !== "CIRCULAR"
     )
       return call.unsupported("Only circular fillets are supported locally yet.");
-    if (
-      untag(definition.getField("isVariable")) === true ||
-      definition.getField("partialFilletBounds") !== undefined
-    )
-      return call.unsupported("Variable and partial fillets are not supported locally yet.");
+    if (definition.getField("partialFilletBounds") !== undefined)
+      return call.unsupported("Partial fillets are not supported locally yet.");
+    rejectVariants(call, definition, ["isAsymmetric", "createDetachedSurface", "smoothCorners"]);
+    if (String(untag(definition.getField("blendControlType")) ?? "RADIUS") !== "RADIUS")
+      return call.unsupported("Fillets sized by width are not supported locally yet.");
+    // OpenCascade's variable rolling ball takes off 9.476 mm^3 where a ball growing from 1 to 3 mm
+    // along a 10 mm cube edge would take 9.179 (its envelope), or 9.299 with circular sections
+    // square to the edge; which one Parasolid builds isn't documented.
+    if (untag(definition.getField("isVariable")) === true)
+      return call.unsupported(
+        "Variable fillets are not supported locally yet: OpenCascade's varying radius doesn't follow a documented Onshape profile.",
+      );
     const radius = magnitude(call, definition.getField("radius"), "radius");
     const edges = edgesOf(oc, model, resolve(call, model, oc, definition.getField("entities")));
     if (edges.length === 0) return call.fail("Nothing to fillet.");
+    rejectUnpropagated(call, oc, model, definition, edges);
     for (const [body, bodyEdges] of byBody(model, edges)) {
-      const fillet = new oc.BRepFilletAPI_MakeFillet(body.shape);
-      for (const edge of bodyEdges) fillet.Add(radius, oc.TopoDS.Edge(edge.shape));
-      const result = attempt(call, "FILLET_FAILED", () => fillet.Shape());
-      modifyBody(oc, model, body, result, historyOf(oc, fillet), id);
+      const result = blended(
+        call,
+        oc,
+        body.shape,
+        bodyEdges.map((edge) => edge.shape),
+        "FILLET_FAILED",
+        (shape, along) => {
+          const fillet = new oc.BRepFilletAPI_MakeFillet(shape);
+          for (const edge of along) fillet.Add(radius, oc.TopoDS.Edge(edge));
+          return { shape: fillet.Shape(), history: historyOf(oc, fillet) };
+        },
+      );
+      modifyBody(oc, model, body, result.shape, result.history, id);
     }
     return undefined;
   },
@@ -268,16 +481,39 @@ export const OPERATION_BUILTINS = {
     const { model, oc } = kernel(call, ctx);
     const definition = map(call, value, "definition");
     const type = String(untag(definition.getField("chamferType")) ?? "EQUAL_OFFSETS");
-    if (type !== "EQUAL_OFFSETS")
-      return call.unsupported(`Chamfer type ${type} is not supported locally yet.`);
-    const width = magnitude(call, definition.getField("width"), "width");
+    if (String(untag(definition.getField("chamferMethod")) ?? "FACE_OFFSET") !== "FACE_OFFSET")
+      return call.unsupported("Chamfers measured by apex range are not supported locally yet.");
+    // Which face takes width1 (or the angle) follows the kernel's edge direction, which differs
+    // between Parasolid and OpenCascade, so only distances that are equal both ways can match.
+    let width: number;
+    if (type === "EQUAL_OFFSETS") width = magnitude(call, definition.getField("width"), "width");
+    else if (type === "TWO_OFFSETS") {
+      width = magnitude(call, definition.getField("width1"), "width1");
+      if (Math.abs(width - magnitude(call, definition.getField("width2"), "width2")) > 1e-12)
+        return call.unsupported(
+          "Chamfers with two different distances are not supported locally yet: which face takes each distance follows Parasolid's edge direction.",
+        );
+    } else
+      return call.unsupported(
+        `Chamfer type ${type} is not supported locally yet: which face takes the distance follows Parasolid's edge direction.`,
+      );
     const edges = edgesOf(oc, model, resolve(call, model, oc, definition.getField("entities")));
     if (edges.length === 0) return call.fail("Nothing to chamfer.");
+    rejectUnpropagated(call, oc, model, definition, edges);
     for (const [body, bodyEdges] of byBody(model, edges)) {
-      const chamfer = new oc.BRepFilletAPI_MakeChamfer(body.shape);
-      for (const edge of bodyEdges) chamfer.Add(width, oc.TopoDS.Edge(edge.shape));
-      const result = attempt(call, "CHAMFER_FAILED", () => chamfer.Shape());
-      modifyBody(oc, model, body, result, historyOf(oc, chamfer), id);
+      const result = blended(
+        call,
+        oc,
+        body.shape,
+        bodyEdges.map((edge) => edge.shape),
+        "CHAMFER_FAILED",
+        (shape, along) => {
+          const chamfer = new oc.BRepFilletAPI_MakeChamfer(shape);
+          for (const edge of along) chamfer.Add(width, oc.TopoDS.Edge(edge));
+          return { shape: chamfer.Shape(), history: historyOf(oc, chamfer) };
+        },
+      );
+      modifyBody(oc, model, body, result.shape, result.history, id);
     }
     return undefined;
   },
@@ -289,14 +525,42 @@ export const OPERATION_BUILTINS = {
     const selected = resolve(call, model, oc, definition.getField("entities"));
     for (const [body, entities] of byBody(model, selected)) {
       const faces = entities.filter((entity) => entity.type === "FACE").map((face) => face.shape);
-      const shell = new oc.BRepOffsetAPI_MakeThickSolid();
-      const result = attempt(call, "SHELL_FAILED", () => {
-        if (faces.length)
-          shell.MakeThickSolidByJoin(body.shape, toList(oc, faces), thickness, 1e-6);
-        else shell.MakeThickSolidBySimple(body.shape, thickness);
-        return shell.Shape();
-      });
-      modifyBody(oc, model, body, result, historyOf(oc, shell), id);
+      // The body less its offset (or its offset less the body), else OpenCascade's own shell; each
+      // only when it's valid, really a shell, and one with sharp joins (OpenCascade's own rounds
+      // concave ones). Either can fail where the other works: an offset of a box with a chamfered
+      // top edge comes back wrong; OpenCascade's shell can't make a hollow body.
+      const accepted = (made: { shape: Shape; history: History } | null) => {
+        if (
+          !made ||
+          !sound(oc, made.shape) ||
+          !shelled(oc, body.shape, faces, thickness, made.shape)
+        )
+          return null;
+        const check = shellCheck(oc, body.shape, faces, thickness, made.shape);
+        return check === "wrong" ? null : { ...made, consumed: check.consumed };
+      };
+      const built = shellSolid(oc, body.shape, faces, thickness);
+      // Only walls that leave no room for a cavity anywhere are what Onshape fails too.
+      if (built === "no cavity") return regenError(call, "SHELL_FAILED");
+      // A kept face shrunk to nothing while a cavity fits (a convex blend no wider than the walls):
+      // Onshape likely meets its neighbours at a sharp corner, which isn't built here.
+      const collapsing = subShapes(oc, body.shape, "FACE")
+        .filter((face) => !faces.some((removed) => removed.IsSame(face)))
+        .map((face) => ({ face, radius: collapseRadius(oc, face, thickness) }))
+        .find(({ radius }) => radius !== null);
+      if (collapsing)
+        return call.unsupported(
+          `Shelling this body is not supported locally yet: walls ${millimeters(thickness)} mm thick shrink ${described(oc, collapsing.face, collapsing.radius!)} to nothing.`,
+        );
+      const made = accepted(built) ?? accepted(thickSolid(oc, body.shape, faces, thickness));
+      if (!made) return call.unsupported("Shelling this body is not supported locally yet.");
+      // Walls with no room on a thin feature (or, outward, across a narrow gap): leaving the feature
+      // solid (or the gap filled) is a guess at what Onshape does.
+      if (made.consumed)
+        return call.unsupported(
+          `Shelling this body is not supported locally yet: ${located(oc, made.consumed)} ${thickness < 0 ? "is on a feature thinner" : "faces a gap narrower"} than two ${millimeters(thickness)} mm walls.`,
+        );
+      modifyBody(oc, model, body, made.shape, made.history, id);
     }
     return undefined;
   },
@@ -310,21 +574,45 @@ export const OPERATION_BUILTINS = {
     );
     if (names.length !== transforms.length)
       return call.fail("transforms and instanceNames must be the same size.");
-    const entities = resolve(call, model, oc, definition.getField("entities"));
-    if (entities.some((entity) => entity.type !== "BODY"))
-      return call.unsupported("Face patterns are not supported locally yet; pattern bodies.");
+    const selected = resolve(call, model, oc, definition.getField("entities"));
+    if (selected.some((entity) => entity.type !== "BODY" && entity.type !== "FACE"))
+      return call.unsupported("Patterning edges or vertices is not supported locally yet.");
+    const entities = selected.filter((entity) => entity.type === "BODY");
+    const faces = selected.filter((entity) => entity.type === "FACE");
+    if (faces.length)
+      patternFaces(
+        call,
+        oc,
+        model,
+        faces,
+        transforms.map((transform, i) => ({ trsf: toTrsf(call, oc, transform), name: names[i]! })),
+        id,
+        untag(definition.getField("copyPropertiesAndAttributes")) !== false,
+      );
     const copies = transforms.flatMap((transform, i) => {
       const trsf = toTrsf(call, oc, transform);
-      return entities.map((body) => ({
-        shape: new oc.BRepBuilderAPI_Transform(body.shape, trsf, true, false).Shape(),
-        bodyType: body.bodyType,
-        createdBy: [...idOf(id), names[i]!],
-        ...(body.frame ? { frame: movedFrame(oc, trsf, body.frame) } : {}),
-        annotate: (_: Shape, type: string) =>
-          type === "BODY" && untag(definition.getField("copyPropertiesAndAttributes")) !== false
-            ? { attributes: body.attributes, properties: body.properties }
-            : {},
-      }));
+      return entities.map((body) => {
+        const moved = new oc.BRepBuilderAPI_Transform(body.shape, trsf, true, false);
+        // Each copied entity names the seed entity it copies, for lineage.
+        const seeds = new ShapeSet<string>(oc);
+        for (const seed of model.geometry.entities.values())
+          if (seed.body === body.id) seeds.set(moved.ModifiedShape(seed.shape), seed.id);
+        return {
+          shape: moved.Shape(),
+          sources: (shape: Shape) => {
+            const seed = seeds.get(shape);
+            return seed ? [seed] : [];
+          },
+          bodyType: body.bodyType,
+          createdBy: [...idOf(id), names[i]!],
+          construction: body.construction,
+          ...(body.frame ? { frame: movedFrame(oc, trsf, body.frame) } : {}),
+          annotate: (_: Shape, type: string) =>
+            type === "BODY" && untag(definition.getField("copyPropertiesAndAttributes")) !== false
+              ? { attributes: body.attributes, properties: body.properties }
+              : {},
+        };
+      });
     });
     model.geometry = addBodies(oc, model.geometry, copies).state;
     return undefined;
@@ -364,11 +652,11 @@ export const OPERATION_BUILTINS = {
     const selected = resolve(call, model, oc, definition.getField("entities"));
     const faces = facesOf(model, selected);
     if (faces.length === 0) return regenError(call, "THICKEN_SELECT_ENTITIES");
-    const solids = faces.map((face) => {
-      const normal = planarNormal(oc, face.shape);
+    const thickened = (face: Shape): Shape => {
+      const normal = planarNormal(oc, face);
       if (normal) {
         // A planar face sweeps straight along its normal, from -back to +front.
-        const start = translated(oc, face.shape, [
+        const start = translated(oc, face, [
           -normal[0] * back,
           -normal[1] * back,
           -normal[2] * back,
@@ -383,20 +671,57 @@ export const OPERATION_BUILTINS = {
           ).Shape(),
         );
       }
-      if (front !== 0 && back !== 0)
-        return call.unsupported("Thickening a curved face both ways is not supported locally yet.");
-      const thick = new oc.BRepOffsetAPI_MakeThickSolid();
-      return attempt(call, "THICKEN_FAILED", () => {
-        thick.MakeThickSolidBySimple(face.shape, front !== 0 ? front : -back);
-        return thick.Shape();
-      });
+      return (
+        thickenFace(oc, face, front, back) ??
+        call.unsupported("Thickening this surface is not supported locally yet.")
+      );
+    };
+    // Faces sharing edges thicken as one sheet, one solid. Where they meet tangentially, the
+    // pieces' end walls coincide and fusing them is exact; at a sharp join Onshape fills or trims
+    // the corner in a way not reproduced here.
+    const solids = connectedGroups(
+      oc,
+      faces.map((face) => face.shape),
+    ).map((group) => {
+      if (!smoothSheet(oc, group))
+        return call.unsupported(
+          "Thickening faces that meet at a sharp edge is not supported locally yet.",
+        );
+      // Deeper than a face's radius on its concave side there's no surface to offset to. With
+      // every face of the sheet so, nothing is left to thicken and Onshape fails too; with only
+      // some (a blend and the face beside it), Onshape likely closes the gap with a sharp corner.
+      const collapsing = group
+        .map((face) => ({
+          face,
+          radius: collapseRadius(oc, face, front) ?? collapseRadius(oc, face, -back),
+        }))
+        .filter(({ radius }) => radius !== null);
+      if (collapsing.length === group.length) return regenError(call, "THICKEN_FAILED");
+      const [shrunk] = collapsing;
+      if (shrunk)
+        return call.unsupported(
+          `Thickening this surface is not supported locally yet: ${millimeters(Math.max(front, back))} mm shrinks ${described(oc, shrunk.face, shrunk.radius!)} to nothing.`,
+        );
+      const pieces = group.map(thickened);
+      // OpenCascade failing to build a valid solid, or gluing one together with tolerances its
+      // check passes, is a local limitation.
+      const loosest = Math.max(TIGHT_TOLERANCE, ...group.map((face) => loosestTolerance(oc, face)));
+      const right = (shape: Shape) => sound(oc, shape) && loosestTolerance(oc, shape) <= loosest;
+      if (!pieces.every(right))
+        return call.unsupported("Thickening this surface is not supported locally yet.");
+      const [first, ...rest] = pieces;
+      const fused = rest.length ? fillAndCut(oc, first!, rest, [])?.shape : first;
+      if (!fused || subShapes(oc, fused, "SOLID").length !== 1 || !right(fused))
+        return call.unsupported("Thickening this surface is not supported locally yet.");
+      return fused;
     });
     let state = addBodies(
       oc,
       model.geometry,
       solids.map((shape) => ({ shape, bodyType: "SOLID" as const, createdBy: idOf(id) })),
     ).state;
-    // keepTools false deletes sheet bodies selected whole; sketches and solids always stay.
+    // keepTools false deletes sheet bodies selected whole; sketches, construction planes and
+    // solids always stay.
     if (untag(definition.getField("keepTools")) === false)
       state = removeBodies(
         state,
@@ -405,6 +730,7 @@ export const OPERATION_BUILTINS = {
             (entity) =>
               entity.type === "BODY" &&
               entity.bodyType === "SHEET" &&
+              !entity.construction &&
               ![...model.geometry.entities.values()].some(
                 (face) => face.body === entity.id && face.sketch !== null,
               ),
@@ -543,10 +869,13 @@ export const OPERATION_BUILTINS = {
       ...byBody(model, resolve(call, model, oc, definition.getField("targets"))).keys(),
     ];
     if (targets.length === 0) return regenError(call, "SPLIT_SELECT_TARGETS");
-    // Planes and planar faces cut as unbounded planes: a face this large crosses every target.
-    const box = new oc.Bnd_Box();
-    for (const target of targets) oc.BRepBndLib.Add(target.shape, box, false);
-    const reach = 10 * Math.sqrt(box.SquareExtent()) + 1;
+    // Planes and planar faces cut as unbounded planes: a patch on the plane covering every target.
+    const across = (plane: { origin: Vec3; normal: Vec3 }) =>
+      planeAround(
+        oc,
+        plane,
+        targets.map((target) => target.shape),
+      );
     const toolValue = definition.getField("tool");
     const toolMap = untag(toolValue);
     let tool: Shape;
@@ -554,7 +883,7 @@ export const OPERATION_BUILTINS = {
     let toolBodies: Entity[] = [];
     if (toolMap instanceof FsMap && toolMap.getField("queryType") === undefined) {
       const plane = planeOf(call, toolValue, "tool");
-      tool = planeFace(oc, plane, reach, reach);
+      tool = across(plane);
       side = plane;
     } else {
       const entities = resolve(call, model, oc, toolValue);
@@ -565,8 +894,7 @@ export const OPERATION_BUILTINS = {
       if (normal) {
         const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(faces[0]!.shape), true);
         const origin = xyz(surface.Plane().Location());
-        const x = xyz(surface.Plane().XAxis().Direction());
-        tool = planeFace(oc, { origin, normal, x }, reach, reach);
+        tool = across({ origin, normal });
         side = { origin, normal };
       } else tool = faces.length === 1 ? faces[0]!.shape : compound(oc, faces);
     }
@@ -600,11 +928,13 @@ export const OPERATION_BUILTINS = {
         createdBy: idOf(id),
       }).state;
     }
-    // Sheet bodies used as tools are deleted unless keepTools is true.
+    // Sheet bodies used as tools are deleted unless keepTools is true; construction planes stay.
     if (untag(definition.getField("keepTools")) !== true)
       model.geometry = removeBodies(
         model.geometry,
-        toolBodies.filter((body) => body.bodyType === "SHEET").map((body) => body.id),
+        toolBodies
+          .filter((body) => body.bodyType === "SHEET" && !body.construction)
+          .map((body) => body.id),
       );
     return undefined;
   },

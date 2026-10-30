@@ -1,6 +1,5 @@
 import {
   addBodies,
-  historyOf,
   ordered,
   removeBodies,
   replaceBodies,
@@ -15,6 +14,7 @@ import type { ModelContext } from "../runtime/ModelContext.ts";
 import { equals, FsBuiltin, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
 import { map } from "./args.ts";
 import { properties } from "./edges.ts";
+import { tidied } from "./faceEdit.ts";
 import { idOf, kernel, magnitude, normalized, resolve, transient, vector } from "./geometryArgs.ts";
 import { regenError, stdPlane } from "./std.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
@@ -412,9 +412,12 @@ export const GEOMETRY_BUILTINS = {
     let consumed: Entity[];
     let keepIds: string[];
     let keepIdBy: "most" | "earliest" = "most";
-    if (operation === "SUBTRACTION") {
+    if (operation === "SUBTRACTION" || operation === "SUBTRACT_COMPLEMENT") {
       if (targets.length === 0) return regenError(call, "BOOLEAN_NEED_ONE_SOLID");
-      algorithm = new oc.BRepAlgoAPI_Cut();
+      // SUBTRACT_COMPLEMENT removes what's outside the tools' union: each target keeps only its
+      // common part with them, and its id.
+      algorithm =
+        operation === "SUBTRACTION" ? new oc.BRepAlgoAPI_Cut() : new oc.BRepAlgoAPI_Common();
       algorithm.SetArguments(
         toList(
           oc,
@@ -445,17 +448,26 @@ export const GEOMETRY_BUILTINS = {
       keepIdBy = "earliest";
     } else return call.unsupported(`Boolean ${operation} is not supported locally yet.`);
 
+    algorithm.SetNonDestructive(true);
     algorithm.Build(new oc.Message_ProgressRange());
     if (algorithm.HasErrors()) return regenError(call, "BOOLEAN_INVALID");
+    // Parasolid merges the faces a boolean leaves split on one surface (a union's coplanar sides),
+    // but not splits the inputs already had.
+    const result = tidied(
+      oc,
+      algorithm,
+      [...targets, ...tools].map((body) => body.shape),
+    );
+    if (!result) return regenError(call, "BOOLEAN_INVALID");
     model.geometry = replaceBodies(oc, model.geometry, {
       consumed: consumed.map((body) => body.id),
       keepIds,
       keepIdBy,
-      results: subShapes(oc, algorithm.Shape(), "SOLID").map((shape) => ({
+      results: subShapes(oc, result.shape, "SOLID").map((shape) => ({
         shape,
         bodyType: "SOLID" as const,
       })),
-      history: historyOf(oc, algorithm),
+      history: result.history,
       createdBy: idOf(id),
     }).state;
     return undefined;

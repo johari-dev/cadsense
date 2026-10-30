@@ -255,9 +255,9 @@ export const points = defineFeature(function(context is Context, id is Id, defin
   it("marks a failure the local runtime can't run, so it isn't blamed on the script", () => {
     const unsupported = cube(10).replace(
       "fCuboid(",
-      'opFlipOrientation(context, id + "flip", { "bodies" : qNothing() });\n        fCuboid(',
+      'opMergeContexts(context, id + "merge", {});\n        fCuboid(',
     );
-    const run = runPreview(runtime, [{ path: "flip.fs", source: unsupported }]).features[0]!.run;
+    const run = runPreview(runtime, [{ path: "merge.fs", source: unsupported }]).features[0]!.run;
     expect(featureFailure(runtime, run)).toMatchObject({ unsupported: true });
     const scriptBug = cube(10).replace("fCuboid(", 'throw regenError("mine");\n        fCuboid(');
     expect(

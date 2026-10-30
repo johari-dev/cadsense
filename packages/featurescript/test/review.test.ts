@@ -467,28 +467,32 @@ describe("11. tracking after an earlier split", () => {
 });
 
 /**
- * A STEP assembly in meters: one D-shaped part (a planar spline closed by a line, 2 mm thick,
- * bottom at z = 0) used twice, the second instance placed 5 mm up, so its edges carry a placement.
- * Its spline edges lie in z = 0, 2, 5 and 7 mm.
+ * A STEP assembly: one lens-shaped part (two planar splines, one bulging up and one down, 2 mm
+ * thick, bottom at z = 0) used twice, the second instance placed 5 mm up, so its edges carry a
+ * placement. Two spline edges lie in each of z = 0, 2, 5 and 7 mm.
  */
 function assembly(oc: Oc): Uint8Array {
-  const points = [
-    [0, 0, 0],
-    [0.01, 0.005, 0],
-    [0.02, -0.005, 0],
-    [0.03, 0, 0],
-  ] as const;
-  const array = new oc.NCollection_Array1_gp_Pnt(1, points.length);
-  points.forEach((p, i) => array.SetValue(i + 1, new oc.gp_Pnt(p[0], p[1], p[2])));
-  const fit = new oc.GeomAPI_Interpolate(new oc.NCollection_HArray1_gp_Pnt(array), false, 1e-9);
-  fit.Perform();
-  const spline = new oc.BRepBuilderAPI_MakeEdge(fit.Curve()).Edge();
-  const line = new oc.BRepBuilderAPI_MakeEdge(
-    new oc.gp_Pnt(0.03, 0, 0),
-    new oc.gp_Pnt(0, 0, 0),
-  ).Edge();
+  const spline = (points: readonly (readonly [number, number])[]) => {
+    const array = new oc.NCollection_Array1_gp_Pnt(1, points.length);
+    points.forEach((p, i) => array.SetValue(i + 1, new oc.gp_Pnt(p[0], p[1], 0)));
+    const fit = new oc.GeomAPI_Interpolate(new oc.NCollection_HArray1_gp_Pnt(array), false, 1e-9);
+    fit.Perform();
+    return new oc.BRepBuilderAPI_MakeEdge(fit.Curve()).Edge();
+  };
+  const top = spline([
+    [0, 0],
+    [0.01, 0.005],
+    [0.02, 0.004],
+    [0.03, 0],
+  ]);
+  const bottom = spline([
+    [0.03, 0],
+    [0.02, -0.005],
+    [0.01, -0.004],
+    [0, 0],
+  ]);
   const face = new oc.BRepBuilderAPI_MakeFace(
-    new oc.BRepBuilderAPI_MakeWire(spline, line).Wire(),
+    new oc.BRepBuilderAPI_MakeWire(top, bottom).Wire(),
     true,
   ).Face();
   const solid = new oc.BRepPrimAPI_MakePrism(face, new oc.gp_Vec(0, 0, 0.002), false, true).Shape();
@@ -501,7 +505,9 @@ function assembly(oc: Oc): Uint8Array {
   builder.Add(compound, solid.Moved(new oc.TopLoc_Location(up), false));
   const writer = new oc.STEPControl_Writer();
   oc.Interface_Static.SetCVal("xstep.cascade.unit", "M");
-  oc.Interface_Static.SetCVal("write.step.unit", "M");
+  // Written in millimeters: OpenCascade's own meter files read back with 5.8 mm tolerances, which
+  // no body may have.
+  oc.Interface_Static.SetCVal("write.step.unit", "MM");
   writer.Transfer(
     compound,
     oc.STEPControl_StepModelType.STEPControl_AsIs,
@@ -544,14 +550,14 @@ export const test = defineFeature(function(context is Context, id is Id, definit
       { base: bytes },
     );
     expect(ok(run)).toEqual(["OK"]);
-    // One spline in each of z = 0, 2, 5 and 7 mm, none in z = 10 or 12 mm.
+    // Two splines in each of z = 0, 2, 5 and 7 mm, none in z = 10 or 12 mm.
     expect((untag(variable(run, "counts")) as readonly FsValue[]).map(untag)).toEqual([
-      1, 1, 1, 1, 0, 0,
+      2, 2, 2, 2, 0, 0,
     ]);
     const offsets = (untag(variable(run, "offsets")) as readonly FsValue[]).map(
       (o) => untag(o) as number,
     );
-    expect(offsets).toHaveLength(4);
+    expect(offsets).toHaveLength(8);
     for (const offset of offsets) expect(offset).toBeCloseTo(0, 9);
   });
 });
@@ -699,17 +705,16 @@ export const test = defineFeature(function(context is Context, id is Id, definit
     expect(max![0]).toBeCloseTo(0.03, 12);
     expect(min![2]).toBeCloseTo(0, 12);
     expect(max![2]).toBeCloseTo(0.007, 12);
-    // y extremes are inside the spline: refine its own extrema from a fine sampling.
-    const [edge] = ordered(
+    // y extremes are inside the splines: refine each one's own extrema from a fine sampling.
+    const curves = ordered(
       run.geometry!,
       (entity) =>
         entity.type === "EDGE" &&
         String(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape)).GetType()) ===
           "GeomAbs_BSplineCurve",
-    );
-    const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge!.shape));
-    const y = (u: number) => curve.EvalD0(u).Y();
-    const extreme = (sign: number) => {
+    ).map((edge) => new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge.shape)));
+    const extremeOf = (curve: (typeof curves)[number], sign: number) => {
+      const y = (u: number) => curve.EvalD0(u).Y();
       const [a, b] = [curve.FirstParameter(), curve.LastParameter()];
       let best = a;
       for (let i = 0; i <= 10_000; i++) {
@@ -725,6 +730,8 @@ export const test = defineFeature(function(context is Context, id is Id, definit
       }
       return y((lo + hi) / 2);
     };
+    const extreme = (sign: number) =>
+      sign * Math.max(...curves.map((curve) => sign * extremeOf(curve, sign)));
     expect(Math.abs(min![1]! - extreme(-1))).toBeLessThan(1e-9);
     expect(Math.abs(max![1]! - extreme(1))).toBeLessThan(1e-9);
   });
