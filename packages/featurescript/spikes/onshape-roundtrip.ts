@@ -160,7 +160,7 @@ try {
     await NodeFSP.readFile(
       NodePath.join(
         NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
-        "fixtures/bolt-circle.fs",
+        "../corpus/bolt-circle/feature.fs",
       ),
       "utf8",
     )
