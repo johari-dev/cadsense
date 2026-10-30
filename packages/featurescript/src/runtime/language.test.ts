@@ -179,6 +179,11 @@ describe("overloads", () => {
       "return [(2 * meter + 3 * meter) == 5 * meter, 1 * inch < 3 * centimeter, toString(2 * meter)];",
       '[true, true, "2 meter"]',
     ));
+  it("a matrix times a number scales it", () =>
+    expectValue("return ([[1, 2], [3, 4]] as Matrix) * 2;", "[[2, 4], [6, 8]] as Matrix"));
+  // A feature named like a std function (std exports a `sphere` function) must run the module's own.
+  it("a module's own constant shadows an imported function of the same name", () =>
+    expectValue("return sphere;", "7", "const sphere = 7;"));
 });
 
 // https://cad.onshape.com/FsDoc/variables.html

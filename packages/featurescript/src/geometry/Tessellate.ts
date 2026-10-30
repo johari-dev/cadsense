@@ -22,7 +22,7 @@ export interface TessellateOptions {
 
 /**
  * Meshes every solid and sheet body in the state. Wire and point bodies have no faces to draw, and
- * sketch regions aren't drawn as surfaces (Onshape doesn't either; they'd hide what's under them).
+ * sketch regions and construction planes aren't drawn as surfaces (they'd hide what's under them).
  */
 export function tessellate(
   oc: Oc,
@@ -32,6 +32,7 @@ export function tessellate(
   const deflection = options.deflection ?? 5e-5;
   const drawn = (body: Entity) =>
     body.type === "BODY" &&
+    !body.construction &&
     (body.bodyType === "SOLID" ||
       (body.bodyType === "SHEET" &&
         !ordered(state, (entity) => entity.body === body.id && entity.type === "FACE").every(
