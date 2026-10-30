@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { ordered } from "../src/geometry/Model.ts";
 import { FeatureScriptRuntime } from "../src/Runtime.ts";
+import { untag } from "../src/runtime/Value.ts";
 
 /** Geometry behavior that the corpus doesn't pin down on its own. */
 let runtime: FeatureScriptRuntime;
@@ -302,5 +303,92 @@ describe("base models", () => {
     expect(variable("z")).toBeCloseTo(1, 9);
     expect(variable("point")).toBeCloseTo(0, 9);
     expect(variable("solids")).toBe(1);
+  });
+
+  it("a transformed or patterned mate connector keeps its frame, moved with it", () => {
+    // Failure modes: the moved connector loses its frame (evMateConnector fails), loses its id
+    // (it has no faces to vote with), keeps the old frame, or moves when only its owner moves.
+    // Onshape leaves owned connectors behind when their part moves; they move only when selected.
+    const port = 'qBodyType(qCreatedBy(id + "port", EntityType.BODY), BodyType.MATE_CONNECTOR)';
+    const run = runtime.runFeatures([
+      {
+        module: feature(
+          [
+            cube,
+            'opMateConnector(context, id + "port", { "coordSystem" : coordSystem(vector(5, 5, 10) * millimeter, vector(0, 1, 0), vector(0, 0, 1)), "owner" : qCreatedBy(id + "cube", EntityType.BODY) });',
+            `opTransform(context, id + "turn", { "bodies" : ${port}, "transform" : rotationAround(line(vector(0, 0, 0) * millimeter, vector(0, 0, 1)), 90 * degree) });`,
+            'opTransform(context, id + "lift", { "bodies" : qCreatedBy(id + "cube", EntityType.BODY), "transform" : transform(vector(0, 0, 50) * millimeter) });',
+            `const turned = evMateConnector(context, { "mateConnector" : ${port} });`,
+            `setVariable(context, "connectors", size(evaluateQuery(context, ${port})));`,
+            'setVariable(context, "origin", turned.origin / millimeter);',
+            'setVariable(context, "x", turned.xAxis);',
+            'setVariable(context, "z", turned.zAxis);',
+            `setVariable(context, "point", evVertexPoint(context, { "vertex" : ${port} }) / millimeter);`,
+            `opPattern(context, id + "copies", { "entities" : ${port}, "transforms" : [transform(vector(0, 0, 5) * millimeter)], "instanceNames" : ["up"] });`,
+            'const copy = qBodyType(qCreatedBy(id + "copies", EntityType.BODY), BodyType.MATE_CONNECTOR);',
+            'setVariable(context, "copyOrigin", evMateConnector(context, { "mateConnector" : copy }).origin / millimeter);',
+          ].join("\n"),
+        ),
+        feature: "test",
+      },
+    ]);
+    expect(run.features[0]?.status, JSON.stringify(run.features[0]?.exceptions)).toBe("OK");
+    const vector = (name: string) => {
+      const value = untag(run.features[0]!.variables.getField(name)!);
+      if (!Array.isArray(value)) throw new Error(`${name} is not a vector`);
+      return value.map((n) => Number(untag(n)));
+    };
+    expect(run.features[0]!.variables.getField("connectors")).toBe(1);
+    const close = (actual: number[], expected: number[]) =>
+      actual.forEach((n, i) => expect(n).toBeCloseTo(expected[i]!, 9));
+    close(vector("origin"), [-5, 5, 10]);
+    close(vector("x"), [-1, 0, 0]);
+    close(vector("z"), [0, 0, 1]);
+    close(vector("point"), [-5, 5, 10]);
+    close(vector("copyOrigin"), [-5, 5, 15]);
+  });
+});
+
+describe("properties", () => {
+  it("names a body, and the name follows it through later operations and features", () => {
+    // Failure modes: an operation that keeps the body's id drops its properties; one custom
+    // property id overwrites another; a failed feature's properties stay; getProperty reads the
+    // current context, which Onshape refuses inside custom features, so scripts would pass here
+    // and fail there.
+    const body = 'qCreatedBy(makeId("Feature1"), EntityType.BODY)';
+    const run = runtime.runFeatures([
+      {
+        module: feature(
+          [
+            cube,
+            `setProperty(context, { "entities" : ${body}, "propertyType" : PropertyType.NAME, "value" : "Motor to Spark MAX" });`,
+            `setProperty(context, { "entities" : ${body}, "propertyType" : PropertyType.CUSTOM, "customPropertyId" : "aaaaaaaaaaaaaaaaaaaaaaaa", "value" : "red" });`,
+            `setProperty(context, { "entities" : ${body}, "propertyType" : PropertyType.CUSTOM, "customPropertyId" : "bbbbbbbbbbbbbbbbbbbbbbbb", "value" : "18 AWG" });`,
+            `opTransform(context, id + "lift", { "bodies" : ${body}, "transform" : transform(vector(0, 0, 5) * millimeter) });`,
+          ].join("\n"),
+        ),
+        feature: "test",
+      },
+      {
+        module: feature(
+          `setProperty(context, { "entities" : ${body}, "propertyType" : PropertyType.NAME, "value" : "Renamed" });\nthrow regenError("undo");`,
+        ),
+        feature: "test",
+      },
+      {
+        module: feature(
+          `getProperty(context, { "entity" : ${body}, "propertyType" : PropertyType.NAME });`,
+        ),
+        feature: "test",
+      },
+    ]);
+    expect(run.features.map((feature) => feature.status)).toEqual(["OK", "ERROR", "ERROR"]);
+    const named = ordered(run.geometry!, (entity) => entity.type === "BODY")[0];
+    expect(Object.fromEntries(named!.properties)).toEqual({
+      NAME: "Motor to Spark MAX",
+      "CUSTOM:aaaaaaaaaaaaaaaaaaaaaaaa": "red",
+      "CUSTOM:bbbbbbbbbbbbbbbbbbbbbbbb": "18 AWG",
+    });
+    expect(run.features[2]!.exceptions[0]?.message).toMatch(/getProperty can't read/);
   });
 });
