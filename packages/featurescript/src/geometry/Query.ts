@@ -1,6 +1,6 @@
 import { FsMap, untag, type FsArray, type FsValue } from "../runtime/Value.ts";
 import { ordered, startsWith, type Entity, type EntityType, type GeometryState } from "./Model.ts";
-import type { Oc, Shape } from "./occt.ts";
+import { ShapeSet, subShapes, type Oc, type Shape } from "./occt.ts";
 
 /** What `evaluateQuery` needs besides the query: the kernel, the geometry, and how to fail. */
 export interface QueryEnv {
@@ -127,7 +127,12 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
     case "OWNER_PART":
       return byOrder(sub("query").flatMap((entity) => env.state.entities.get(entity.body) ?? []));
     case "OWNED_BY_PART": {
-      const bodies = new Set(evaluateQuery(env, map.getField("part")).map((entity) => entity.body));
+      // Only bodies own entities; a face in `part` doesn't stand for its whole body (std's evArea relies on this).
+      const bodies = new Set(
+        evaluateQuery(env, map.getField("part"))
+          .filter((entity) => entity.type === "BODY")
+          .map((entity) => entity.id),
+      );
       return all(
         (entity) => bodies.has(entity.body) && (entityType === null || entity.type === entityType),
       );
@@ -201,6 +206,72 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
         );
       });
     }
+    case "EDGE_ADJACENT":
+    case "VERTEX_ADJACENT": {
+      // Entities sharing an edge (or a vertex) with any seed, other than the seeds themselves.
+      const kind = type === "EDGE_ADJACENT" ? "EDGE" : "VERTEX";
+      const seeds = evaluateQuery(env, map.getField("query"));
+      const shared = new ShapeSet<true>(env.oc);
+      for (const seed of seeds)
+        for (const part of seed.type === kind ? [seed.shape] : subShapes(env.oc, seed.shape, kind))
+          shared.set(part, true);
+      const seedIds = new Set(seeds.map((seed) => seed.id));
+      const bodies = new Set(seeds.map((seed) => seed.body));
+      return all(
+        (entity) =>
+          entity.type !== "BODY" &&
+          bodies.has(entity.body) &&
+          !seedIds.has(entity.id) &&
+          (entityType === null || entity.type === entityType) &&
+          (entity.type === kind ? [entity.shape] : subShapes(env.oc, entity.shape, kind)).some(
+            (part) => shared.has(part),
+          ),
+      );
+    }
+    case "SKETCH_ENTITY": {
+      // makeQuery(sketchId, "SKETCH_ENTITY", type, { sketchEntityId }): one named sketch entity.
+      const sketchId = idOf(map.getField("operationId"));
+      const entityId = text(map.getField("sketchEntityId"));
+      return all(
+        (entity) =>
+          entity.sketch?.entityId === entityId &&
+          entity.sketch.sketchId.length === sketchId.length &&
+          startsWith(entity.sketch.sketchId, sketchId) &&
+          (entityType === null || entity.type === entityType),
+      );
+    }
+    case "PARALLEL_EDGES": {
+      const direction = unitVector(map.getField("direction"));
+      return evaluateQuery(env, map.getField("queryToFilter")).filter((entity) => {
+        if (entity.type !== "EDGE" || geometryType(env.oc, entity) !== "LINE") return false;
+        const curve = new env.oc.BRepAdaptor_Curve(env.oc.TopoDS.Edge(entity.shape));
+        const tangent = curve.EvalD1(curve.FirstParameter()).D1;
+        const t = Math.hypot(tangent.X(), tangent.Y(), tangent.Z());
+        return (
+          Math.abs(
+            Math.abs(
+              (tangent.X() * direction[0] +
+                tangent.Y() * direction[1] +
+                tangent.Z() * direction[2]) /
+                t,
+            ) - 1,
+          ) < 1e-9
+        );
+      });
+    }
+    case "COINCIDES_WITH_PLANE": {
+      const plane = untag(map.getField("plane"));
+      if (!(plane instanceof FsMap)) return env.fail("COINCIDES_WITH_PLANE needs a plane.");
+      const origin = unitVector(plane.getField("origin"), false);
+      const normal = unitVector(plane.getField("normal"));
+      const off = (x: number, y: number, z: number) =>
+        Math.abs(
+          (x - origin[0]) * normal[0] + (y - origin[1]) * normal[1] + (z - origin[2]) * normal[2],
+        );
+      return sub().filter((entity) =>
+        samplePoints(env.oc, entity).every(([x, y, z]) => off(x, y, z) < CONTAINS_TOLERANCE),
+      );
+    }
     case "CONTAINS_POINT": {
       const [x, y, z] = (untag(map.getField("point")) as FsArray).map((c) => Number(untag(c)));
       const vertex = new env.oc.BRepBuilderAPI_MakeVertex(new env.oc.gp_Pnt(x!, y!, z!)).Vertex();
@@ -209,6 +280,44 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
     default:
       return env.unsupported(`Query type ${type ?? "(missing)"} is not supported locally yet.`);
   }
+}
+
+/** A numeric 3-vector from a query field; normalized unless `normalize` is false. */
+function unitVector(value: FsValue, normalize = true): [number, number, number] {
+  const [x, y, z] = (untag(value) as FsArray).map((c) => Number(untag(c)));
+  const length = normalize ? Math.hypot(x!, y!, z!) || 1 : 1;
+  return [x! / length, y! / length, z! / length];
+}
+
+/** Points spread over an entity (vertex, edge, or face), for "lies in" tests. */
+function samplePoints(oc: Oc, entity: Entity): [number, number, number][] {
+  const p = (point: InstanceType<Oc["gp_Pnt"]>): [number, number, number] => [
+    point.X(),
+    point.Y(),
+    point.Z(),
+  ];
+  if (entity.type === "VERTEX") return [p(oc.BRep_Tool.Pnt(oc.TopoDS.Vertex(entity.shape)))];
+  if (entity.type === "EDGE") {
+    const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape));
+    const [a, b] = [curve.FirstParameter(), curve.LastParameter()];
+    return [0, 0.25, 0.5, 0.75, 1].map((t) => p(curve.EvalD0(a + t * (b - a))));
+  }
+  if (entity.type === "FACE") {
+    const face = oc.TopoDS.Face(entity.shape);
+    const bounds = oc.BRepTools.UVBounds(face);
+    const surface = new oc.BRepAdaptor_Surface(face, true);
+    return [0.1, 0.5, 0.9].flatMap((s) =>
+      [0.1, 0.5, 0.9].map((t) =>
+        p(
+          surface.EvalD0(
+            bounds.UMin + s * (bounds.UMax - bounds.UMin),
+            bounds.VMin + t * (bounds.VMax - bounds.VMin),
+          ),
+        ),
+      ),
+    );
+  }
+  return [];
 }
 
 /** True when `part` is one of `whole`'s sub-shapes (an edge or vertex of a face). */

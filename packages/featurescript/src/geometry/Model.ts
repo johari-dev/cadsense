@@ -51,7 +51,7 @@ export const emptyGeometry: GeometryState = { entities: new Map(), next: 1 };
 export type Annotate = (
   shape: Shape,
   type: EntityType,
-) => Partial<Pick<Entity, "cap" | "sketch" | "construction">>;
+) => Partial<Pick<Entity, "cap" | "sketch" | "construction" | "attributes">>;
 
 /** What an OpenCascade operation did to one input sub-shape. */
 export interface History {
