@@ -120,6 +120,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_drive_options",
       "cad_update_view",
       "cad_capture",
+      "cad_featurescript_preview",
     ]);
     expect(
       listedTools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name),
@@ -132,6 +133,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_measure",
       "cad_find_parts",
       "cad_drive_options",
+      "cad_featurescript_preview",
     ]);
     // Claude must receive the same review guidance as native Codex tool registration.
     expect(listedTools.map(({ name, description }) => ({ name, description }))).toEqual(

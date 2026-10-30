@@ -16,7 +16,23 @@ export {
   type SourceFile,
   type Span,
 } from "./syntax/Source.ts";
-export { FeatureScriptRuntime, type FeatureRun, type RuntimeOptions } from "./Runtime.ts";
+export {
+  BASE_FEATURE_ID,
+  FeatureScriptRuntime,
+  STD_DIR,
+  type FeatureRun,
+  type RuntimeOptions,
+} from "./Runtime.ts";
+export {
+  describePreview,
+  runPreview,
+  VIEWS,
+  writePreview,
+  type PreviewResult,
+  type PreviewStep,
+  type SolidSummary,
+} from "./preview/Preview.ts";
+export type { View } from "./preview/Render.ts";
 export { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
 export { ModuleLoadError, type ModuleInstance } from "./runtime/Modules.ts";
 export { equals, formatValue, FsMap, FsTagged, type FsValue } from "./runtime/Value.ts";

@@ -27,6 +27,27 @@ Parameters are FeatureScript expressions; unset inputs take their defaults. It w
 
 An agent can run this, read the PNGs and the summary, edit the script, and run it again.
 
+### In the app
+
+Agents in a CAD chat get the same thing as the `cad_featurescript_preview` tool (in-app Claude and
+Codex; not the standalone `cadsense mcp` server, whose review workspaces an outside agent can't
+write to). Input is `{path, feature?, parameters?, before?, base?, view?}`, with `path`, `before[].path`
+and `base` relative to the project workspace. It returns a status (`OK`, `INFO`, `WARNING`, `ERROR`,
+or `INVALID` when the script doesn't load, or `STOPPED` on a timeout or crash), the same summary as
+the CLI, the solids, and the chosen view as a PNG. Artifacts for each run go to
+`<state>/attachments/featurescript-previews/<time>-<id>/`, and the newest 50 are kept.
+
+The server runs previews in one worker thread (`apps/server/src/featurescript/`), one at a time.
+It loads std and OpenCascade on first use (about half a second), stops after 10 idle minutes,
+and starts fresh after 20 previews, because shapes are never freed. A preview that takes over
+2 minutes is stopped by terminating the worker. Each preview reloads the user's modules, so edits
+take effect, while std stays loaded. Bundled builds ship the worker as `dist/featurescript-worker.mjs`
+and std as `dist/featurescript-std/`, and keep `replicad-opencascadejs` external, since it loads
+its WASM from beside itself.
+
+The base is a STEP file the user exports from Onshape for now. Syncing it from the Part Studio
+(milestone M5) needs the Onshape API.
+
 ## Layout
 
 - `std/`: vendored Standard Library, re-pinned with `scripts/vendor-std.ts`. `std/VERSION.json`
