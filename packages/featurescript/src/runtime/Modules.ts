@@ -60,13 +60,27 @@ export class ModuleInstance {
   /** Modules whose exports this module re-exports, including itself. Computed on demand. */
   reach: readonly ModuleInstance[] | undefined;
 
-  constructor(path: string, file: SourceFile, ast: Module, isStd: boolean) {
+  /**
+   * An import of another Onshape document (by element id) that isn't available locally. It
+   * declares nothing; a name looked up through it fails where it's used, naming the element.
+   */
+  readonly unavailable: boolean;
+
+  constructor(path: string, file: SourceFile, ast: Module, isStd: boolean, unavailable = false) {
     this.path = path;
     this.file = file;
     this.ast = ast;
     this.isStd = isStd;
+    this.unavailable = unavailable;
   }
 }
+
+/**
+ * An import path naming an element of an Onshape document: `elementId`, or
+ * `documentId/versionId/elementId`, each 24 hex digits.
+ */
+export const isOnshapeElementPath = (path: string): boolean =>
+  /^[0-9a-f]{24}(?:\/[0-9a-f]{24}){0,2}$/i.test(path);
 
 /** A module that failed to parse, or imports one that doesn't exist. */
 export class ModuleLoadError extends Error {
@@ -138,7 +152,9 @@ export class ModuleLoader {
       try {
         imported = this.load(node.path);
       } catch (error) {
-        if (error instanceof ModuleLoadError && error.file === null)
+        if (!(error instanceof ModuleLoadError && error.file === null)) throw error;
+        // Icons, images and libraries from other Onshape documents can't be fetched here.
+        if (!isOnshapeElementPath(node.path))
           throw new ModuleLoadError(
             path,
             file,
@@ -151,7 +167,7 @@ export class ModuleLoader {
             ],
             error.message,
           );
-        throw error;
+        imported = this.unavailableModule(node.path);
       }
       if (node.namespace.length > 1)
         throw new ModuleLoadError(
@@ -172,6 +188,22 @@ export class ModuleLoader {
         exported: node.exported,
       });
     }
+    return instance;
+  }
+
+  /** The stand-in for an Onshape element import that can't be read; see `ModuleInstance.unavailable`. */
+  private unavailableModule(path: string): ModuleInstance {
+    const existing = this.modules.get(path);
+    if (existing) return existing;
+    const file = sourceFile(path, "");
+    const instance = new ModuleInstance(
+      path,
+      file,
+      { version: null, declarations: [] },
+      false,
+      true,
+    );
+    this.modules.set(path, instance);
     return instance;
   }
 

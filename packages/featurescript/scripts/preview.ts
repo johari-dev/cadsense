@@ -88,5 +88,10 @@ try {
       );
     process.exit(1);
   }
+  // A script that loads but can't be read: a missing type in its precondition, a bad parameter.
+  if (error instanceof Error) {
+    console.error(error.message);
+    process.exit(1);
+  }
   throw error;
 }

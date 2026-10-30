@@ -120,6 +120,23 @@ interface CallRecord {
 const TOP = "<top level>";
 
 /**
+ * For a name `module` can't resolve: the Onshape document imports it could have come from, which
+ * aren't available locally (see `ModuleInstance.unavailable`), or "".
+ */
+function missingImportHint(module: ModuleInstance, namespace: readonly string[]): string {
+  const missing = [
+    ...new Set(
+      module.imports
+        .filter((imp) => imp.module.unavailable && imp.namespace === (namespace[0] ?? null))
+        .map((imp) => imp.module.path),
+    ),
+  ];
+  return missing.length
+    ? ` It may come from Onshape element ${missing.join(" or ")}, which isn't available locally.`
+    : "";
+}
+
+/**
  * Runs FeatureScript by walking the syntax tree. Not reentrant across threads, but a run may call
  * back into FeatureScript from builtins (callbacks, nested features).
  */
@@ -247,7 +264,12 @@ export class Interpreter {
         .lookup(module, name, parts)
         .find((entry) => entry.kind === "type" || entry.kind === "enum");
       if (!slot || (slot.kind !== "type" && slot.kind !== "enum"))
-        this.fault("unresolved-name", `Type ${type.name} not found.`, module, type.span);
+        this.fault(
+          "unresolved-name",
+          `Type ${type.name} not found.${missingImportHint(module, parts)}`,
+          module,
+          type.span,
+        );
       resolved = { kind: "tag", def: slot.def };
     }
     this.typeCache.set(type, resolved);
@@ -737,7 +759,7 @@ export class Interpreter {
     if (found.length === 0)
       return this.fault(
         "unresolved-name",
-        `${[...node.namespace, node.name].join("::")} not found.`,
+        `${[...node.namespace, node.name].join("::")} not found.${missingImportHint(env.module, node.namespace)}`,
         env.module,
         node.span,
       );

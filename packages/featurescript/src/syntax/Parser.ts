@@ -989,7 +989,8 @@ class Parser {
         this.expectPunct(":", "after a map key");
         const value = this.expression();
         entries.push({ key, value });
-      } while (this.eatPunct(","));
+        // Onshape takes a trailing comma before the closing brace.
+      } while (this.eatPunct(",") && !this.isPunct("}"));
     this.expectPunct("}", "to close the map");
     return { kind: "Map", entries, span: this.spanFrom(start) };
   }
