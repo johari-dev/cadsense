@@ -116,6 +116,10 @@ The base is a STEP file the user exports from Onshape for now. Syncing it from t
   expectations come from). `test/corpus.e2e.test.ts` runs them and writes
   `.cadsense/fs-corpus/<case>/result.png` (the last feature's faces in amber), `result.glb` and
   `report.json`.
+- `conformance/`: cases compared against real Onshape. `cases/index.ts` lists them (a source in
+  `cases/`, the features to run with fixed inputs, and probe expressions). `record.ts` records them in
+  Onshape into `recordings/`. `test/conformance.test.ts` runs each case locally, compares it with its
+  recording, and writes `REPORT.md` and `.cadsense/fs-conformance/<case>.json`.
 - `test/broken/`: files with syntax errors; each lists the exact diagnostics it must produce.
 - `spikes/`: throwaway measurements from milestone M0. Results are below.
 
@@ -280,15 +284,16 @@ Failure modes:
 
 ### To confirm against Onshape (conformance recordings)
 
-- `as` precedence relative to arithmetic (`a + b as T`).
-- `??` precedence relative to `||`.
-- `^` associativity and unary minus (`-2^2`, `2^3^2`).
-- Map key order and number formatting in `toString`.
+- `as` precedence relative to arithmetic (`a + b as T`) (`lang-as-precedence`).
+- `??` precedence relative to `||` (`lang-nullish-precedence`).
+- `^` associativity and unary minus (`-2^2`, `2^3^2`) (`lang-power`).
+- Map key order and number formatting in `toString` (`lang-tostring`).
 - How `~` prints tagged values, numbers and nested containers. The docs show
   `ValueWithUnits(27) : { "unit" : ... , "value" : 2 }`; we print the same shape without the internal
   type number, and plain decimal numbers.
 - Trailing commas in arrays, argument lists and enums. Std never uses them, so the parser rejects
-  them; maps take one, since community scripts that run in Onshape use it.
+  them; maps take one, since community scripts that run in Onshape use it (`lang-trailing-comma-array`,
+  `-args`, `-enum` and `-map`, one Feature Studio each).
 
 ## M3 status: interpreter
 
@@ -304,8 +309,8 @@ Runs without Onshape. Checked by:
 - The bolt circle's spec matches its source (7 inputs, defaults, bounds, the `Depth` condition), and a
   run with its defaults reaches `@evPlane`, the first geometry call.
 
-Not yet checked against Onshape recordings (the API quota is out). Builtins still unsupported: all
-geometry (M4), attributes, sketches, and `@matrixSvd`.
+Not yet checked against Onshape: `conformance/` has the cases, but none are recorded (the API quota
+ran out on the first call).
 
 ## M4 status: geometry
 
@@ -551,6 +556,44 @@ To confirm against Onshape recordings:
   with gates at the current version).
 - Whether a header newer than Onshape's current version is an error (a forum post says Onshape
   rejects it); locally `FeatureScript 9999;` runs at 3095.
+
+## Conformance recordings
+
+`conformance/` compares local runs with real Onshape. A case is a source in `conformance/cases/`, the
+features to run with fixed inputs, and probe expressions. One probe reads both sides: each feature's
+status, enum and message; every body except the default planes and origin (types, sketch and
+construction flags, face/edge/vertex counts, box, and volume, area or length); the context's
+variables; and the case's own values. Locally the probe runs as features after the case's features.
+In Onshape it runs through the Part Studio FeatureScript endpoint.
+
+`record.ts` records by hand. It needs the network and an API key file (see its header). It works in
+one private document, "Cadsense conformance (scratch)", which it finds by name or creates, and
+remembers in `recordings/onshape.json`. Each case gets a new Part Studio. A recording stays current
+while what its case sends to Onshape, its sources and the probe version don't change (a case's
+description, covers and comparison settings aren't part of it), and only cases without a current
+recording are recorded. A case that fails goes to `recordings/failures.json` and stays pending. HTTP
+402 or 429 stops the run. `Redaction.ts` keeps the key out of output, logs, recordings and errors.
+The recorder doesn't read back the parameters Onshape stored, so after the first run check every
+feature that is ERROR in Onshape and OK locally before trusting it.
+
+`test/conformance.test.ts` never fails on a mismatch. It rewrites `REPORT.md` with the mismatches,
+the cases the local runtime can't run, the probe values it can't read, and the cases not recorded yet.
+Numbers match within 1e-6 relative (box corners within 1e-6 m, counts exactly). Errors match by
+`ErrorStringEnum` member, or by message text otherwise.
+
+66 cases: the 14 corpus cases, 9 language cases, one per geometry "to confirm" item (13), 3 context
+cases (default planes, large integer literals at 3083 and 3095), 4 from parity reviews, 7 sketch
+solver cases, Wire run (2), and 14 std features. None are recorded yet.
+
+- Open questions the cases record: what `alignCanonically` returns for normals other than Top, Front
+  and Right, and so where std's `newSketch` puts a sketch on a bottom, back or left face
+  (`confirm-align-canonically`, `confirm-sketches-on-faces`); whether `qCreatedBy(sketchId,
+EntityType.EDGE)` returns each sketch edge twice, as here (once on the wire body, once on the
+  region's sheet), so that `opSweep` along a lone sketch circle stops at a sharp corner
+  (`confirm-sketch-edges`, `confirm-sweep-along-sketch-circle`); how Onshape's solver resolves
+  conflicting or ambiguous constraints (`confirm-solver-*`); the default planes' bodies, normals, x
+  directions and sizes (`context-default-planes`); and integer literals past 2^53 at 3083 and 3095
+  (`context-large-integer-3083`, `-3095`).
 
 ## M0 spike results
 
