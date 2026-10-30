@@ -1,3 +1,4 @@
+import { ownerPlane } from "./sketch.ts";
 import { edgeCurveDefinition } from "./bspline.ts";
 import { faceSurfaceDefinition } from "./surfaces.ts";
 import type { Entity, EntityType } from "../geometry/Model.ts";
@@ -685,6 +686,20 @@ export const EVALUATOR_BUILTINS = {
     const input = open(call, ctx, args);
     const entity = resolve(call, input.model, input.oc, input.definition.getField("axis"))[0];
     if (!entity) return call.fail("CANNOT_RESOLVE_AXIS: axis resolves to nothing.");
+    // With allowSketchPoints, a sketch point's axis runs along its sketch's normal (std's Hole
+    // places holes at sketch points so).
+    if (
+      untag(input.definition.getField("allowSketchPoints")) === true &&
+      entity.type === "VERTEX"
+    ) {
+      const plane = ownerPlane(call, input.model, entity);
+      if (plane)
+        return stdLine(
+          call,
+          xyz(input.oc.BRep_Tool.Pnt(input.oc.TopoDS.Vertex(entity.shape))),
+          plane.normal,
+        );
+    }
     const { origin, direction } = axisOf(call, input.oc, entity);
     return stdLine(call, origin, direction);
   },

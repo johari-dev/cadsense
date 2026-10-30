@@ -309,15 +309,30 @@ STEP bases keep geometry only. This OpenCascade build (`replicad-opencascadejs` 
 `STEPCAFControl_Writer` and the `XCAFDoc_*` tools but no `STEPCAFControl_Reader`, so part names and
 colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
 
-- Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
-  helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
+- Sketches: points, lines, circles, arcs, ellipses, elliptical arcs, Bezier curves, conics and fit
+  splines, plus std's rectangle, polygon and polyline helpers. `skSolve` solves `skConstraint`'s
+  constraints and dimensions (coincident, horizontal, vertical, parallel, perpendicular, tangent,
+  equal, concentric, midpoint, mirror, fix, normal, distance, angle, length, radius, diameter, major
+  and minor diameter), moving the drawing as little as they allow, so geometry that already
+  satisfies them stays put. FIX removes its unknowns; each Gauss-Newton step leaves out equations
+  nearly dependent on the others, so redundant constraints change nothing; status OK means every
+  equation holds. Where the drawing sits exactly between two solutions (a side, a tangency, an
+  angle's sense) the run stops, since Onshape's choice isn't known. Conflicting or unconverged
+  sketches fail with `SKETCH_SOLVE_FAILED`, bad references and pairs with std's input errors. Arcs
+  run counterclockwise as in Onshape, so a clockwise-drawn arc's `start` is its drawn end. Each
+  curve is its own wire body, and each point and circle, arc or ellipse center a point body, all
+  created by `sketchId + "wireOp"`; regions are one sheet body created by the sketch.
+  `sketchEntityQuery` finds a curve's body and edge by its id, and its ends as
+  `"<id>.start"`/`"<id>.end"`. `evOwnerSketchPlane` returns the sketch's plane.
+  `skSetInitialGuess` places points, lines, ellipses and elliptical arcs. Regions use spike S4's
+  splitter approach.
 - Evaluators: `evAxis`, `evLine`, `evBox3d`, `evVolume`, `evArea`, `evLength`, `evDistance`,
   `evVertexPoint`, `evEdgeTangentLine(s)`, `evFaceTangentPlane(s)`, `evFaceTangentPlanesAtEdge`,
   `evPlane` (planar faces and mate connectors' XY planes), `evPlanarEdge(s)`, `evEdgeConvexity`,
   `evCornerType`, `evCollisionDetection`, `evMateConnectorCoordSystem`, `evEdgeCurvature(s)` and
   their derivatives, `evFaceCurvatures`, `evFacePeriodicity`, `evFilletRadius`, `evRaycast`,
-  `evMeshPoints`, `evPointsDeviation`, `evSurfaceDefinition` (planes, cylinders, spheres, cones) and
-  `evCurveDefinition` (lines, circles), `evApproximateCentroid`, and `evApproximateMassProperties`
+  `evMeshPoints`, `evPointsDeviation`, `evSurfaceDefinition` (planes, cylinders, spheres, cones,
+  B-splines) and `evCurveDefinition` (lines, circles, B-splines), `evApproximateCentroid`, and `evApproximateMassProperties`
   without a `referenceFrame`. Also `constructPaths`, the linear, circular and curve pattern
   transforms (std's Linear, Circular and Curve pattern features), `matrixSvd`, query variables (std's
   Variable and Query variable features), and operation bookkeeping (`lastOperationId`,
@@ -414,14 +429,29 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
 Not supported locally yet (each stops the run with the calling line): sheet metal,
 variable/partial/conic/asymmetric fillets, chamfers other than equal offsets, healing or offsetting
 faces of sheets, `opBodyDraft`, `opFaceBlend`, `opBooleanedPattern`, `opDerip`, offset and other
-curve and surface definitions, `evFaceCurvatureDerivatives`, sketch constraint solving, and the
-curve and surface cases listed above.
+curve and surface definitions, `evFaceCurvatureDerivatives`, the curve and surface cases listed
+above, sketch constraints of other types (projected, offset, patterns, pierce, quadrant,
+silhouette, rho, curvature, freeze) or on external references, constraints that would move Bezier
+curves, conics or fit splines, ellipse constraints beyond centers, diameters, axis direction and
+points on them, distances between circles, and `skSpline`, `skSplineSegment`,
+`skInterpolatedSpline`, `skInterpolatedSplineSegment`, `skText`, `skImage`.
 
 To confirm against Onshape recordings:
 
 - `evPlane` puts the plane origin at the face's centroid; Onshape doesn't document where it goes.
-- A sketch makes one wire body and one region sheet body here, and connected sketch lines don't
-  share vertices.
+- Sketch topology: each curve is its own wire body, coincident ends don't share vertices, a point
+  at a curve end still gets its own point body, bodies come wires, then the region sheet, then
+  points, and construction `skPoint`s are construction point bodies.
+- A failed sketch solve throws `SKETCH_SOLVE_FAILED` and leaves no geometry; Onshape might keep the
+  geometry with an error status. A free line given HORIZONTAL moves both ends halfway.
+- FIX on a line keeps its infinite line and lets its ends slide; FIX on an arc fixes its center and
+  radius. DISTANCE to a circle measures to the curve. Missing dimension values give
+  `SKETCH_DIMENSION_DIST_ERROR` (lengths) or `SKETCH_DIMENSION_FAILED` (angles); a NONE constraint
+  gives `SKETCH_CONSTRAINT_UNKNOWN`; collinear `skArc` points give `SKETCH_ARC_FAILED`.
+- Sketch return values: `skPoint` gives `{ pointId }`, lines and arcs `{ startId, endId }`, circles
+  and ellipses `{ centerId }`. Initial guesses other than the elliptical arc's documented format are
+  inferred (point [x, y]; line [px, py, dx, dy, t0, t1]). Conic weights use rho / (1 - rho), as
+  std's conic classes do.
 - Query results come back in creation order.
 - "Through all" extrudes to a generous model extent rather than exactly through.
 - With `arcLengthParameterization : false`, edge parameters are uniform in OpenCascade's curve

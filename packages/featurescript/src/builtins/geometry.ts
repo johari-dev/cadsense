@@ -7,63 +7,15 @@ import {
   type Entity,
   type EntityAttribute,
 } from "../geometry/Model.ts";
-import { Sketch, solveSketch, type SketchPlane } from "../geometry/Sketch.ts";
 import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
-import type { ModelContext } from "../runtime/ModelContext.ts";
-import { equals, FsBuiltin, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
+import { equals, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
 import { map } from "./args.ts";
 import { properties } from "./edges.ts";
 import { tidied } from "./faceEdit.ts";
 import { idOf, kernel, magnitude, normalized, resolve, transient, vector } from "./geometryArgs.ts";
 import { regenError, stdPlane } from "./std.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
-
-// ------------------------------------------------------------------ sketches
-
-interface SketchHandle {
-  readonly sketch: Sketch;
-  readonly model: ModelContext;
-}
-const sketchOf = (call: BuiltinCall, value: FsValue): SketchHandle => {
-  const v = untag(value);
-  if (!(v instanceof FsBuiltin) || !(v.native as SketchHandle | undefined)?.sketch)
-    return call.fail("Expected a Sketch.");
-  const handle = v.native as SketchHandle;
-  if (handle.sketch.solved) return call.fail("This sketch is already solved.");
-  return handle;
-};
-const sketchPlane = (call: BuiltinCall, plane: FsValue): SketchPlane => {
-  const p = map(call, plane, "sketchPlane");
-  return {
-    origin: vector(call, p.getField("origin"), 3, "sketchPlane.origin"),
-    normal: normalized(vector(call, p.getField("normal"), 3, "sketchPlane.normal")),
-    x: normalized(vector(call, p.getField("x"), 3, "sketchPlane.x")),
-  };
-};
-/** Adds an entity; `value` holds its parameters (with or without units). */
-const sketchEntity =
-  (
-    build: (
-      call: BuiltinCall,
-      id: string,
-      value: FsMap,
-      construction: boolean,
-    ) => Sketch["entities"][number],
-  ): BuiltinImpl =>
-  ([sketch, id, value], call) => {
-    const { sketch: target } = sketchOf(call, sketch);
-    const definition = map(call, value, "value");
-    target.entities.push(
-      build(
-        call,
-        String(untag(id)),
-        definition,
-        untag(definition.getField("construction")) === true,
-      ),
-    );
-    return undefined;
-  };
 
 // ------------------------------------------------------------------ attributes and properties
 
@@ -143,58 +95,6 @@ function bound(
 }
 
 export const GEOMETRY_BUILTINS = {
-  newSketch: ([ctx, id, value], call) => {
-    const { model } = kernel(call, ctx);
-    const plane = map(call, value, "value").getField("sketchPlane");
-    if (untag(plane) instanceof FsMap === false)
-      return call.unsupported(
-        "Sketching on a face query is not supported locally yet; pass a Plane (e.g. from evPlane).",
-      );
-    return new FsBuiltin<SketchHandle>({
-      sketch: new Sketch(idOf(id), sketchPlane(call, plane)),
-      model,
-    });
-  },
-  isSketch: ([value]) =>
-    value instanceof FsBuiltin &&
-    (value.native as SketchHandle | undefined)?.sketch instanceof Sketch,
-  skLineSegment: sketchEntity((call, id, value, construction) => ({
-    kind: "line",
-    id,
-    start: vector(call, value.getField("start"), 2, "start"),
-    end: vector(call, value.getField("end"), 2, "end"),
-    construction,
-  })),
-  skCircle: sketchEntity((call, id, value, construction) => ({
-    kind: "circle",
-    id,
-    center: vector(call, value.getField("center"), 2, "center"),
-    radius: magnitude(call, value.getField("radius"), "radius"),
-    construction,
-  })),
-  skArc: sketchEntity((call, id, value, construction) => ({
-    kind: "arc",
-    id,
-    start: vector(call, value.getField("start"), 2, "start"),
-    mid: vector(call, value.getField("mid"), 2, "mid"),
-    end: vector(call, value.getField("end"), 2, "end"),
-    construction,
-  })),
-  skPoint: sketchEntity((call, id, value, construction) => ({
-    kind: "point",
-    id,
-    position: vector(call, value.getField("position"), 2, "position"),
-    construction,
-  })),
-  // No constraint solver yet: std's helpers (rectangles, polygons) build geometry that already
-  // satisfies the constraints they add, so these are accepted as-is.
-  skConstraint: () => undefined,
-  skSolve: ([sketch], call) => {
-    const { sketch: target, model } = sketchOf(call, sketch);
-    model.geometry = solveSketch(model.oc!, model.geometry, target);
-    return undefined;
-  },
-
   evaluateQuery: ([ctx, args], call) => {
     const { model, oc } = kernel(call, ctx);
     return resolve(call, model, oc, map(call, args, "definition").getField("query")).map((entity) =>
