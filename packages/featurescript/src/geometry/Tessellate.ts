@@ -1,7 +1,10 @@
 import { ordered, type Entity, type GeometryState } from "./Model.ts";
 import type { Oc } from "./occt.ts";
 
-/** Triangles of one body split by material, in meters, flat-shaded (three vertices per triangle). */
+/**
+ * Triangles of one body split by material, in meters. Each face's vertices appear once, shared by
+ * its triangles through `indices`, with normals smoothed within the face and not across its edges.
+ */
 export interface BodyMesh {
   readonly bodyId: string;
   readonly name: string;
@@ -10,6 +13,8 @@ export interface BodyMesh {
     readonly material: 0 | 1;
     readonly positions: Float32Array;
     readonly normals: Float32Array;
+    /** Three vertex indices per triangle, wound counterclockwise seen from outside. */
+    readonly indices: Uint32Array;
   }[];
 }
 
@@ -34,7 +39,35 @@ export const isDrawnBody = (state: GeometryState, body: Entity): boolean =>
         (face) => face.sketch !== null,
       )));
 
-/** Meshes every body {@link isDrawnBody} accepts. */
+/** One material's growing share of a body's mesh. */
+interface Bucket {
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
+  vertices: number;
+  triangles: number;
+}
+const bucket = (): Bucket => ({
+  positions: new Float32Array(0),
+  normals: new Float32Array(0),
+  indices: new Uint32Array(0),
+  vertices: 0,
+  triangles: 0,
+});
+/** `array` with room for `length` entries, doubled when it grows, keeping its contents. */
+function room<T extends Float32Array | Uint32Array>(array: T, length: number): T {
+  if (array.length >= length) return array;
+  const grown = new (array.constructor as new (length: number) => T)(
+    Math.max(length, array.length * 2),
+  );
+  grown.set(array);
+  return grown;
+}
+
+/**
+ * Meshes every body {@link isDrawnBody} accepts. OpenCascade objects made per vertex and triangle
+ * are freed as soon as they're read, so meshing doesn't grow the WASM heap by the triangle count.
+ */
 export function tessellate(
   oc: Oc,
   state: GeometryState,
@@ -44,56 +77,105 @@ export function tessellate(
   return ordered(state, (body) => isDrawnBody(state, body)).map((body) => {
     const mesher = new oc.BRepMesh_IncrementalMesh(body.shape, deflection, false, 0.35, false);
     mesher.delete();
-    const buckets: [number[], number[]][] = [
-      [[], []],
-      [[], []],
-    ];
+    const buckets: [Bucket, Bucket] = [bucket(), bucket()];
     for (const face of ordered(
       state,
       (entity) => entity.body === body.id && entity.type === "FACE",
     )) {
       const location = new oc.TopLoc_Location();
-      const triangulation = oc.BRep_Tool.Triangulation(oc.TopoDS.Face(face.shape), location, 0);
-      if (triangulation.isNull()) continue;
-      const transform = location.Transformation();
+      const topoFace = oc.TopoDS.Face(face.shape);
+      const triangulation = oc.BRep_Tool.Triangulation(topoFace, location, 0);
+      topoFace.delete();
+      if (triangulation.isNull()) {
+        triangulation.delete();
+        location.delete();
+        continue;
+      }
+      // The location's 3x4 matrix, row by row; null when it doesn't move anything.
+      const matrix = location.IsIdentity()
+        ? null
+        : (() => {
+            const transform = location.Transformation();
+            return [1, 2, 3].flatMap((row) =>
+              [1, 2, 3, 4].map((column) => transform.Value(row, column)),
+            );
+          })();
+      location.delete();
       const reversed = String(face.shape.Orientation()) === "TopAbs_REVERSED";
-      const [positions, normals] = buckets[options.highlight?.(face) ? 1 : 0]!;
-      const node = (i: number) => {
-        const p = triangulation.Node(i).Transformed(transform);
-        return [p.X(), p.Y(), p.Z()] as const;
-      };
-      for (let t = 1; t <= triangulation.NbTriangles(); t++) {
-        const triangle = triangulation.Triangle(t);
-        const [n1, n2, n3] = [triangle.Value(1), triangle.Value(2), triangle.Value(3)];
-        type Point = readonly [number, number, number];
-        const corners: [Point, Point, Point] = reversed
-          ? [node(n1), node(n3), node(n2)]
-          : [node(n1), node(n2), node(n3)];
-        const [a, b, c] = corners;
-        const u = [b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!];
-        const v = [c[0]! - a[0]!, c[1]! - a[1]!, c[2]! - a[2]!];
-        const n = [
-          u[1]! * v[2]! - u[2]! * v[1]!,
-          u[2]! * v[0]! - u[0]! * v[2]!,
-          u[0]! * v[1]! - u[1]! * v[0]!,
-        ];
-        const length = Math.hypot(n[0]!, n[1]!, n[2]!) || 1;
-        for (const corner of corners) {
-          positions.push(corner[0]!, corner[1]!, corner[2]!);
-          normals.push(n[0]! / length, n[1]! / length, n[2]! / length);
+      const target = buckets[options.highlight?.(face) ? 1 : 0];
+      const nodes = triangulation.NbNodes();
+      const count = triangulation.NbTriangles();
+      const first = target.vertices;
+      target.positions = room(target.positions, (first + nodes) * 3);
+      target.normals = room(target.normals, (first + nodes) * 3);
+      target.indices = room(target.indices, (target.triangles + count) * 3);
+      const { positions, normals, indices } = target;
+      for (let i = 0; i < nodes; i++) {
+        const node = triangulation.Node(i + 1);
+        const [x, y, z] = [node.X(), node.Y(), node.Z()];
+        node.delete();
+        const o = (first + i) * 3;
+        if (matrix) {
+          const m = matrix;
+          positions[o] = m[0]! * x + m[1]! * y + m[2]! * z + m[3]!;
+          positions[o + 1] = m[4]! * x + m[5]! * y + m[6]! * z + m[7]!;
+          positions[o + 2] = m[8]! * x + m[9]! * y + m[10]! * z + m[11]!;
+        } else {
+          positions[o] = x;
+          positions[o + 1] = y;
+          positions[o + 2] = z;
+        }
+        normals[o] = normals[o + 1] = normals[o + 2] = 0;
+      }
+      for (let t = 0; t < count; t++) {
+        const triangle = triangulation.Triangle(t + 1);
+        // A reversed face's triangles are wound against its outward side.
+        const a = first + triangle.Value(1) - 1;
+        const b = first + triangle.Value(reversed ? 3 : 2) - 1;
+        const c = first + triangle.Value(reversed ? 2 : 3) - 1;
+        triangle.delete();
+        const o = (target.triangles + t) * 3;
+        indices[o] = a;
+        indices[o + 1] = b;
+        indices[o + 2] = c;
+        // Each corner gathers the triangle's area-weighted normal; normalized below.
+        const ux = positions[b * 3]! - positions[a * 3]!;
+        const uy = positions[b * 3 + 1]! - positions[a * 3 + 1]!;
+        const uz = positions[b * 3 + 2]! - positions[a * 3 + 2]!;
+        const vx = positions[c * 3]! - positions[a * 3]!;
+        const vy = positions[c * 3 + 1]! - positions[a * 3 + 1]!;
+        const vz = positions[c * 3 + 2]! - positions[a * 3 + 2]!;
+        const nx = uy * vz - uz * vy;
+        const ny = uz * vx - ux * vz;
+        const nz = ux * vy - uy * vx;
+        for (const corner of [a, b, c]) {
+          normals[corner * 3] = normals[corner * 3]! + nx;
+          normals[corner * 3 + 1] = normals[corner * 3 + 1]! + ny;
+          normals[corner * 3 + 2] = normals[corner * 3 + 2]! + nz;
         }
       }
+      triangulation.delete();
+      for (let i = first; i < first + nodes; i++) {
+        const o = i * 3;
+        const length = Math.hypot(normals[o]!, normals[o + 1]!, normals[o + 2]!) || 1;
+        normals[o] = normals[o]! / length;
+        normals[o + 1] = normals[o + 1]! / length;
+        normals[o + 2] = normals[o + 2]! / length;
+      }
+      target.vertices += nodes;
+      target.triangles += count;
     }
     return {
       bodyId: body.id,
       name: `${body.createdBy.join(".")} (${body.id})`,
-      groups: buckets.flatMap(([positions, normals], material) =>
-        positions.length
+      groups: buckets.flatMap((group, material) =>
+        group.triangles > 0
           ? [
               {
                 material: material as 0 | 1,
-                positions: new Float32Array(positions),
-                normals: new Float32Array(normals),
+                positions: group.positions.slice(0, group.vertices * 3),
+                normals: group.normals.slice(0, group.vertices * 3),
+                indices: group.indices.slice(0, group.triangles * 3),
               },
             ]
           : [],
