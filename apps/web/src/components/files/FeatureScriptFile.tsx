@@ -16,17 +16,23 @@ import {
   NOTICE_TONES,
   failureLocationLabel,
 } from "~/featurescript/FeatureScriptPreview";
+import { validRollback, type Rollback } from "~/featurescript/featureScriptFeatureList";
 import {
   featureScriptFileKey,
   inputsChanged,
   previewInputs,
   useFeatureScriptFileSettings,
+  useFeatureScriptPanelStore,
+  withAgentRun,
   withManipulated,
   withoutInputs,
   withRunEditing,
   type FeatureScriptFileSettings,
 } from "~/featurescript/featureScriptPanelStore";
-import { useFeatureScriptPreview } from "~/featurescript/useFeatureScriptPreview";
+import {
+  useFeatureScriptPreview,
+  useFeatureScriptRollback,
+} from "~/featurescript/useFeatureScriptPreview";
 import { useSeedComposer } from "~/hooks/useSeedComposer";
 import { useRightPanelStore } from "~/rightPanelStore";
 
@@ -132,6 +138,38 @@ export function FeatureScriptFile(props: {
   const [handledReveal, setHandledReveal] = useState<number | null>(null);
   const revealing = props.revealLine !== null && handledReveal !== props.revealRequestId;
   const mode = revealing ? "code" : settings.mode;
+  const earlier = settings.before ?? [];
+  // The rail's rollback bar, for this visit to the file. It rolls back only the preview, and goes
+  // back to the end when the steps it was between are gone.
+  const [rollbackAt, setRollback] = useState<Rollback>(null);
+  const rollback = mode === "preview" ? validRollback(rollbackAt, earlier.length) : null;
+  const rolledBack = useFeatureScriptRollback(
+    {
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      path: props.relativePath,
+      source: baseKnown ? props.contents : null,
+      before: earlier,
+      base,
+    },
+    rollback,
+  );
+  /** Opens an earlier step's file as the agent ran it: its inputs, after the steps before it. */
+  const openStep = (index: number) => {
+    const step = earlier[index];
+    if (!step) return;
+    useFeatureScriptPanelStore
+      .getState()
+      .update(featureScriptFileKey(props.environmentId, props.cwd, step.path), (current) =>
+        withAgentRun(current, {
+          feature: step.feature ?? null,
+          parameters: step.parameters ?? {},
+          before: earlier.slice(0, index),
+          base,
+        }),
+      );
+    useRightPanelStore.getState().openFile(props.threadRef, step.path);
+  };
   const seed = useSeedComposer(props.threadRef);
   const showLine = (path: string, line: number) => {
     if (path === props.relativePath) updateSettings((current) => ({ ...current, mode: "code" }));
@@ -176,6 +214,10 @@ export function FeatureScriptFile(props: {
               updateInputs((current) => withManipulated(current, from, ran)),
             )
           }
+          rollback={rollback}
+          rolledBack={rolledBack}
+          onRollback={setRollback}
+          onOpenStep={openStep}
         />
       ) : (
         <>

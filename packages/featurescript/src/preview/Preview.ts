@@ -151,6 +151,12 @@ export interface PreviewOptions {
    * context before the feature, then run the feature (and editing logic) with the inputs it set.
    */
   readonly manipulatorChange?: ManipulatorChange;
+  /**
+   * Roll back, as Onshape's rollback bar does: run only the first `rollback` steps and mesh the
+   * model they leave, with nothing highlighted and no step run as the dialog. Every step's source
+   * still counts, so the panel's unsaved text wins for an earlier step of the same file.
+   */
+  readonly rollback?: number;
 }
 
 /**
@@ -196,7 +202,8 @@ function runSteps(
   // wins: the panel's unsaved text for its file over the copy an earlier step read from disk.
   const sources = new Map(steps.map((step) => [step.path, step.source]));
   runtime.loader.useSources(sources);
-  const prepared = steps.map((step) => {
+  const running = options.rollback === undefined ? steps : steps.slice(0, options.rollback);
+  const prepared = running.map((step) => {
     const module = runtime.load(step.path, sources.get(step.path));
     const specs = featureSpecs(runtime.interpreter, module);
     const named = step.feature
@@ -229,7 +236,7 @@ function runSteps(
     dialogStep(
       runtime,
       step,
-      i === prepared.length - 1
+      i === prepared.length - 1 && options.rollback === undefined
         ? {
             ...(options.editing ? { editing: options.editing } : {}),
             ...(options.manipulatorChange ? { manipulatorChange: options.manipulatorChange } : {}),
@@ -261,12 +268,13 @@ function summarize(
   const last = prepared.at(-1);
   const dialog = dialogs.at(-1) ?? null;
   const lastFeature = [`Feature${prepared.length}`];
+  // Rolled back, the last step that ran isn't the previewed feature: nothing is its.
+  const previewed = options.rollback === undefined && run.features.length === prepared.length;
   const createdByLast = (face: { readonly createdBy: readonly string[] }) =>
-    startsWith(face.createdBy, lastFeature);
+    options.rollback === undefined && startsWith(face.createdBy, lastFeature);
   // The previewed feature's error entities: faces and bodies still drawn turn red in place, and
   // anything else (a rolled-back body, edges, vertices) is drawn over the model.
-  const errors =
-    run.features.length === prepared.length ? (run.features.at(-1)?.errorEntities ?? []) : [];
+  const errors = previewed ? (run.features.at(-1)?.errorEntities ?? []) : [];
   const errorIds = new Set(errors.map((entity) => entity.id));
   const drawn = (entity: Entity) => {
     const body = geometry?.entities.get(entity.body);
@@ -295,7 +303,7 @@ function summarize(
     options.before && oc && geometryBeforeLast ? tessellate(oc, geometryBeforeLast) : null;
   // Only when the previewed (last) feature ran; a fault earlier stops the run before it.
   const changes =
-    oc && geometry && geometryBeforeLast && run.features.length === prepared.length
+    oc && geometry && geometryBeforeLast && previewed
       ? {
           volumeMm3:
             solids.reduce((sum, solid) => sum + solid.volumeMm3, 0) -
@@ -389,7 +397,7 @@ function summarize(
     errorEntities: drawnErrors,
     editing,
     manipulators:
-      last && run.features.length === prepared.length
+      last && previewed
         ? (run.features.at(-1)?.manipulators.entries() ?? []).map(([key, manipulator]) =>
             previewManipulator(runtime, last.module, key, manipulator),
           )

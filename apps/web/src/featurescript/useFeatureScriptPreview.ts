@@ -242,3 +242,70 @@ export function useFeatureScriptPreview(
   if (state.fileKey === fileKey) return { ...state, manipulate };
   return { ...IDLE, running: request.source !== null, manipulate };
 }
+
+export interface FeatureScriptRollbackState {
+  /** The newest finished rollback run, and the rollback it ran; null before the first. */
+  readonly latest: (FeatureScriptPanelPreview & { readonly rollback: number }) | null;
+  readonly running: boolean;
+  /** The request itself failed, as in {@link FeatureScriptPreviewState}. */
+  readonly error: string | null;
+}
+
+const NOT_ROLLED_BACK: FeatureScriptRollbackState = { latest: null, running: false, error: null };
+
+/**
+ * Runs the rail's rollback bar: the base and the first `rollback` earlier steps, without the
+ * file's own feature, each time the bar moves or the file, its text, the steps or the base
+ * change. Null (the bar at the end) runs nothing, and drops a run still in flight. The last
+ * result stays while the next runs, as the preview's does.
+ */
+export function useFeatureScriptRollback(
+  request: Pick<
+    FeatureScriptPreviewRequest,
+    "environmentId" | "cwd" | "path" | "source" | "before" | "base"
+  >,
+  rollback: number | null,
+): FeatureScriptRollbackState {
+  const run = useAtomCommand(featureScriptEnvironment.preview, { reportFailure: false });
+  const { environmentId, cwd, path, source, base } = request;
+  const fileKey = JSON.stringify([environmentId, cwd, path]);
+  const beforeKey = JSON.stringify(request.before);
+  const [state, setState] = useState({ fileKey, ...NOT_ROLLED_BACK });
+  const requested = useRef(0);
+  useEffect(() => {
+    const id = ++requested.current;
+    if (rollback === null || source === null) return;
+    setState((current) =>
+      current.fileKey === fileKey
+        ? { ...current, running: true }
+        : { fileKey, ...NOT_ROLLED_BACK, running: true },
+    );
+    const before = JSON.parse(beforeKey) as FeatureScriptPreviewRequest["before"];
+    void run({
+      environmentId,
+      input: {
+        cwd,
+        path,
+        source,
+        ...(before.length > 0 ? { before } : {}),
+        ...(base === null ? {} : { base }),
+        rollback,
+      },
+    }).then((result) => {
+      // Superseded calls resolve with the newest run, which the newest call applies.
+      if (id !== requested.current) return;
+      setState((current) =>
+        result._tag === "Success"
+          ? { fileKey, latest: { ...result.value, rollback }, running: false, error: null }
+          : isAtomCommandInterrupted(result)
+            ? { ...current, running: false }
+            : {
+                ...current,
+                running: false,
+                error: failureText(squashAtomCommandFailure(result)),
+              },
+      );
+    });
+  }, [run, environmentId, cwd, path, fileKey, source, beforeKey, base, rollback]);
+  return rollback !== null && state.fileKey === fileKey ? state : NOT_ROLLED_BACK;
+}

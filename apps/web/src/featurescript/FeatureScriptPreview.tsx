@@ -16,8 +16,11 @@ import {
   CaretDownIcon as ChevronDownIcon,
   WarningCircleIcon as CircleAlertIcon,
   CodeIcon as Code2Icon,
+  BoundingBoxIcon,
   CrosshairIcon,
+  CubeIcon,
   EyeIcon,
+  FileCodeIcon,
   FrameCornersIcon as FocusIcon,
   InfoIcon,
   ChatIcon as MessageSquareIcon,
@@ -62,13 +65,26 @@ import {
   type FeatureScriptFileSettings,
   type FeatureScriptListItem,
 } from "./featureScriptPanelStore";
+import {
+  featureList,
+  rollbackAt,
+  rollbackFromGap,
+  rollbackGap,
+  type FeatureList,
+  type FeatureListRow,
+  type Rollback,
+} from "./featureScriptFeatureList";
 import { manipulatorRow, readManipulator } from "./featureScriptManipulators";
 import {
   FeatureScriptViewport,
   type ManipulatorDrag,
   type ViewManipulator,
 } from "./FeatureScriptViewport";
-import type { FeatureScriptPanelRun, FeatureScriptPreviewState } from "./useFeatureScriptPreview";
+import type {
+  FeatureScriptPanelRun,
+  FeatureScriptPreviewState,
+  FeatureScriptRollbackState,
+} from "./useFeatureScriptPreview";
 
 const NO_BASE = "";
 const FAILED: ReadonlySet<FeatureScriptPreviewStatus> = new Set(["ERROR", "INVALID", "STOPPED"]);
@@ -135,6 +151,10 @@ export function formatVolumeChange(mm3: number): string {
   const magnitude = Math.abs(rounded).toLocaleString(undefined, { maximumFractionDigits: 1 });
   return `${rounded < 0 ? "−" : rounded > 0 ? "+" : ""}${magnitude} mm³`;
 }
+
+/** `61,125 mm³`. */
+const formatVolume = (mm3: number) =>
+  `${(Math.round(mm3 * 10) / 10).toLocaleString(undefined, { maximumFractionDigits: 1 })} mm³`;
 
 /** `bolt-circle.fs:41`, or just the message's file when it has no line. */
 export function failureLocationLabel(failure: FeatureScriptFailure): string | null {
@@ -225,6 +245,12 @@ export interface FeatureScriptPreviewProps {
   readonly onAskAgent: (failure: FeatureScriptFailure) => void;
   /** A manipulator was dragged and released: run its change. */
   readonly onManipulate: (change: FeatureScriptManipulatorChange) => void;
+  /** Where the rail's rollback bar is, and the run of the model there. */
+  readonly rollback: Rollback;
+  readonly rolledBack: FeatureScriptRollbackState;
+  readonly onRollback: (rollback: Rollback) => void;
+  /** An earlier step was clicked in the rail: open its file. */
+  readonly onOpenStep: (index: number) => void;
 }
 
 /** Where an input's value lives: a top-level input, or an input inside one item of a list. */
@@ -278,13 +304,27 @@ function slotValues(settings: FeatureScriptFileSettings, slot: InputSlot) {
  * as errors in red) with an Onshape-style dialog over it. Changing an input runs the preview again.
  * A failure keeps the last good model on screen, greyed out, under the cause and a link to its
  * line, unless it marked error entities, which show on its own model.
+ *
+ * A rail of features sits left of the dialog, as Onshape's feature list: std's default geometry,
+ * the base, the agent's earlier steps and the feature. Its rollback bar shows the model before a
+ * step; setting an input (or picking) rolls forward to the end again, as editing a feature does.
  */
 export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
-  const { run, settings, updateSettings } = props;
+  const { run, settings, updateSettings, onRollback } = props;
   const { latest, lastGood } = run;
-  const failure: FeatureScriptFailure | null = run.error
+  const rolled = props.rollback !== null;
+  const rolledRun = rolled ? props.rolledBack.latest : null;
+  // Greyed out until the model at the bar's place is in.
+  const rollingBack = rolled && (rolledRun === null || rolledRun.rollback !== props.rollback);
+  const runFailure: FeatureScriptFailure | null = run.error
     ? { message: run.error, location: null, unsupported: false }
     : (latest?.failure ?? null);
+  // Rolled back, the feature didn't run: only an earlier step can fail.
+  const failure: FeatureScriptFailure | null = !rolled
+    ? runFailure
+    : props.rolledBack.error
+      ? { message: props.rolledBack.error, location: null, unsupported: false }
+      : (rolledRun?.failure ?? null);
   const failed = run.error !== null || (latest !== null && FAILED.has(latest.status));
   // A failure that marked entities in red shows them on its own (rolled-back) model, as Onshape
   // does; any other failure shows the last good model.
@@ -297,16 +337,30 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
   const [picking, setPicking] = useState<PickTarget | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
   const [missingModel, setMissingModel] = useState<string | null>(null);
-  const before = shown?.model?.before ?? null;
+  const before = rolled ? null : (shown?.model?.before ?? null);
   const showing =
     (picking !== null && before) || (view === "before" && before) ? "before" : "after";
+  // Rolled back, the model at the bar, or the preview's (greyed) until the first one is in.
+  const model = rolledRun ? rolledRun.model : (shown?.model ?? null);
   const dialogShown = dialog !== null && (dialog.inputs.length > 0 || dialog.features.length > 1);
+  const earlier = settings.before ?? [];
+  const typeName = dialog
+    ? (dialog.features.find((feature) => feature.name === dialog.feature)?.typeName ??
+      dialog.feature)
+    : null;
+  const list = featureList({
+    before: earlier,
+    path: props.path,
+    featureName: typeName ?? props.path.split("/").at(-1) ?? props.path,
+    run: latest,
+    rollback: props.rollback,
+  });
   // The latest run's manipulators, drawn while its dialog is open on its own model, as Onshape
-  // draws them; not over a greyed last good run, the model before, or while picking.
+  // draws them; not over a greyed last good run, the model before, a rollback, or while picking.
   const isPicking = picking !== null;
   const manipulators = useMemo(
     (): readonly (ViewManipulator & { readonly row: DrivenRow })[] =>
-      latest && shown === latest && dialogShown && !isPicking && showing === "after"
+      latest && shown === latest && dialogShown && !isPicking && showing === "after" && !rolled
         ? latest.manipulators.flatMap((fields) => {
             const manipulator = readManipulator(fields);
             if (!manipulator) return [];
@@ -314,7 +368,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
             return [{ manipulator, row, name: row && "input" in row ? row.name : null }];
           })
         : [],
-    [latest, shown, dialogShown, isPicking, showing],
+    [latest, shown, dialogShown, isPicking, showing, rolled],
   );
   const [dragging, setDragging] = useState<(ManipulatorDrag & { readonly row: DrivenRow }) | null>(
     null,
@@ -329,8 +383,15 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     return () => window.removeEventListener("keydown", cancel);
   }, [picking]);
 
+  /** Changes the dialog's inputs, which rolls the bar forward to the feature they're for. */
+  const editInputs = (
+    change: (current: FeatureScriptFileSettings) => FeatureScriptFileSettings,
+  ) => {
+    onRollback(null);
+    updateSettings(change);
+  };
   const setParameter = (slot: InputSlot, expression: string | null) =>
-    updateSettings((current) =>
+    editInputs((current) =>
       updateSlot(current, slot, (values) => withValue(values, slot.input, expression)),
     );
   const pick = (hit: PickHit, add: boolean) => {
@@ -340,7 +401,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     const picked = target.kind === "point" ? null : pickQuery(target.kind, hit);
     // Not on what the input takes (off an edge for an edge input): nothing is picked.
     if (target.kind !== "point" && picked === null) return;
-    updateSettings((current) =>
+    editInputs((current) =>
       updateSlot(current, target.slot, (values) => {
         if (picked) {
           const earlier = values.queries?.[input] ?? (values.picks[input] ?? []).map(faceAt);
@@ -362,7 +423,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     list: string,
     change: (items: readonly FeatureScriptListItem[]) => readonly FeatureScriptListItem[],
   ) =>
-    updateSettings((current) => {
+    editInputs((current) => {
       // A list set as one expression (by the agent) starts over as items.
       const { [list]: _expression, ...parameters } = current.parameters;
       return withTouched(
@@ -376,7 +437,7 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     });
   const resetInputs = () => {
     setPicking(null);
-    updateSettings(withoutInputs);
+    editInputs(withoutInputs);
   };
   const allPicks = [
     ...Object.values(settings.picks),
@@ -385,100 +446,127 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     ),
   ].flat();
   const emptyMessage =
-    missingModel !== null && missingModel === shown?.model?.[showing]
+    missingModel !== null && missingModel === model?.[showing]
       ? "This run's model isn't available anymore. Save or change an input to run it again."
-      : !shown?.model
-        ? run.running
-          ? "Running the feature…"
-          : latest && !failed
-            ? "The feature ran but made no geometry. Pick a base STEP below, or set its inputs."
-            : null
-        : showing === "after" && shown.model.after === null
-          ? "Nothing is left after the feature. Before shows what it started from."
-          : null;
+      : rolledRun && !rollingBack && !rolledRun.model?.after
+        ? `There's nothing to show before ${list.rolledBackBefore}.`
+        : !model
+          ? run.running
+            ? "Running the feature…"
+            : latest && !failed
+              ? "The feature ran but made no geometry. Pick a base STEP below, or set its inputs."
+              : null
+          : showing === "after" && model.after === null && !rolled
+            ? "Nothing is left after the feature. Before shows what it started from."
+            : null;
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden bg-[#141414]">
-      <FeatureScriptViewport
-        environmentId={props.environmentId}
-        after={shown?.model?.after ?? null}
-        before={before}
-        show={showing}
-        stale={stale}
-        picking={picking !== null}
-        onPick={pick}
-        picks={allPicks}
-        fitRequest={fitRequest}
-        onLoadFailed={setMissingModel}
-        manipulators={manipulators}
-        onDrag={(drag) =>
-          setDragging(
-            drag && {
-              ...drag,
-              row: manipulators.find((drawn) => drawn.manipulator.key === drag.key)?.row ?? null,
-            },
-          )
-        }
-        onRelease={(manipulator, changes) =>
-          props.onManipulate({ key: manipulator.key, manipulator: manipulator.expression, changes })
-        }
-      />
-      {dragging ? (
-        <span
-          className="pointer-events-none absolute rounded-md border border-border bg-background/92 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-foreground"
-          style={{ left: dragging.at[0] + 14, top: dragging.at[1] - 30 }}
-          data-testid="featurescript-manipulator-value"
-        >
-          {dragging.label}
-        </span>
-      ) : null}
-      {emptyMessage ? (
-        <div className="absolute inset-0 flex items-center justify-center px-8 text-center text-xs text-muted-foreground">
-          {emptyMessage}
-        </div>
-      ) : null}
-      {dialog && dialogShown ? (
-        <FeatureDialog
-          preview={dialog}
-          settings={settings}
-          picking={picking}
-          driven={dragging?.row ?? null}
-          onPick={(target) =>
-            setPicking((current) =>
-              current !== null && sameSlot(current.slot, target.slot) ? null : target,
-            )
-          }
-          onSetParameter={setParameter}
-          onList={(list, change) => {
-            // Picking for an item that's removed would land nowhere; stop.
-            setPicking((current) =>
-              current && "list" in current.slot && current.slot.list === list ? null : current,
-            );
-            updateList(list, change);
-          }}
-          onFeature={(feature) => {
-            setPicking(null);
-            updateSettings((current) => ({ ...withDefaultInputs(current), feature }));
-          }}
-          onReset={() => {
-            setPicking(null);
-            updateSettings(withDefaultInputs);
+    <div className="@container/fspanel relative min-h-0 flex-1 overflow-hidden bg-[#141414]">
+      {/* The rail is a column of its own, as Onshape's feature list, so the model centers in the
+          room right of it and the dialog sits over the model as before. */}
+      <div className="absolute inset-0 flex">
+        <FeatureRail
+          list={list}
+          base={props.base}
+          rollback={props.rollback}
+          onRollback={onRollback}
+          onOpenStep={props.onOpenStep}
+          onDropEarlier={() => {
+            onRollback(null);
+            updateSettings(({ before: _before, ...current }) => current);
           }}
         />
-      ) : null}
-      {stale ? (
-        <span className="absolute top-2.5 right-2.5 inline-flex h-6 items-center rounded-md border border-border bg-background/90 px-2 text-[11px] text-muted-foreground">
-          Last good run
-        </span>
-      ) : null}
-      {picking !== null ? (
-        <div className="absolute top-2.5 right-2.5 max-w-56 rounded-md border border-info/40 bg-background/90 px-2 py-1 text-[11px] text-foreground">
-          {picking.kind === "point"
-            ? "Click where the point goes. Its Z axis points out of the face you click."
-            : `${PICK_HINTS[picking.kind]}${showing === "before" ? " on the model before the feature" : ""}.`}{" "}
-          Shift adds more. Esc stops.
+        <div className="relative min-w-0 flex-1">
+          <FeatureScriptViewport
+            environmentId={props.environmentId}
+            after={model?.after ?? null}
+            before={before}
+            show={showing}
+            stale={rolled ? rollingBack : stale}
+            picking={picking !== null}
+            onPick={pick}
+            picks={allPicks}
+            fitRequest={fitRequest}
+            onLoadFailed={setMissingModel}
+            manipulators={manipulators}
+            onDrag={(drag) =>
+              setDragging(
+                drag && {
+                  ...drag,
+                  row:
+                    manipulators.find((drawn) => drawn.manipulator.key === drag.key)?.row ?? null,
+                },
+              )
+            }
+            onRelease={(manipulator, changes) =>
+              props.onManipulate({
+                key: manipulator.key,
+                manipulator: manipulator.expression,
+                changes,
+              })
+            }
+          />
+          {dragging ? (
+            <span
+              className="pointer-events-none absolute rounded-md border border-border bg-background/92 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-foreground"
+              style={{ left: dragging.at[0] + 14, top: dragging.at[1] - 30 }}
+              data-testid="featurescript-manipulator-value"
+            >
+              {dragging.label}
+            </span>
+          ) : null}
+          {emptyMessage ? (
+            <div className="absolute inset-0 flex items-center justify-center px-8 text-center text-xs text-muted-foreground">
+              {emptyMessage}
+            </div>
+          ) : null}
+          {dialog && dialogShown ? (
+            <FeatureDialog
+              preview={dialog}
+              typeName={typeName}
+              settings={settings}
+              picking={picking}
+              driven={dragging?.row ?? null}
+              onPick={(target) => {
+                // Picks land on the model before the feature, so roll forward to it.
+                onRollback(null);
+                setPicking((current) =>
+                  current !== null && sameSlot(current.slot, target.slot) ? null : target,
+                );
+              }}
+              onSetParameter={setParameter}
+              onList={(list, change) => {
+                // Picking for an item that's removed would land nowhere; stop.
+                setPicking((current) =>
+                  current && "list" in current.slot && current.slot.list === list ? null : current,
+                );
+                updateList(list, change);
+              }}
+              onFeature={(feature) => {
+                setPicking(null);
+                editInputs((current) => ({ ...withDefaultInputs(current), feature }));
+              }}
+              onReset={() => {
+                setPicking(null);
+                editInputs(withDefaultInputs);
+              }}
+            />
+          ) : null}
+          {stale && !rolled ? (
+            <span className="absolute top-2.5 right-2.5 inline-flex h-6 items-center rounded-md border border-border bg-background/90 px-2 text-[11px] text-muted-foreground">
+              Last good run
+            </span>
+          ) : null}
+          {picking !== null ? (
+            <div className="absolute top-2.5 right-2.5 max-w-56 rounded-md border border-info/40 bg-background/90 px-2 py-1 text-[11px] text-foreground">
+              {picking.kind === "point"
+                ? "Click where the point goes. Its Z axis points out of the face you click."
+                : `${PICK_HINTS[picking.kind]}${showing === "before" ? " on the model before the feature" : ""}.`}{" "}
+              Shift adds more. Esc stops.
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
       <div className="absolute inset-x-2.5 bottom-2.5 flex flex-col gap-2">
         {failure ? (
           <FailureBanner
@@ -491,10 +579,22 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
           />
         ) : null}
         {/* A notice can come with a failure: error entities it couldn't draw, say. */}
-        {latest?.notice ? <NoticeBanner notice={latest.notice} /> : null}
+        {latest?.notice && !rolled ? <NoticeBanner notice={latest.notice} /> : null}
         <Footer
           preview={latest}
           failed={failed}
+          rolledBack={
+            rolled
+              ? {
+                  before: list.rolledBackBefore ?? "",
+                  volumeMm3:
+                    rolledRun && !rollingBack
+                      ? rolledRun.solids.reduce((sum, solid) => sum + solid.volumeMm3, 0)
+                      : null,
+                }
+              : null
+          }
+          onRollForward={() => onRollback(null)}
           base={props.base}
           stepFiles={props.stepFiles}
           // Picked faces and points belong to the old base; nearest-face queries would quietly
@@ -503,8 +603,11 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
             setPicking(null);
             updateSettings((current) => withBase(current, base));
           }}
-          earlier={settings.before ?? []}
-          onDropEarlier={() => updateSettings(({ before: _before, ...current }) => current)}
+          earlier={earlier}
+          onDropEarlier={() => {
+            onRollback(null);
+            updateSettings(({ before: _before, ...current }) => current);
+          }}
           view={before ? showing : null}
           onView={setView}
           onFit={() => setFitRequest((count) => count + 1)}
@@ -515,8 +618,239 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
   );
 }
 
+/** A step's status dot in the rail, in the status pill's colors; NOT_RUN is hollow. */
+const STEP_DOT = {
+  OK: "bg-success",
+  INFO: NOTICE_TONES.INFO.dot,
+  WARNING: NOTICE_TONES.WARNING.dot,
+  ERROR: "bg-destructive",
+  NOT_RUN: "border border-muted-foreground/70",
+} as const satisfies Record<NonNullable<FeatureListRow["status"]>, string>;
+
+/** std's default geometry, which every Part Studio starts with. */
+const DEFAULT_GEOMETRY = [
+  { name: "Origin", Icon: CrosshairIcon },
+  { name: "Top", Icon: BoundingBoxIcon },
+  { name: "Front", Icon: BoundingBoxIcon },
+  { name: "Right", Icon: BoundingBoxIcon },
+] as const;
+
+/**
+ * The feature list, as Onshape's: default geometry (dimmed), the base, the agent's earlier steps
+ * (each opens its file) and the previewed feature, selected. The rollback bar under them drags
+ * (or steps with the arrow keys) to show the model before a step, and drops back at the end to
+ * preview again. Hidden when the panel is too narrow to keep the model its room.
+ */
+function FeatureRail(props: {
+  readonly list: FeatureList;
+  readonly base: string | null;
+  readonly rollback: Rollback;
+  readonly onRollback: (rollback: Rollback) => void;
+  readonly onOpenStep: (index: number) => void;
+  readonly onDropEarlier: () => void;
+}) {
+  const { list } = props;
+  const count = list.steps.length;
+  const rowsRef = useRef<HTMLDivElement>(null);
+  /** The bar's gap while it's dragged; it's committed on release. */
+  const [dragGap, setDragGap] = useState<number | null>(null);
+  const dragging = dragGap !== null;
+  const gap = dragGap ?? rollbackGap(props.rollback, count);
+  const onRollbackRef = useRef(props.onRollback);
+  onRollbackRef.current = props.onRollback;
+  // The bar renders where it sits, so a key that moves it would drop its focus.
+  const keepFocus = useRef(false);
+  useEffect(() => {
+    if (!dragging) return;
+    /** The gap under the pointer: below every row whose middle is above it. */
+    const gapAt = (event: PointerEvent) => {
+      const rows = rowsRef.current?.querySelectorAll<HTMLElement>("[data-rollback-row]") ?? [];
+      const middles = [...rows].map((row) => {
+        const box = row.getBoundingClientRect();
+        return box.top + box.height / 2;
+      });
+      return rollbackGap(rollbackAt(event.clientY, middles), count);
+    };
+    const move = (event: PointerEvent) => setDragGap(gapAt(event));
+    const up = (event: PointerEvent) => {
+      setDragGap(null);
+      onRollbackRef.current(rollbackFromGap(gapAt(event), count));
+    };
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDragGap(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("keydown", cancel);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("keydown", cancel);
+    };
+  }, [dragging, count]);
+  // The rows as the bar shows them, dimmed below it while it's dragged too.
+  const shown = rollbackFromGap(gap, count);
+  const dimmed = (index: number) => shown !== null && index >= shown;
+  const bar = (
+    <div
+      ref={(element) => {
+        if (!element || !keepFocus.current) return;
+        keepFocus.current = false;
+        element.focus();
+      }}
+      role="slider"
+      tabIndex={0}
+      aria-label="Rollback bar"
+      aria-orientation="vertical"
+      aria-valuemin={0}
+      aria-valuemax={count + 1}
+      aria-valuenow={gap}
+      aria-valuetext={
+        shown === null
+          ? "At the end"
+          : `Before ${shown < count ? list.steps[shown]!.name : list.feature.name}`
+      }
+      className="group cursor-row-resize touch-none px-2.5 py-1 outline-none"
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        setDragGap(gap);
+      }}
+      onKeyDown={(event) => {
+        const by =
+          event.key === "ArrowUp"
+            ? -1
+            : event.key === "ArrowDown"
+              ? 1
+              : event.key === "Home"
+                ? -gap
+                : event.key === "End"
+                  ? count + 1 - gap
+                  : 0;
+        if (by === 0) return;
+        event.preventDefault();
+        keepFocus.current = true;
+        props.onRollback(rollbackFromGap(gap + by, count));
+      }}
+      data-testid="featurescript-rollback-bar"
+    >
+      <div className="h-1 rounded-full bg-info group-focus-visible:ring-2 group-focus-visible:ring-info/50 group-focus-visible:ring-offset-1 group-focus-visible:ring-offset-popover" />
+    </div>
+  );
+  const row = "flex h-6.5 w-full min-w-0 items-center gap-1.5 px-2.5 text-left";
+  const dot = (status: FeatureListRow["status"]) =>
+    status === null ? null : (
+      <span
+        role="img"
+        aria-label={status}
+        className={cn("size-1.5 shrink-0 rounded-full", STEP_DOT[status])}
+        data-status={status}
+      />
+    );
+  return (
+    <div
+      className={cn(
+        "mt-2.5 ml-2.5 hidden max-h-[calc(100%-7rem)] w-44 shrink-0 flex-col self-start overflow-hidden rounded-xl border border-border bg-popover/95 text-xs shadow-lg @min-[36rem]/fspanel:flex",
+        // The app theme no longer defines --info and --success, which bg-info and bg-success
+        // read; the rail's selection, bar and dots need them, so it sets its own.
+        "[--info:#60a5fa] [--success:#4ade80]",
+      )}
+      role="group"
+      aria-label="Features"
+    >
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pr-1.5 pl-2.5">
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground">Features</span>
+        {count > 0 ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost-muted"
+                  size="icon-xs"
+                  aria-label="Run without the agent's earlier features"
+                  onClick={props.onDropEarlier}
+                />
+              }
+            >
+              <XIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="top">Run without the agent's earlier features</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </div>
+      <div ref={rowsRef} className="min-h-0 overflow-y-auto py-1">
+        {DEFAULT_GEOMETRY.map(({ name, Icon }) => (
+          <div key={name} className={cn(row, "text-muted-foreground/70")}>
+            <Icon className="size-3.5 shrink-0" />
+            <span className="truncate">{name}</span>
+          </div>
+        ))}
+        <div className="my-1 h-px bg-border" />
+        {props.base ? (
+          <Tooltip>
+            <TooltipTrigger render={<div className={cn(row, "text-foreground")} />}>
+              <CubeIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{props.base.split("/").at(-1)}</span>
+            </TooltipTrigger>
+            <TooltipPopup side="right">{props.base}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+        {gap === 0 ? bar : null}
+        {list.steps.map((step) => (
+          <div key={step.index}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className={cn(
+                      row,
+                      "text-foreground hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
+                      dimmed(step.index) && "text-muted-foreground/60",
+                    )}
+                    aria-label={`Open ${step.name}`}
+                    onClick={() => props.onOpenStep(step.index)}
+                    data-rollback-row
+                  />
+                }
+              >
+                <FileCodeIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 truncate">{step.name}</span>
+                {dot(step.status)}
+              </TooltipTrigger>
+              <TooltipPopup side="right" className="max-w-72">
+                {step.message ? `${step.status}: ${step.message}` : `Open ${step.step.path}`}
+              </TooltipPopup>
+            </Tooltip>
+            {gap === step.index + 1 ? bar : null}
+          </div>
+        ))}
+        <div
+          className={cn(
+            row,
+            "border-l-2 border-info bg-info/12 pl-2 text-foreground",
+            dimmed(count) && "text-muted-foreground/60",
+          )}
+          aria-current="true"
+          data-rollback-row
+        >
+          <FileCodeIcon className="size-3.5 shrink-0 text-info" />
+          <span className="min-w-0 truncate">{list.feature.name}</span>
+          {dot(list.feature.status)}
+        </div>
+        {gap === count + 1 ? bar : null}
+      </div>
+      <p className="shrink-0 border-t border-border px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        Drag the bar to see the model before a step.
+      </p>
+    </div>
+  );
+}
+
 function FeatureDialog(props: {
   readonly preview: FeatureScriptPanelRun;
+  /** The previewed feature's "Feature Type Name". */
+  readonly typeName: string | null;
   readonly settings: FeatureScriptFileSettings;
   readonly picking: PickTarget | null;
   /** The row a dragged manipulator drives, lit up while it's dragged. */
@@ -531,10 +865,7 @@ function FeatureDialog(props: {
   readonly onReset: () => void;
 }) {
   const [open, setOpen] = useState(true);
-  const { preview, settings } = props;
-  const typeName =
-    preview.features.find((feature) => feature.name === preview.feature)?.typeName ??
-    preview.feature;
+  const { preview, settings, typeName } = props;
   const changed =
     Object.keys(settings.parameters).length > 0 || Object.keys(settings.lists ?? {}).length > 0;
   const rows = preview.inputs.filter((input) => input.visible);
@@ -1046,10 +1377,16 @@ function FooterStatus(props: { readonly status: FeatureScriptPreviewStatus }) {
 function Footer(props: {
   readonly preview: FeatureScriptPanelPreview | null;
   readonly failed: boolean;
+  /**
+   * Where the rail's bar is: the row right below it, and the model's total volume there (null
+   * while it runs); null at the end. Rolled back, it takes the outcome's place.
+   */
+  readonly rolledBack: { readonly before: string; readonly volumeMm3: number | null } | null;
+  readonly onRollForward: () => void;
   readonly base: string | null;
   readonly stepFiles: readonly string[];
   readonly onBase: (base: string | null) => void;
-  /** Features the agent ran before this one, from its chat card. */
+  /** Features the agent ran before this one, from its chat card; the rail lists them when wide. */
   readonly earlier: readonly CadFeatureScriptPreviewStep[];
   readonly onDropEarlier: () => void;
   /** Which model is showing, or null when there's no "before" to switch to. */
@@ -1059,8 +1396,8 @@ function Footer(props: {
   /** What's being dragged (the row a manipulator drives), which the outcome gives way to. */
   readonly dragging: string | null;
 }) {
-  const { preview } = props;
-  const changes = !props.failed ? preview?.changes : null;
+  const { preview, rolledBack } = props;
+  const changes = !props.failed && !rolledBack ? preview?.changes : null;
   return (
     <div
       className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-background/90 px-2 py-1.5 text-xs"
@@ -1096,7 +1433,27 @@ function Footer(props: {
           <span className="text-muted-foreground">Esc cancels</span>
         </>
       ) : null}
-      {preview && !props.failed && props.dragging === null ? (
+      {rolledBack ? (
+        <>
+          <span className="text-info-foreground" data-testid="featurescript-rolled-back">
+            Rolled back before {rolledBack.before}
+          </span>
+          <span className="text-muted-foreground">
+            {rolledBack.volumeMm3 === null ? (
+              "Rolling back…"
+            ) : (
+              <>
+                Total volume{" "}
+                <span className="text-foreground">{formatVolume(rolledBack.volumeMm3)}</span>
+              </>
+            )}
+          </span>
+          <Button variant="ghost-muted" size="xs" onClick={props.onRollForward}>
+            Roll to end
+          </Button>
+        </>
+      ) : null}
+      {preview && !props.failed && props.dragging === null && !rolledBack ? (
         <FooterStatus status={preview.status} />
       ) : null}
       {changes && props.dragging === null ? (
@@ -1112,7 +1469,7 @@ function Footer(props: {
       ) : null}
       <span className="ml-auto flex min-w-0 items-center gap-1 text-muted-foreground">
         {props.earlier.length > 0 ? (
-          <span className="inline-flex items-center gap-0.5">
+          <span className="inline-flex items-center gap-0.5 @min-[36rem]/fspanel:hidden">
             <Tooltip>
               <TooltipTrigger render={<span />}>
                 after {props.earlier.length} agent{" "}
