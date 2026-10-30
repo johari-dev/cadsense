@@ -62,7 +62,7 @@ describe("runPreview on a warm runtime", () => {
       "ERROR",
       "OK",
     ]);
-    const faulting = cube(10).replace("fCuboid(", "@opHelix(context, id, {}); fCuboid(");
+    const faulting = cube(10).replace("fCuboid(", "@opImportForeign(context, id, {}); fCuboid(");
     const stopped = runPreview(runtime, [
       { path: "fault.fs", source: faulting.replace("cube =", "fault =") },
       { path: "cube.fs", source: cube(10) },

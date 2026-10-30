@@ -1,3 +1,5 @@
+import { edgeCurveDefinition } from "./bspline.ts";
+import { faceSurfaceDefinition } from "./surfaces.ts";
 import type { Entity, EntityType } from "../geometry/Model.ts";
 import { faceRegion, filletRadius, onFace, reach } from "../geometry/Query.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
@@ -953,6 +955,15 @@ export const EVALUATOR_BUILTINS = {
         ["halfAngle", quantity(call, cone.halfAngle, "ANGLE_UNITS")],
       ]);
     }
+    if (kind === "GeomAbs_BSplineSurface") {
+      // Planes flip with their face; whether Onshape flips a B-spline for a reversed face isn't
+      // documented, so only faces running with their surface are read.
+      if (reversed(face.shape))
+        return call.unsupported(
+          "evSurfaceDefinition for a B-spline face reversed against its surface is not supported locally yet.",
+        );
+      return faceSurfaceDefinition(call, input.oc, face.shape);
+    }
     return call.unsupported(
       `evSurfaceDefinition for ${kind.replace("GeomAbs_", "")} surfaces is not supported locally yet.`,
     );
@@ -982,6 +993,8 @@ export const EVALUATOR_BUILTINS = {
         ["radius", length(call, circle.Radius())],
       ]);
     }
+    if (kind === "GeomAbs_BSplineCurve" || kind === "GeomAbs_BezierCurve")
+      return edgeCurveDefinition(call, input.oc, edge.shape);
     return call.unsupported(
       `evCurveDefinition for ${kind.replace("GeomAbs_", "")} curves is not supported locally yet.`,
     );

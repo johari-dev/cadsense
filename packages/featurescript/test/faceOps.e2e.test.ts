@@ -1596,7 +1596,10 @@ describe("invalid shapes", () => {
       ].join("\n"),
     );
     expect(r.status).toBe("ERROR");
-    if (r.fault) expect(r.fault).toMatch(/Feature1\.sweep produced an invalid solid body/);
+    if (r.fault)
+      expect(r.fault).toMatch(
+        /Feature1\.sweep produced an invalid solid body|opSweep along a path with a sharp corner/,
+      );
     expect(r.bodies()).toEqual([]);
   });
 

@@ -4,8 +4,10 @@ import { ModelContext } from "../runtime/ModelContext.ts";
 import { FsBuiltin, untag } from "../runtime/Value.ts";
 import { CONSTRUCTION_BUILTINS } from "./construction.ts";
 import { contextBuiltins } from "./context.ts";
+import { BSPLINE_BUILTINS } from "./bspline.ts";
 import { CORE_BUILTINS } from "./core.ts";
 import { CURVATURE_BUILTINS } from "./curvature.ts";
+import { CURVE_BUILTINS } from "./curves.ts";
 import { EVALUATOR_BUILTINS } from "./evaluators.ts";
 import { FACE_BUILTINS } from "./faces.ts";
 import { GEOMETRY_BUILTINS } from "./geometry.ts";
@@ -16,6 +18,8 @@ import { PATTERN_BUILTINS } from "./patterns.ts";
 import { PLANE_BUILTINS } from "./planes.ts";
 import { PROBE_BUILTINS } from "./probes.ts";
 import { TOPOLOGY_BUILTINS } from "./topology.ts";
+import { HOLE_BUILTINS } from "./hole.ts";
+import { SURFACE_BUILTINS } from "./surfaces.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 /**
@@ -23,49 +27,9 @@ import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
  * FeatureScript's `try` can't catch. Geometry arrives with the OpenCascade kernel (milestone M4).
  */
 export const UNSUPPORTED = [
-  // Queries and topology
   "clusterBodies",
-  "unpackQuery",
-  // Geometry operations
-  "opBodyDraft",
-  "opBooleanedPattern",
-  "opBoundarySurface",
-  "opConstrainedSurface",
-  "opCreateBSplineCurve",
-  "opCreateBSplineSurface",
-  "opCreateCompositePart",
-  "opCreateCurvesOnFace",
-  "opCreateIsocline",
-  "opDerip",
-  "opDropCurve",
-  "opEditCurve",
-  "opEnclose",
-  "opFaceBlend",
-  "opFillSurface",
-  "opHelix",
-  "opHole",
-  "opImportForeign",
-  "opIntersectFaces",
-  "opMergeContexts",
-  "opModifyCompositePart",
-  "opMoveCurveBoundary",
-  "opNameEntity",
-  "opOffsetCurveOnFace",
-  "opOffsetWire",
-  "opPolyline",
-  "opRuledSurface",
-  "opSMFlatOperation",
-  "opSplineThroughEdges",
-  "opSplitByIsocline",
-  "opSplitBySelfShadow",
-  "opTessellatedLoft",
-  "opWrap",
-  // Geometry evaluation
-  "evApproximateBSplineCurve",
-  "evApproximateBSplineSurface",
   "evFaceCurvatureDerivatives",
   "evFaults",
-  "evMaxPathDeviation",
   "evMaxTolerance",
   "evOffsetDetection",
   "evOwnerSketchPlane",
@@ -76,8 +40,28 @@ export const UNSUPPORTED = [
   "evSheetMetalHoleToolBodies",
   "evTessellatedLoftMatches",
   "evTolerances",
-  "evaluateSpline",
-  // Sketches
+  "opBodyDraft",
+  "opBooleanedPattern",
+  "opBoundarySurface",
+  "opConstrainedSurface",
+  "opCreateCompositePart",
+  "opCreateCurvesOnFace",
+  "opCreateIsocline",
+  "opDerip",
+  "opFaceBlend",
+  "opImportForeign",
+  "opMergeContexts",
+  "opModifyCompositePart",
+  "opMoveCurveBoundary",
+  "opNameEntity",
+  "opOffsetCurveOnFace",
+  "opOffsetWire",
+  "opSMFlatOperation",
+  "opSplitByIsocline",
+  "opSplitBySelfShadow",
+  "opTessellatedLoft",
+  "opWrap",
+  "sheetMetalApplyInFlat",
   "skBezier",
   "skConicSegment",
   "skEllipse",
@@ -90,13 +74,8 @@ export const UNSUPPORTED = [
   "skSpline",
   "skSplineSegment",
   "skText",
-  // Attributes and properties
-  "getHoleAttributes",
-  // Patterns and sheet metal
-  "sheetMetalApplyInFlat",
+  "unpackQuery",
   "updateSheetMetalGeometry",
-  // Other
-  "approximateSpline",
   "validateToleranceSchema",
 ] as const satisfies readonly StdBuiltinName[];
 
@@ -157,6 +136,10 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
     ...PATTERN_BUILTINS,
     ...CURVATURE_BUILTINS,
     ...PROBE_BUILTINS,
+    ...HOLE_BUILTINS,
+    ...CURVE_BUILTINS,
+    ...BSPLINE_BUILTINS,
+    ...SURFACE_BUILTINS,
   } satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">);
 
 /** Names with an implementation, for the test that nothing is both implemented and unsupported. */
@@ -175,4 +158,8 @@ export const IMPLEMENTED: readonly string[] = [
   ...Object.keys(PATTERN_BUILTINS),
   ...Object.keys(CURVATURE_BUILTINS),
   ...Object.keys(PROBE_BUILTINS),
+  ...Object.keys(HOLE_BUILTINS),
+  ...Object.keys(CURVE_BUILTINS),
+  ...Object.keys(BSPLINE_BUILTINS),
+  ...Object.keys(SURFACE_BUILTINS),
 ];

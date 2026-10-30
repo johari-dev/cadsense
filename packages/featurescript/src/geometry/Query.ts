@@ -1,7 +1,14 @@
 import { coneOf, edgeConvexity, edgeJoint, isReversed, properties } from "../builtins/edges.ts";
 import { creatorOf, hasRun, lineageOf, type Lineage } from "../runtime/ModelContext.ts";
 import { equals, FsMap, FsTagged, untag, type FsArray, type FsValue } from "../runtime/Value.ts";
-import { ordered, topology, type Entity, type EntityType, type GeometryState } from "./Model.ts";
+import {
+  ordered,
+  topology,
+  topologyNamesOf,
+  type Entity,
+  type EntityType,
+  type GeometryState,
+} from "./Model.ts";
 import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "./occt.ts";
 
 /** What `evaluateQuery` needs besides the query: the kernel, the geometry, and how to fail. */
@@ -690,11 +697,31 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
         "qMateConnectorsOfParts needs mate connectors' owner parts, which aren't recorded locally yet.",
       );
     case "HOLE_FACES":
-    case "OP_HOLE_FACE":
-    case "OP_HOLE_PROFILE":
       return env.unsupported(
-        `Query type ${type} needs hole recognition or opHole's naming, which aren't available locally yet.`,
+        `Query type ${type} needs hole recognition, which isn't available locally yet.`,
       );
+    case "OP_HOLE_FACE":
+    case "OP_HOLE_PROFILE": {
+      // The faces or profile entities opHole named, optionally by face name and identity entity.
+      const id = joined(idOf(map.getField("featureId")));
+      const kind = type === "OP_HOLE_FACE" ? "HOLE_FACE" : "HOLE_PROFILE";
+      const name = untag(map.getField("name")) === undefined ? null : text(map.getField("name"));
+      const identities =
+        untag(map.getField("identity")) === undefined
+          ? null
+          : new Set(sub("identity").map((entity) => entity.id));
+      return all(
+        (entity) =>
+          (entityType === null || entity.type === entityType) &&
+          topologyNamesOf(env.oc, entity.shape).some(
+            (named) =>
+              named.kind === kind &&
+              continues(joined(named.operation), id) &&
+              (name === null || named.name === name) &&
+              (identities === null || (named.identity !== null && identities.has(named.identity))),
+          ),
+      );
+    }
     case "LOOP_AROUND_FACE":
     case "SHELL_CONTAINING_FACE":
     case "TANGENT_EDGES":

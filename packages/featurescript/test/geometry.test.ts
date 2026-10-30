@@ -142,10 +142,13 @@ describe("base models", () => {
   it("a feature that faults after modeling leaves no geometry, like one that fails", () => {
     // An unsupported builtin stops the run past std's try, so std's rollback never runs.
     const run = runtime.runFeatures([
-      { module: feature(`${cube}\n@opHelix(context, id + "helix", {});`), feature: "test" },
+      {
+        module: feature(`${cube}\n@opImportForeign(context, id + "import", {});`),
+        feature: "test",
+      },
     ]);
     expect(run.features[0]?.status).toBe("ERROR");
-    expect(run.features[0]?.fault?.message).toMatch(/opHelix/);
+    expect(run.features[0]?.fault?.message).toMatch(/opImportForeign/);
     expect(run.geometry!.entities.size).toBe(defaultEntities());
   });
 

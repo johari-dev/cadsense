@@ -336,7 +336,7 @@ export type FeatureScriptLocation = typeof FeatureScriptLocation.Type;
 export const FeatureScriptFailure = Schema.Struct({
   message: Schema.String,
   location: Schema.NullOr(FeatureScriptLocation),
-  /** The local runtime can't run something the script calls, such as `opHelix`. */
+  /** The local runtime can't run something the script calls, such as `opImportForeign`. */
   unsupported: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type FeatureScriptFailure = typeof FeatureScriptFailure.Type;

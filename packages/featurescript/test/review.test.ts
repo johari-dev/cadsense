@@ -2377,8 +2377,7 @@ describe("33. planar face parameters", () => {
 describe("34. curve patterns along straight edges", () => {
   it("space four instances along a straight sketch line, tangent to it", () => {
     // A 10 mm cube patterned 4 times along a 30 mm line from (5, 5) to (5, 35), default
-    // orientation. std's opSweep for the tangent strip may stop here on lockFaces (another
-    // stream's), so the run either stops there or puts the cubes' centers 10 mm apart.
+    // orientation: the cubes' centers 10 mm apart.
     const run = studio.run([
       { body: cube },
       {
@@ -2398,11 +2397,7 @@ describe("34. curve patterns along straight edges", () => {
         },
       },
     ]);
-    const patterned = ok(run)[2]!;
-    if (patterned !== "OK") {
-      expect(patterned).toContain("lockFaces");
-      return;
-    }
+    expect(ok(run)[2]).toBe("OK");
     const oc = run.oc!;
     const centers = ordered(run.geometry!, (e) => e.type === "BODY" && e.bodyType === "SOLID")
       .map((body) => {
