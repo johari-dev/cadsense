@@ -3,15 +3,29 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodePerfHooks from "node:perf_hooks";
 import { toGlb } from "../geometry/Glb.ts";
-import { ordered, startsWith, type GeometryState } from "../geometry/Model.ts";
+import { ordered, startsWith, type Entity, type GeometryState } from "../geometry/Model.ts";
 import type { Oc, Shape } from "../geometry/occt.ts";
-import { isDrawnBody, tessellate, type BodyMesh } from "../geometry/Tessellate.ts";
+import { errorOverlay, isDrawnBody, tessellate, type BodyMesh } from "../geometry/Tessellate.ts";
 import type { FeatureRun, FeatureScriptRuntime, PickedConnector } from "../Runtime.ts";
 import type { FsFrame } from "../runtime/Errors.ts";
 import { STD_PREFIX, type ModuleInstance } from "../runtime/Modules.ts";
 import { formatValue, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
 import { defaultDefinition, featureSpecs, type FeatureSpec } from "../spec/FeatureSpec.ts";
 import { positionAt } from "../syntax/Source.ts";
+import {
+  changedParameters,
+  DIALOG_MODULE,
+  dialogStep,
+  editingState,
+  evaluateInputs,
+  plainValue,
+  standingEdits,
+  valueExpression,
+  type DialogEditing,
+  type EditingState,
+  type ManipulatorChange,
+  type PlainValue,
+} from "./Dialog.ts";
 import { renderPng, type View } from "./Render.ts";
 
 /** One feature to run: a module's source, which feature in it, and parameters as FeatureScript expressions. */
@@ -50,12 +64,45 @@ export interface PreviewResult {
     readonly path: string;
     readonly module: ModuleInstance;
     readonly spec: FeatureSpec;
-    /** The definition it ran with: defaults, then the step's parameters. */
+    /**
+     * The definition it ran with: defaults, then the step's parameters (evaluated just before it
+     * when they read variables), then what the editing logic changed.
+     */
     readonly definition: FsMap;
+    /** The inputs it was given, as expressions. */
+    readonly parameters: Readonly<Record<string, string>>;
+    /**
+     * The inputs whose expression the dialog shows as typed (`#width`; see `dialogInputs`): its
+     * parameters, less any the editing logic replaced with a value.
+     */
+    readonly shown: Readonly<Record<string, string>>;
     readonly run: FeatureRun | null;
+    /** Its INFO or WARNING message; see {@link featureNotice}. */
+    readonly notice: ReturnType<typeof featureNotice>;
   }[];
   readonly solids: readonly SolidSummary[];
+  /**
+   * The model after the last feature: its faces in the highlight material, and the entities it
+   * marked as errors in the error material (in place, or in one extra mesh when they're gone).
+   */
   readonly meshes: readonly BodyMesh[];
+  /**
+   * How many entities the last feature marked as errors (`setErrorEntities`) the meshes draw in
+   * red; one with nothing to draw isn't counted.
+   */
+  readonly errorEntities: number;
+  /**
+   * When the run was asked to act as the dialog and the feature has an editing logic function:
+   * the state to send with the next run.
+   */
+  readonly editing: EditingState | null;
+  /** Manipulators the last feature added, for drawing them and sending one back dragged. */
+  readonly manipulators: readonly PreviewManipulator[];
+  /**
+   * After a manipulator change: the last step's inputs as the change function set them, which the
+   * caller keeps as the person's. Null otherwise, and when the change function failed.
+   */
+  readonly parameters: Readonly<Record<string, string>> | null;
   /** The model before the last feature, when asked for. */
   readonly meshesBefore: readonly BodyMesh[] | null;
   /** What the last feature did to the model; null without a kernel or when it didn't run. */
@@ -70,11 +117,40 @@ export interface PreviewChanges {
   readonly createdFaces: number;
 }
 
+/** One manipulator a feature added with `addManipulators`. */
+export interface PreviewManipulator {
+  readonly key: string;
+  /** Its `ManipulatorType` member: `LINEAR_1D`, `LINEAR_3D`, `ANGULAR`, `FLIP`, ... */
+  readonly type: string;
+  /** The `Manipulator` as an expression, to send back with a change; null if it has none. */
+  readonly expression: string | null;
+  /** Its fields (`base`, `direction`, `offset`, `angle`, `flipped`, ...) in meters and radians. */
+  readonly fields: Readonly<Record<string, PlainValue>>;
+}
+
 /** A line in a user's script. */
 export interface SourceLocation {
   readonly path: string;
   readonly line: number;
   readonly column: number;
+}
+
+export interface PreviewOptions {
+  /** Also mesh the model before the last feature. */
+  readonly before?: boolean;
+  /** Points picked in the panel, made into mate connectors before the features run. */
+  readonly connectors?: readonly PickedConnector[];
+  /**
+   * Run the last step as Onshape's feature dialog does, given the state the previous run returned
+   * (null when the dialog opens): its "Editing Logic Function" runs when an input changed, and the
+   * feature runs with (and the dialog shows) the definition it returns. See `dialogStep`.
+   */
+  readonly editing?: DialogEditing;
+  /**
+   * A manipulator of the last feature was dragged: run its "Manipulator Change Function" on the
+   * context before the feature, then run the feature (and editing logic) with the inputs it set.
+   */
+  readonly manipulatorChange?: ManipulatorChange;
 }
 
 /**
@@ -86,8 +162,35 @@ export function runPreview(
   runtime: FeatureScriptRuntime,
   steps: readonly PreviewStep[],
   base?: Uint8Array,
-  options: { readonly before?: boolean; readonly connectors?: readonly PickedConnector[] } = {},
+  options: PreviewOptions = {},
 ): PreviewResult {
+  const { manipulatorChange, ...rest } = options;
+  if (!manipulatorChange)
+    return summarize(runtime, runSteps(runtime, steps, base, options), options);
+  // The change function runs in a run of its own, which is thrown away; then the feature runs
+  // with the inputs it set, as for any input change, editing logic included.
+  const change = runSteps(runtime, steps, base, options);
+  const target = change.prepared.at(-1);
+  const given = untag(change.dialogs.at(-1)?.given.value);
+  const changed = untag(change.dialogs.at(-1)?.resolved.value);
+  if (!target || !(given instanceof FsMap) || !(changed instanceof FsMap))
+    return {
+      ...summarize(runtime, change, options),
+      // The change failed, at its line; the dialog's state stays as it was.
+      editing: options.editing?.previous ?? null,
+    };
+  const parameters = changedParameters(runtime, target, given, changed);
+  const moved = steps.map((step, i) => (i === steps.length - 1 ? { ...step, parameters } : step));
+  return { ...runPreview(runtime, moved, base, rest), parameters };
+}
+
+/** Prepares `steps` (each as Onshape's dialog would run it) and runs them; see `runPreview`. */
+function runSteps(
+  runtime: FeatureScriptRuntime,
+  steps: readonly PreviewStep[],
+  base: Uint8Array | undefined,
+  options: PreviewOptions,
+) {
   runtime.loader.unloadUserModules();
   // A step's source is that file's text for the whole run, imports included, and a later step's
   // wins: the panel's unsaved text for its file over the copy an earlier step read from disk.
@@ -108,34 +211,91 @@ export function runPreview(
           ? `${step.path} has no feature named ${step.feature}.`
           : `${step.path} defines no feature.`,
       );
-    const parameters = FsMap.fromEntries(
-      Object.entries(fallback ? {} : (step.parameters ?? {})).map(
-        ([id, source]) => [id, runtime.evaluate(module, source)] as const,
-      ),
-    );
-    return { path: step.path, module, spec, definition: defaultDefinition(spec, parameters) };
+    const parameters = fallback ? {} : (step.parameters ?? {});
+    const { values, lazy } = evaluateInputs(runtime, module, parameters);
+    return {
+      path: step.path,
+      module,
+      spec,
+      parameters,
+      lazy,
+      values,
+      definition: defaultDefinition(spec, values),
+    };
   });
+  // Each step as Onshape's dialog would run it, where that differs from calling the feature: its
+  // inputs read variables, or it's the previewed feature and the dialog is open on it.
+  const dialogs = prepared.map((step, i) =>
+    dialogStep(
+      runtime,
+      step,
+      i === prepared.length - 1
+        ? {
+            ...(options.editing ? { editing: options.editing } : {}),
+            ...(options.manipulatorChange ? { manipulatorChange: options.manipulatorChange } : {}),
+          }
+        : {},
+    ),
+  );
   const started = NodePerfHooks.performance.now();
   const run = runtime.runFeatures(
-    prepared.map(({ module, spec, definition }) => ({ module, feature: spec.name, definition })),
+    prepared.map(
+      ({ module, spec, definition }, i) => dialogs[i] ?? { module, feature: spec.name, definition },
+    ),
     {
       ...(base ? { base } : {}),
       ...(options.connectors ? { connectors: options.connectors } : {}),
     },
   );
   const elapsedMs = NodePerfHooks.performance.now() - started;
+  return { prepared, dialogs, run, elapsedMs };
+}
+
+/** The result of steps `runSteps` ran: models, solids, changes, and each feature's dialog. */
+function summarize(
+  runtime: FeatureScriptRuntime,
+  { prepared, dialogs, run, elapsedMs }: ReturnType<typeof runSteps>,
+  options: PreviewOptions,
+): PreviewResult {
   const { oc, geometry, geometryBeforeLast } = run;
-  const lastFeature = [`Feature${steps.length}`];
+  const last = prepared.at(-1);
+  const dialog = dialogs.at(-1) ?? null;
+  const lastFeature = [`Feature${prepared.length}`];
   const createdByLast = (face: { readonly createdBy: readonly string[] }) =>
     startsWith(face.createdBy, lastFeature);
+  // The previewed feature's error entities: faces and bodies still drawn turn red in place, and
+  // anything else (a rolled-back body, edges, vertices) is drawn over the model.
+  const errors =
+    run.features.length === prepared.length ? (run.features.at(-1)?.errorEntities ?? []) : [];
+  const errorIds = new Set(errors.map((entity) => entity.id));
+  const drawn = (entity: Entity) => {
+    const body = geometry?.entities.get(entity.body);
+    return (
+      (entity.type === "FACE" || entity.type === "BODY") &&
+      geometry?.entities.get(entity.id) !== undefined &&
+      body !== undefined &&
+      isDrawnBody(geometry, body)
+    );
+  };
   // Tessellating first leaves each face's triangulation for the bounds below.
-  const meshes = oc && geometry ? tessellate(oc, geometry, { highlight: createdByLast }) : [];
+  const overlay = oc && errors.length > 0 ? errorOverlay(oc, errors, drawn) : null;
+  const drawnErrors = errors.filter(drawn).length + (overlay?.drawn ?? 0);
+  const meshes =
+    oc && geometry
+      ? [
+          ...tessellate(oc, geometry, {
+            highlight: createdByLast,
+            error: (face) => errorIds.has(face.id) || errorIds.has(face.body),
+          }),
+          ...(overlay?.mesh ? [overlay.mesh] : []),
+        ]
+      : [];
   const solids = oc && geometry ? summarizeSolids(oc, geometry) : [];
   const meshesBefore =
     options.before && oc && geometryBeforeLast ? tessellate(oc, geometryBeforeLast) : null;
   // Only when the previewed (last) feature ran; a fault earlier stops the run before it.
   const changes =
-    oc && geometry && geometryBeforeLast && run.features.length === steps.length
+    oc && geometry && geometryBeforeLast && run.features.length === prepared.length
       ? {
           volumeMm3:
             solids.reduce((sum, solid) => sum + solid.volumeMm3, 0) -
@@ -153,19 +313,112 @@ export function runPreview(
           ),
         }
       : null;
+  // The definition each dialog step ran its feature with, or had before that failed.
+  const ranWith = (i: number) => {
+    const resolved = untag(dialogs[i]?.resolved.value);
+    return resolved instanceof FsMap ? resolved : dialogs[i]?.unresolved;
+  };
+  const evaluated = untag(dialog?.evaluated.value);
+  const returned = untag(dialog?.resolved.value);
+  // Onshape's UI spec lets editing logic return a quantity as an expression string. Locally a string
+  // can't be evaluated inside the run (and Onshape's own syntax, "3/8 in", isn't FeatureScript), so
+  // instead of the feature failing its precondition the run stops on it.
+  const quantityText =
+    dialog?.logic && last && returned instanceof FsMap
+      ? last.spec.inputs.find(
+          (input) =>
+            ["length", "angle", "integer", "real"].includes(input.kind) &&
+            typeof untag(returned.get(input.id)) === "string",
+        )
+      : undefined;
+  const lastRun = run.features.at(-1);
+  const stoppedLast: FeatureRun | null =
+    quantityText && lastRun && run.features.length === prepared.length
+      ? {
+          ...lastRun,
+          status: "ERROR",
+          fault: {
+            reason: "unsupported-builtin",
+            message: `The Editing Logic Function set ${quantityText.id} to a string; evaluating quantity expressions an editing logic returns is not supported locally yet.`,
+            stack: [],
+          },
+        }
+      : null;
+  const runOf = (i: number) =>
+    i === prepared.length - 1 && stoppedLast ? stoppedLast : (run.features[i] ?? null);
+  const editing =
+    !options.editing || !dialog?.logic || !last
+      ? null
+      : returned instanceof FsMap
+        ? editingState(
+            runtime,
+            last,
+            returned,
+            evaluated instanceof FsMap ? evaluated : FsMap.empty,
+          )
+        : // The logic threw or an input's variable was missing: no definition came back, and the
+          // dialog's state stays as it was, as Onshape leaves a failed regeneration's inputs.
+          options.editing.previous;
+  // The inputs the dialog shows the logic's values for: what it set this run, or after a failed
+  // run, its earlier edits that still stand (not to an input the person just set, say).
+  const logicSet =
+    !options.editing || editing === null || !last
+      ? {}
+      : returned instanceof FsMap
+        ? editing.edited
+        : standingEdits(options.editing, last.parameters);
   return {
-    features: prepared.map(({ path, module, spec, definition }, i) => ({
+    features: prepared.map(({ path, module, spec, definition, parameters }, i) => ({
       path,
       module,
       spec,
-      definition,
-      run: run.features[i] ?? null,
+      definition: ranWith(i) ?? definition,
+      parameters,
+      // The logic's values replace the expressions it overrode, as Onshape's dialog shows them.
+      shown:
+        i === prepared.length - 1
+          ? Object.fromEntries(
+              Object.entries(parameters).filter(([id]) => logicSet[id] === undefined),
+            )
+          : parameters,
+      run: runOf(i),
+      notice: featureNotice(runOf(i)),
     })),
     solids,
     meshes,
+    errorEntities: drawnErrors,
+    editing,
+    manipulators:
+      last && run.features.length === prepared.length
+        ? (run.features.at(-1)?.manipulators.entries() ?? []).map(([key, manipulator]) =>
+            previewManipulator(runtime, last.module, key, manipulator),
+          )
+        : [],
+    parameters: null,
     meshesBefore,
     changes,
     elapsedMs,
+  };
+}
+
+/** A manipulator the feature in `module` added under `key`, for the caller to draw or send back. */
+function previewManipulator(
+  runtime: FeatureScriptRuntime,
+  module: ModuleInstance,
+  key: FsValue,
+  manipulator: FsValue,
+): PreviewManipulator {
+  const fields = untag(manipulator);
+  const entries = fields instanceof FsMap ? fields.entries() : [];
+  return {
+    key: String(untag(key)),
+    type: String(untag(fields instanceof FsMap ? fields.getField("manipulatorType") : undefined)),
+    expression: valueExpression(runtime, module, manipulator),
+    fields: Object.fromEntries(
+      entries.flatMap(([name, value]) =>
+        typeof name === "string" && name !== "manipulatorType" ? [[name, plainValue(value)]] : [],
+      ),
+    ),
   };
 }
 
@@ -219,7 +472,8 @@ export function userLocation(
   stack: readonly FsFrame[],
 ): SourceLocation | null {
   for (const frame of stack) {
-    if (frame.file.startsWith(STD_PREFIX)) continue;
+    // The dialog's step is ours, not the user's; a failure in it is located in std or not at all.
+    if (frame.file.startsWith(STD_PREFIX) || frame.file === DIALOG_MODULE) continue;
     const module = [...runtime.loader.loaded].find((candidate) => candidate.path === frame.file);
     if (!module) continue;
     return { path: frame.file, ...positionAt(module.file, frame.span.start) };
@@ -266,6 +520,26 @@ export function featureFailure(
     location: null,
     unsupported,
   };
+}
+
+/**
+ * What a feature that worked but reported INFO or WARNING says, as Onshape shows it beside the
+ * feature: its custom message, or else its `ErrorStringEnum` member. Error entities this runtime
+ * couldn't find to draw add a sentence (an INFO of their own for OK and ERROR features). Null
+ * otherwise.
+ */
+export function featureNotice(run: FeatureRun | null): {
+  readonly status: "INFO" | "WARNING";
+  readonly message: string;
+} | null {
+  const undrawn = run?.undrawnErrorEntities[0];
+  const drawing =
+    undrawn === undefined ? null : `Some error entities can't be drawn locally: ${undrawn}`;
+  if (run?.status === "INFO" || run?.status === "WARNING") {
+    const own = run.message ?? run.statusEnum ?? run.status;
+    return { status: run.status, message: drawing ? `${own} ${drawing}` : own };
+  }
+  return drawing ? { status: "INFO", message: drawing } : null;
 }
 
 export const VIEWS: readonly View[] = ["iso", "top", "front", "right"];

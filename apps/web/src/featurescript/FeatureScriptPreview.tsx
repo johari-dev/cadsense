@@ -4,6 +4,7 @@ import type {
   FeatureScriptDialogInput,
   FeatureScriptDialogItemInput,
   FeatureScriptFailure,
+  FeatureScriptNotice,
   FeatureScriptPanelPreview,
   FeatureScriptPreviewStatus,
 } from "@cadsense/contracts";
@@ -17,9 +18,11 @@ import {
   CrosshairIcon,
   EyeIcon,
   FrameCornersIcon as FocusIcon,
+  InfoIcon,
   ChatIcon as MessageSquareIcon,
   PlusIcon,
   ArrowCounterClockwiseIcon as RotateCcwIcon,
+  WarningIcon as TriangleAlertIcon,
   XIcon,
 } from "~/lib/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -39,17 +42,21 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 import { cn } from "../lib/utils";
 import {
   inputExpression,
+  faceAt,
   newPickId,
-  pickExpression,
   pickKind,
+  pickQuery,
   pointExpression,
+  unionQuery,
   type PickHit,
+  type PickKind,
 } from "./featureScriptDialog";
 import {
   inputsChanged,
   withBase,
   withDefaultInputs,
   withoutInputs,
+  withTouched,
   withValue,
   type FeatureScriptFileSettings,
   type FeatureScriptListItem,
@@ -59,6 +66,56 @@ import type { FeatureScriptPanelRun, FeatureScriptPreviewState } from "./useFeat
 
 const NO_BASE = "";
 const FAILED: ReadonlySet<FeatureScriptPreviewStatus> = new Set(["ERROR", "INVALID", "STOPPED"]);
+
+/**
+ * How an INFO or WARNING notice looks: the failure banner's and strip's shapes, in blue or amber.
+ * `banner` sits over the model in preview mode, `strip` above the code.
+ */
+export const NOTICE_TONES = {
+  INFO: {
+    Icon: InfoIcon,
+    icon: "text-info",
+    text: "text-info-foreground",
+    banner: "border-info/35 bg-[rgba(22,32,46,0.96)]",
+    strip: "border-info/25 bg-info/8",
+    dot: "bg-info",
+  },
+  WARNING: {
+    Icon: TriangleAlertIcon,
+    icon: "text-warning",
+    text: "text-warning-foreground",
+    banner: "border-warning/35 bg-[rgba(44,36,20,0.96)]",
+    strip: "border-warning/25 bg-warning/8",
+    dot: "bg-warning",
+  },
+} as const satisfies Record<FeatureScriptNotice["status"], unknown>;
+
+/**
+ * How a row the feature's status blames (its faulty parameters) is outlined: red for an error, as
+ * Onshape does, and the notice's tone for INFO and WARNING.
+ */
+const FAULTY_ROW = {
+  ERROR: "rounded-md bg-destructive/8 ring-1 ring-destructive/50 ring-inset",
+  WARNING: "rounded-md bg-warning/8 ring-1 ring-warning/50 ring-inset",
+  INFO: "rounded-md bg-info/8 ring-1 ring-info/50 ring-inset",
+} as const;
+
+/** What a dialog row needs to show that the feature's status blames it. */
+interface Fault {
+  /** The row's outline, from {@link FAULTY_ROW}. */
+  readonly row: string;
+  /** Errors mark the control invalid too, which the design system draws with a red border. */
+  readonly invalid: boolean;
+}
+
+/** What to click for each kind of pick; a click elsewhere picks nothing. */
+const PICK_HINTS = {
+  face: "Click a face",
+  faceOrEdge: "Click a face, or on an edge",
+  edge: "Click on an edge",
+  vertex: "Click on a corner",
+  body: "Click a part",
+} as const satisfies Record<PickKind, string>;
 
 /** `−1,425.5 mm³`, with a real minus sign. */
 export function formatVolumeChange(mm3: number): string {
@@ -98,8 +155,8 @@ export function FeatureScriptStatusPill(props: {
             ? "bg-muted-foreground/60"
             : failed
               ? "bg-destructive"
-              : status === "WARNING"
-                ? "bg-warning"
+              : status === "WARNING" || status === "INFO"
+                ? NOTICE_TONES[status].dot
                 : "bg-success",
         )}
       />
@@ -169,7 +226,10 @@ const sameSlot = (a: InputSlot, b: InputSlot) =>
   ("list" in a ? a.list : null) === ("list" in b ? b.list : null) &&
   ("item" in a ? a.item : null) === ("item" in b ? b.item : null);
 
-/** `settings` with `change` applied to the values that hold `slot`. */
+/**
+ * `settings` with `change` applied to the values that hold `slot`, and the input (or its list)
+ * marked as set by the person, so the run takes it even if its text didn't change.
+ */
 function updateSlot(
   settings: FeatureScriptFileSettings,
   slot: InputSlot,
@@ -177,17 +237,20 @@ function updateSlot(
     values: Values,
   ) => Values,
 ): FeatureScriptFileSettings {
-  if (!("list" in slot)) return change(settings);
+  if (!("list" in slot)) return withTouched(change(settings), slot.input);
   const items = settings.lists?.[slot.list] ?? [];
   // The item may have gone since (removed, or the list reset); nothing to change then.
   if (!items.some((item) => item.key === slot.item)) return settings;
-  return {
-    ...settings,
-    lists: {
-      ...settings.lists,
-      [slot.list]: items.map((item) => (item.key === slot.item ? change(item) : item)),
+  return withTouched(
+    {
+      ...settings,
+      lists: {
+        ...settings.lists,
+        [slot.list]: items.map((item) => (item.key === slot.item ? change(item) : item)),
+      },
     },
-  };
+    slot.list,
+  );
 }
 
 /** The values that hold `slot`, if its list item still exists. */
@@ -197,9 +260,10 @@ function slotValues(settings: FeatureScriptFileSettings, slot: InputSlot) {
 }
 
 /**
- * Preview mode for a `.fs` file: the model after the feature (its faces in amber) with an
- * Onshape-style dialog over it. Changing an input runs the preview again. A failure keeps the last
- * good model on screen, greyed out, under the cause and a link to its line.
+ * Preview mode for a `.fs` file: the model after the feature (its faces in amber, entities it marked
+ * as errors in red) with an Onshape-style dialog over it. Changing an input runs the preview again.
+ * A failure keeps the last good model on screen, greyed out, under the cause and a link to its
+ * line, unless it marked error entities, which show on its own model.
  */
 export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
   const { run, settings, updateSettings } = props;
@@ -208,8 +272,10 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     ? { message: run.error, location: null, unsupported: false }
     : (latest?.failure ?? null);
   const failed = run.error !== null || (latest !== null && FAILED.has(latest.status));
-  // Under a failure, the last good model; otherwise the newest one.
-  const shown = failed && lastGood ? lastGood : (latest ?? lastGood);
+  // A failure that marked entities in red shows them on its own (rolled-back) model, as Onshape
+  // does; any other failure shows the last good model.
+  const marksErrors = latest !== null && latest.errorEntities > 0 && latest.model !== null;
+  const shown = failed && lastGood && !marksErrors ? lastGood : (latest ?? lastGood);
   const stale = shown !== null && shown !== latest;
   // The newest run's dialog, or the last good one while the script doesn't load.
   const dialog = latest && latest.features.length > 0 ? latest : lastGood;
@@ -238,23 +304,23 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     if (picking === null) return;
     const target = picking;
     const { input } = target.slot;
+    const picked = target.kind === "point" ? null : pickQuery(target.kind, hit);
+    // Not on what the input takes (off an edge for an edge input): nothing is picked.
+    if (target.kind !== "point" && picked === null) return;
     updateSettings((current) =>
       updateSlot(current, target.slot, (values) => {
-        if (target.kind === "face") {
-          const points = add ? [...(values.picks[input] ?? []), hit.point] : [hit.point];
-          return withValue(values, input, pickExpression(points), { picks: points });
+        if (picked) {
+          const earlier = values.queries?.[input] ?? (values.picks[input] ?? []).map(faceAt);
+          const queries = add ? [...earlier, picked.query] : [picked.query];
+          const points = add ? [...(values.picks[input] ?? []), picked.at] : [picked.at];
+          return withValue(values, input, unionQuery(queries), { picks: points, queries });
         }
         const connector = { id: newPickId(), origin: hit.point, zAxis: hit.normal };
         const connectors = add ? [...(values.points?.[input] ?? []), connector] : [connector];
-        return withValue(
-          values,
-          input,
-          pointExpression(
-            connectors.map((point) => point.id),
-            target.entity,
-          ),
-          { picks: connectors.map((point) => point.origin), points: connectors },
-        );
+        return withValue(values, input, pointExpression(connectors.map((point) => point.id)), {
+          picks: connectors.map((point) => point.origin),
+          points: connectors,
+        });
       }),
     );
     if (!add) setPicking(null);
@@ -266,11 +332,14 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
     updateSettings((current) => {
       // A list set as one expression (by the agent) starts over as items.
       const { [list]: _expression, ...parameters } = current.parameters;
-      return {
-        ...current,
-        parameters,
-        lists: { ...current.lists, [list]: change(current.lists?.[list] ?? []) },
-      };
+      return withTouched(
+        {
+          ...current,
+          parameters,
+          lists: { ...current.lists, [list]: change(current.lists?.[list] ?? []) },
+        },
+        list,
+      );
     });
   const resetInputs = () => {
     setPicking(null);
@@ -349,9 +418,9 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
       ) : null}
       {picking !== null ? (
         <div className="absolute top-2.5 right-2.5 max-w-56 rounded-md border border-info/40 bg-background/90 px-2 py-1 text-[11px] text-foreground">
-          {picking.kind === "face"
-            ? `Click a face${showing === "before" ? " on the model before the feature" : ""}.`
-            : "Click where the point goes. Its Z axis points out of the face you click."}{" "}
+          {picking.kind === "point"
+            ? "Click where the point goes. Its Z axis points out of the face you click."
+            : `${PICK_HINTS[picking.kind]}${showing === "before" ? " on the model before the feature" : ""}.`}{" "}
           Shift adds more. Esc stops.
         </div>
       ) : null}
@@ -366,6 +435,8 @@ export function FeatureScriptPreview(props: FeatureScriptPreviewProps) {
             {...(inputsChanged(settings) ? { onResetInputs: resetInputs } : {})}
           />
         ) : null}
+        {/* A notice can come with a failure: error entities it couldn't draw, say. */}
+        {latest?.notice ? <NoticeBanner notice={latest.notice} /> : null}
         <Footer
           preview={latest}
           failed={failed}
@@ -409,6 +480,11 @@ function FeatureDialog(props: {
   const changed =
     Object.keys(settings.parameters).length > 0 || Object.keys(settings.lists ?? {}).length > 0;
   const rows = preview.inputs.filter((input) => input.visible);
+  // The rows are the previewed feature's, so they take its own status, not an earlier step's.
+  const fault: Fault =
+    preview.featureStatus === "WARNING" || preview.featureStatus === "INFO"
+      ? { row: FAULTY_ROW[preview.featureStatus], invalid: false }
+      : { row: FAULTY_ROW.ERROR, invalid: true };
   const slotPicking = (slot: InputSlot) =>
     props.picking !== null && sameSlot(props.picking.slot, slot);
   const row = (input: FeatureScriptDialogItemInput, slot: InputSlot) => {
@@ -417,6 +493,7 @@ function FeatureDialog(props: {
       <InputRow
         key={input.id}
         input={input}
+        fault={fault}
         parameter={values?.parameters[input.id]}
         picks={values?.picks[input.id]?.length ?? 0}
         picking={slotPicking(slot)}
@@ -492,6 +569,7 @@ function FeatureDialog(props: {
               <ListInput
                 key={input.id}
                 input={input}
+                fault={fault}
                 runKeys={preview.listKeys[input.id] ?? null}
                 items={settings.lists?.[input.id] ?? null}
                 expression={settings.parameters[input.id] ?? null}
@@ -515,6 +593,7 @@ function FeatureDialog(props: {
  */
 function ListInput(props: {
   readonly input: FeatureScriptDialogInput;
+  readonly fault: Fault;
   /** The keys of the items the run had, in its order; null when it ran the list as one expression. */
   readonly runKeys: readonly string[] | null;
   /** The items edited here, or null before the first edit. */
@@ -543,7 +622,13 @@ function ListInput(props: {
   const remove = (key: string) => props.onList((items) => items.filter((item) => item.key !== key));
   const fromExpression = props.items === null && props.expression !== null;
   return (
-    <div className="px-2.5 py-1" role="group" aria-label={input.label}>
+    <div
+      className={cn("px-2.5 py-1", input.faulty && props.fault.row)}
+      role="group"
+      aria-label={input.label}
+      aria-invalid={(input.faulty && props.fault.invalid) || undefined}
+      data-faulty={input.faulty || undefined}
+    >
       <div className="flex min-h-8 items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-muted-foreground">{input.label}</span>
         <Button variant="outline" size="xs" onClick={add}>
@@ -624,6 +709,7 @@ function ListInput(props: {
 
 function InputRow(props: {
   readonly input: FeatureScriptDialogItemInput;
+  readonly fault: Fault;
   /** The expression the person set, if any. */
   readonly parameter: string | undefined;
   readonly picks: number;
@@ -635,20 +721,24 @@ function InputRow(props: {
   const label = (
     <span className="min-w-0 flex-1 truncate text-muted-foreground">{input.label}</span>
   );
+  const row = cn("flex min-h-8 items-center gap-2 px-2.5", input.faulty && props.fault.row);
+  const invalid = (input.faulty && props.fault.invalid) || undefined;
+  const faulty = input.faulty || undefined;
   if (input.kind === "boolean")
     return (
-      <label className="flex min-h-8 cursor-pointer items-center gap-2 px-2.5">
+      <label className={cn(row, "cursor-pointer")} data-faulty={faulty}>
         {label}
         <Checkbox
           checked={input.value === "true"}
           onCheckedChange={(checked) => props.onSet(checked ? "true" : "false")}
           aria-label={input.label}
+          aria-invalid={invalid}
         />
       </label>
     );
   if (input.kind === "enum" && input.options.length > 0)
     return (
-      <div className="flex min-h-8 items-center gap-2 px-2.5">
+      <div className={row} data-faulty={faulty}>
         {label}
         <Select
           value={input.value}
@@ -656,7 +746,12 @@ function InputRow(props: {
             if (typeof value === "string") props.onSet(value);
           }}
         >
-          <SelectTrigger size="xs" className="w-32 min-w-0" aria-label={input.label}>
+          <SelectTrigger
+            size="xs"
+            className="w-32 min-w-0"
+            aria-label={input.label}
+            aria-invalid={invalid}
+          >
             <SelectValue>{enumLabel(input.value)}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
@@ -672,7 +767,7 @@ function InputRow(props: {
   const target = input.kind === "query" ? pickKind(input.filter) : null;
   if (target)
     return (
-      <div className="flex min-h-8 items-center gap-2 px-2.5">
+      <div className={row} data-faulty={faulty}>
         {label}
         <Button
           variant={props.picking ? "secondary" : "outline"}
@@ -680,6 +775,7 @@ function InputRow(props: {
           className={cn("max-w-32 min-w-0", props.picking && "ring-2 ring-info/60")}
           aria-pressed={props.picking}
           aria-label={`Pick ${input.label}`}
+          aria-invalid={invalid}
           onClick={() => props.onPick(target)}
         >
           <CrosshairIcon />
@@ -706,9 +802,9 @@ function InputRow(props: {
       </div>
     );
   return (
-    <div className="flex min-h-8 items-center gap-2 px-2.5">
+    <div className={row} data-faulty={faulty}>
       {label}
-      <ValueField input={input} parameter={props.parameter} onSet={props.onSet} />
+      <ValueField input={input} invalid={invalid} parameter={props.parameter} onSet={props.onSet} />
     </div>
   );
 }
@@ -722,6 +818,7 @@ const enumLabel = (option: string) => {
 /** A typed value: a number with a unit, or any FeatureScript expression. Enter or blur applies it. */
 function ValueField(props: {
   readonly input: FeatureScriptDialogItemInput;
+  readonly invalid: true | undefined;
   readonly parameter: string | undefined;
   readonly onSet: (expression: string | null) => void;
 }) {
@@ -747,6 +844,7 @@ function ValueField(props: {
       size="compact"
       className="w-32"
       aria-label={input.label}
+      aria-invalid={props.invalid}
       value={text}
       onFocus={() => setEditing(true)}
       onChange={(event) => setText(event.currentTarget.value)}
@@ -817,6 +915,41 @@ function FailureBanner(props: {
   );
 }
 
+/** A feature's INFO or WARNING message over the model, which stays as it ran. */
+function NoticeBanner(props: { readonly notice: FeatureScriptNotice }) {
+  const tone = NOTICE_TONES[props.notice.status];
+  return (
+    <div
+      role="status"
+      className={cn("flex gap-2.5 rounded-xl border px-3 py-2.5 text-xs", tone.banner)}
+      data-testid="featurescript-notice"
+    >
+      <tone.Icon className={cn("mt-0.5 size-4 shrink-0", tone.icon)} />
+      <p className={cn("min-w-0 flex-1 font-mono text-[11.5px] break-words", tone.text)}>
+        {props.notice.message}
+      </p>
+    </div>
+  );
+}
+
+/** The outcome in the footer: a check for OK, the notice's icon and color for INFO and WARNING. */
+function FooterStatus(props: { readonly status: FeatureScriptPreviewStatus }) {
+  const { status } = props;
+  const tone = status === "INFO" || status === "WARNING" ? NOTICE_TONES[status] : null;
+  const Icon = tone?.Icon ?? CheckIcon;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 font-medium",
+        tone ? tone.text : "text-success",
+      )}
+    >
+      <Icon className={cn("size-3.5", tone?.icon)} />
+      {status}
+    </span>
+  );
+}
+
 /** View controls, what the feature did, and the base it ran on. */
 function Footer(props: {
   readonly preview: FeatureScriptPanelPreview | null;
@@ -863,12 +996,7 @@ function Footer(props: {
           <FocusIcon />
         </Button>
       </span>
-      {preview && !props.failed ? (
-        <span className="inline-flex items-center gap-1 font-medium text-success">
-          <CheckIcon className="size-3.5" />
-          {preview.status}
-        </span>
-      ) : null}
+      {preview && !props.failed ? <FooterStatus status={preview.status} /> : null}
       {changes ? (
         <>
           <span className="text-muted-foreground">

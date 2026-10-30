@@ -60,6 +60,26 @@ the workspace's only STEP file until someone picks another. The panel calls
 attachments, and the newest 40 are kept. Meshes are indexed (each face's vertices once, normals
 smoothed within a face), and the asset route gzips them for clients that accept it.
 
+A feature that reports INFO or WARNING shows its message in a blue or amber banner over the model,
+and in a strip in Code mode; the status pill and footer use the same colour. Inputs a status blames
+are outlined in the dialog: `regenError(message, ["waypoints"])`, a warning's associated
+parameters, and list items by `faultyArrayParameterId` (`waypoints[1].height`). Entities a feature
+marks with `setErrorEntities` or a `regenError`'s entities are drawn in red in the after model, as
+they were before a failed feature's rollback. The panel draws the model's exact B-rep edges and
+vertices (tangent edges included, as Onshape shows them by default), and a click picks the nearest
+edge or vertex of a drawn solid or sheet, or the clicked part for body filters, through
+`qClosestTo`.
+
+The panel runs the previewed feature as Onshape's dialog does. Its "Editing Logic Function" runs on
+the context before the feature, which is then rolled back, when the dialog opens (`oldDefinition`
+`{}`) and after each input change; the feature runs with the definition it returns, and the dialog
+shows that definition. An input with `#name` outside a string becomes `getVariable(context,
+"name")`, evaluated just before its feature; a missing variable fails the feature and marks that
+input. The response lists the feature's manipulators, and a request can carry a drag: the
+"Manipulator Change Function" runs, then the feature runs with the inputs it set. Handles aren't
+drawn yet. `setErrorEntities`, `transferSubfeatureErrorDisplay` and `addManipulators` record display
+data in `src/builtins/display.ts`; the other UI-only builtins still do nothing.
+
 The server runs previews in one worker thread (`apps/server/src/featurescript/`), one at a time.
 A worker loads std and OpenCascade and runs a small warm-up preview as soon as it starts (about a
 second), and stops after 10 idle minutes. Shapes are never freed, so once a worker's WASM memory

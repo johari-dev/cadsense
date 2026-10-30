@@ -10,7 +10,7 @@ import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
-import { failureLocationLabel, formatVolumeChange } from "./FeatureScriptPreview";
+import { failureLocationLabel, formatVolumeChange, NOTICE_TONES } from "./FeatureScriptPreview";
 import {
   featureScriptFileKey,
   useFeatureScriptPanelStore,
@@ -97,7 +97,11 @@ export function FeatureScriptChatCard(props: {
           <span
             className={cn(
               "size-1.5 rounded-full",
-              failed ? "bg-destructive" : card.status === "WARNING" ? "bg-warning" : "bg-success",
+              failed
+                ? "bg-destructive"
+                : card.status === "WARNING" || card.status === "INFO"
+                  ? NOTICE_TONES[card.status].dot
+                  : "bg-success",
             )}
           />
           {card.status}
