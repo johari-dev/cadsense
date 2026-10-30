@@ -14,8 +14,9 @@ import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { equals, FsBuiltin, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
 import { map } from "./args.ts";
+import { properties } from "./edges.ts";
 import { idOf, kernel, magnitude, normalized, resolve, transient, vector } from "./geometryArgs.ts";
-import { lengthVector, regenError, stdTagged, unitVector } from "./std.ts";
+import { regenError, stdPlane } from "./std.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 // ------------------------------------------------------------------ sketches
@@ -262,25 +263,34 @@ export const GEOMETRY_BUILTINS = {
     return undefined;
   },
 
+  /**
+   * The plane of the first entity `face` resolves to: a planar face's, or a mate connector's XY
+   * plane (std's `QueryFilterCompound.ALLOWS_PLANE` sends both, e.g. cPlane's offset plane).
+   */
   evPlane: ([ctx, args], call) => {
     const { model, oc } = kernel(call, ctx);
-    const face = resolve(call, model, oc, map(call, args, "definition").getField("face"))[0];
-    if (face?.type !== "FACE") return call.fail("CANNOT_RESOLVE_PLANE: no face to evaluate.");
-    const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face.shape), true);
+    const entity = resolve(call, model, oc, map(call, args, "definition").getField("face"))[0];
+    // A mate connector's body and vertex carry its coordinate system; std's `plane(cSys)`.
+    if (entity?.frame)
+      return stdPlane(call, entity.frame.origin, entity.frame.zAxis, entity.frame.xAxis);
+    if (entity?.type !== "FACE")
+      return call.fail("CANNOT_RESOLVE_PLANE: no planar face or mate connector to evaluate.");
+    const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
     if (String(surface.GetType()) !== "GeomAbs_Plane")
       return call.fail("CANNOT_RESOLVE_PLANE: the face isn't planar.");
     const position = surface.Plane().Position();
     // A reversed face's outward normal is opposite its surface's; keep x, flip the normal.
-    const flip = String(face.shape.Orientation()) === "TopAbs_REVERSED" ? -1 : 1;
-    const normal = xyz(position.Direction()).map((c) => c * flip);
-    // The origin is the face's centroid. Unverified: Onshape doesn't document where it puts it.
-    const props = new oc.GProp_GProps();
-    oc.BRepGProp.SurfaceProperties(face.shape, props, false, false);
-    return stdTagged(call, "surfaceGeometry.fs", "Plane", [
-      ["origin", lengthVector(call, xyz(props.CentreOfMass()))],
-      ["normal", unitVector(call, normal)],
-      ["x", unitVector(call, xyz(position.XDirection()))],
-    ]);
+    const flip = String(entity.shape.Orientation()) === "TopAbs_REVERSED" ? -1 : 1;
+    const [nx, ny, nz] = xyz(position.Direction());
+    // The origin is the face's centroid, integrated as accurately as evArea's (adaptively when
+    // the boundary isn't lines, circles and ellipses). Unverified: Onshape doesn't document it.
+    const centroid = properties(oc, entity.shape, 2, call.unsupported).CentreOfMass();
+    return stdPlane(
+      call,
+      xyz(centroid),
+      [nx * flip, ny * flip, nz * flip],
+      xyz(position.XDirection()),
+    );
   },
 
   setAttribute: ([ctx, value], call) => {

@@ -126,8 +126,10 @@ Std is 3095 (277 files, from the mirror's `be9fafcd067d`), re-vendored with
 (`V3095_LARGE_INTEGER_LITERALS`), like a new Onshape Part Studio, whatever `FeatureScript N;` header
 a script declares; import version strings are ignored. A script importing an older std still runs
 std 3095's code, so std changes since its version that aren't behind an `isAtVersionOrLater` gate
-apply to it (to confirm against Onshape). Scripts declaring 3083 or 1560 run unchanged. Features
-Onshape holds back with `asVersion` aren't held back locally yet.
+apply to it (to confirm against Onshape). Scripts declaring 3083 or 1560 run unchanged. A feature
+whose definition sets `asVersion` runs at that version, and so do its subfeatures, until it ends or
+aborts (never later than its parent's); `isAtVersionOrLater` and `getCurrentVersion` read it, and
+`isAtVersionOrLater` honors the `asVersion` argument `sketch.fs` passes.
 
 ## Language notes
 
@@ -309,10 +311,48 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
 
 - Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
   helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
-- Evaluators: `evAxis`, `evLine`, `evBox3d`, `evVolume`, `evArea`, `evLength`, `evDistance` (minimum,
-  without edge/face parameters), `evVertexPoint`, `evEdgeTangentLine(s)`, `evFaceTangentPlane(s)`,
-  `evPlane`, `evSurfaceDefinition` and `evCurveDefinition` (planes, cylinders, spheres, lines, circles),
-  `evApproximateCentroid`, and `evApproximateMassProperties` without a `referenceFrame`.
+- Evaluators: `evAxis`, `evLine`, `evBox3d`, `evVolume`, `evArea`, `evLength`, `evDistance`,
+  `evVertexPoint`, `evEdgeTangentLine(s)`, `evFaceTangentPlane(s)`, `evFaceTangentPlanesAtEdge`,
+  `evPlane` (planar faces and mate connectors' XY planes), `evPlanarEdge(s)`, `evEdgeConvexity`,
+  `evCornerType`, `evCollisionDetection`, `evMateConnectorCoordSystem`, `evEdgeCurvature(s)` and
+  their derivatives, `evFaceCurvatures`, `evFacePeriodicity`, `evFilletRadius`, `evRaycast`,
+  `evMeshPoints`, `evPointsDeviation`, `evSurfaceDefinition` (planes, cylinders, spheres, cones) and
+  `evCurveDefinition` (lines, circles), `evApproximateCentroid`, and `evApproximateMassProperties`
+  without a `referenceFrame`. Also `constructPaths`, the linear, circular and curve pattern
+  transforms (std's Linear, Circular and Curve pattern features), `matrixSvd`, query variables (std's
+  Variable and Query variable features), and operation bookkeeping (`lastOperationId`,
+  `lastModifyingOperationId`, `valuesSortedById`, `clampContextVersion`, `getLanguageVersion`).
+  Every `QueryType` is handled; the ones listed below stop.
+- Edge parameters in [0, 1] measure arc length by default, as std documents, on every curve: the
+  speed is integrated adaptively to 1e-12 and inverted by a bracketed Newton search.
+  `arcLengthParameterization : false` uses the curve's own parameter, uniformly.
+- `evBox3d`, `qFarthestAlong`, `qInFrontOfPlane`, `qIntersectsPlane`: extremes are proven or the run
+  stops. Lines, circles, ellipses, spheres, tori closed form; planes, cylinders, cones, extrusions
+  via boundary; B-spline, Bezier, hyperbola, parabola edges/faces and surfaces of revolution by
+  branch and bound to 1e-11 m; offset and other curves/surfaces stop, as does a trimmed face whose
+  search peaks off the face. `tight : false` is an upper bound with no search, stopping only on
+  offset/other geometry.
+- On-face decisions use a ray-casting classifier in the face's parameter plane; it stops if no ray
+  is clean. `evRaycast` edge/corner hits get the face parameter by projection.
+- Areas, volumes, centroids (`evPlane`'s origin too): fixed-order only where exact
+  (plane/cylinder/cone/sphere/torus faces whose parameter-space boundaries are lines, circles,
+  ellipses), adaptive to 1e-12 elsewhere; edge lengths fixed-order only on lines and circles; sizes
+  cached per shape.
+- `evDistance`: maximum stops; sides may be queries, points, Lines, Planes. Extended sides drop
+  bodies; line/circle edges become the whole line/circle; plane/cylinder/sphere/torus faces the
+  whole surface; cones only the face's half (Parasolid); unextendable entities count at distance 0,
+  else stop. Two lines/planes pair in closed form; an extended cylinder/cone against another
+  unbounded side stops. Parameters: faces relative to the parameter box; edges 0..1 (outside when
+  extended); Lines the length along; Planes the 2D position; bodies and points 0. Deviation: planar
+  faces get real parameters (curve pattern's swept strip is a plane here; zeros would stack
+  instances).
+- `qCoincidentFilter`: proven exactly or stops; large matching faces take ~2 s (sampled backstop).
+- Identity tracking: a body split or merged after tracking starts stops the run, as do
+  `startTracking`'s derived entities.
+- Query types that stop: sheet metal, composite, mesh, tolerance, `MATE_CONNECTOR`,
+  `LAMINAR_DEPENDENCY`, dependency, historical, `qMatching`, and std's four unimplemented types.
+- Bezier faces can't arrive locally (STEP converts them to B-splines); a kernel-level test covers
+  them.
 - Corpus: fourteen cases (bolt circle, turned shaft, filleted block, chamfered block, shelled box,
   boss pattern, evaluators, sphere, construction, lofted frustum, swept tube, thickened plate, split
   block, mass properties). Every volume matches its hand-calculated value and every face/edge/vertex
@@ -320,8 +360,9 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
 
 Not supported locally yet (each stops the run with the calling line): draft, hole, helix, loft guides
 and connections, sweeps that lock or keep the profile's orientation, sheet metal,
-variable/partial/conic fillets, chamfers other than equal offsets, face patterns, evaluators on
-B-spline geometry, and sketch constraint solving.
+variable/partial/conic fillets, chamfers other than equal offsets, face patterns, curve and surface
+definitions beyond the types above (B-splines among them), `evFaceCurvatureDerivatives`, and sketch
+constraint solving.
 
 To confirm against Onshape recordings:
 
@@ -330,12 +371,36 @@ To confirm against Onshape recordings:
   share vertices.
 - Query results come back in creation order.
 - "Through all" extrudes to a generous model extent rather than exactly through.
-- Edge tangent parameters are uniform over the curve, which is arc length only for lines and circles.
+- With `arcLengthParameterization : false`, edge parameters are uniform in OpenCascade's curve
+  parameter. Std calls that parameterization "arbitrary", so on curves whose speed varies (splines,
+  ellipses) the points may differ from Onshape's. Arc length (the default) is found to 1e-12.
 - `opSplitPart` leaves the original part id on one piece (the lower one in `split-block`).
 - `evApproximateMassProperties` products of inertia are `-integral(x y)`, the usual tensor convention.
 - `opPlane` without a size makes a 1 m plane, like std's plane feature; `opPoint` points are
   construction entities.
-- `qContainsPoint` on solid bodies matches points on their boundary, not inside them.
+- `qContainsPoint` on bodies matches interior and boundary points (the FeatureScript lead's forum
+  answer).
+- `qCreatedBy` returns only entities an operation created, not ones it merely modified (std's docs).
+- `evCollisionDetection` clash types for solids (from forum reports): overlap and boundary-touching
+  containment are `INTERFERE`; strict containment `TOOL_IN_TARGET`/`TARGET_IN_TOOL`; contact without
+  overlap `ABUT_NO_CLASS`.
+- `EdgeTopology.LAMINAR` is treated as one-sided.
+- `getParameterToleranceInfo` returns a tagged `ToleranceInfo` of `NONE`.
+- Extended edge parameters past the ends: lines extrapolate (2, -1); circles use the turn after the
+  edge's start in its walking direction.
+- Extended faces: periodic parameters fall within one turn of the parameter box start.
+- Planar faces get real `evDistance` parameters, not the zeros `DistanceResult`'s doc describes
+  (curve pattern needs them).
+- `evDistance` closest-pair ties start from side0's reference point (two lines/planes) or the
+  line's (line and plane); the reference is an edge's midpoint, a face's parametric middle, or a
+  Line's or Plane's origin.
+- `evBox3d` with `tight : false` is our own upper bound; it may be looser than Onshape's (`tag.fs`'s
+  warning reads it).
+- Hole up to next with its axis exactly on an edge between two start faces gets two hits at one
+  distance.
+- Curvature signs follow std's docs; principal curvatures within 1e-7 (relative) are umbilic.
+- `lastOperationId` before any operation stops the run (only a fresh `newContext()` has none: a
+  Part Studio's default planes are operations); `getFeatureName` fails inside a feature.
 - `opFitSpline` without `parameters` spaces its points by chord length over [0, 1], so a derivative
   is a length per unit parameter, comparable to the curve's length. Std doesn't say how Onshape spaces
   them; if it differs, end derivatives (a wire's "straightness") will bend differently.

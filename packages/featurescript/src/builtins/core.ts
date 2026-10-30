@@ -130,6 +130,91 @@ function determinant(call: BuiltinCall, m: Rows): number {
   return det;
 }
 
+/** Jacobi stops once the off-diagonal squares are this small next to the diagonal's. */
+const CONVERGED = 1e-32;
+
+/**
+ * Singular value decomposition m = u s v^T of an n x p matrix: v and the squared singular values
+ * from a Jacobi eigen decomposition of m^T m, u's columns m v / sigma, completed to an orthonormal
+ * basis. Singular values come in decreasing order; each column's sign is arbitrary, as in any SVD.
+ */
+function svd(original: Rows): { u: Rows; s: Rows; v: Rows } {
+  const [n, p] = [original.length, original[0]!.length];
+  // Work on m / its largest entry, so m^T m neither underflows nor overflows; sigma scales back.
+  const scale = Math.max(...original.flat().map(Math.abs));
+  const m = scale > 0 ? original.map((row) => row.map((x) => x / scale)) : original;
+  const a = Array.from({ length: p }, (_, i) =>
+    Array.from({ length: p }, (_, j) => m.reduce((sum, row) => sum + row[i]! * row[j]!, 0)),
+  );
+  const diagonal = a.reduce((sum, row, i) => sum + row[i]! ** 2, 0) || 1;
+  const v: number[][] = Array.from({ length: p }, (_, i) =>
+    Array.from({ length: p }, (_, j) => (i === j ? 1 : 0)),
+  );
+  for (let sweep = 0; sweep < 100; sweep++) {
+    let off = 0;
+    for (let i = 0; i < p; i++) for (let j = i + 1; j < p; j++) off += a[i]![j]! ** 2;
+    if (off <= CONVERGED * diagonal) break;
+    for (let i = 0; i < p; i++)
+      for (let j = i + 1; j < p; j++) {
+        if (a[i]![j] === 0) continue;
+        const theta = (a[j]![j]! - a[i]![i]!) / (2 * a[i]![j]!);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        for (let k = 0; k < p; k++) {
+          const [aki, akj] = [a[k]![i]!, a[k]![j]!];
+          a[k]![i] = c * aki - s * akj;
+          a[k]![j] = s * aki + c * akj;
+        }
+        for (let k = 0; k < p; k++) {
+          const [aik, ajk] = [a[i]![k]!, a[j]![k]!];
+          a[i]![k] = c * aik - s * ajk;
+          a[j]![k] = s * aik + c * ajk;
+        }
+        for (let k = 0; k < p; k++) {
+          const [vki, vkj] = [v[k]![i]!, v[k]![j]!];
+          v[k]![i] = c * vki - s * vkj;
+          v[k]![j] = s * vki + c * vkj;
+        }
+      }
+  }
+  const order = Array.from({ length: p }, (_, i) => i).sort((i, j) => a[j]![j]! - a[i]![i]!);
+  const unscaled = order.map((i) => Math.sqrt(Math.max(0, a[i]![i]!)));
+  const vSorted = v.map((row) => order.map((i) => row[i]!));
+  // u's columns: m v_i / sigma_i where sigma_i > 0, then Gram-Schmidt from the standard basis.
+  const columns: number[][] = [];
+  const largest = unscaled[0] ?? 0;
+  const orthonormalize = (candidate: number[]) => {
+    let w = [...candidate];
+    for (let pass = 0; pass < 2; pass++)
+      for (const column of columns) {
+        const projection = column.reduce((sum, x, k) => sum + x * w[k]!, 0);
+        w = w.map((x, k) => x - projection * column[k]!);
+      }
+    const size = Math.hypot(...w);
+    return size > 1e-10 ? w.map((x) => x / size) : null;
+  };
+  for (let i = 0; i < Math.min(n, p); i++)
+    if (unscaled[i]! > 1e-14 * largest) {
+      const column = m.map(
+        (row) => row.reduce((sum, x, k) => sum + x * vSorted[k]![i]!, 0) / unscaled[i]!,
+      );
+      columns.push(orthonormalize(column) ?? column);
+    }
+  for (let e = 0; columns.length < n && e < n; e++) {
+    const basis = orthonormalize(Array.from({ length: n }, (_, k) => (k === e ? 1 : 0)));
+    if (basis) columns.push(basis);
+  }
+  const sigma = unscaled.map((value) => value * scale);
+  return {
+    u: Array.from({ length: n }, (_, r) => columns.map((column) => column[r]!)),
+    s: Array.from({ length: n }, (_, r) =>
+      Array.from({ length: p }, (_, c) => (r === c ? sigma[r]! : 0)),
+    ),
+    v: vSorted,
+  };
+}
+
 // ------------------------------------------------------------------ JSON
 
 function fromJson(value: unknown): FsValue {
@@ -365,6 +450,14 @@ export const CORE_BUILTINS = {
     );
   },
   matrixInverse: ([a], call) => inverse(call, rows(call, a, "matrix")),
+  matrixSvd: ([a], call) => {
+    const { u, s, v } = svd(rows(call, a, "matrix"));
+    return FsMap.fromEntries([
+      ["u", u],
+      ["s", s],
+      ["v", v],
+    ]);
+  },
   matrixDeterminant: ([a], call) => determinant(call, rows(call, a, "matrix")),
   matrixSum: ([a, b], call) => elementwise(call, a, b, (x, y) => x + y),
   matrixDifference: ([a, b], call) => elementwise(call, a, b, (x, y) => x - y),
