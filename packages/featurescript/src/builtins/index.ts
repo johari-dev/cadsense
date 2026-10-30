@@ -1,30 +1,26 @@
-import type { BuiltinImpl } from "../runtime/Interpreter.ts";
-import { CONTEXT_BUILTINS } from "./context.ts";
+import type { Oc } from "../geometry/occt.ts";
+import type { BuiltinImpl, BuiltinTable } from "../runtime/Interpreter.ts";
+import { contextBuiltins } from "./context.ts";
 import { CORE_BUILTINS } from "./core.ts";
+import { GEOMETRY_BUILTINS } from "./geometry.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 /**
  * Std builtins this runtime doesn't implement yet. Calling one stops the run with a fault that
  * FeatureScript's `try` can't catch. Geometry arrives with the OpenCascade kernel (milestone M4).
  */
-const UNSUPPORTED = [
+export const UNSUPPORTED = [
   // Queries and topology
   "clusterBodies",
   "constructPaths",
-  "evaluateQuery",
-  "evaluateQueryCount",
   "getQueryVariable",
-  "isQueryEmpty",
   "lastModifyingOperationId",
   "lastOperationId",
-  "queryContainsFlattenedSheetMetal",
   "setQueryVariable",
   "skipOrderDisambiguation",
-  "transientIdToString",
   "unpackQuery",
   // Geometry operations
   "opBodyDraft",
-  "opBoolean",
   "opBooleanedPattern",
   "opBoundarySurface",
   "opChamfer",
@@ -35,7 +31,6 @@ const UNSUPPORTED = [
   "opCreateCurvesOnFace",
   "opCreateIsocline",
   "opCreateOutline",
-  "opDeleteBodies",
   "opDeleteFace",
   "opDerip",
   "opDraft",
@@ -46,7 +41,6 @@ const UNSUPPORTED = [
   "opExtendSheetBody",
   "opExtractSurface",
   "opExtractWires",
-  "opExtrude",
   "opFaceBlend",
   "opFillSurface",
   "opFillet",
@@ -123,7 +117,6 @@ const UNSUPPORTED = [
   "evOwnerSketchPlane",
   "evPlanarEdge",
   "evPlanarEdges",
-  "evPlane",
   "evPointsDeviation",
   "evRaycast",
   "evRuledSurfaceBases",
@@ -138,39 +131,26 @@ const UNSUPPORTED = [
   "evVolume",
   "evaluateSpline",
   // Sketches
-  "newSketch",
-  "skArc",
   "skBezier",
-  "skCircle",
   "skConicSegment",
-  "skConstraint",
   "skEllipse",
   "skEllipticalArc",
   "skFitSpline",
   "skImage",
   "skInterpolatedSpline",
   "skInterpolatedSplineSegment",
-  "skLineSegment",
-  "skPoint",
   "skSetInitialGuess",
-  "skSolve",
   "skSpline",
   "skSplineSegment",
   "skText",
   // Attributes and properties
-  "getAllAttributes",
-  "getAttribute",
-  "getAttributes",
   "getHoleAttributes",
   "getProperty",
-  "removeAttributes",
-  "setAttribute",
   "setProperty",
   // Patterns and sheet metal
   "computeCircularPatternTransforms",
   "computeCurvePatternTransforms",
   "computeLinearPatternTransforms",
-  "getRemainderPatternTransform",
   "sheetMetalApplyInFlat",
   "updateSheetMetalGeometry",
   // Other
@@ -182,7 +162,6 @@ const UNSUPPORTED = [
   "getFeatureName",
   "getLanguageVersion",
   "getParameterToleranceInfo",
-  "getTolerantParameterIds",
   "matrixSvd",
   "validateToleranceSchema",
   "valuesSortedById",
@@ -192,11 +171,20 @@ const UNSUPPORTED = [
  * Every builtin std calls, each either implemented or explicitly unsupported. Re-vendoring std with a
  * new builtin fails the type check here until someone decides which it is.
  */
-export const BUILTINS = {
-  ...CORE_BUILTINS,
-  ...CONTEXT_BUILTINS,
-  ...(Object.fromEntries(UNSUPPORTED.map((name) => [name, "unsupported"])) as Record<
-    (typeof UNSUPPORTED)[number],
-    "unsupported"
-  >),
-} satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">;
+export const createBuiltins = (oc: Oc | null): BuiltinTable =>
+  ({
+    ...(Object.fromEntries(UNSUPPORTED.map((name) => [name, "unsupported"])) as Record<
+      (typeof UNSUPPORTED)[number],
+      "unsupported"
+    >),
+    ...CORE_BUILTINS,
+    ...contextBuiltins(oc),
+    ...GEOMETRY_BUILTINS,
+  }) satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">;
+
+/** Names with an implementation, for the test that nothing is both implemented and unsupported. */
+export const IMPLEMENTED: readonly string[] = [
+  ...Object.keys(CORE_BUILTINS),
+  ...Object.keys(contextBuiltins(null)),
+  ...Object.keys(GEOMETRY_BUILTINS),
+];

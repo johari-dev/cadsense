@@ -78,12 +78,12 @@ describe("feature runs", () => {
 
   it("an unsupported builtin stops the run with a located fault, even under try silent", () => {
     const run = runtime.runFeature(
-      feature('try silent\n{\n    opExtrude(context, id + "extrude", {});\n}'),
+      feature('try silent\n{\n    opLoft(context, id + "loft", {});\n}'),
       "test",
     );
     expect(run.status).toBe("ERROR");
     expect(run.fault?.reason).toBe("unsupported-builtin");
-    expect(run.fault?.message).toContain("@opExtrude");
+    expect(run.fault?.message).toContain("@opLoft");
     expect(run.fault?.stack.some((frame) => frame.file.startsWith("test/feature"))).toBe(true);
   });
 });

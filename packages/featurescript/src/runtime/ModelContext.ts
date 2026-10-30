@@ -1,9 +1,12 @@
+import { emptyGeometry, type GeometryState } from "../geometry/Model.ts";
+import type { Oc } from "../geometry/occt.ts";
 import { FsMap, keyOf, untag, type FsValue } from "./Value.ts";
 
 /** The part of a context that `@abortFeature` rolls back. Immutable, so a snapshot is a reference. */
 interface ContextState {
   /** Variable name to `{ value, description }`. */
   readonly variables: FsMap;
+  readonly geometry: GeometryState;
 }
 
 const OK_STATUS = FsMap.fromEntries([["statusType", "OK"]]);
@@ -15,7 +18,9 @@ const OK_STATUS = FsMap.fromEntries([["statusType", "OK"]]);
 export class ModelContext {
   /** The `FeatureScriptVersionNumber` enum value the context was created with. */
   readonly version: FsValue;
-  private state: ContextState = { variables: FsMap.empty };
+  private state: ContextState = { variables: FsMap.empty, geometry: emptyGeometry };
+  /** The geometry kernel, or null when the runtime was created without one. */
+  readonly oc: Oc | null;
   /** Feature id to status map. Kept across rollback, so a failed feature keeps its error. */
   private readonly statuses = new Map<string, FsMap>();
   /** Open features and operations by token, innermost last. */
@@ -27,8 +32,16 @@ export class ModelContext {
   /** Id of the most recently started top-level feature. */
   lastActiveId: FsValue = [];
 
-  constructor(version: FsValue) {
+  constructor(version: FsValue, oc: Oc | null) {
     this.version = version;
+    this.oc = oc;
+  }
+
+  get geometry(): GeometryState {
+    return this.state.geometry;
+  }
+  set geometry(geometry: GeometryState) {
+    this.state = { ...this.state, geometry };
   }
 
   /** Starts a feature or operation; `abort` restores the context to this point. */
@@ -65,6 +78,7 @@ export class ModelContext {
   }
   setVariable(name: string, value: FsValue, description: FsValue) {
     this.state = {
+      ...this.state,
       variables: this.state.variables.set(
         name,
         FsMap.fromEntries([
