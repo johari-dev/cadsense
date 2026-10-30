@@ -163,38 +163,66 @@ def build_plate(job):
     cam = adsk.cam.CAM.cast(doc.products.itemByProductType("CAMProductType"))
     setup = create_setup(cam, body, job["name"])
     tool = create_tool(settings)
-    results = []
-    for name, make in plan_operations(job, built, body):
+    # Fusion generates an operation as soon as it is added, and a failed generation opens a modal
+    # dialog that blocks Fusion, and this add-in, until someone clicks it. So every operation is
+    # configured in full, selections included, before it is added; one that cannot be configured
+    # is never added.
+    added = []
+    for name, strategy, configure in plan_operations(job, built, body):
         try:
-            op = make(setup, tool)
-            apply_feeds(op, settings)
-            results.append((name, op, None))
+            op_input = setup.operations.createInput(strategy)
+            op_input.tool = tool
+            apply_feeds(op_input.parameters, settings)
+            configure(op_input.parameters)
+            op = setup.operations.add(op_input)
+            op.name = name
+            added.append((name, op, None))
         except Exception as error:
-            results.append((name, None, str(error) or type(error).__name__))
+            added.append((name, None, first_line(error)))
 
-    future = cam.generateToolpath(setup)
-    started = time.time()
-    while not future.isGenerationCompleted:
-        if time.time() - started > GENERATE_TIMEOUT:
-            raise JobError("Fusion is still generating toolpaths; check the setup in Fusion.")
+    operations = []
+    generated = adsk.core.ObjectCollection.create()
+    deadline = time.time() + GENERATE_TIMEOUT
+    for name, op, failure in added:
+        if failure:
+            operations.append({"name": name, "state": "error", "message": failure})
+            continue
+        wait_for(lambda op=op: not op.isGenerating, deadline)
+        if not op.hasToolpath and not op.hasError:
+            try:
+                future = cam.generateToolpath(op)
+                wait_for(lambda: future.isGenerationCompleted, deadline)
+            except RuntimeError:
+                pass  # "Generation not started": the operation's own error says why.
+        if op.hasToolpath and not op.hasError:
+            generated.add(op)
+        if op.hasError or not op.hasToolpath:
+            message = first_line(op.error) or "Fusion could not generate it"
+            operations.append({"name": name, "state": "error", "message": message})
+        elif op.hasWarning:
+            operations.append({"name": name, "state": "warning", "message": first_line(op.warning)})
+        else:
+            operations.append({"name": name, "state": "ok"})
+    # Rapids at 400 in/min and no tool changes: one tool cuts the whole plate. Fusion can only time
+    # operations that have toolpaths.
+    seconds = (
+        cam.getMachiningTime(generated, 1.0, 400 * CM, 0).machiningTime if generated.count else 0
+    )
+    return {"replaced": replaced, "minutes": seconds / 60, "operations": operations}
+
+
+def wait_for(done, deadline):
+    """Lets Fusion run until `done()` holds, giving up at the deadline."""
+    while not done():
+        if time.time() > deadline:
+            raise JobError("Fusion is still generating; check the setup in Fusion.")
         adsk.doEvents()
         time.sleep(0.05)
 
-    operations = []
-    for name, op, failure in results:
-        if failure:
-            operations.append({"name": name, "state": "error", "message": failure})
-        elif op.hasError:
-            operations.append(
-                {"name": name, "state": "error", "message": "Fusion could not generate it"}
-            )
-        elif op.hasWarning:
-            operations.append({"name": name, "state": "warning", "message": "Fusion warned"})
-        else:
-            operations.append({"name": name, "state": "ok"})
-    # Rapids at 400 in/min and no tool changes: one tool cuts the whole plate.
-    seconds = cam.getMachiningTime(setup, 1.0, 400 * CM, 0).machiningTime
-    return {"replaced": replaced, "minutes": seconds / 60, "operations": operations}
+
+def first_line(text):
+    lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+    return lines[0] if lines else ""
 
 
 def open_document(key):
@@ -379,39 +407,35 @@ def create_tool(settings):
     )
 
 
-def apply_feeds(op, settings):
+def apply_feeds(parameters, settings):
+    """The panel's feeds. Fusion fails to generate when ramp speed or lead feeds are zero."""
     for parameter, expression in (
         ("tool_spindleSpeed", f"{SPINDLE_RPM} rpm"),
+        ("tool_rampSpindleSpeed", "tool_spindleSpeed"),
         ("tool_feedCutting", f"{settings['feed']} in/min"),
+        ("tool_feedEntry", "tool_feedCutting"),
+        ("tool_feedExit", "tool_feedCutting"),
         ("tool_feedPlunge", f"{settings['plunge']} in/min"),
         ("tool_feedRamp", f"{settings['plunge']} in/min"),
     ):
-        item = op.parameters.itemByName(parameter)
+        item = parameters.itemByName(parameter)
         if item:
             item.expression = expression
 
 
-def set_expressions(op, pairs):
+def set_expressions(parameters, pairs):
     """Sets operation parameters by name, failing with the name Fusion did not know."""
     for parameter, expression in pairs:
-        item = op.parameters.itemByName(parameter)
+        item = parameters.itemByName(parameter)
         if not item:
             raise JobError(f"Fusion has no '{parameter}' parameter")
         item.expression = expression
 
 
-def add_operation(setup, tool, strategy, name):
-    op_input = setup.operations.createInput(strategy)
-    op_input.tool = tool
-    op = setup.operations.add(op_input)
-    op.name = name
-    return op
-
-
 def plan_operations(job, built, body):
-    """The plan's operations in cutting order, as (name, make(setup, tool)) pairs.
+    """The plan's operations in cutting order, as (name, strategy, configure(parameters)).
 
-    Each operation is made on its own so one Fusion rejects does not lose the others.
+    Each operation is configured on its own so one Fusion rejects does not lose the others.
     """
     settings = job["settings"]
     tool_diameter = settings["tool"]
@@ -422,19 +446,19 @@ def plan_operations(job, built, body):
     pockets = [(f, ext) for f, ext in built if f["kind"] == "pocket"]
     for i, (pocket, extrude) in enumerate(pockets):
 
-        def make_pocket(setup, tool, extrude=extrude, name=f"Pocket {i + 1}"):
-            op = add_operation(setup, tool, "pocket2d", name)
-            set_expressions(op, (("doMultipleDepths", "true"), ("maximumStepdown", stepdown)))
-            pockets_value = op.parameters.itemByName("pockets").value
+        def configure_pocket(parameters, extrude=extrude):
+            set_expressions(
+                parameters, (("doMultipleDepths", "true"), ("maximumStepdown", stepdown))
+            )
+            pockets_value = parameters.itemByName("pockets").value
             selections = pockets_value.getCurveSelections()
             selection = selections.createNewPocketSelection()
             selection.isSelectingSamePlaneFaces = False
             floors = extrude.endFaces
             selection.inputGeometry = [floors.item(j) for j in range(floors.count)]
             pockets_value.applyCurveSelections(selections)
-            return op
 
-        operations.append((f"Pocket {i + 1}", make_pocket))
+        operations.append((f"Pocket {i + 1}", "pocket2d", configure_pocket))
 
     # Bores group holes of one size, like the plan; holes the tool can't mill are drilled by hand.
     bores = {}
@@ -445,47 +469,33 @@ def plan_operations(job, built, body):
     for diameter, faces in sorted(bores.items()):
         name = f"Bore Ø{diameter:.3f}".replace("Ø0.", "Ø.")
 
-        def make_bore(setup, tool, faces=faces, name=name):
-            op = add_operation(setup, tool, "bore", name)
-            set_expressions(op, (("pitch", stepdown), ("bottomHeight_offset", breakthrough)))
-            circular = op.parameters.itemByName("circularFaces")
-            if not circular:
-                raise JobError("Fusion has no 'circularFaces' parameter; pick the holes by hand")
-            circular.value.value = faces
-            return op
+        # A bore's helix drops its pitch per turn, so the pitch is the depth of cut.
+        def configure_bore(parameters, faces=faces):
+            set_expressions(
+                parameters, (("threadPitch", stepdown), ("bottomHeight_offset", breakthrough))
+            )
+            parameters.itemByName("circularFaces").value.value = faces
 
-        operations.append((name, make_bore))
+        operations.append((name, "bore", configure_bore))
 
     cutouts = [(f, ext) for f, ext in built if f["kind"] == "cutout"]
     for i, (cutout, extrude) in enumerate(cutouts):
         name = f"Contour {i + 1}" if len(cutouts) > 1 else "Contour"
 
-        def make_contour(setup, tool, cutout=cutout, extrude=extrude, name=name):
-            op = add_operation(setup, tool, "contour2d", name)
+        def configure_contour(parameters, cutout=cutout, extrude=extrude):
             set_expressions(
-                op,
+                parameters,
                 (
                     ("doMultipleDepths", "true"),
                     ("maximumStepdown", stepdown),
                     ("bottomHeight_offset", breakthrough),
                 ),
             )
-            edges = bottom_loop(body, extrude)
-            contours = op.parameters.itemByName("contours").value
-            selections = contours.getCurveSelections()
-            chain = selections.createNewChainSelection()
-            chain.isOpen = False
-            # The tool cuts on the right of the first edge's direction, seen from above. It
-            # belongs inside the opening.
-            chain.isReverted = not right_side_inside(edges[0], cutout["polygon"])
-            chain.inputGeometry = edges
-            contours.applyCurveSelections(selections)
-            return op
+            chain_loop(parameters, bottom_loop(body, extrude), cutout["polygon"], inside=True)
 
-        operations.append((name, make_contour))
+        operations.append((name, "contour2d", configure_contour))
 
-    def make_profile(setup, tool):
-        op = add_operation(setup, tool, "contour2d", "Profile")
+    def configure_profile(parameters):
         pairs = [
             ("doMultipleDepths", "true"),
             ("maximumStepdown", stepdown),
@@ -499,42 +509,55 @@ def plan_operations(job, built, body):
                 ("tabHeight", f"{job['tab']['height']} in"),
                 ("tabDistance", f"{perimeter / settings['tabs']:.4f} in"),
             ]
-        set_expressions(op, pairs)
-        contours = op.parameters.itemByName("contours").value
-        selections = contours.getCurveSelections()
-        silhouette = selections.createNewSilhouetteSelection()
-        silhouette.inputGeometry = [body]
-        contours.applyCurveSelections(selections)
-        return op
+        set_expressions(parameters, pairs)
+        # A silhouette would also contour every hole, so the profile chains the outline itself.
+        chain_loop(parameters, bottom_loop(body), job["plate"]["outline"], inside=False)
 
-    operations.append(("Profile", make_profile))
+    operations.append(("Profile", "contour2d", configure_profile))
     return operations
 
 
-def bottom_loop(body, extrude):
-    """The edges, in order, where a through cut leaves the plate's bottom face."""
-    walls = {extrude.sideFaces.item(i).tempId for i in range(extrude.sideFaces.count)}
+def bottom_loop(body, extrude=None):
+    """The edges, in order, of a loop on the plate's bottom face: the outline, or where a through
+    cut's walls leave the face."""
+    walls = extrude and {extrude.sideFaces.item(i).tempId for i in range(extrude.sideFaces.count)}
     for face in body.faces:
         if face.boundingBox.maxPoint.z > 1e-4 or face.boundingBox.minPoint.z < -1e-4:
             continue
         for loop in face.loops:
-            if loop.isOuter:
-                continue
             edges = [coedge.edge for coedge in loop.coEdges]
-            if all(any(f.tempId in walls for f in edge.faces) for edge in edges):
+            if not walls and loop.isOuter:
                 return edges
-    raise JobError("could not find where the cutout leaves the bottom face")
+            if walls and not loop.isOuter:
+                if all(any(f.tempId in walls for f in edge.faces) for edge in edges):
+                    return edges
+    raise JobError("could not find the loop on the plate's bottom face")
 
 
-def right_side_inside(edge, polygon):
-    """Whether a point just right of the edge's midpoint, seen from above, is inside the polygon."""
+def chain_loop(parameters, edges, polygon, inside):
+    """Selects a closed loop of edges for a 2D contour, with the tool inside or outside polygon.
+
+    Fusion cuts on the left of the first edge's direction, seen from above, unless the chain is
+    reversed.
+    """
+    contours = parameters.itemByName("contours").value
+    selections = contours.getCurveSelections()
+    chain = selections.createNewChainSelection()
+    chain.isOpen = False
+    chain.isReverted = left_side_inside(edges[0], polygon) != inside
+    chain.inputGeometry = edges
+    contours.applyCurveSelections(selections)
+
+
+def left_side_inside(edge, polygon):
+    """Whether a point just left of the edge's midpoint, seen from above, is inside the polygon."""
     start = edge.startVertex.geometry
     end = edge.endVertex.geometry
     dx, dy = end.x - start.x, end.y - start.y
     length = math.hypot(dx, dy) or 1
     step = 0.01 * CM
-    x = (start.x + end.x) / 2 + dy / length * step
-    y = (start.y + end.y) / 2 - dx / length * step
+    x = (start.x + end.x) / 2 - dy / length * step
+    y = (start.y + end.y) / 2 + dx / length * step
     return point_in_polygon(x / CM, y / CM, polygon)
 
 
