@@ -83,7 +83,8 @@ data in `src/builtins/display.ts`; the other UI-only builtins still do nothing.
 The server runs previews in one worker thread (`apps/server/src/featurescript/`), one at a time.
 A worker loads std and OpenCascade and runs a small warm-up preview as soon as it starts (about a
 second), and stops after 10 idle minutes. Shapes are never freed, so once a worker's WASM memory
-passes 1.5 GB (a preview adds a few MB) it's replaced, and the replacement starts right away so it's
+passes 1.5 GB it's replaced (the corpus, run 20 times over, grew it 1.1 MB per preview on average
+and 5.3 MB for the shelled box), and the replacement starts right away so it's
 warm by the next preview. A preview that takes over
 2 minutes is stopped by terminating the worker. Each preview reloads the user's modules, so edits
 take effect, while std stays loaded. Bundled builds ship the worker as `dist/featurescript-worker.mjs`
@@ -390,7 +391,13 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
 - Identity tracking: a body split or merged after tracking starts stops the run, as do
   `startTracking`'s derived entities.
 - Query types that stop: sheet metal, composite, mesh, tolerance, `MATE_CONNECTOR`,
-  `LAMINAR_DEPENDENCY`, dependency, historical, `qMatching`, and std's four unimplemented types.
+  `LAMINAR_DEPENDENCY`, historical, `qMatching`, std's four unimplemented types, and `qDependency`
+  of anything but a body `opExtrude` made (whose dependency is its profile, so std's drafted
+  extrude runs).
+- `qCreatedBy` follows std's split and merge rules: a split piece is also created by the split and
+  its original's creator, and a merged entity by every merged entity's creator and the merge. A
+  merged entity carries every source's attributes. Faces take `APPEARANCE` and `NAME` properties,
+  which follow them through operations and patterns.
 - Bezier faces can't arrive locally (STEP converts them to B-splines); a kernel-level test covers
   them.
 - Face and body operations: direct edits heal the way Parasolid's local operations do. A box around
@@ -414,7 +421,9 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
   OpenCascade's own STEP files written in meters read back with 5.8 mm tolerances and stop.
 - `opTransform` and `opPattern` stop on any matrix OpenCascade can't keep exactly: uneven or
   non-uniform scales (std's `fEllipsoid` among them). The bindings have no general transform.
-- Split part and thicken never delete construction planes they use as tools (`splitpart.fs`).
+- Split part and thicken never delete construction planes they use as tools (`splitpart.fs`). Split
+  part cuts solid, sheet and wire targets (sheets and wires by a planar tool; the pieces are the
+  touching faces or edges on each side) and leaves construction and point bodies as they are.
 - Every `GeometryState` carries `lineage`: for each entity id, the ids it came from (split, merged,
   generated, pattern-copied), kept across operations and dropped with a rolled-back feature.
 - Splitting a whole cylinder's top leaves one more vertex and edge than Parasolid: OpenCascade
@@ -451,7 +460,8 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
   block, mass properties). Every volume matches its hand-calculated value and every face/edge/vertex
   count matches Parasolid's conventions. Each case runs in 5-100 ms.
 
-Not supported locally yet (each stops the run with the calling line): sheet metal,
+Not supported locally yet (each stops the run with the calling line): extrudes up to a surface, body,
+vertex or the next face, std Boolean's offset option (derived tracking), sheet metal,
 variable/partial/conic/asymmetric fillets, chamfers other than equal offsets, healing or offsetting
 faces of sheets, `opBodyDraft`, `opFaceBlend`, `opBooleanedPattern`, `opDerip`, offset and other
 curve and surface definitions, `evFaceCurvatureDerivatives`, the curve and surface cases listed
@@ -483,6 +493,8 @@ To confirm against Onshape recordings:
   parameter. Std calls that parameterization "arbitrary", so on curves whose speed varies (splines,
   ellipses) the points may differ from Onshape's. Arc length (the default) is found to 1e-12.
 - `opSplitPart` leaves the original part id on one piece (the lower one in `split-block`).
+- `opSplitPart` given the default planes or origin among its targets (`qEverything(EntityType.BODY)`)
+  leaves them untouched.
 - `opHole`: references use the hole's largest radius; `UP_TO_NEXT` is where the first target is
   exited; `holeDepth` runs from TARGET_START's full entrance to the last profile with a radius;
   `positionReferenceInfo` lists only the references the profiles use; skipped clearance profiles

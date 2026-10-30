@@ -87,6 +87,30 @@ const CONTAINS_TOLERANCE = 1e-7;
 const ZERO_LENGTH = 1e-8;
 
 /**
+ * The entities in `state` that continue entity `id` (of `type`): itself while it lasts, else the
+ * entities of its type that came from it since (split pieces, merged entities), through the
+ * lineage; edges a split cut across a face came from it too, but don't continue it.
+ */
+function continuations(state: GeometryState, id: string, type: EntityType): Entity[] {
+  const kept = state.entities.get(id);
+  if (kept) return [kept];
+  const from = (entity: Entity) => {
+    if (entity.type !== type) return false;
+    const seen = new Set<string>();
+    const queue = [...(state.lineage.get(entity.id) ?? [])];
+    while (queue.length) {
+      const next = queue.pop()!;
+      if (next === id) return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(...(state.lineage.get(next) ?? []));
+    }
+    return false;
+  };
+  return ordered(state, from);
+}
+
+/**
  * Entities a std query (a map tagged `Query`) resolves to. std leaves the order open except for
  * `qUnion`, which keeps its subqueries' order; everything else comes in creation order.
  */
@@ -122,9 +146,12 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
     }
     case "CREATED_BY": {
       const id = joined(idOf(map.getField("featureId")));
+      // Split pieces and merged entities have several creators (Entity.alsoCreatedBy).
       return all(
         (entity) =>
-          continues(joined(entity.createdBy), id) &&
+          [entity.createdBy, ...(entity.alsoCreatedBy ?? [])].some((creator) =>
+            continues(joined(creator), id),
+          ) &&
           (entityType === null || entity.type === entityType),
       );
     }
@@ -140,6 +167,18 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
       return untag(map.getField("filterInnerLoops")) === true
         ? outerRegions(env.oc, regions)
         : regions;
+    }
+    case "SWEPT_FACE": {
+      // makeQuery(extrudeId, "SWEPT_FACE", FACE): the side faces an extrude swept, every face it
+      // made but its caps (std's drafted extrude drafts these).
+      const id = joined(idOf(map.getField("operationId")));
+      return all(
+        (entity) =>
+          entity.type === "FACE" &&
+          entity.cap === null &&
+          entity.sketch === null &&
+          continues(joined(entity.createdBy), id),
+      );
     }
     case "IMPRINT": {
       // makeQuery(sketchId + "imprint", "IMPRINT", FACE): the regions a sketch imprints.
@@ -662,10 +701,35 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
     // Closed composite parts don't exist locally, so they consume nothing.
     case "CONSUMED":
       return text(map.getField("consumed")) === "YES" ? [] : sub();
-    case "DEPENDENCY":
+    case "DEPENDENCY": {
+      // An extruded body depends on its profile (std's drafted extrude reads it for the profile's
+      // plane): what opExtrude's recorded profile query found when it ran. Other operations'
+      // dependencies aren't known locally.
+      const found = new Map<string, Entity>();
+      for (const entity of sub()) {
+        const creator = entity.type === "BODY" ? creatorOf(env.state, entity.createdBy) : undefined;
+        const definition = untag(creator?.definition);
+        if (creator?.builtin !== "opExtrude" || !(definition instanceof FsMap))
+          return env.unsupported(
+            "qDependency is only known locally for bodies opExtrude made: other operations don't record what they were made from.",
+          );
+        // Resolved where the extrude ran, so later geometry its query would also match isn't.
+        // What continues the profile now: itself, or the pieces a later split made of it (by
+        // lineage); a profile deleted since is no dependency.
+        for (const profile of evaluateQuery(
+          { ...env, state: creator.before },
+          definition.getField("entities"),
+        ))
+          for (const current of continuations(env.state, profile.id, profile.type))
+            found.set(current.id, current);
+      }
+      return [...found.values()].filter(
+        (entity) => entityType === null || entity.type === entityType,
+      );
+    }
     case "LAMINAR_DEPENDENCY":
       return env.unsupported(
-        `${type === "DEPENDENCY" ? "qDependency" : "qLaminarDependency"} needs to know which entities each operation was made from, which isn't recorded locally yet.`,
+        "qLaminarDependency needs to know which entities each operation was made from, which isn't recorded locally yet.",
       );
     case "PATTERN":
       return env.unsupported(

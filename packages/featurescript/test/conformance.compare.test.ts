@@ -38,6 +38,8 @@ import { FeatureScriptRuntime } from "../src/Runtime.ts";
  * 12. The dialog: an input Onshape's spec lists that the local spec doesn't (or in another order,
  *     or inside a list's items) passes.
  * 11. The report leaves out a mismatch, either side's value, or an unsupported case.
+ * 14. Bodies that tie on kind, box and measure pair in list order, so the same bodies listed in
+ *     another order compare the wrong ones and report differences that aren't there.
  */
 
 let runtime: FeatureScriptRuntime;
@@ -516,6 +518,53 @@ describe("conformance comparison", () => {
     expect(report).toContain(JSON.stringify(field(localSolid, "volume")));
     expect(report).toContain("std-chamfer");
     expect(report).toContain("Chamfers with two different distances");
+  });
+});
+
+describe("body pairing", () => {
+  it("pairs bodies that tie on box and measure by what else they share (14)", () => {
+    // Two solids with one box and volume, 6 and 7 faces: the same bodies in either order match.
+    const plain: ConformanceCase = {
+      name: "test-tied-bodies",
+      description: "",
+      covers: "",
+      area: "language",
+      features: [],
+    };
+    const solid = (faces: number) => ({
+      types: ["SOLID"],
+      sketch: false,
+      construction: false,
+      box: [0, 0, 0, 1, 1, 1],
+      volume: 1,
+      faces,
+      edges: 12,
+      vertices: 8,
+    });
+    const model = { statuses: [], variables: {}, values: {} };
+    const recording: Recording = {
+      case: plain.name,
+      hash: caseHash(plain),
+      recordedAt: "2026-10-25T00:00:00.000Z",
+      onshapeVersion: 3083,
+      partStudio: null,
+      sources: [],
+      features: [],
+      probe: {
+        result: probeResultSchema.decode({ ...model, bodies: [solid(6), solid(7)] }, "test"),
+      },
+    };
+    const local = (faces: readonly number[]): LocalRun => ({
+      compiled: {},
+      features: [],
+      unsupported: null,
+      stopped: null,
+      probeFaults: {},
+      inputs: {},
+      result: probeResultSchema.decode({ ...model, bodies: faces.map(solid) }, "test"),
+    });
+    expect(paths(compareCase(plain, recording, local([6, 7])))).toEqual([]);
+    expect(paths(compareCase(plain, recording, local([7, 6])))).toEqual([]);
   });
 });
 

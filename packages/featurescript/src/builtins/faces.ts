@@ -1,3 +1,5 @@
+import { distance } from "../geometry/Query.ts";
+import { EdgeWalk } from "./edges.ts";
 import {
   addBodies,
   chainHistory,
@@ -440,14 +442,19 @@ export const FACE_BUILTINS = {
       edges.forEach((edge, i) => {
         const at = array(call, lists[i], "parameters").map((t) => magnitude(call, t, "parameter"));
         if (at.some((t) => t < 0 || t > 1)) return regenError(call, "SPLIT_EDGE_PARAMETER_BOUND");
-        const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge.shape));
+        // The same parameters the edge evaluators read, from the edge's start as oriented.
+        const walk = new EdgeWalk(
+          oc,
+          edge.shape,
+          String(edge.shape.Orientation()) === "TopAbs_REVERSED",
+          call.unsupported,
+        );
         points.set(
           edge,
-          at.map((t) =>
-            new oc.BRepBuilderAPI_MakeVertex(
-              curve.Value(curveParameter(oc, edge.shape, t, byLength)),
-            ).Vertex(),
-          ),
+          at.map((t) => {
+            const { point } = walk.at(walk.parameter(t, byLength));
+            return new oc.BRepBuilderAPI_MakeVertex(new oc.gp_Pnt(...point)).Vertex();
+          }),
         );
       });
     }
@@ -699,11 +706,13 @@ export const FACE_BUILTINS = {
               entity.type === "FACE" && entity.body === body.id && chain.has(entity.shape),
           );
         });
-      // Old versions name the neutral surface referenceFace or referencePlane.
+      // Old versions name the neutral surface referenceFace or referencePlane, and std's drafted
+      // extrude passes neutralPlane.
       const reference =
         definition.getField("referenceSurface") ??
         definition.getField("referenceFace") ??
-        definition.getField("referencePlane");
+        definition.getField("referencePlane") ??
+        definition.getField("neutralPlane");
       if (reference === undefined) return regenError(call, "DRAFT_SELECT_NEUTRAL");
       const referenceMap = untag(reference);
       let plane: { origin: Vec3; normal: Vec3 } | null;
@@ -1151,45 +1160,6 @@ function sheetFaces(model: ModelContext, entities: readonly Entity[]): Entity[] 
 }
 
 /**
- * The curve parameter `t` (0 to 1) of the way along `edge` from its start as oriented: by length
- * (Onshape's default), or uniformly over the curve's own parameter.
- */
-function curveParameter(oc: Oc, edge: Shape, t: number, byLength: boolean): number {
-  const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
-  const [a, b] = [curve.FirstParameter(), curve.LastParameter()];
-  const share = String(edge.Orientation()) === "TopAbs_REVERSED" ? 1 - t : t;
-  if (!byLength) return a + share * (b - a);
-  // Five-point Gauss-Legendre over 64 spans, then bisection inside the span holding the target.
-  const nodes = [
-    [0, 0.5688888888888889],
-    [0.5384693101056831, 0.4786286704993665],
-    [-0.5384693101056831, 0.4786286704993665],
-    [0.906179845938664, 0.2369268850561891],
-    [-0.906179845938664, 0.2369268850561891],
-  ] as const;
-  const length = (from: number, to: number) =>
-    nodes.reduce((sum, [x, w]) => {
-      const u = (from + to) / 2 + ((to - from) / 2) * x;
-      return sum + w * curve.EvalD1(u).D1.Magnitude();
-    }, 0) *
-    ((to - from) / 2);
-  const spans = 64;
-  const step = (b - a) / spans;
-  const cumulative = [0];
-  for (let i = 0; i < spans; i++)
-    cumulative.push(cumulative[i]! + length(a + i * step, a + (i + 1) * step));
-  const target = share * cumulative[spans]!;
-  const span = Math.min(spans - 1, Math.max(0, cumulative.findIndex((sum) => sum >= target) - 1));
-  let [low, high] = [a + span * step, a + (span + 1) * step];
-  for (let i = 0; i < 60; i++) {
-    const mid = (low + high) / 2;
-    if (cumulative[span]! + length(a + span * step, mid) < target) low = mid;
-    else high = mid;
-  }
-  return (low + high) / 2;
-}
-
-/**
  * Replaces `body` by what a splitter made of it (same body type, ids carried by the splitter's
  * history), returning the result's body ids. A wire split into loose edges is chained again.
  */
@@ -1432,6 +1402,21 @@ export function patternFaces(
           normalNear(oc, seed.shape, edgePoints(oc, subShapes(oc, piece, "EDGE")[0]!, 3)[1]!)
             .distance < 1e-7,
       );
+    /** The seed face's edge `edge` (a piece's, at the seed) lies on, by its ends and middle. */
+    const seedEdgeOf = (seed: Entity | undefined, edge: Shape) => {
+      if (!seed) return undefined;
+      const points = edgePoints(oc, edge, 3).map((p) =>
+        new oc.BRepBuilderAPI_MakeVertex(new oc.gp_Pnt(...p)).Vertex(),
+      );
+      const onSeed = new ShapeSet<true>(oc);
+      for (const shape of subShapes(oc, seed.shape, "EDGE")) onSeed.set(shape, true);
+      return [...model.geometry.entities.values()].find(
+        (entity) =>
+          entity.type === "EDGE" &&
+          onSeed.has(entity.shape) &&
+          points.every((point) => distance(oc, entity.shape, point) < 1e-7),
+      );
+    };
     for (const { trsf, name } of instances) {
       const body = model.geometry.entities.get(seedBody.id)!;
       const moved = swept.regions.map((region) => {
@@ -1444,6 +1429,10 @@ export function patternFaces(
           copies: region.changedFaces.map((piece) => ({
             piece: image(piece),
             seed: seedOf(piece),
+            edges: subShapes(oc, piece, "EDGE").map((edge) => ({
+              edge: image(edge),
+              seed: seedEdgeOf(seedOf(piece), edge),
+            })),
           })),
           bounds: subShapes(oc, region.cell, "FACE")
             .filter((face) => !region.changedFaces.some((piece) => piece.IsSame(face)))
@@ -1480,8 +1469,13 @@ export function patternFaces(
       // Each copied face's seed: its lineage source, and its attributes when copying them.
       const copyOf = new ShapeSet<Entity>(oc);
       for (const region of moved)
-        for (const { piece, seed } of region.copies)
+        for (const { piece, seed, edges } of region.copies) {
           if (seed) for (const image of imagesOf(changed.history, piece)) copyOf.set(image, seed);
+          for (const edge of edges)
+            if (edge.seed)
+              for (const image of imagesOf(changed.history, edge.edge))
+                copyOf.set(image, edge.seed);
+        }
       model.geometry = replaceBodies(oc, model.geometry, {
         consumed: [body.id],
         keepIds: [body.id],
@@ -1496,8 +1490,9 @@ export function patternFaces(
           return seed ? [seed.id] : [];
         },
         annotate: (shape, type) => {
-          const seed = type === "FACE" && copyAttributes ? copyOf.get(shape) : undefined;
-          return seed ? { attributes: seed.attributes } : {};
+          const seed =
+            (type === "FACE" || type === "EDGE") && copyAttributes ? copyOf.get(shape) : undefined;
+          return seed ? { attributes: seed.attributes, properties: seed.properties } : {};
         },
       }).state;
     }

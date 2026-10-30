@@ -427,6 +427,10 @@ export const CORE_BUILTINS = {
     );
   },
   matrixMultiply: ([a, b], call) => {
+    // std's number * Matrix passes the number first.
+    const first = untag(a);
+    if (typeof first === "number")
+      return rows(call, b, "matrix").map((row) => row.map((x) => first * x));
     const m = rows(call, a, "matrix");
     const scalar = untag(b);
     if (typeof scalar === "number") return m.map((row) => row.map((x) => x * scalar));

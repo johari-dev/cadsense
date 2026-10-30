@@ -1,15 +1,19 @@
 import {
   addBodies,
+  chainHistory,
+  historyOf,
   ordered,
   removeBodies,
   replaceBodies,
+  sameAttributeType,
   updateEntities,
   type Entity,
   type EntityAttribute,
+  type History,
 } from "../geometry/Model.ts";
 import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
-import { equals, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
+import { equals, FsMap, untag, type FsValue } from "../runtime/Value.ts";
 import { map } from "./args.ts";
 import { properties } from "./edges.ts";
 import { tidied } from "./faceEdit.ts";
@@ -35,8 +39,6 @@ const matchesPattern = (value: FsValue, pattern: FsValue): boolean => {
   return v instanceof FsMap && p.entries().every(([key, expected]) => equals(v.get(key), expected));
 };
 /** Legacy unnamed attributes are told apart by type tag. */
-const sameTag = (a: FsValue, b: FsValue) =>
-  (a instanceof FsTagged ? a.tag : null) === (b instanceof FsTagged ? b.tag : null);
 
 /** The attributes on `entities` that `definition` selects (by name, pattern, or legacy type). */
 function selectAttributes(entities: readonly Entity[], definition: FsMap): EntityAttribute[] {
@@ -49,7 +51,7 @@ function selectAttributes(entities: readonly Entity[], definition: FsMap): Entit
       if (pattern !== undefined)
         return (
           attribute.name === null &&
-          sameTag(attribute.value, pattern) &&
+          sameAttributeType(attribute.value, pattern) &&
           matchesPattern(attribute.value, pattern)
         );
       return true;
@@ -213,7 +215,8 @@ export const GEOMETRY_BUILTINS = {
               ]
             : [
                 ...entity.attributes.filter(
-                  (existing) => existing.name !== null || !sameTag(existing.value, attribute),
+                  (existing) =>
+                    existing.name !== null || !sameAttributeType(existing.value, attribute),
                 ),
                 { name: null, value: attribute },
               ],
@@ -266,14 +269,15 @@ export const GEOMETRY_BUILTINS = {
     const key = propertyKey(call, definition);
     const setTo = definition.getField("value");
     if (setTo === undefined) return call.fail("setProperty needs a value.");
-    // Std: "Bodies only for now".
-    const bodies = resolve(call, model, oc, definition.getField("entities")).filter(
-      (entity) => entity.type === "BODY",
-    );
+    // Std: bodies take every property, faces only APPEARANCE and NAME.
+    const entities = resolve(call, model, oc, definition.getField("entities"));
+    const faces = entities.filter((entity) => entity.type === "FACE");
+    if (faces.length > 0 && key !== "APPEARANCE" && key !== "NAME")
+      return call.unsupported(`setProperty ${key} on faces is not supported locally yet.`);
     model.geometry = updateEntities(
       model.geometry,
-      bodies.map((body) => body.id),
-      (body) => ({ ...body, properties: new Map([...body.properties, [key, setTo]]) }),
+      [...entities.filter((entity) => entity.type === "BODY"), ...faces].map((entity) => entity.id),
+      (entity) => ({ ...entity, properties: new Map([...entity.properties, [key, setTo]]) }),
     );
     return undefined;
   },
@@ -312,6 +316,10 @@ export const GEOMETRY_BUILTINS = {
     let consumed: Entity[];
     let keepIds: string[];
     let keepIdBy: "most" | "earliest" = "most";
+    // An intersection of more than two bodies: what the bodies before the last share, and how it
+    // came from them. OpenCascade's common of one argument with several tools is the argument and
+    // the tools' union, so each body joins in its own step.
+    let shared: { shape: Shape; history: History } | null = null;
     if (operation === "SUBTRACTION" || operation === "SUBTRACT_COMPLEMENT") {
       if (targets.length === 0) return regenError(call, "BOOLEAN_NEED_ONE_SOLID");
       // SUBTRACT_COMPLEMENT removes what's outside the tools' union: each target keeps only its
@@ -335,16 +343,31 @@ export const GEOMETRY_BUILTINS = {
     } else if (operation === "UNION" || operation === "INTERSECTION") {
       const all = [...tools, ...targets];
       if (all.length < 2) return regenError(call, "BOOLEAN_NEED_ONE_SOLID");
+      if (operation === "INTERSECTION")
+        for (const body of all.slice(1, -1)) {
+          const step = new oc.BRepAlgoAPI_Common();
+          step.SetArguments(toList(oc, [shared?.shape ?? all[0]!.shape]));
+          step.SetTools(toList(oc, [body.shape]));
+          step.SetNonDestructive(true);
+          step.Build(new oc.Message_ProgressRange());
+          if (step.HasErrors()) return regenError(call, "BOOLEAN_INVALID");
+          const history = historyOf(oc, step);
+          shared = {
+            shape: step.Shape(),
+            history: shared ? chainHistory(shared.history, history) : history,
+          };
+        }
       algorithm = operation === "UNION" ? new oc.BRepAlgoAPI_Fuse() : new oc.BRepAlgoAPI_Common();
-      algorithm.SetArguments(toList(oc, [all[0]!.shape]));
+      algorithm.SetArguments(toList(oc, [shared?.shape ?? all[0]!.shape]));
       algorithm.SetTools(
         toList(
           oc,
-          all.slice(1).map((body) => body.shape),
+          (shared ? all.slice(-1) : all.slice(1)).map((body) => body.shape),
         ),
       );
-      consumed = all;
-      keepIds = all.map((body) => body.id);
+      // With keepTools the tools stay as they are and the result is a new body.
+      consumed = keepTools ? [] : all;
+      keepIds = keepTools ? [] : all.map((body) => body.id);
       keepIdBy = "earliest";
     } else return call.unsupported(`Boolean ${operation} is not supported locally yet.`);
 
@@ -353,12 +376,14 @@ export const GEOMETRY_BUILTINS = {
     if (algorithm.HasErrors()) return regenError(call, "BOOLEAN_INVALID");
     // Parasolid merges the faces a boolean leaves split on one surface (a union's coplanar sides),
     // but not splits the inputs already had.
-    const result = tidied(
-      oc,
-      algorithm,
-      [...targets, ...tools].map((body) => body.shape),
-    );
-    if (!result) return regenError(call, "BOOLEAN_INVALID");
+    const tidy = tidied(oc, algorithm, [
+      ...[...targets, ...tools].map((body) => body.shape),
+      ...(shared ? [shared.shape] : []),
+    ]);
+    if (!tidy) return regenError(call, "BOOLEAN_INVALID");
+    const result = shared
+      ? { shape: tidy.shape, history: chainHistory(shared.history, tidy.history) }
+      : tidy;
     model.geometry = replaceBodies(oc, model.geometry, {
       consumed: consumed.map((body) => body.id),
       keepIds,
