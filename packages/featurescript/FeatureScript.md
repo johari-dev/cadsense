@@ -379,17 +379,43 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
   generated, pattern-copied), kept across operations and dropped with a rolled-back feature.
 - Splitting a whole cylinder's top leaves one more vertex and edge than Parasolid: OpenCascade
   needs a vertex where a periodic face's seam ends.
+- Curves and surfaces: `opHole` (std's hole profiles and position references, measured where a
+  cylinder of the hole's largest radius meets each target; hole faces and profiles carry std's
+  names for `qOpHoleFace`/`qOpHoleProfile`, so std's Hole feature runs), `opHelix` (an interpolated
+  B-spline within about 1e-11 of the true helix's radius), B-spline curves and surfaces
+  (`opCreateBSplineCurve`/`Surface`, `evaluateSpline`, `approximateSpline`,
+  `evApproximateBSplineCurve`/`Surface`, and `evCurveDefinition`/`evSurfaceDefinition` on B-spline
+  edges and faces), `opPolyline`, `opExtractWires`, `opIntersectFaces`, `opDropCurve`,
+  `opSplineThroughEdges`, `opEditCurve`, `opFillSurface`, `opEnclose` (sheets that meet edge to
+  edge) and `opRuledSurface` (aligned with a vector). Std's Helix (circle type), Composite curve,
+  Intersection curve, Projected curve (curve to face) and 3D fit spline run.
+- `opSweep` is fitted to 0.1 um and starts at the profile. The profile turns with a
+  rotation-minimizing frame (lines and arcs keep the analytic frame); keep orientation, lock
+  direction, lock faces, scale and twist along straight paths are supported, and profiles with
+  holes sweep along closed paths. Sweeps that would fold, stall or run into themselves stop. A
+  300-turn spring's volume matches area times path length to 2e-8.
+- `opLoft` takes one vertex connection. `opFitSpline` spaces points centripetally, per
+  `std/fitSpline.fs`.
+- Still stopping in this area: `opOffsetWire`, `opOffsetCurveOnFace`, `opCreateCurvesOnFace`,
+  `opMoveCurveBoundary`, `opBoundarySurface`, `opConstrainedSurface`, `opWrap`, `opCreateIsocline`,
+  `opSplitByIsocline`; periodic targets, derivatives and `interpolateIndices` in
+  `approximateSpline`; non-planar analytic faces in `evApproximateBSplineSurface`; `makeSolid` in
+  `opCreateBSplineSurface`; normal projection onto curved faces in `opDropCurve`; G1/G2 fill edges
+  with two faces; crossing sheets in `opEnclose`; angled or face-normal ruled surfaces; loft guides,
+  several connections and connections along edges; twist along a curved path and
+  `extendToFullPath : false` from mid-path; matched hole profiles on slanted faces, holes up to a
+  non-planar face, and sheet metal holes; `evSurfaceDefinition` on a B-spline face reversed against
+  its surface.
 - Corpus: fourteen cases (bolt circle, turned shaft, filleted block, chamfered block, shelled box,
   boss pattern, evaluators, sphere, construction, lofted frustum, swept tube, thickened plate, split
   block, mass properties). Every volume matches its hand-calculated value and every face/edge/vertex
   count matches Parasolid's conventions. Each case runs in 5-100 ms.
 
-Not supported locally yet (each stops the run with the calling line): draft, hole, helix, loft guides
-and connections, sweeps that lock or keep the profile's orientation, sheet metal,
+Not supported locally yet (each stops the run with the calling line): sheet metal,
 variable/partial/conic/asymmetric fillets, chamfers other than equal offsets, healing or offsetting
-faces of sheets, `opBodyDraft`, `opFaceBlend`, `opBooleanedPattern`, `opDerip`, curve and surface
-definitions beyond the types above (B-splines among them), `evFaceCurvatureDerivatives`, and sketch
-constraint solving.
+faces of sheets, `opBodyDraft`, `opFaceBlend`, `opBooleanedPattern`, `opDerip`, offset and other
+curve and surface definitions, `evFaceCurvatureDerivatives`, sketch constraint solving, and the
+curve and surface cases listed above.
 
 To confirm against Onshape recordings:
 
@@ -402,6 +428,15 @@ To confirm against Onshape recordings:
   parameter. Std calls that parameterization "arbitrary", so on curves whose speed varies (splines,
   ellipses) the points may differ from Onshape's. Arc length (the default) is found to 1e-12.
 - `opSplitPart` leaves the original part id on one piece (the lower one in `split-block`).
+- `opHole`: references use the hole's largest radius; `UP_TO_NEXT` is where the first target is
+  exited; `holeDepth` runs from TARGET_START's full entrance to the last profile with a radius;
+  `positionReferenceInfo` lists only the references the profiles use; skipped clearance profiles
+  step down where the previous profile ends.
+- `opHelix`'s `clockwise` (looking along `direction`) is right-handed about it, with the parameter in
+  revolutions. `opSweep` twist is right-handed about the path; lock direction is a fixed binormal.
+- `opDropCurve` projects along both senses of the direction; `evMaxPathDeviation` takes the larger
+  one-sided maximum; `approximateSpline` uses averaged chord-length parameters, least squares and
+  clamped ends.
 - Draft takes material off on the pull side of the neutral plane (from std's angle manipulator).
 - Healing only grows faces that touch the deleted face; deleting a pocket floor fails here, where
   Onshape may extend the walls through to a slot.
@@ -439,9 +474,9 @@ To confirm against Onshape recordings:
 - Curvature signs follow std's docs; principal curvatures within 1e-7 (relative) are umbilic.
 - `lastOperationId` before any operation stops the run (only a fresh `newContext()` has none: a
   Part Studio's default planes are operations); `getFeatureName` fails inside a feature.
-- `opFitSpline` without `parameters` spaces its points by chord length over [0, 1], so a derivative
-  is a length per unit parameter, comparable to the curve's length. Std doesn't say how Onshape spaces
-  them; if it differs, end derivatives (a wire's "straightness") will bend differently.
+- `opFitSpline` without `parameters` spaces its points centripetally over [0, 1], per
+  `std/fitSpline.fs`, so a derivative is a length per unit parameter. If Onshape spaces them
+  differently, end derivatives (a wire's "straightness") will bend differently.
 - `getProperty` inside a custom feature raises an error rather than returning undefined.
 - A wire or point body (a mate connector) keeps its id through `opTransform`, carried by its edges
   or vertices since it has no faces.

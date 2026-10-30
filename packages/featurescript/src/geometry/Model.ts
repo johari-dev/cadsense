@@ -494,3 +494,40 @@ export function chainHistory(first: History, second: History): History {
     ],
   };
 }
+
+/**
+ * A name an operation gave one of the faces, edges or vertices it made: `opHole`'s face names
+ * (`qOpHoleFace`) and profile names (`qOpHoleProfile`).
+ */
+export interface TopologyName {
+  readonly kind: "HOLE_FACE" | "HOLE_PROFILE";
+  /** Id components of the naming operation. */
+  readonly operation: readonly string[];
+  readonly name: string | null;
+  /** Transient id of the entity that identifies the hole (`opHole`'s `identities`), if given. */
+  readonly identity: string | null;
+}
+
+const topologyNames = new WeakMap<Oc, ShapeSet<TopologyName[]>>();
+
+/**
+ * Records `name` on `shape` (once). Names belong to that exact face, edge or vertex, so a later
+ * operation that rebuilds it drops them; rolling a feature back can't leave stale names, since its
+ * shapes are gone with it. A boolean can share one face between a kept tool and its target; both
+ * then carry the name.
+ */
+export function nameTopology(oc: Oc, shape: Shape, name: TopologyName): void {
+  const names = topologyNames.get(oc) ?? new ShapeSet<TopologyName[]>(oc);
+  topologyNames.set(oc, names);
+  const existing = names.get(shape) ?? [];
+  const same = (other: TopologyName) =>
+    other.kind === name.kind &&
+    other.name === name.name &&
+    other.identity === name.identity &&
+    other.operation.join("/") === name.operation.join("/");
+  if (!existing.some(same)) names.set(shape, [...existing, name]);
+}
+
+/** Names operations recorded on `shape`, for the queries that find them. */
+export const topologyNamesOf = (oc: Oc, shape: Shape): readonly TopologyName[] =>
+  topologyNames.get(oc)?.get(shape) ?? [];
