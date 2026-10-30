@@ -201,7 +201,7 @@ class Parser {
     } else {
       this.report({
         code: "missing-version",
-        message: 'A module must start with a version header such as "FeatureScript 3083;".',
+        message: 'A module must start with a version header such as "FeatureScript 3095;".',
         span: { start: 0, end: 0 },
       });
     }

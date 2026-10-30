@@ -99,6 +99,36 @@ The base is a STEP file the user exports from Onshape for now. Syncing it from t
 - `test/broken/`: files with syntax errors; each lists the exact diagnostics it must produce.
 - `spikes/`: throwaway measurements from milestone M0. Results are below.
 
+## Part Studio context
+
+Every context starts like a Part Studio (std's `definePartStudio`): `runFeatures` calls std's own
+`addDefaultFeatures(context, meter)` before the base and the features. That creates the Origin (a
+construction point body, one vertex) under `makeId("Origin")`, and the Front, Top and Right planes
+(construction sheet bodies, 0.15 m squares, std's `PLANE_SIZE_BOUNDS` for meters) under
+`makeId("Front")`, `makeId("Top")` and `makeId("Right")`, in that order. Top is XY (normal +Z, x
++X), Front is XZ seen from -Y (normal -Y, x +X), Right is YZ (normal +X, x +Y). `qTopPlane`,
+`qOrigin`, `qDefaultBodies` and `qCreatedBy(makeId("Top"), EntityType.FACE)` find them.
+
+They're construction geometry: not solids, not drawn, not counted in a preview's solids, volumes or
+created faces, and not picked by the panel (its face query filters construction out). They do count
+in `qEverything`: an empty context holds 32 entities (4 bodies, 3 faces, 12 edges, 13 vertices), and
+`qBodyType(qEverything(EntityType.BODY), BodyType.SHEET)` includes the three planes, as in Onshape
+(std's `mateConnector.fs` filters them out with `qConstructionFilter`). A runtime without a geometry
+kernel creates none.
+
+`newSketch` on a face (which realigns the plane with `@alignCanonically`) works for faces facing
+like Top, Front or Right (normal +Z, -Y or +X), and sketches in that plane's axes, with the origin
+at the projection of the world origin. A face facing any other way stops the run naming its normal;
+`newSketchOnPlane` with `evPlane(...)` works on any planar face.
+
+Std is 3095 (277 files, from the mirror's `be9fafcd067d`), re-vendored with
+`scripts/vendor-std.ts`; it calls no builtins 3083 didn't. Contexts run at std's current version
+(`V3095_LARGE_INTEGER_LITERALS`), like a new Onshape Part Studio, whatever `FeatureScript N;` header
+a script declares; import version strings are ignored. A script importing an older std still runs
+std 3095's code, so std changes since its version that aren't behind an `isAtVersionOrLater` gate
+apply to it (to confirm against Onshape). Scripts declaring 3083 or 1560 run unchanged. Features
+Onshape holds back with `asVersion` aren't held back locally yet.
+
 ## Language notes
 
 Sources: [Lexical conventions](https://cad.onshape.com/FsDoc/tokens.html),
@@ -106,7 +136,10 @@ Sources: [Lexical conventions](https://cad.onshape.com/FsDoc/tokens.html),
 [Top-level constructs](https://cad.onshape.com/FsDoc/top-level.html), and std itself.
 
 - Semicolons are never optional. Strings use `'` or `"`, with escapes `\b \t \n \f \r \uXXXX` and
-  the matching quote. Numbers are decimal floats plus `inf`.
+  the matching quote. Numbers are decimal floats plus `inf`. Integer literals read as the nearest
+  IEEE double: `9007199254740993` is `9007199254740992`, and `18446744073709551617` is
+  `1.8446744073709552e19`. `V3095_LARGE_INTEGER_LITERALS` is named in std but not used or
+  documented anywhere in it.
 - Keywords: `annotation enum export function import operator precondition predicate returns type`,
   `typecheck typeconvert as is new break const continue for in return var while if else false inf`,
   `true undefined catch throw try`, reserved `assert case default do switch`. `switch (x) { k : v }` is
@@ -270,6 +303,10 @@ names bodies (or sets any other property), and the name follows the body through
 the preview's solid summaries. `getProperty` fails: std says it "cannot be called on the current
 context inside custom features", and a preview has no other context.
 
+STEP bases keep geometry only. This OpenCascade build (`replicad-opencascadejs` 1.1.0) has
+`STEPCAFControl_Writer` and the `XCAFDoc_*` tools but no `STEPCAFControl_Reader`, so part names and
+colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
+
 - Sketches: lines, circles, arcs, points. Constraints are accepted but not solved (std's rectangle
   helpers build geometry that already satisfies them). Regions use spike S4's splitter approach.
 - Evaluators: `evAxis`, `evLine`, `evBox3d`, `evVolume`, `evArea`, `evLength`, `evDistance` (minimum,
@@ -308,6 +345,24 @@ To confirm against Onshape recordings:
 - `qClosestTo` returns every entity within `TOLERANCE.zeroLength` (1e-8 m) of the nearest. The file
   panel uses it for picked faces, because a click lands on the tessellation, which can sit tens of
   microns off a curved face, beyond `qContainsPoint`'s 1e-7 m.
+- The default planes are made with `meter` (0.15 m squares). Onshape passes the document's default
+  length unit, so an inch document gets 6 in squares (`PLANE_SIZE_BOUNDS[inch]`). Only the
+  displayed size differs; nothing here depends on it except `evArea` of a plane.
+- Each default plane has 4 edges and 4 vertices here (the square `opPlane` makes). Std's
+  `qTopPlane`/`qFrontPlane`/`qRightPlane` accept only FACE or BODY, and `qOrigin` only VERTEX or
+  BODY, so Onshape may expose no plane edges or vertices to `qEverything(EntityType.EDGE)` /
+  `(VERTEX)`.
+- `qEverything(EntityType.BODY)` includes the Origin and the three planes here.
+- `opDeleteBodies` deletes default bodies here (a later feature failing restores them). Onshape may
+  refuse.
+- The canonical sketch x axis (`alignCanonically`) for normals other than +Z, -Y and +X. Onshape
+  doesn't document it; locally those stop the run.
+- What `V3095_LARGE_INTEGER_LITERALS` changed in Onshape's parser. Check:
+  `println(12345678901234567890);` in a module declaring 3083 and one declaring 3095.
+- Whether a script importing an older std runs that std's code in Onshape (locally it runs 3095's,
+  with gates at the current version).
+- Whether a header newer than Onshape's current version is an error (a forum post says Onshape
+  rejects it); locally `FeatureScript 9999;` runs at 3095.
 
 ## M0 spike results
 
@@ -332,7 +387,7 @@ Measured 2026-10-01 on WSL2, Node 24.18. Scripts are in `spikes/`.
 ### S2: Std load
 
 - All 276 files of std 3083 (150k lines, 7 MB) parse and link in ~220 ms, single-threaded, no cache,
-  well under the 2 s threshold for adding an AST cache.
+  well under the 2 s threshold for adding an AST cache. (Std 3095 has 277 files.)
 - Evaluating all 916 top-level constants takes ~45 ms. 913 evaluate; the other 3 (the tolerance
   definitions) are never evaluated by Onshape either. A preview worker can load std on start.
 - Evaluating std's constants found a lexer bug the parser tests missed: `1.e-4` lexed as `(1).e - 4`.
