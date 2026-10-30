@@ -117,7 +117,8 @@ function distanceSide(call: BuiltinCall, input: Definition, field: string): Shap
  */
 function massProperties(oc: Oc, entities: readonly Entity[]) {
   const dimension = (entity: Entity): number => {
-    if (entity.type === "BODY") return { SOLID: 3, SHEET: 2, WIRE: 1, POINT: 0 }[entity.bodyType];
+    if (entity.type === "BODY")
+      return { SOLID: 3, SHEET: 2, WIRE: 1, POINT: 0, MATE_CONNECTOR: 0 }[entity.bodyType];
     return { FACE: 2, EDGE: 1, VERTEX: 0 }[entity.type];
   };
   const highest = Math.max(...entities.map(dimension));
@@ -261,7 +262,14 @@ export const EVALUATOR_BUILTINS = {
   },
   evVertexPoint: ([ctx, args], call) => {
     const input = open(call, ctx, args);
-    const vertex = first(call, input, "vertex", "VERTEX");
+    // A mate connector or point body is a single vertex, and Onshape evaluates it as one.
+    const vertex =
+      resolve(call, input.model, input.oc, input.definition.getField("vertex")).find(
+        (entity) =>
+          entity.type === "VERTEX" ||
+          (entity.type === "BODY" &&
+            (entity.bodyType === "MATE_CONNECTOR" || entity.bodyType === "POINT")),
+      ) ?? call.fail("vertex resolves to no vertex.");
     return lengthVector(call, xyz(input.oc.BRep_Tool.Pnt(input.oc.TopoDS.Vertex(vertex.shape))));
   },
   evDistance: ([ctx, args], call) => {

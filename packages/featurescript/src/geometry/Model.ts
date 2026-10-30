@@ -9,7 +9,14 @@ export interface EntityAttribute {
 
 export type EntityType = "BODY" | "FACE" | "EDGE" | "VERTEX";
 /** Matches std's `BodyType` members we produce. */
-export type BodyType = "SOLID" | "SHEET" | "WIRE" | "POINT";
+export type BodyType = "SOLID" | "SHEET" | "WIRE" | "POINT" | "MATE_CONNECTOR";
+
+/** A mate connector's coordinate system: origin in meters, unit x and z axes. */
+export interface Frame {
+  readonly origin: readonly [number, number, number];
+  readonly xAxis: readonly [number, number, number];
+  readonly zAxis: readonly [number, number, number];
+}
 
 /** Where a sketch entity came from. */
 export interface SketchOrigin {
@@ -37,6 +44,8 @@ export interface Entity {
   readonly attributes: readonly EntityAttribute[];
   /** Creation order; query results follow it. */
   readonly order: number;
+  /** A mate connector's coordinate system, on its body and its one vertex. */
+  readonly frame?: Frame;
 }
 
 /** Everything geometric in a context. Immutable, so rolling back a feature is keeping a reference. */
@@ -109,6 +118,7 @@ interface NewBody {
   readonly createdBy: readonly string[];
   readonly construction?: boolean;
   readonly annotate?: Annotate;
+  readonly frame?: Frame;
 }
 
 /** Adds brand-new bodies (and their topology), created by one operation. */
@@ -135,6 +145,7 @@ export function addBodies(
       cap: null,
       attributes: [],
       order: next,
+      ...(body.frame ? { frame: body.frame } : {}),
       ...body.annotate?.(shape, type),
     });
     entities.set(bodyId, make(body.shape, "BODY", bodyId));
