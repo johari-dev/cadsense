@@ -28,6 +28,7 @@ import {
   runPreview,
   toGlb,
   writePreview,
+  type PickedConnector,
   type PreviewStep,
   type SolidSummary,
   type View,
@@ -55,6 +56,8 @@ export interface PreviewJob {
    * importing file, and their size limit.
    */
   readonly workspace: { readonly root: string; readonly maxModuleBytes: number };
+  /** Points picked in the panel, made into mate connectors before the features run. */
+  readonly connectors: readonly PickedConnector[];
   /** A STEP file whose bodies are created by `makeId("Base")`. */
   readonly base: Uint8Array | null;
   readonly output: PreviewOutput;
@@ -110,9 +113,10 @@ const locateFailure = (error: unknown, summary: string): FeatureScriptFailure =>
     return {
       message: located.message,
       location: { path: located.file, line: located.start.line, column: located.start.column },
+      unsupported: false,
     };
   }
-  return { message: summary, location: null };
+  return { message: summary, location: null, unsupported: false };
 };
 
 /**
@@ -150,6 +154,7 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
   try {
     result = runPreview(loaded, job.steps, job.base ?? undefined, {
       before: output.kind === "panel",
+      connectors: job.connectors,
     });
   } catch (error) {
     const summary = describeFailure(error);

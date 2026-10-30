@@ -114,8 +114,29 @@ export function defaultDefinition(spec: FeatureSpec, overrides: FsMap = FsMap.em
   let definition = FsMap.fromEntries(
     spec.inputs.map((input) => [input.id, input.defaultValue] as const),
   );
-  for (const [key, value] of overrides.entries()) definition = definition.set(key, value);
+  for (const [key, value] of overrides.entries()) {
+    const list = spec.inputs.find((input) => input.id === key && input.kind === "array");
+    definition = definition.set(key, list ? withItemDefaults(list, value) : value);
+  }
   return definition;
+}
+
+/**
+ * A list input's value with each item's missing inner inputs at their defaults, the way Onshape's
+ * dialog always fills a new item. Values that aren't arrays of maps are left for the precondition.
+ */
+function withItemDefaults(list: FeatureInput, value: FsValue): FsValue {
+  const items = untag(value);
+  if (!Array.isArray(items)) return value;
+  return items.map((item) => {
+    const fields = untag(item);
+    if (!(fields instanceof FsMap)) return item;
+    let filled = fields;
+    for (const inner of list.items)
+      if (filled.getField(inner.id) === undefined)
+        filled = filled.set(inner.id, inner.defaultValue);
+    return item instanceof FsTagged ? new FsTagged(item.tag, filled) : filled;
+  });
 }
 
 /** Annotation keys Onshape parses itself rather than evaluating; `Filter` uses `&&` on enum values. */

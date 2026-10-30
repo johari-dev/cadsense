@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import { createBuiltins } from "./builtins/index.ts";
 import type { GeometryState } from "./geometry/Model.ts";
 import { loadOcct, type Oc } from "./geometry/occt.ts";
+import { addConnectors } from "./geometry/Connectors.ts";
 import { importStep } from "./geometry/Step.ts";
 import { FsFault, FsThrow, type FsFrame } from "./runtime/Errors.ts";
 import { Interpreter } from "./runtime/Interpreter.ts";
@@ -21,6 +22,19 @@ export const STD_DIR = new URL("../std/", import.meta.url);
  * finds them. Features run after it as `Feature1`, `Feature2`, ...
  */
 export const BASE_FEATURE_ID = ["Base"] as const;
+
+/**
+ * Points picked in the file panel become mate connectors created by this pseudo-feature, so
+ * `qCreatedBy(makeId("Picked") + "c1", EntityType.BODY)` finds the one with id `c1`.
+ */
+export const PICKED_FEATURE_ID = ["Picked"] as const;
+
+/** A mate connector made before the features run: an origin in meters and its Z axis. */
+export interface PickedConnector {
+  readonly id: string;
+  readonly origin: readonly [number, number, number];
+  readonly zAxis: readonly [number, number, number];
+}
 
 /** Reads `onshape/std/*.fs` from the vendored std in `dir`. */
 export const readStd = (path: string, dir: URL = STD_DIR): string | undefined => {
@@ -168,7 +182,10 @@ export class FeatureScriptRuntime {
    */
   runFeatures(
     steps: readonly FeatureStep[],
-    options: { readonly base?: Uint8Array } = {},
+    options: {
+      readonly base?: Uint8Array;
+      readonly connectors?: readonly PickedConnector[];
+    } = {},
   ): PartStudioRun {
     const context = this.callStd("context.fs", "newContext");
     const model = (untag(context) as FsBuiltin<ModelContext>).native;
@@ -178,6 +195,13 @@ export class FeatureScriptRuntime {
           "A base model needs the geometry kernel; use FeatureScriptRuntime.withGeometry().",
         );
       model.geometry = importStep(model.oc, model.geometry, options.base, BASE_FEATURE_ID);
+    }
+    if (options.connectors?.length) {
+      if (!model.oc)
+        throw new Error(
+          "Picked points need the geometry kernel; use FeatureScriptRuntime.withGeometry().",
+        );
+      model.geometry = addConnectors(model.oc, model.geometry, options.connectors);
     }
     const results: FeatureRun[] = [];
     let geometryBeforeLast = model.geometry;

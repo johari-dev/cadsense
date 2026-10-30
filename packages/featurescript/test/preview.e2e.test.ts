@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from "vite-plus/test";
-import { featureFailure, runPreview } from "../src/preview/Preview.ts";
+import { dialogInputs } from "../src/preview/Inputs.ts";
+import { featureFailure, formatInput, runPreview } from "../src/preview/Preview.ts";
 import { FeatureScriptRuntime } from "../src/Runtime.ts";
+import { untag, type FsValue } from "../src/runtime/Value.ts";
 
 /** One warm runtime previews many edits of the same script, the way the server's worker does. */
 const cube = (size: number) => `FeatureScript 3083;
@@ -67,6 +69,203 @@ describe("runPreview on a warm runtime", () => {
     ]);
     expect(stopped.features[1]?.run).toBeNull();
     expect(stopped.changes).toBeNull();
+  });
+
+  it("runs list inputs with partly filled items on points picked in the panel", () => {
+    // Failure modes: an item missing an inner input fails the precondition instead of taking that
+    // input's default; picked points don't exist as mate connectors under makeId("Picked"), or
+    // their frame is wrong; the dialog can't show each item's values; a query value shows as a
+    // raw map; picked connectors count as the feature's own changes or get drawn.
+    const waypoints = `FeatureScript 3083;
+import(path : "onshape/std/geometry.fs", version : "3083.0");
+annotation { "Feature Type Name" : "Points" }
+export const points = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition
+    {
+        annotation { "Name" : "Waypoints", "Item name" : "Waypoint" }
+        definition.waypoints is array;
+        for (var waypoint in definition.waypoints)
+        {
+            annotation { "Name" : "Point", "Filter" : QueryFilterCompound.ALLOWS_VERTEX, "MaxNumberOfPicks" : 1 }
+            waypoint.point is Query;
+            annotation { "Name" : "X offset" }
+            isLength(waypoint.x, ZERO_DEFAULT_LENGTH_BOUNDS);
+        }
+    }
+    {
+        var xs = [];
+        for (var waypoint in definition.waypoints)
+        {
+            const at = evVertexPoint(context, { "vertex" : waypoint.point });
+            xs = append(xs, (at[0] + waypoint.x) / millimeter);
+        }
+        setVariable(context, "xs", xs);
+        setVariable(context, "z", evMateConnector(context, { "mateConnector" : definition.waypoints[0].point }).zAxis);
+    });
+`;
+    const picked = (id: string) => `qCreatedBy(makeId("Picked") + "${id}", EntityType.BODY)`;
+    const result = runPreview(
+      runtime,
+      [
+        {
+          path: "points.fs",
+          source: waypoints,
+          parameters: {
+            waypoints: `[{ "point" : ${picked("c1")} }, { "point" : ${picked("c2")}, "x" : 5 * millimeter }]`,
+          },
+        },
+      ],
+      undefined,
+      {
+        connectors: [
+          { id: "c1", origin: [0.01, 0, 0], zAxis: [0, 1, 0] },
+          { id: "c2", origin: [0.02, 0, 0], zAxis: [0, 0, 1] },
+        ],
+      },
+    );
+    const run = result.features[0]!.run!;
+    expect(run.status, JSON.stringify(run.exceptions)).toBe("OK");
+    const numbers = (name: string) =>
+      (untag(run.variables.getField(name)!) as readonly FsValue[]).map((n) => Number(untag(n)));
+    expect(numbers("xs").map((n) => Number(n.toFixed(6)))).toEqual([10, 25]);
+    expect(numbers("z").map((n) => Number(n.toFixed(6)))).toEqual([0, 1, 0]);
+    expect(result.meshes).toEqual([]);
+    expect(result.changes).toEqual({ volumeMm3: 0, createdFaces: 0 });
+
+    const [list] = dialogInputs(
+      runtime,
+      result.features[0]!.module,
+      result.features[0]!.spec,
+      result.features[0]!.definition,
+    );
+    expect(list).toMatchObject({ id: "waypoints", kind: "array", itemName: "Waypoint" });
+    expect(list!.items.map((item) => item.map((input) => [input.id, input.value]))).toEqual([
+      [
+        ["point", "created by Picked.c1"],
+        ["x", "0 mm"],
+      ],
+      [
+        ["point", "created by Picked.c2"],
+        ["x", "5 mm"],
+      ],
+    ]);
+  });
+
+  it("runs the first feature with defaults when the panel's saved one is gone", () => {
+    // The panel remembers which feature it showed; renaming or moving that feature must not leave
+    // the file stuck. Failure modes: the stale name still throws; the stale feature's inputs are
+    // applied to the first feature; an agent's explicit choice falls back silently too.
+    const first = cube(10);
+    const fallback = runPreview(runtime, [
+      {
+        path: "gone.fs",
+        source: first,
+        feature: "moved",
+        parameters: { size: "nope(" },
+        fallbackToFirst: true,
+      },
+    ]);
+    expect(fallback.features[0]?.spec.name).toBe("cube");
+    expect(fallback.features[0]?.definition.getField("size")).toBeUndefined();
+    expect(fallback.features[0]?.run?.status).toBe("OK");
+    expect(() =>
+      runPreview(runtime, [{ path: "gone.fs", source: first, feature: "moved" }]),
+    ).toThrow(/no feature named moved/);
+  });
+
+  it("refuses a picked point without a direction instead of making a frame of NaNs", () => {
+    expect(() =>
+      runPreview(runtime, [{ path: "cube.fs", source: cube(10) }], undefined, {
+        connectors: [{ id: "c1", origin: [0, 0, 0], zAxis: [0, 0, 0] }],
+      }),
+    ).toThrow(/c1.*direction/);
+    // Finite but huge components overflow a plain length; the direction is still (1, 1, 1).
+    const huge = runPreview(
+      runtime,
+      [
+        {
+          path: "huge.fs",
+          source: cube(10).replace(
+            "fCuboid(",
+            'setVariable(context, "z", evMateConnector(context, { "mateConnector" : qCreatedBy(makeId("Picked") + "c1", EntityType.BODY) }).zAxis);\n        fCuboid(',
+          ),
+        },
+      ],
+      undefined,
+      { connectors: [{ id: "c1", origin: [0, 0, 0], zAxis: [1.7e308, 1.7e308, 1.7e308] }] },
+    );
+    const z = untag(huge.features[0]!.run!.variables.getField("z")!) as readonly FsValue[];
+    expect(z.map((n) => Number(untag(n)).toFixed(6))).toEqual(["0.577350", "0.577350", "0.577350"]);
+  });
+
+  it("gives a picked point std's perpendicularVector of its Z axis as its X axis", () => {
+    // The connector's whole frame orients anything built on it, so it must match a mate connector
+    // made from the same Z in Onshape.
+    const directions = [
+      [0, 0, 1],
+      [1, 0, 0],
+      [0, -1, 0],
+      [0.3, -0.8, 0.52],
+    ] as const;
+    const checks = directions
+      .map(
+        (_, i) =>
+          `setVariable(context, "x${i}", norm(evMateConnector(context, { "mateConnector" : qCreatedBy(makeId("Picked") + "c${i}", EntityType.BODY) }).xAxis - perpendicularVector(vector(${directions[i]!.join(", ")}))));`,
+      )
+      .join("\n        ");
+    const run = runPreview(
+      runtime,
+      [{ path: "axes.fs", source: cube(10).replace("fCuboid(", `${checks}\n        fCuboid(`) }],
+      undefined,
+      {
+        connectors: directions.map((zAxis, i) => ({ id: `c${i}`, origin: [0, 0, 0], zAxis })),
+      },
+    ).features[0]!.run!;
+    expect(run.status, JSON.stringify(run.exceptions)).toBe("OK");
+    for (const i of directions.keys())
+      expect(Number(untag(run.variables.getField(`x${i}`)!))).toBeLessThan(1e-12);
+  });
+
+  it("describes query values in a few words", () => {
+    // Failure modes: a raw map; a containment or nth-element query read as its whole subquery.
+    const module = runtime.load("queries.fs", cube(10));
+    const describe = (expression: string) => formatInput(runtime.evaluate(module, expression));
+    expect(describe("qNothing()")).toBe("(nothing selected)");
+    expect(describe('qCreatedBy(makeId("Feature1") + "port", EntityType.BODY)')).toBe(
+      "created by Feature1.port",
+    );
+    expect(
+      describe(
+        'qContainsPoint(qCreatedBy(makeId("Base"), EntityType.FACE), vector(50, 30, 10) * millimeter)',
+      ),
+    ).toBe("created by Base at (50, 30, 10) mm");
+    expect(describe("qClosestTo(qEverything(EntityType.FACE), vector(1, 2, 3) * millimeter)")).toBe(
+      "closest to (1, 2, 3) mm",
+    );
+    expect(describe('qNthElement(qCreatedBy(makeId("Base"), EntityType.FACE), 2)')).toBe(
+      "item 3 of created by Base",
+    );
+    expect(
+      describe(
+        'qConstructionFilter(qCreatedBy(makeId("Base"), EntityType.FACE), ConstructionObject.NO)',
+      ),
+    ).toBe("created by Base");
+  });
+
+  it("marks a failure the local runtime can't run, so it isn't blamed on the script", () => {
+    const unsupported = cube(10).replace(
+      "fCuboid(",
+      'opFlipOrientation(context, id + "flip", { "bodies" : qNothing() });\n        fCuboid(',
+    );
+    const run = runPreview(runtime, [{ path: "flip.fs", source: unsupported }]).features[0]!.run;
+    expect(featureFailure(runtime, run)).toMatchObject({ unsupported: true });
+    const scriptBug = cube(10).replace("fCuboid(", 'throw regenError("mine");\n        fCuboid(');
+    expect(
+      featureFailure(
+        runtime,
+        runPreview(runtime, [{ path: "bug.fs", source: scriptBug }]).features[0]!.run,
+      ),
+    ).toMatchObject({ unsupported: false });
   });
 
   it("summarizes each solid with its name and its bounds in millimeters", () => {
@@ -238,6 +437,24 @@ export const usesBlock = defineFeature(function(context is Context, id is Id, de
     files.set("lib/block.fs", library(10));
     expect(volume("wiring/robot.fs", user("../lib/block.fs"))).toEqual([1000]);
     expect(asked).not.toContain("onshape/std/geometry.fs");
+  });
+
+  it("runs the editor's text for a file an earlier step imports", () => {
+    // The panel sends its open file's unsaved text as the last step; an agent's earlier step read
+    // from disk may import that same file, and must see the editor's text too.
+    files.set("wiring/block.fs", library(10));
+    const edited = `${library(20)}
+annotation { "Feature Type Name" : "Nothing" }
+export const nothing = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition {}
+    {
+    });
+`;
+    const result = runPreview(workspace, [
+      { path: "wiring/robot.fs", source: user("block.fs") },
+      { path: "wiring/block.fs", source: edited },
+    ]);
+    expect(result.solids.map((solid) => Math.round(solid.volumeMm3))).toEqual([8000]);
   });
 
   it("never reads a workspace file as part of the standard library", () => {

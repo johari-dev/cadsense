@@ -40,15 +40,22 @@ the solids, and the chosen view as a PNG. Artifacts for each run go to
 `<state>/attachments/featurescript-previews/<time>-<id>/`, and the newest 50 are kept. Each call also
 shows in the chat as a card (`cad.featurescript.previewed` activity) with the status, the failing
 line, the views (copied into the thread's attachments) and the change; its links open the script in
-the file panel with the agent's inputs.
+the file panel with the agent's inputs, base and earlier features (`before`).
 
 People get the same loop in the file panel. A `.fs` file there has a Code/Preview toggle like
 markdown. Preview shows the model after the feature, with the faces it made in amber and a
 Before/After switch, under an Onshape-style dialog of the feature's inputs (read from its
-precondition; inputs its `if`s hide are hidden). Editing an input, picking a face in the model, or
-saving the file runs it again; a run takes about a tenth of a second. A failure keeps the last good
-model on screen, greyed out, under the cause, a "Show line" link and an "Ask the agent to fix it"
-button. The base is the workspace's only STEP file until someone picks another. The panel calls
+precondition; inputs its `if`s hide are hidden). Editing an input, picking in the model, or
+saving the file runs it again; a run takes about a tenth of a second. A click gives a face input
+the nearest face the preview draws (`qClosestTo` over faces that aren't sketch regions or
+construction), so faces an earlier feature made count too. A point input (a vertex or mate
+connector filter) gets a mate connector at the click, Z out of the face and X std's
+`perpendicularVector` of Z, created before the features run by `makeId("Picked") + "<id>"`. Like a
+mate connector someone places in Onshape, it's a body: `qEverything(EntityType.BODY)` sees it. List inputs (`definition.waypoints is array` with a loop over its
+items) get items to add, reorder and remove; an item's unset inputs take their defaults. A failure
+keeps the last good model on screen, greyed out, under the cause, a "Show line" link and an "Ask
+the agent to fix it" button, or "for a workaround" when the runtime can't run a builtin. The base is
+the workspace's only STEP file until someone picks another. The panel calls
 `featurescript.preview` with the editor's text; its before/after GLBs are `fspanel-*.bin`
 attachments, and the newest 40 are kept.
 

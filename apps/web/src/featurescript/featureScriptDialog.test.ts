@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
-import { inputExpression, pickExpression } from "./featureScriptDialog";
+import {
+  inputExpression,
+  listExpression,
+  newPickId,
+  pickExpression,
+  pickKind,
+  pointExpression,
+} from "./featureScriptDialog";
 
 /**
  * What a person types in the feature dialog becomes a FeatureScript expression the server
@@ -55,12 +62,15 @@ describe("inputExpression", () => {
 describe("pickExpression", () => {
   // A click lands on the tessellation, up to its deflection off a curved face, so the query asks for
   // the closest face rather than one containing the point.
-  it("finds the base face nearest a picked point, given in meters, as millimeters", () => {
+  // The faces the preview draws: the base's and any an earlier feature made.
+  const drawn =
+    "qSketchFilter(qConstructionFilter(qEverything(EntityType.FACE), ConstructionObject.NO), SketchObject.NO)";
+  it("finds the drawn face nearest a picked point, given in meters, as millimeters", () => {
     expect(pickExpression([[0.05, 0.03, 0.01]])).toBe(
-      'qClosestTo(qCreatedBy(makeId("Base"), EntityType.FACE), vector(50, 30, 10) * millimeter)',
+      `qClosestTo(${drawn}, vector(50, 30, 10) * millimeter)`,
     );
     expect(pickExpression([[0.0123456789, -0.0000000001, 0.1]])).toBe(
-      'qClosestTo(qCreatedBy(makeId("Base"), EntityType.FACE), vector(12.3457, 0, 100) * millimeter)',
+      `qClosestTo(${drawn}, vector(12.3457, 0, 100) * millimeter)`,
     );
   });
 
@@ -71,7 +81,78 @@ describe("pickExpression", () => {
         [0.1, 0, 0.005],
       ]),
     ).toBe(
-      'qUnion([qClosestTo(qCreatedBy(makeId("Base"), EntityType.FACE), vector(0, 0, 10) * millimeter), qClosestTo(qCreatedBy(makeId("Base"), EntityType.FACE), vector(100, 0, 5) * millimeter)])',
+      `qUnion([qClosestTo(${drawn}, vector(0, 0, 10) * millimeter), qClosestTo(${drawn}, vector(100, 0, 5) * millimeter)])`,
+    );
+  });
+});
+
+/**
+ * Picking a point and editing a list. Ways this goes wrong: a direction or axis input that can't be
+ * picked although a planar face gives it; a point input offered faces, or a vertex-only input given
+ * a mate connector body its filter rejects; an edge input offered picks that make queries the
+ * feature refuses; two picked points sharing an id, or an id the server's pattern rejects; a list
+ * item's unset inputs written as something other than "missing" (the runtime fills defaults); list
+ * order lost; an empty list sent as anything but [].
+ */
+describe("pickKind", () => {
+  it("picks faces for face, plane, direction and axis filters, and with no filter", () => {
+    for (const filter of [
+      null,
+      "EntityType.FACE",
+      "(EntityType.FACE && GeometryType.PLANE) && ConstructionObject.NO",
+      "QueryFilterCompound.ALLOWS_DIRECTION",
+      "QueryFilterCompound.ALLOWS_AXIS",
+      "GeometryType.CYLINDER",
+      "EntityType.FACE || EntityType.VERTEX",
+    ])
+      expect(pickKind(filter), String(filter)).toEqual({ kind: "face" });
+  });
+
+  it("picks points as mate connectors where connectors are allowed, else as their vertex", () => {
+    expect(pickKind("QueryFilterCompound.ALLOWS_VERTEX")).toEqual({
+      kind: "point",
+      entity: "BODY",
+    });
+    expect(pickKind("EntityType.VERTEX || BodyType.MATE_CONNECTOR")).toEqual({
+      kind: "point",
+      entity: "BODY",
+    });
+    expect(pickKind("EntityType.VERTEX")).toEqual({ kind: "point", entity: "VERTEX" });
+  });
+
+  it("offers no pick for filters a click can't satisfy", () => {
+    expect(pickKind("EntityType.EDGE")).toBeNull();
+    expect(pickKind("EntityType.BODY && BodyType.SOLID")).toBeNull();
+    expect(pickKind("GeometryType.LINE")).toBeNull();
+  });
+});
+
+describe("points and lists", () => {
+  it("finds picked points by id under the Picked pseudo-feature", () => {
+    expect(pointExpression(["p1"], "BODY")).toBe(
+      'qCreatedBy(makeId("Picked") + "p1", EntityType.BODY)',
+    );
+    expect(pointExpression(["p1", "p2"], "VERTEX")).toBe(
+      'qUnion([qCreatedBy(makeId("Picked") + "p1", EntityType.VERTEX), qCreatedBy(makeId("Picked") + "p2", EntityType.VERTEX)])',
+    );
+  });
+
+  it("makes ids the server accepts, never twice", () => {
+    const ids = new Set(Array.from({ length: 1000 }, newPickId));
+    expect(ids.size).toBe(1000);
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_]{1,40}$/);
+  });
+
+  it("writes items in order, leaving out what they don't set", () => {
+    expect(listExpression([])).toBe("[]");
+    expect(
+      listExpression([
+        { point: 'qCreatedBy(makeId("Picked") + "p1", EntityType.BODY)' },
+        {},
+        { x: "5 * millimeter", z: "-2 * millimeter" },
+      ]),
+    ).toBe(
+      '[{ "point" : qCreatedBy(makeId("Picked") + "p1", EntityType.BODY) }, {}, { "x" : 5 * millimeter, "z" : -2 * millimeter }]',
     );
   });
 });
