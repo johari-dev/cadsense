@@ -8,10 +8,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
 import {
   FeatureScriptModeToggle,
   FeatureScriptPreview,
   FeatureScriptStatusPill,
+  NOTICE_TONES,
   failureLocationLabel,
 } from "~/featurescript/FeatureScriptPreview";
 import {
@@ -20,6 +22,7 @@ import {
   previewInputs,
   useFeatureScriptFileSettings,
   withoutInputs,
+  withRunEditing,
   type FeatureScriptFileSettings,
 } from "~/featurescript/featureScriptPanelStore";
 import { useFeatureScriptPreview } from "~/featurescript/useFeatureScriptPreview";
@@ -102,7 +105,19 @@ export function FeatureScriptFile(props: {
     before: settings.before ?? [],
     base,
     feature: settings.feature,
+    editing: settings.editing ?? null,
+    touched: settings.touched ?? [],
+    edits: settings.edits ?? 0,
   });
+  // Keep the dialog state each run returns for the next, while it's for the feature shown. While
+  // the saved feature is masked, the run is the first feature's, and the saved settings aren't.
+  const latest = run.latest;
+  useEffect(() => {
+    if (masked || !latest || latest.feature !== (settings.feature ?? latest.features[0]?.name))
+      return;
+    const next = latest.editing;
+    updateSettings((current) => withRunEditing(current, next));
+  }, [latest, masked, settings.feature, updateSettings]);
   const latestFeatures = run.latest?.features ?? [];
   const savedFeature = saved.feature;
   useEffect(() => {
@@ -122,6 +137,8 @@ export function FeatureScriptFile(props: {
     useRightPanelStore.getState().openFile(props.threadRef, path, line);
   };
   const failure = run.latest?.failure ?? null;
+  const notice = run.latest?.notice ?? null;
+  const noticeTone = notice ? NOTICE_TONES[notice.status] : null;
   const resetInputs = () => updateSettings(withoutInputs);
 
   return (
@@ -184,6 +201,25 @@ export function FeatureScriptFile(props: {
                   Reset to defaults
                 </Button>
               ) : null}
+            </div>
+          ) : null}
+          {notice && noticeTone ? (
+            <div
+              role="status"
+              className={cn(
+                "flex shrink-0 items-start gap-2 border-b px-3 py-1.5 text-xs",
+                noticeTone.strip,
+              )}
+            >
+              <noticeTone.Icon className={cn("mt-0.5 size-3.5 shrink-0", noticeTone.icon)} />
+              <p
+                className={cn(
+                  "min-w-0 flex-1 font-mono text-[11.5px] break-words",
+                  noticeTone.text,
+                )}
+              >
+                {notice.message}
+              </p>
             </div>
           ) : null}
           <EditableFileSurface

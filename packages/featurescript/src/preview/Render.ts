@@ -1,14 +1,16 @@
 // @effect-diagnostics nodeBuiltinImport:off - encodes PNGs with Node's zlib.
 import * as NodeZlib from "node:zlib";
-import type { BodyMesh } from "../geometry/Tessellate.ts";
+import type { BodyMesh, MeshMaterial } from "../geometry/Tessellate.ts";
 
 /**
  * A small software renderer: a flat-shaded, z-buffered orthographic PNG of tessellated bodies, so a
- * person or an agent can see a preview without a browser. Z is up, as in CAD.
+ * person or an agent can see a preview without a browser. Z is up, as in CAD. Error edges and
+ * vertices are drawn last, over everything, so they show even behind a face.
  */
-const COLORS: Record<0 | 1, readonly [number, number, number]> = {
+const COLORS: Record<MeshMaterial, readonly [number, number, number]> = {
   0: [150, 158, 168],
   1: [245, 196, 66],
+  2: [222, 45, 38],
 };
 
 export type View = "iso" | "top" | "front" | "right";
@@ -48,10 +50,14 @@ export function renderPng(meshes: readonly BodyMesh[], view: View = "iso", size 
     minY = Infinity,
     maxY = -Infinity;
   for (const mesh of meshes)
-    for (const group of mesh.groups)
-      for (let i = 0; i < group.positions.length; i += 3) {
-        const x = dot(right, group.positions, i);
-        const y = dot(up, group.positions, i);
+    for (const positions of [
+      ...mesh.groups.map((group) => group.positions),
+      mesh.edges ?? [],
+      mesh.vertices ?? [],
+    ])
+      for (let i = 0; i < positions.length; i += 3) {
+        const x = dot(right, positions, i);
+        const y = dot(up, positions, i);
         minX = Math.min(minX, x);
         maxX = Math.max(maxX, x);
         minY = Math.min(minY, y);
@@ -109,6 +115,31 @@ export function renderPng(meshes: readonly BodyMesh[], view: View = "iso", size 
             pixels.set(color, index * 3);
           }
       }
+  // A 3 px square at a point of model space, over whatever is drawn there.
+  const mark = (positions: ArrayLike<number>, o: number, radius = 1) => {
+    const x = Math.round((dot(right, positions, o) - cx) * scale + size / 2);
+    const y = Math.round(size / 2 - (dot(up, positions, o) - cy) * scale);
+    for (let dy = -radius; dy <= radius; dy++)
+      for (let dx = -radius; dx <= radius; dx++)
+        if (x + dx >= 0 && x + dx < size && y + dy >= 0 && y + dy < size)
+          pixels.set(COLORS[2], ((y + dy) * size + x + dx) * 3);
+  };
+  for (const mesh of meshes) {
+    const edges = mesh.edges ?? [];
+    for (let s = 0; s < edges.length; s += 6) {
+      const from = [edges[s]!, edges[s + 1]!, edges[s + 2]!];
+      const to = [edges[s + 3]!, edges[s + 4]!, edges[s + 5]!];
+      const pixelsLong = Math.hypot(dot(right, to) - dot(right, from), dot(up, to) - dot(up, from));
+      const steps = Math.max(1, Math.ceil(pixelsLong * scale));
+      for (let k = 0; k <= steps; k++)
+        mark(
+          from.map((value, axis) => value + ((to[axis]! - value) * k) / steps),
+          0,
+        );
+    }
+    const vertices = mesh.vertices ?? [];
+    for (let o = 0; o < vertices.length; o += 3) mark(vertices, o, 3);
+  }
   return encodePng(pixels, size, size);
 }
 

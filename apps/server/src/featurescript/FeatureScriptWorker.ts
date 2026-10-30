@@ -35,6 +35,8 @@ import {
   type View,
 } from "@cadsense/featurescript";
 
+type PreviewOptions = NonNullable<Parameters<typeof runPreview>[3]>;
+
 export interface FeatureScriptWorkerData {
   /** The vendored std directory as a file URL, when it isn't beside the package source. */
   readonly stdDir: string | null;
@@ -61,6 +63,10 @@ export interface PreviewJob {
   readonly connectors: readonly PickedConnector[];
   /** A STEP file whose bodies are created by `makeId("Base")`. */
   readonly base: Uint8Array | null;
+  /** Panel jobs run the last feature as Onshape's dialog does; see `runPreview`'s `editing`. */
+  readonly editing: PreviewOptions["editing"] | null;
+  /** A manipulator of the last feature was dragged; see `runPreview`'s `manipulatorChange`. */
+  readonly manipulatorChange: PreviewOptions["manipulatorChange"] | null;
   readonly output: PreviewOutput;
 }
 
@@ -79,7 +85,18 @@ export type PreviewJobResult = { readonly memoryBytes: number } & (
       readonly png: Uint8Array | null;
       /** Panel jobs: the last feature's dialog, and which GLBs were written (none for no bodies). */
       readonly panel:
-        | (Pick<FeatureScriptPanelPreview, "features" | "feature" | "inputs"> & {
+        | (Pick<
+            FeatureScriptPanelPreview,
+            | "features"
+            | "feature"
+            | "inputs"
+            | "notice"
+            | "errorEntities"
+            | "editing"
+            | "manipulators"
+            | "parameters"
+            | "featureStatus"
+          > & {
             readonly after: boolean;
             readonly before: boolean;
           })
@@ -176,6 +193,8 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
     result = runPreview(loaded, job.steps, job.base ?? undefined, {
       before: output.kind === "panel",
       connectors: job.connectors,
+      ...(job.editing ? { editing: job.editing } : {}),
+      ...(job.manipulatorChange ? { manipulatorChange: job.manipulatorChange } : {}),
     });
   } catch (error) {
     const summary = describeFailure(error);
@@ -209,7 +228,22 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
         typeName,
       })),
       feature: last.spec.name,
-      inputs: dialogInputs(loaded, last.module, last.spec, last.definition),
+      inputs: dialogInputs(loaded, last.module, last.spec, last.definition, {
+        faulty: last.run?.faultyParameters ?? [],
+        expressions: last.shown,
+      }),
+      // The previewed feature's own notice, or else the first earlier one's, named.
+      notice:
+        last.notice ??
+        result.features.flatMap(({ spec, notice }) =>
+          notice ? [{ ...notice, message: `${spec.typeName}: ${notice.message}` }] : [],
+        )[0] ??
+        null,
+      errorEntities: result.errorEntities,
+      editing: result.editing,
+      manipulators: result.manipulators,
+      featureStatus: last.run?.status ?? null,
+      parameters: result.parameters,
       after: result.meshes.length > 0,
       before: meshesBefore.length > 0,
     };

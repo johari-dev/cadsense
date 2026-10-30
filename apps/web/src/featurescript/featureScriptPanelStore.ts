@@ -1,6 +1,7 @@
 import type {
   CadFeatureScriptPreviewStep,
   EnvironmentId,
+  FeatureScriptEditingState,
   FeatureScriptPickedConnector,
 } from "@cadsense/contracts";
 import { useCallback } from "react";
@@ -13,8 +14,13 @@ import { listExpression, type ModelPoint } from "./featureScriptDialog";
 /** Inputs set by typing or picking: input id to FeatureScript expression, and the picks behind it. */
 interface InputValues {
   readonly parameters: Readonly<Record<string, string>>;
-  /** Picked face points per input, in meters, so picks can be added to. */
+  /** Where each input's picks are shown, in meters. */
   readonly picks: Readonly<Record<string, readonly ModelPoint[]>>;
+  /**
+   * Each pick's query per input, so picks can be added to; the input's expression is their union.
+   * Picks saved without them were face picks.
+   */
+  readonly queries?: Readonly<Record<string, readonly string[]>>;
   /** Picked points per input, made into mate connectors at each run. */
   readonly points?: Readonly<Record<string, readonly FeatureScriptPickedConnector[]>>;
 }
@@ -35,6 +41,18 @@ export interface FeatureScriptFileSettings extends InputValues {
   readonly feature?: string;
   /** Features the agent ran first, from the chat card that opened the file. */
   readonly before?: readonly CadFeatureScriptPreviewStep[];
+  /**
+   * The feature dialog's editing-logic state the last run returned, sent with the next run. Unset
+   * while the dialog is fresh (a new file, a reset, another feature).
+   */
+  readonly editing?: FeatureScriptEditingState;
+  /**
+   * Inputs the person set since the run `editing` came from, even to the text they had, so one the
+   * editing logic overrode can be taken back. A list counts as one input.
+   */
+  readonly touched?: readonly string[];
+  /** How many times the person set an input; each one runs the preview, even with the same text. */
+  readonly edits?: number;
 }
 
 export const DEFAULT_FEATURESCRIPT_SETTINGS: FeatureScriptFileSettings = {
@@ -43,10 +61,13 @@ export const DEFAULT_FEATURESCRIPT_SETTINGS: FeatureScriptFileSettings = {
   picks: {},
 };
 
-/** The settings with every input back to its default, for the same feature. */
+/** The settings with every input back to its default, for the same feature, in a fresh dialog. */
 export const withDefaultInputs = ({
   points: _points,
+  queries: _queries,
   lists: _lists,
+  editing: _editing,
+  touched: _touched,
   ...settings
 }: FeatureScriptFileSettings): FeatureScriptFileSettings => ({
   ...settings,
@@ -74,17 +95,59 @@ export function withValue<Values extends InputValues>(
   picked: {
     readonly picks?: readonly ModelPoint[];
     readonly points?: readonly FeatureScriptPickedConnector[];
+    readonly queries?: readonly string[];
   } = {},
 ): Values {
   const { [id]: _parameter, ...parameters } = values.parameters;
   const { [id]: _picks, ...picks } = values.picks;
   const { [id]: _points, ...points } = values.points ?? {};
+  const { [id]: _queries, ...queries } = values.queries ?? {};
   return {
     ...values,
     parameters: expression === null ? parameters : { ...parameters, [id]: expression },
     picks: picked.picks ? { ...picks, [id]: picked.picks } : picks,
     points: picked.points ? { ...points, [id]: picked.points } : points,
+    queries: picked.queries ? { ...queries, [id]: picked.queries } : queries,
   };
+}
+
+/** The settings after the person set input `id` (a list's id for its items): marked, and counted. */
+export const withTouched = (
+  settings: FeatureScriptFileSettings,
+  id: string,
+): FeatureScriptFileSettings => ({
+  ...settings,
+  touched: settings.touched?.includes(id) ? settings.touched : [...(settings.touched ?? []), id],
+  edits: (settings.edits ?? 0) + 1,
+});
+
+/** Whether two sets of input expressions are the same, whatever their key order. */
+const sameExpressions = (
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+) =>
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.entries(a).every(([id, expression]) => b[id] === expression);
+
+/**
+ * The settings after a run returned the dialog state `editing` (null: the feature has no editing
+ * logic): kept for the next run, and the inputs that run took no longer marked. The same settings
+ * when there's nothing to change, or when the run wasn't of the inputs these settings send (one
+ * from before a reset or a later edit): its state belongs to a dialog that's gone, and the run of
+ * these inputs brings its own.
+ */
+export function withRunEditing(
+  settings: FeatureScriptFileSettings,
+  editing: FeatureScriptEditingState | null,
+): FeatureScriptFileSettings {
+  if (
+    (settings.touched === undefined &&
+      JSON.stringify(settings.editing ?? null) === JSON.stringify(editing)) ||
+    (editing !== null && !sameExpressions(editing.parameters, previewInputs(settings).parameters))
+  )
+    return settings;
+  const { editing: _editing, touched: _touched, ...rest } = settings;
+  return editing === null ? rest : { ...rest, editing };
 }
 
 /** `values` without the inputs set by picking, which belong to the base they were picked on. */
@@ -97,6 +160,7 @@ function withoutPicked<Values extends InputValues>(values: Values): Values {
     ),
     picks: {},
     points: {},
+    queries: {},
   };
 }
 

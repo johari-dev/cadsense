@@ -9,15 +9,28 @@ import { observeCadAppearance } from "../cad/CadAppearance";
 import { CAD_CAMERA_FOV } from "../cad/CadSceneModel";
 import { cn } from "../lib/utils";
 import type { ModelPoint, PickHit } from "./featureScriptDialog";
+import { bodyNode, edgeMiddle, faceProbe, isOutline, isPickable } from "./featureScriptScene";
+import {
+  snapToOutline,
+  type ClickedSurface,
+  type ProjectedOutline,
+  type ProjectedPoint,
+  type ProjectedSegment,
+} from "./featureScriptSnap";
 
 /** The renderer's view toward the model, matching the iso PNGs agents get. */
 const ISO = new THREE.Vector3(1, 1, 1).normalize();
 const PICK_COLOR = 0x60a5fa;
-const EDGE_ANGLE_DEGREES = 25;
+/** Error vertices, in screen pixels. */
+const ERROR_POINT_SIZE = 7;
 
 export interface FeatureScriptViewportProps {
   readonly environmentId: EnvironmentId;
-  /** GLB attachment ids from the panel preview: meters, Z up, feature faces in material 1. */
+  /**
+   * GLB attachment ids from the panel preview: meters, Z up, feature faces in material 1, error
+   * entities in material 2 (edges and vertices as lines and points), each body's B-rep edges and
+   * vertices as lines and points in material 3.
+   */
   readonly after: string | null;
   readonly before: string | null;
   readonly show: "after" | "before";
@@ -236,12 +249,18 @@ function createView(
 
   const disposeObject = (object: THREE.Object3D) =>
     object.traverse((child) => {
-      if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
+      if (
+        child instanceof THREE.Mesh ||
+        child instanceof THREE.LineSegments ||
+        child instanceof THREE.Points
+      ) {
         child.geometry.dispose();
         for (const material of [child.material].flat()) material.dispose();
       }
     });
+  // The model's edges. Copies keep the GLB outline material's mark, so a click finds them.
   const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1d2126 });
+  edgeMaterial.userData = { outline: true };
 
   const setModel = (slot: Slot, model: THREE.Group | null) => {
     // Clearing a slot also cancels its pending load, so an older run's model can't come back.
@@ -298,17 +317,59 @@ function createView(
       return true;
     }
     gltf.scene.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return;
-      for (const material of [child.material].flat()) material.side = THREE.DoubleSide;
-      child.add(
-        new THREE.LineSegments(
-          new THREE.EdgesGeometry(child.geometry, EDGE_ANGLE_DEGREES),
-          edgeMaterial.clone(),
-        ),
-      );
+      if (isOutline(child)) {
+        // A body's edges, every B-rep one, drawn as the model's edges always were; its vertices
+        // are there to snap clicks to, not drawn.
+        if (child instanceof THREE.Points) child.visible = false;
+        else {
+          for (const material of [child.material].flat()) material.dispose();
+          child.material = edgeMaterial.clone();
+        }
+      } else if (child instanceof THREE.Points || child instanceof THREE.LineSegments) {
+        // Error edges and vertices draw over the faces they sit on, and vertices at a fixed size.
+        child.renderOrder = 2;
+        for (const material of [child.material].flat()) {
+          material.depthTest = false;
+          if (material instanceof THREE.PointsMaterial) {
+            material.size = ERROR_POINT_SIZE;
+            material.sizeAttenuation = false;
+          }
+        }
+      } else if (child instanceof THREE.Mesh)
+        for (const material of [child.material].flat()) material.side = THREE.DoubleSide;
     });
     setModel(slot, gltf.scene);
     return true;
+  };
+
+  /**
+   * The outline of the body `object` is part of (its edges as drawn, and its vertices), projected
+   * into the canvas's pixels.
+   */
+  const outlineOf = (object: THREE.Object3D, rect: DOMRect): ProjectedOutline => {
+    const edges: ProjectedSegment[] = [];
+    const vertices: ProjectedPoint[] = [];
+    bodyNode(object)?.traverse((child) => {
+      if (!isOutline(child)) return;
+      const positions = child.geometry.getAttribute("position");
+      const project = (i: number): ProjectedPoint => {
+        const world = new THREE.Vector3()
+          .fromBufferAttribute(positions, i)
+          .applyMatrix4(child.matrixWorld);
+        const ndc = world.clone().project(camera);
+        return {
+          screen: [((ndc.x + 1) / 2) * rect.width, ((1 - ndc.y) / 2) * rect.height],
+          world: [world.x, world.y, world.z],
+          depth: -world.clone().applyMatrix4(camera.matrixWorldInverse).z,
+        };
+      };
+      if (child instanceof THREE.Points)
+        for (let i = 0; i < positions.count; i++) vertices.push(project(i));
+      else
+        for (let i = 0; i + 1 < positions.count; i += 2)
+          edges.push({ a: project(i), b: project(i + 1), exact: edgeMiddle(child, i) });
+    });
+    return { edges, vertices };
   };
 
   const raycaster = new THREE.Raycaster();
@@ -338,17 +399,33 @@ function createView(
     );
     const hit = raycaster
       .intersectObject(model, true)
-      .find((intersection) => intersection.object instanceof THREE.Mesh);
+      .find((intersection) => isPickable(intersection.object));
     if (!hit) return;
     // The clicked face's normal, turned toward the camera: the side the person clicked on.
     const normal = (hit.face?.normal.clone() ?? raycaster.ray.direction.clone().negate())
       .transformDirection(hit.object.matrixWorld)
       .normalize();
     if (normal.dot(raycaster.ray.direction) > 0) normal.negate();
-    pick.onPick(
-      { point: [hit.point.x, hit.point.y, hit.point.z], normal: [normal.x, normal.y, normal.z] },
-      event.shiftKey,
+    // The edge or vertex the click is on, of the clicked body's.
+    const point: ModelPoint = [hit.point.x, hit.point.y, hit.point.z];
+    const surface = {
+      point,
+      normal: [normal.x, normal.y, normal.z],
+      eye: [camera.position.x, camera.position.y, camera.position.z],
+      worldPerPixel:
+        (2 *
+          camera.position.distanceTo(hit.point) *
+          Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+        rect.height,
+    } satisfies ClickedSurface;
+    const snapped = snapToOutline(
+      outlineOf(hit.object, rect),
+      [event.clientX - rect.left, event.clientY - rect.top],
+      surface,
     );
+    // The face the hit triangle draws, by its probe.
+    const face = hit.face ? faceProbe(hit.object, hit.face.a) : null;
+    pick.onPick({ point, normal: surface.normal, face, ...snapped }, event.shiftKey);
   };
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", onPointerUp);

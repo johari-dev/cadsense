@@ -351,6 +351,8 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
         connectors: [],
         base: base?.bytes ?? null,
+        editing: null,
+        manipulatorChange: null,
         output: { kind: "agent", view, outDir },
       });
       yield* pruneRuns(runsDir).pipe(Effect.ignore);
@@ -450,11 +452,19 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
         connectors: input.connectors ?? [],
         base,
+        editing: { previous: input.editing ?? null, touched: input.touched ?? [] },
+        manipulatorChange: input.manipulatorChange ?? null,
         output: { kind: "panel", after: file(after), before: file(before) },
       });
       yield* prunePanelModels().pipe(Effect.ignore);
       const empty = {
         failure: null,
+        notice: null,
+        errorEntities: 0,
+        editing: null,
+        manipulators: [],
+        parameters: null,
+        featureStatus: null,
         features: [],
         feature: null,
         inputs: [],
@@ -479,6 +489,12 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       return {
         status: worstStatus(ran.features),
         failure: ran.failure,
+        notice: ran.panel?.notice ?? null,
+        errorEntities: ran.panel?.errorEntities ?? 0,
+        editing: ran.panel?.editing ?? null,
+        manipulators: ran.panel?.manipulators ?? [],
+        parameters: ran.panel?.parameters ?? null,
+        featureStatus: ran.panel?.featureStatus ?? null,
         features: ran.panel?.features ?? [],
         feature: ran.panel?.feature ?? null,
         inputs: ran.panel?.inputs ?? [],

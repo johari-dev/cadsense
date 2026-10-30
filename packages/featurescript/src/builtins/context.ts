@@ -46,20 +46,17 @@ const IDENTITY_TRANSFORM = FsMap.fromEntries([
   ["translation", [0, 0, 0]],
 ]);
 
-/** Builtins that only feed Onshape's UI (highlights, manipulators, dimension labels). Locally they do nothing. */
+/** Builtins that only feed Onshape's UI (highlights, dimension labels); display.ts handles error entities and manipulators. Locally they do nothing. */
 const UI_ONLY = [
   "recordQuery",
   "setFeatureComputedParameter",
-  "setErrorEntities",
   "setHighlightedEntities",
   "setDimensionedEntities",
   "setExternalDisambiguation",
   "setFeatureHiddenParameters",
-  "addManipulators",
   "addDebugEntities",
   "addAuxiliaryEntities",
   "addReferenceCSysFrame",
-  "transferSubfeatureErrorDisplay",
   "setFeaturePatternInstanceData",
   "unsetFeaturePatternInstanceData",
   "setPatternData",

@@ -5,6 +5,7 @@ import {
 import type {
   CadFeatureScriptPreviewStep,
   EnvironmentId,
+  FeatureScriptEditingState,
   FeatureScriptPanelPreview,
   FeatureScriptPickedConnector,
 } from "@cadsense/contracts";
@@ -32,6 +33,15 @@ export interface FeatureScriptPreviewRequest {
   readonly before: readonly CadFeatureScriptPreviewStep[];
   readonly base: string | null;
   readonly feature: string | undefined;
+  /**
+   * The dialog state the last run returned, null when the dialog is fresh. Sent with each run, but
+   * storing a run's new state doesn't run it again.
+   */
+  readonly editing: FeatureScriptEditingState | null;
+  /** Inputs the person set since that state's run; sent with each run, like `editing`. */
+  readonly touched: readonly string[];
+  /** Counts the person's edits: each one runs again, even when it left every input's text alone. */
+  readonly edits: number;
 }
 
 /**
@@ -90,12 +100,17 @@ export function useFeatureScriptPreview(
   const [state, setState] = useState({ fileKey, ...IDLE });
   const requested = useRef(0);
   const applied = useRef(0);
+  const editing = useRef(request.editing);
+  editing.current = request.editing;
+  const touched = useRef(request.touched);
+  touched.current = request.touched;
   // Inputs arrive as new objects each render; their text decides when to run again.
   const inputsKey = JSON.stringify([
     request.parameters,
     request.connectors,
     request.before,
     request.listKeys,
+    request.edits,
   ]);
   const { environmentId, cwd, path, base, feature } = request;
 
@@ -124,6 +139,8 @@ export function useFeatureScriptPreview(
         ...(before.length > 0 ? { before } : {}),
         ...(base === null ? {} : { base }),
         ...(feature === undefined ? {} : { feature }),
+        editing: editing.current,
+        ...(touched.current.length > 0 ? { touched: touched.current } : {}),
       },
     }).then((result) => {
       // Runs coalesce, so superseded calls resolve with the newest result; never go backwards.

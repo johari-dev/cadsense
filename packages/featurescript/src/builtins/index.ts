@@ -8,6 +8,7 @@ import { BSPLINE_BUILTINS } from "./bspline.ts";
 import { CORE_BUILTINS } from "./core.ts";
 import { CURVATURE_BUILTINS } from "./curvature.ts";
 import { CURVE_BUILTINS } from "./curves.ts";
+import { DISPLAY_BUILTINS } from "./display.ts";
 import { EVALUATOR_BUILTINS } from "./evaluators.ts";
 import { FACE_BUILTINS } from "./faces.ts";
 import { GEOMETRY_BUILTINS } from "./geometry.ts";
@@ -118,6 +119,8 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
     >),
     ...CORE_BUILTINS,
     ...contextBuiltins(oc),
+    // After the context's no-op UI builtins, which these replace.
+    ...DISPLAY_BUILTINS,
     ...GEOMETRY_BUILTINS,
     ...EVALUATOR_BUILTINS,
     ...OPERATION_BUILTINS,
@@ -141,6 +144,7 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
 export const IMPLEMENTED: readonly string[] = [
   ...Object.keys(CORE_BUILTINS),
   ...Object.keys(contextBuiltins(null)),
+  ...Object.keys(DISPLAY_BUILTINS),
   ...Object.keys(GEOMETRY_BUILTINS),
   ...Object.keys(EVALUATOR_BUILTINS),
   ...Object.keys(OPERATION_BUILTINS),

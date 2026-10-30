@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - the runtime reads vendored std files from disk.
 import * as NodeFS from "node:fs";
+import { featureDisplay } from "./builtins/display.ts";
 import { createBuiltins } from "./builtins/index.ts";
-import type { GeometryState } from "./geometry/Model.ts";
+import type { Entity, GeometryState } from "./geometry/Model.ts";
 import { loadOcct, wasmMemoryBytes, type Oc } from "./geometry/occt.ts";
 import { addConnectors } from "./geometry/Connectors.ts";
 import { importStep } from "./geometry/Step.ts";
@@ -74,6 +75,21 @@ export interface FeatureRun {
   readonly statusEnum: string | null;
   /** The custom message from `regenError("...")`, if any. */
   readonly message: string | null;
+  /**
+   * The inputs its status blames (`regenError(message, ["waypoints"])`, warnings' associated
+   * parameters), which Onshape outlines in the dialog. A list item's inner input is std's
+   * `faultyArrayParameterId`, `waypoints[1].height`.
+   */
+  readonly faultyParameters: readonly string[];
+  /**
+   * Entities its `setErrorEntities` (or a thrown `regenError`'s entities) marked, as they were
+   * then: Onshape shows them in red, even after a failed feature's rollback removed them.
+   */
+  readonly errorEntities: readonly Entity[];
+  /** Why some error entities couldn't be found to draw; the feature's status doesn't change. */
+  readonly undrawnErrorEntities: readonly string[];
+  /** Manipulators it added (`addManipulators`), by key, as the dialog would show them. */
+  readonly manipulators: FsMap;
   /** Context variables after the feature. A failed feature's are rolled back. */
   readonly variables: FsMap;
   readonly console: readonly string[];
@@ -250,6 +266,7 @@ export class FeatureScriptRuntime {
       const statusType = untag(status.getField("statusType"));
       const statusEnum = untag(status.getField("statusEnum"));
       const message = untag(status.getField("statusMsg"));
+      const faulty = untag(status.getField("faultyParameters"));
       results.push({
         status: fault
           ? "ERROR"
@@ -258,6 +275,12 @@ export class FeatureScriptRuntime {
             : "OK",
         statusEnum: typeof statusEnum === "string" ? statusEnum : null,
         message: typeof message === "string" ? message : null,
+        faultyParameters: Array.isArray(faulty)
+          ? faulty.map(untag).filter((name) => typeof name === "string")
+          : [],
+        errorEntities: featureDisplay(model, id).errorEntities,
+        undrawnErrorEntities: featureDisplay(model, id).undrawnErrorEntities,
+        manipulators: featureDisplay(model, id).manipulators,
         variables: model.variables(),
         console: this.interpreter.console.slice(consoleStart),
         fault,
