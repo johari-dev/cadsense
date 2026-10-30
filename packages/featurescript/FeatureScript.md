@@ -353,6 +353,32 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
   `LAMINAR_DEPENDENCY`, dependency, historical, `qMatching`, and std's four unimplemented types.
 - Bezier faces can't arrive locally (STEP converts them to B-splines); a kernel-level test covers
   them.
+- Face and body operations: direct edits heal the way Parasolid's local operations do. A box around
+  the part is split by the changed faces, their new surfaces and the neighbors' extended surfaces,
+  and the cells the change sweeps through are added (a face moved outward, a hole filled) or
+  removed. Ids carry through OpenCascade's boolean history; a moved face keeps its id. This covers
+  `opDeleteFace` (heal, cap, leave open, `includeFillet`), `opOffsetFace`, `opMoveFace`,
+  `opReplaceFace`, `opModifyFillet` and face patterns in `opPattern`. `opExtractSurface` copies
+  faces into sheets (with an offset, trimmed only by perpendicular planar neighbors);
+  `opCreateOutline` projects tools onto planar targets; `opSplitFace` and `opSplitEdges` imprint
+  without cutting the body; `opExtendSheetBody` and `opEdgeChange` move edges of flat one-face
+  sheets by a distance; `opDraft` tilts faces about a neutral plane or reference edges square to
+  the pull; `opFullRoundFillet` handles one flat center face between parallel planar sides;
+  `opExtractWires` and `opFlipOrientation` are complete.
+- Shells are accepted only as sharp-join offsets: sampled points on every result face must lie
+  exactly the thickness from one source face, none nearer a kept face, with tolerances no looser
+  than the input's. OpenCascade's rounded-corner fallback, and features or gaps narrower than two
+  walls, stop.
+- Every body must pass OpenCascade's full check and keep vertex and edge tolerances within 0.5 mm,
+  STEP imports included (the loosest of 45 sample files is 0.069 mm), or the run stops.
+  OpenCascade's own STEP files written in meters read back with 5.8 mm tolerances and stop.
+- `opTransform` and `opPattern` stop on any matrix OpenCascade can't keep exactly: uneven or
+  non-uniform scales (std's `fEllipsoid` among them). The bindings have no general transform.
+- Split part and thicken never delete construction planes they use as tools (`splitpart.fs`).
+- Every `GeometryState` carries `lineage`: for each entity id, the ids it came from (split, merged,
+  generated, pattern-copied), kept across operations and dropped with a rolled-back feature.
+- Splitting a whole cylinder's top leaves one more vertex and edge than Parasolid: OpenCascade
+  needs a vertex where a periodic face's seam ends.
 - Corpus: fourteen cases (bolt circle, turned shaft, filleted block, chamfered block, shelled box,
   boss pattern, evaluators, sphere, construction, lofted frustum, swept tube, thickened plate, split
   block, mass properties). Every volume matches its hand-calculated value and every face/edge/vertex
@@ -360,7 +386,8 @@ colors in a STEP file aren't read into `NAME` or `APPEARANCE`.
 
 Not supported locally yet (each stops the run with the calling line): draft, hole, helix, loft guides
 and connections, sweeps that lock or keep the profile's orientation, sheet metal,
-variable/partial/conic fillets, chamfers other than equal offsets, face patterns, curve and surface
+variable/partial/conic/asymmetric fillets, chamfers other than equal offsets, healing or offsetting
+faces of sheets, `opBodyDraft`, `opFaceBlend`, `opBooleanedPattern`, `opDerip`, curve and surface
 definitions beyond the types above (B-splines among them), `evFaceCurvatureDerivatives`, and sketch
 constraint solving.
 
@@ -375,6 +402,17 @@ To confirm against Onshape recordings:
   parameter. Std calls that parameterization "arbitrary", so on curves whose speed varies (splines,
   ellipses) the points may differ from Onshape's. Arc length (the default) is found to 1e-12.
 - `opSplitPart` leaves the original part id on one piece (the lower one in `split-block`).
+- Draft takes material off on the pull side of the neutral plane (from std's angle manipulator).
+- Healing only grows faces that touch the deleted face; deleting a pocket floor fails here, where
+  Onshape may extend the walls through to a slot.
+- Face edits merge coplanar faces across the whole body, so edges from an earlier split face vanish.
+- A moved, offset or replaced face keeps its id; its edges get new ones.
+- Error enums: an empty Delete face selection gives `DIRECT_EDIT_DELETE_SELECT_FACES`; deleting
+  every face gives `DIRECT_EDIT_DELETE_FACE_ALL_FACES`; a failed extract-surface offset gives
+  `DIRECT_EDIT_OFFSET_FACE_FAILED`.
+- Split edges parameters run from the edge's oriented start, by length; extract wires joins edge
+  ends within 0.1 um; face pattern faces are created by `[...id, instanceName]` and copy the seed's
+  attributes.
 - `evApproximateMassProperties` products of inertia are `-integral(x y)`, the usual tensor convention.
 - `opPlane` without a size makes a 1 m plane, like std's plane feature; `opPoint` points are
   construction entities.
