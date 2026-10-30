@@ -24,7 +24,7 @@ export const DEFAULT_CAM: CamSettings = {
 };
 
 /** Below the plate the profile cuts this far into the spoilboard so it falls free at the tabs. */
-const BREAKTHROUGH = 0.01;
+export const BREAKTHROUGH = 0.01;
 const TAB_WIDTH = 0.25;
 const TAB_HEIGHT = 0.04;
 const STEPOVER = 0.4;

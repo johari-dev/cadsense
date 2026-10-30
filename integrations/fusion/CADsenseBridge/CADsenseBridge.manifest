@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "5b0f3c1e-8a4d-4f3b-9c55-6d2e7a1b9f40",
+  "author": "CADsense",
+  "description": {
+    "": "Builds plates sent from CADsense's CAM panel as Fusion documents with router setups."
+  },
+  "version": "0.1.0",
+  "runOnStartup": true,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
