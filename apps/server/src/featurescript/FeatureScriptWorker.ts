@@ -2,7 +2,8 @@
 /**
  * Runs FeatureScript previews off the server's main thread. OpenCascade calls are synchronous and a
  * preview can take seconds, so FeatureScriptPreviews keeps one of these warm, sends it one job at a
- * time, and terminates it on timeout. Std and OpenCascade load on the first job.
+ * time, and terminates it on timeout. Std and OpenCascade load as soon as the worker starts, with a
+ * small preview to warm them, so a replacement started early is ready for its first job.
  */
 import type {
   CadFeatureScriptPreviewResult,
@@ -63,7 +64,8 @@ export interface PreviewJob {
   readonly output: PreviewOutput;
 }
 
-export type PreviewJobResult =
+/** Every result carries the WASM memory the worker holds, which only grows, to know when to replace it. */
+export type PreviewJobResult = { readonly memoryBytes: number } & (
   | {
       readonly id: number;
       readonly kind: "ran";
@@ -89,7 +91,8 @@ export type PreviewJobResult =
       readonly kind: "invalid";
       readonly summary: string;
       readonly failure: FeatureScriptFailure;
-    };
+    }
+);
 
 /** A message for a preview that couldn't start, with file:line:column for syntax errors. */
 const describeFailure = (error: unknown): string => {
@@ -139,15 +142,33 @@ const readImport = ({ root, maxModuleBytes }: PreviewJob["workspace"], relative:
 
 const port = NodeWorkerThreads.parentPort;
 const { stdDir } = NodeWorkerThreads.workerData as FeatureScriptWorkerData;
-let runtime: Promise<FeatureScriptRuntime> | undefined;
 /** The running job's workspace; the warm runtime reads imports through it. */
 let workspace: PreviewJob["workspace"] | undefined;
 
+/** A cube, run once at startup so std's modules, OpenCascade and the mesher are loaded. */
+const WARM_UP = `FeatureScript 3083;
+import(path : "onshape/std/geometry.fs", version : "3083.0");
+annotation { "Feature Type Name" : "Warm up" }
+export const warmUp = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition {}
+    {
+        fCuboid(context, id + "c", { "corner1" : vector(0, 0, 0) * millimeter, "corner2" : vector(1, 1, 1) * millimeter });
+    });
+`;
+// OpenCascade failing to load surfaces on the first job, which awaits this. The warm-up itself is
+// best-effort: whatever broke it, the first job reports.
+const runtime = FeatureScriptRuntime.withGeometry({
+  ...(stdDir ? { stdDir: new URL(stdDir) } : {}),
+  readModule: (path) => (workspace ? readImport(workspace, path) : undefined),
+}).then((loaded) => {
+  try {
+    runPreview(loaded, [{ path: "warm-up.fs", source: WARM_UP }]);
+  } catch {}
+  return loaded;
+});
+
 const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
-  const loaded = await (runtime ??= FeatureScriptRuntime.withGeometry({
-    ...(stdDir ? { stdDir: new URL(stdDir) } : {}),
-    readModule: (path) => (workspace ? readImport(workspace, path) : undefined),
-  }));
+  const loaded = await runtime;
   workspace = job.workspace;
   const { output } = job;
   let result;
@@ -158,7 +179,13 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
     });
   } catch (error) {
     const summary = describeFailure(error);
-    return { id: job.id, kind: "invalid", summary, failure: locateFailure(error, summary) };
+    return {
+      id: job.id,
+      kind: "invalid",
+      summary,
+      failure: locateFailure(error, summary),
+      memoryBytes: loaded.memoryBytes(),
+    };
   }
   const failure =
     result.features
@@ -207,6 +234,7 @@ const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
     elapsedMs: result.elapsedMs,
     png,
     panel,
+    memoryBytes: loaded.memoryBytes(),
   };
 };
 

@@ -57,11 +57,14 @@ keeps the last good model on screen, greyed out, under the cause, a "Show line" 
 the agent to fix it" button, or "for a workaround" when the runtime can't run a builtin. The base is
 the workspace's only STEP file until someone picks another. The panel calls
 `featurescript.preview` with the editor's text; its before/after GLBs are `fspanel-*.bin`
-attachments, and the newest 40 are kept.
+attachments, and the newest 40 are kept. Meshes are indexed (each face's vertices once, normals
+smoothed within a face), and the asset route gzips them for clients that accept it.
 
 The server runs previews in one worker thread (`apps/server/src/featurescript/`), one at a time.
-It loads std and OpenCascade on first use (about half a second), stops after 10 idle minutes,
-and starts fresh after 20 previews, because shapes are never freed. A preview that takes over
+A worker loads std and OpenCascade and runs a small warm-up preview as soon as it starts (about a
+second), and stops after 10 idle minutes. Shapes are never freed, so once a worker's WASM memory
+passes 1.5 GB (a preview adds a few MB) it's replaced, and the replacement starts right away so it's
+warm by the next preview. A preview that takes over
 2 minutes is stopped by terminating the worker. Each preview reloads the user's modules, so edits
 take effect, while std stays loaded. Bundled builds ship the worker as `dist/featurescript-worker.mjs`
 and std as `dist/featurescript-std/`, and keep `replicad-opencascadejs` external, since it loads

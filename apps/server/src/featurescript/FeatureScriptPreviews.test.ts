@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -236,6 +237,36 @@ export function block(context is Context, id is Id)
         assert.include(slow.result.summary, "took longer than 3s");
         const next = yield* h.preview({ path: "cube.fs" });
         assert.equal(next.result.status, "OK");
+      }),
+    ),
+  );
+
+  it.live("replaces a worker past its memory limit, and starts the replacement at once", () =>
+    run(
+      Effect.gen(function* () {
+        // Failure modes: a worker never replaced, so memory grows to OpenCascade's 4 GB limit; the
+        // replacement started only when the next preview arrives, so that preview waits for std
+        // and OpenCascade to load; a worker under the limit replaced anyway. A replacement is
+        // only visible through timing: a cold worker takes about a second, a warm one tens of ms.
+        const timed = (h: Effect.Success<ReturnType<typeof harness>>) =>
+          Effect.gen(function* () {
+            const started = yield* Clock.currentTimeMillis;
+            const preview = yield* h.panel({ path: "cube.fs", source: cube(10) });
+            assert.equal(preview.status, "OK");
+            return (yield* Clock.currentTimeMillis) - started;
+          });
+        const recycling = yield* harness({}, { recycleAtBytes: 0 });
+        yield* timed(recycling);
+        // Sent while the replacement is still warming up, so it waits.
+        const duringWarmUp = yield* timed(recycling);
+        yield* Effect.sleep("8 seconds");
+        const afterWarmUp = yield* timed(recycling);
+        assert.isBelow(afterWarmUp, duringWarmUp / 3);
+
+        const keeping = yield* harness({});
+        const first = yield* timed(keeping);
+        const second = yield* timed(keeping);
+        assert.isBelow(second, first / 3);
       }),
     ),
   );
