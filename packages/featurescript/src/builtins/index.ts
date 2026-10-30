@@ -6,6 +6,7 @@ import { CORE_BUILTINS } from "./core.ts";
 import { EVALUATOR_BUILTINS } from "./evaluators.ts";
 import { GEOMETRY_BUILTINS } from "./geometry.ts";
 import { OPERATION_BUILTINS } from "./operations.ts";
+import { PLANE_BUILTINS } from "./planes.ts";
 import type { StdBuiltinName } from "./stdBuiltinNames.generated.ts";
 
 /**
@@ -125,7 +126,6 @@ export const UNSUPPORTED = [
   "sheetMetalApplyInFlat",
   "updateSheetMetalGeometry",
   // Other
-  "alignCanonically",
   "approximateSpline",
   "clampContextVersion",
   "containsSketch",
@@ -154,6 +154,7 @@ export const createBuiltins = (oc: Oc | null): BuiltinTable =>
     ...EVALUATOR_BUILTINS,
     ...OPERATION_BUILTINS,
     ...CONSTRUCTION_BUILTINS,
+    ...PLANE_BUILTINS,
   }) satisfies Record<StdBuiltinName, BuiltinImpl | "unsupported">;
 
 /** Names with an implementation, for the test that nothing is both implemented and unsupported. */
@@ -164,4 +165,5 @@ export const IMPLEMENTED: readonly string[] = [
   ...Object.keys(EVALUATOR_BUILTINS),
   ...Object.keys(OPERATION_BUILTINS),
   ...Object.keys(CONSTRUCTION_BUILTINS),
+  ...Object.keys(PLANE_BUILTINS),
 ];

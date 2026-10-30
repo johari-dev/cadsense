@@ -160,8 +160,12 @@ export class FeatureScriptRuntime {
 
   /** Calls a top-level std function by file and name, e.g. `("context.fs", "newContext")`. */
   callStd(file: string, name: string, args: readonly FsValue[] = []): FsValue {
-    const module = this.loader.load(`${STD_PREFIX}${file}`);
-    return this.interpreter.callFunction(this.interpreter.topLevelValue(module, name), args);
+    return this.interpreter.callFunction(this.stdValue(file, name), args);
+  }
+
+  /** A top-level std value by file and name, e.g. `("units.fs", "meter")`. */
+  stdValue(file: string, name: string): FsValue {
+    return this.interpreter.topLevelValue(this.loader.load(`${STD_PREFIX}${file}`), name);
   }
 
   /**
@@ -186,6 +190,11 @@ export class FeatureScriptRuntime {
    * `base` (a STEP file) if given. Errors a feature raises
    * become its status, as in Onshape. A fault stops the run; later features don't run.
    * Parameters that reference earlier features are queries, which resolve when the feature runs.
+   *
+   * Like a Part Studio (std's `definePartStudio`), the context starts with the default features:
+   * the Origin and the Top, Front and Right planes, made by `makeId("Origin")`, `makeId("Top")`, ...
+   * They're construction geometry, created before the base and the features. A runtime without a
+   * kernel can't make geometry, so its contexts have none.
    */
   runFeatures(
     steps: readonly FeatureStep[],
@@ -196,6 +205,11 @@ export class FeatureScriptRuntime {
   ): PartStudioRun {
     const context = this.callStd("context.fs", "newContext");
     const model = (untag(context) as FsBuiltin<ModelContext>).native;
+    if (model.oc)
+      this.callStd("defaultFeatures.fs", "addDefaultFeatures", [
+        context,
+        this.stdValue("units.fs", "meter"),
+      ]);
     if (options.base) {
       if (!model.oc)
         throw new Error(

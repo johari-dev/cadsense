@@ -27,6 +27,8 @@ const cube =
   'fCuboid(context, id + "cube", { "corner1" : vector(0, 0, 0) * millimeter, "corner2" : vector(10, 10, 10) * millimeter });';
 const solids = (run: ReturnType<FeatureScriptRuntime["runFeatures"]>) =>
   ordered(run.geometry!, (entity) => entity.type === "BODY" && entity.bodyType === "SOLID").length;
+/** Entities in a context with no features: the default planes and origin every context starts with. */
+const defaultEntities = () => runtime.runFeatures([]).geometry!.entities.size;
 
 describe("geometry", () => {
   it("a feature that fails after modeling leaves no geometry (failure mode 17)", () => {
@@ -34,7 +36,7 @@ describe("geometry", () => {
       { module: feature(`${cube}\nthrow regenError("after modeling");`), feature: "test" },
     ]);
     expect(run.features[0]).toMatchObject({ status: "ERROR", message: "after modeling" });
-    expect(run.geometry!.entities.size).toBe(0);
+    expect(run.geometry!.entities.size).toBe(defaultEntities());
   });
 
   it("an earlier feature's geometry survives a later feature's failure", () => {
@@ -82,7 +84,10 @@ describe("base models", () => {
     const oc = plateRun.oc!;
     const base = writeStep(
       oc,
-      ordered(plateRun.geometry!, (entity) => entity.type === "BODY").map((body) => body.shape),
+      ordered(
+        plateRun.geometry!,
+        (entity) => entity.type === "BODY" && entity.bodyType === "SOLID",
+      ).map((body) => body.shape),
     );
 
     const cut = feature(
@@ -141,7 +146,7 @@ describe("base models", () => {
     ]);
     expect(run.features[0]?.status).toBe("ERROR");
     expect(run.features[0]?.fault?.message).toMatch(/opHelix/);
-    expect(run.geometry!.entities.size).toBe(0);
+    expect(run.geometry!.entities.size).toBe(defaultEntities());
   });
 
   it("filters qEverything by body type, the way std's qBodyType writes it", () => {
@@ -163,7 +168,8 @@ describe("base models", () => {
     ]);
     expect(run.features[0]?.status).toBe("OK");
     expect(run.features[0]!.variables.getField("solids")).toBe(1);
-    expect(run.features[0]!.variables.getField("sheets")).toBe(1);
+    // The sketch region and the Top, Front and Right planes, which are construction sheets.
+    expect(run.features[0]!.variables.getField("sheets")).toBe(4);
   });
 
   // Fit splines. Ways this goes wrong: the curve misses its points; end derivatives are ignored or
@@ -412,7 +418,10 @@ describe("properties", () => {
       },
     ]);
     expect(run.features.map((feature) => feature.status)).toEqual(["OK", "ERROR", "ERROR"]);
-    const named = ordered(run.geometry!, (entity) => entity.type === "BODY")[0];
+    const named = ordered(
+      run.geometry!,
+      (entity) => entity.type === "BODY" && entity.bodyType === "SOLID",
+    )[0];
     expect(Object.fromEntries(named!.properties)).toEqual({
       NAME: "Motor to Spark MAX",
       "CUSTOM:aaaaaaaaaaaaaaaaaaaaaaaa": "red",

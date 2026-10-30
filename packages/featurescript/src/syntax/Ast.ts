@@ -269,7 +269,7 @@ export type Declaration =
     } & DeclarationBase);
 
 export interface Module {
-  /** From `FeatureScript 3083;`. Null if the header is missing. */
+  /** From `FeatureScript 3095;`. Null if the header is missing. */
   readonly version: number | null;
   readonly declarations: readonly Declaration[];
 }

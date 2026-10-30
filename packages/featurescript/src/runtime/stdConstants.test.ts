@@ -51,7 +51,7 @@ describe("std constants", () => {
         }
     expect(count).toBeGreaterThan(900);
     expect(failures).toEqual([]);
-    // ~220 ms on a dev machine to parse and link all 276 files.
+    // ~220 ms on a dev machine to parse and link all 277 files.
     expect(loadMs).toBeLessThan(3000);
   });
 });
