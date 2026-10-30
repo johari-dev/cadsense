@@ -303,6 +303,21 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       return images;
     });
 
+    /** A step whose script is read from the workspace. */
+    const readStep = Effect.fn("FeatureScriptPreviews.readStep")(function* (
+      root: string,
+      field: string,
+      step: typeof CadFeatureScriptPreviewStep.Type,
+    ) {
+      const file = yield* readWorkspaceFile(root, field, step.path, MAX_SCRIPT_BYTES);
+      return {
+        path: file.path,
+        source: new TextDecoder().decode(file.bytes),
+        ...(step.feature === undefined ? {} : { feature: step.feature }),
+        ...(step.parameters === undefined ? {} : { parameters: step.parameters }),
+      };
+    });
+
     const preview = Effect.fn("FeatureScriptPreviews.preview")(function* (
       workspaceRoot: string,
       input: unknown,
@@ -310,23 +325,11 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
     ) {
       const request = yield* decodeCadToolInput(CadFeatureScriptPreviewInput, input);
       const root = yield* fs.realPath(workspaceRoot).pipe(Effect.mapError(unavailable));
-      const readStep = Effect.fn(function* (
-        field: string,
-        step: typeof CadFeatureScriptPreviewStep.Type,
-      ) {
-        const file = yield* readWorkspaceFile(workspaceRoot, field, step.path, MAX_SCRIPT_BYTES);
-        return {
-          path: file.path,
-          source: new TextDecoder().decode(file.bytes),
-          ...(step.feature === undefined ? {} : { feature: step.feature }),
-          ...(step.parameters === undefined ? {} : { parameters: step.parameters }),
-        };
-      });
       const steps = [
         ...(yield* Effect.forEach(request.before ?? [], (step, i) =>
-          readStep(`before[${i}].path`, step),
+          readStep(root, `before[${i}].path`, step),
         )),
-        yield* readStep("path", request),
+        yield* readStep(root, "path", request),
       ];
       const base =
         request.base === undefined
@@ -339,6 +342,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         id: nextJob++,
         steps,
         workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
+        connectors: [],
         base: base?.bytes ?? null,
         output: { kind: "agent", view, outDir },
       });
@@ -349,7 +353,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
               result: {
                 status: "STOPPED",
                 summary: outcome.failure,
-                failure: { message: outcome.failure, location: null },
+                failure: { message: outcome.failure, location: null, unsupported: false },
                 changes: null,
                 features: [],
                 solids: [],
@@ -391,6 +395,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         failure: result.failure,
         changes: result.changes,
         parameters: request.parameters ?? {},
+        before: request.before ?? [],
         base: base?.path ?? null,
         // A failed feature rolled back, so one view of the unchanged model is enough.
         images: result.artifacts
@@ -408,11 +413,17 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
       input: FeatureScriptPanelPreviewInput,
     ) {
       const root = yield* fs.realPath(input.cwd).pipe(Effect.mapError(unavailable));
+      // The agent's earlier features, when the panel opened its card, run from disk.
+      const earlier = yield* Effect.forEach(input.before ?? [], (step, i) =>
+        readStep(root, `before[${i}].path`, step),
+      );
       const step = {
         path: yield* workspacePath(root, "path", input.path),
         source: input.source,
         ...(input.feature === undefined ? {} : { feature: input.feature }),
         ...(input.parameters === undefined ? {} : { parameters: input.parameters }),
+        // The panel's saved feature may have been renamed or moved since.
+        fallbackToFirst: true,
       };
       const base =
         input.base === undefined
@@ -428,8 +439,9 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         .pipe(Effect.mapError(unavailable));
       const outcome = yield* runJob({
         id: nextJob++,
-        steps: [step],
+        steps: [...earlier, step],
         workspace: { root, maxModuleBytes: MAX_SCRIPT_BYTES },
+        connectors: input.connectors ?? [],
         base,
         output: { kind: "panel", after: file(after), before: file(before) },
       });
@@ -448,7 +460,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
         return {
           ...empty,
           status: "STOPPED",
-          failure: { message: outcome.failure, location: null },
+          failure: { message: outcome.failure, location: null, unsupported: false },
         } satisfies FeatureScriptPanelPreview;
       const ran = outcome.success;
       if (ran.kind === "invalid")

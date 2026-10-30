@@ -8,7 +8,7 @@ import { useAssetUrl } from "../assets/assetUrls";
 import { observeCadAppearance } from "../cad/CadAppearance";
 import { CAD_CAMERA_FOV } from "../cad/CadSceneModel";
 import { cn } from "../lib/utils";
-import type { ModelPoint } from "./featureScriptDialog";
+import type { ModelPoint, PickHit } from "./featureScriptDialog";
 
 /** The renderer's view toward the model, matching the iso PNGs agents get. */
 const ISO = new THREE.Vector3(1, 1, 1).normalize();
@@ -24,8 +24,8 @@ export interface FeatureScriptViewportProps {
   /** Grey the model out, for the last good run shown under a failure. */
   readonly stale: boolean;
   readonly picking: boolean;
-  /** A face was clicked while picking; `add` when shift was held. */
-  readonly onPick: (point: ModelPoint, add: boolean) => void;
+  /** The model was clicked while picking; `add` when shift was held. */
+  readonly onPick: (hit: PickHit, add: boolean) => void;
   readonly picks: readonly ModelPoint[];
   /** Bumped to fit the camera to the model again. */
   readonly fitRequest: number;
@@ -82,7 +82,7 @@ export function FeatureScriptViewport(props: FeatureScriptViewportProps) {
     try {
       created = createView(canvas, {
         picking: () => pickingRef.current,
-        onPick: (point, add) => onPickRef.current(point, add),
+        onPick: (hit, add) => onPickRef.current(hit, add),
       });
     } catch {
       canvas.remove();
@@ -166,7 +166,7 @@ function createView(
   canvas: HTMLCanvasElement,
   pick: {
     readonly picking: () => boolean;
-    readonly onPick: (point: ModelPoint, add: boolean) => void;
+    readonly onPick: (hit: PickHit, add: boolean) => void;
   },
 ) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -339,7 +339,16 @@ function createView(
     const hit = raycaster
       .intersectObject(model, true)
       .find((intersection) => intersection.object instanceof THREE.Mesh);
-    if (hit) pick.onPick([hit.point.x, hit.point.y, hit.point.z], event.shiftKey);
+    if (!hit) return;
+    // The clicked face's normal, turned toward the camera: the side the person clicked on.
+    const normal = (hit.face?.normal.clone() ?? raycaster.ray.direction.clone().negate())
+      .transformDirection(hit.object.matrixWorld)
+      .normalize();
+    if (normal.dot(raycaster.ray.direction) > 0) normal.negate();
+    pick.onPick(
+      { point: [hit.point.x, hit.point.y, hit.point.z], normal: [normal.x, normal.y, normal.z] },
+      event.shiftKey,
+    );
   };
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", onPointerUp);

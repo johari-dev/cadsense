@@ -349,6 +349,35 @@ describe("base models", () => {
   });
 });
 
+describe("panel picks", () => {
+  it("finds the faces the preview draws: not sketch regions, construction planes or connectors", () => {
+    // The panel's face picks search this query, so a click can land on a base face or one an
+    // earlier feature made, and never on a sketch region or plane sitting under it.
+    const drawn =
+      "qSketchFilter(qConstructionFilter(qEverything(EntityType.FACE), ConstructionObject.NO), SketchObject.NO)";
+    const run = runtime.runFeatures([
+      {
+        module: feature(
+          [
+            cube,
+            'const sketch = newSketchOnPlane(context, id + "sketch", { "sketchPlane" : plane(vector(0, 0, 10) * millimeter, vector(0, 0, 1)) });',
+            'skCircle(sketch, "circle", { "center" : vector(5, 5) * millimeter, "radius" : 2 * millimeter });',
+            "skSolve(sketch);",
+            'opPlane(context, id + "plane", { "plane" : plane(vector(0, 0, 10) * millimeter, vector(0, 0, 1)) });',
+            'opMateConnector(context, id + "port", { "coordSystem" : coordSystem(vector(5, 5, 10) * millimeter, vector(1, 0, 0), vector(0, 0, 1)), "owner" : qCreatedBy(id + "cube", EntityType.BODY) });',
+            `setVariable(context, "faces", size(evaluateQuery(context, ${drawn})));`,
+            `setVariable(context, "top", size(evaluateQuery(context, qClosestTo(${drawn}, vector(5, 5, 10) * millimeter))));`,
+          ].join("\n"),
+        ),
+        feature: "test",
+      },
+    ]);
+    expect(run.features[0]?.status, JSON.stringify(run.features[0]?.exceptions)).toBe("OK");
+    expect(run.features[0]!.variables.getField("faces")).toBe(6);
+    expect(run.features[0]!.variables.getField("top")).toBe(1);
+  });
+});
+
 describe("properties", () => {
   it("names a body, and the name follows it through later operations and features", () => {
     // Failure modes: an operation that keeps the body's id drops its properties; one custom

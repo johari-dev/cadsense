@@ -406,6 +406,56 @@ export function block(context is Context, id is Id)
     ),
   );
 
+  it.live(
+    "panel: runs the agent's earlier features from disk, and points picked in the panel",
+    () =>
+      run(
+        Effect.gen(function* () {
+          // Failure modes: earlier features dropped, so the panel shows something other than the
+          // card; the dialog or the change describing an earlier feature instead of the opened one;
+          // picked points missing, so queries for them select nothing.
+          const h = yield* harness({ "ports.fs": cube(10) });
+          const atConnector = feature(
+            'const origin = evMateConnector(context, { "mateConnector" : qCreatedBy(makeId("Picked") + "c1", EntityType.BODY) }).origin;\n        fCuboid(context, id + "c", { "corner1" : origin, "corner2" : origin + vector(1, 1, 1) * millimeter });',
+          );
+          const preview = yield* h.panel({
+            path: "wire.fs",
+            source: atConnector,
+            before: [{ path: "ports.fs" }],
+            connectors: [{ id: "c1", origin: [0.02, 0, 0], zAxis: [0, 0, 1] }],
+          });
+          assert.isNull(preview.failure);
+          assert.equal(preview.status, "OK");
+          assert.equal(preview.feature, "test");
+          assert.closeTo(preview.changes!.volumeMm3, 1, 1e-6);
+          assert.deepEqual(
+            preview.solids.map((solid) => Math.round(solid.volumeMm3)),
+            [1000, 1],
+          );
+          // At the picked point, within the tessellation's deflection.
+          preview.solids[1]!.boundsMm.min.forEach((mm, i) =>
+            assert.closeTo(mm, [20, 0, 0][i]!, 0.06),
+          );
+        }),
+      ),
+  );
+
+  it.live("panel: a saved feature that's gone runs the file's first feature instead", () =>
+    run(
+      Effect.gen(function* () {
+        const h = yield* harness({});
+        const preview = yield* h.panel({
+          path: "cube.fs",
+          source: cube(10),
+          feature: "moved",
+          parameters: { size: "nope(" },
+        });
+        assert.equal(preview.status, "OK");
+        assert.equal(preview.feature, "test");
+      }),
+    ),
+  );
+
   it.live("panel: a feature that deletes everything still has a model before it", () =>
     run(
       Effect.gen(function* () {
@@ -441,6 +491,7 @@ export function block(context is Context, id is Id)
         assert.equal(card!.typeName, "Bolt circle");
         assert.equal(card!.base, "plate.step");
         assert.deepEqual(card!.parameters, { face: FACE, count: "4" });
+        assert.deepEqual(card!.before, []);
         assert.deepEqual(
           card!.images.map((image) => image.view),
           ["iso", "top", "front", "right"],
@@ -456,6 +507,13 @@ export function block(context is Context, id is Id)
         );
         assert.equal(invalid.result.status, "INVALID");
         assert.equal(invalid.card!.feature, "boltCircle");
+        // The card keeps the features the agent ran first, so the panel can run them too.
+        const earlier = { path: "bolt.fs", parameters: { face: FACE, count: "3" } };
+        const stacked = yield* h.preview(
+          { path: "bolt.fs", base: "plate.step", parameters: { face: FACE }, before: [earlier] },
+          threadId,
+        );
+        assert.deepEqual(stacked.card!.before, [earlier]);
         const noCard = yield* h.preview({ path: "bolt.fs" });
         assert.isUndefined(noCard.card);
         const failed = yield* h.preview({ path: "missing-face.fs" }, threadId).pipe(Effect.flip);
