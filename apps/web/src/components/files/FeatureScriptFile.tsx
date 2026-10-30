@@ -21,6 +21,7 @@ import {
   inputsChanged,
   previewInputs,
   useFeatureScriptFileSettings,
+  withManipulated,
   withoutInputs,
   withRunEditing,
   type FeatureScriptFileSettings,
@@ -169,6 +170,12 @@ export function FeatureScriptFile(props: {
           base={base}
           onShowLine={showLine}
           onAskAgent={(failure) => seed(fixRequest(props.relativePath, failure))}
+          // A drag's run keeps the inputs its change function set as the person's.
+          onManipulate={(change) =>
+            run.manipulate(change, (ran, from) =>
+              updateInputs((current) => withManipulated(current, from, ran)),
+            )
+          }
         />
       ) : (
         <>

@@ -2,6 +2,8 @@ import type {
   CadFeatureScriptPreviewStep,
   EnvironmentId,
   FeatureScriptEditingState,
+  FeatureScriptInputKind,
+  FeatureScriptPanelPreview,
   FeatureScriptPickedConnector,
 } from "@cadsense/contracts";
 import { useCallback } from "react";
@@ -9,7 +11,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "../lib/storage";
-import { listExpression, type ModelPoint } from "./featureScriptDialog";
+import { inputExpression, listExpression, type ModelPoint } from "./featureScriptDialog";
 
 /** Inputs set by typing or picking: input id to FeatureScript expression, and the picks behind it. */
 interface InputValues {
@@ -198,6 +200,90 @@ export function previewInputs(settings: FeatureScriptFileSettings): {
       ...lists.flatMap(([, items]) => items.flatMap((item) => Object.values(item.points ?? {}))),
     ].flat(),
     listKeys: Object.fromEntries(lists.map(([id, items]) => [id, items.map((item) => item.key)])),
+  };
+}
+
+/** What a run's dialog showed, with the item keys of each list it ran. */
+type RanDialog = Pick<FeatureScriptPanelPreview, "inputs"> & {
+  readonly listKeys: Readonly<Record<string, readonly string[]>>;
+};
+
+/** Item input kinds whose shown value (`40 mm`, `true`) can be typed back as an expression. */
+const TYPED_KINDS: ReadonlySet<FeatureScriptInputKind> = new Set([
+  "length",
+  "angle",
+  "integer",
+  "real",
+  "boolean",
+  "enum",
+]);
+
+/**
+ * A list's items with the inputs a manipulator change set in the run `ran`, against the run the
+ * drag started `from`: each item, matched to the runs' items by key, gets the inner inputs whose
+ * value the change moved, as typed (`40.5 * millimeter`). Null when a moved input has no typed
+ * form (a query, say), so the caller keeps the run's expression for the whole list.
+ */
+function movedItems(
+  items: readonly FeatureScriptListItem[],
+  list: string,
+  from: RanDialog,
+  ran: RanDialog,
+): readonly FeatureScriptListItem[] | null {
+  const runItem = (run: RanDialog, key: string) => {
+    const index = run.listKeys[list]?.indexOf(key) ?? -1;
+    return index < 0 ? undefined : run.inputs.find((input) => input.id === list)?.items[index];
+  };
+  const next: FeatureScriptListItem[] = [];
+  for (const item of items) {
+    const before = runItem(from, item.key);
+    const after = runItem(ran, item.key);
+    let changed = item;
+    for (const input of after ?? []) {
+      const was = before?.find((candidate) => candidate.id === input.id);
+      if (!was || was.value === input.value) continue;
+      if (!TYPED_KINDS.has(input.kind)) return null;
+      changed = withValue(changed, input.id, inputExpression(input.kind, input.value));
+    }
+    next.push(changed);
+  }
+  return next;
+}
+
+/**
+ * The settings after a manipulator drag the run `ran` took, which started from the run `from`:
+ * the inputs its change function set (`ran.parameters`) kept as the person's, so the next run
+ * gives the same model. Top-level inputs, and lists sent as one expression, take the run's
+ * expressions; lists edited item by item stay items (see {@link movedItems}). The run's dialog
+ * state is kept for the inputs these settings send, since that run already ran the editing logic
+ * on them, and the edit is counted like any other. The same settings when the change failed.
+ */
+export function withManipulated(
+  settings: FeatureScriptFileSettings,
+  from: RanDialog,
+  ran: RanDialog & Pick<FeatureScriptPanelPreview, "parameters" | "editing">,
+): FeatureScriptFileSettings {
+  if (ran.parameters === null) return settings;
+  const sent = previewInputs(settings).parameters;
+  const lists: Record<string, readonly FeatureScriptListItem[]> = { ...settings.lists };
+  let next = settings;
+  for (const [id, expression] of Object.entries(ran.parameters)) {
+    if (expression === sent[id]) continue;
+    const items = lists[id];
+    const moved = items ? movedItems(items, id, from, ran) : null;
+    if (moved) lists[id] = moved;
+    else {
+      delete lists[id];
+      next = withValue(next, id, expression);
+    }
+  }
+  const { touched: _touched, editing: _editing, ...rest } = { ...next, lists };
+  return {
+    ...rest,
+    ...(ran.editing
+      ? { editing: { parameters: previewInputs(rest).parameters, edited: ran.editing.edited } }
+      : {}),
+    edits: (settings.edits ?? 0) + 1,
   };
 }
 

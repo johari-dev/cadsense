@@ -9,6 +9,24 @@ import { observeCadAppearance } from "../cad/CadAppearance";
 import { CAD_CAMERA_FOV } from "../cad/CadSceneModel";
 import { cn } from "../lib/utils";
 import type { ModelPoint, PickHit } from "./featureScriptDialog";
+import {
+  arcGeometry,
+  buildHandle,
+  disposeHandle,
+  dragProxy,
+  focusHandle,
+  scaleHandle,
+  type DrawnHandle,
+} from "./featureScriptHandles";
+import {
+  dragManipulator,
+  handlePoint,
+  startDrag,
+  type Drag,
+  type DragValue,
+  type DrawnManipulator,
+  type Ray,
+} from "./featureScriptManipulators";
 import { bodyNode, edgeMiddle, faceProbe, isOutline, isPickable } from "./featureScriptScene";
 import {
   snapToOutline,
@@ -42,8 +60,35 @@ export interface FeatureScriptViewportProps {
   readonly picks: readonly ModelPoint[];
   /** Bumped to fit the camera to the model again. */
   readonly fitRequest: number;
+  /**
+   * The previewed feature's manipulators to draw and drag, each with the dialog row it drives
+   * (its name labels the value while dragging); empty to draw none. A new array redraws them.
+   */
+  readonly manipulators: readonly ViewManipulator[];
+  /** A handle is being dragged (where its value shows, in the view's pixels), or null when not. */
+  readonly onDrag: (drag: ManipulatorDrag | null) => void;
+  /** A drag was released (or a flip arrow clicked): the manipulator and its changed fields. */
+  readonly onRelease: (
+    manipulator: DrawnManipulator,
+    changes: Readonly<Record<string, string>>,
+  ) => void;
   /** A model couldn't be fetched or read (pruned, say); the view keeps what it had. */
   readonly onLoadFailed: (attachmentId: string) => void;
+}
+
+/** A manipulator to draw, and the name of the dialog row it drives, if the dialog shows one. */
+export interface ViewManipulator {
+  readonly manipulator: DrawnManipulator;
+  readonly name: string | null;
+}
+
+/** A drag in progress, for the panel: what's dragged, its value, and where it shows. */
+export interface ManipulatorDrag {
+  readonly key: string;
+  /** What the handle shows, e.g. `Z offset 40 mm`. */
+  readonly label: string;
+  /** The handle's position in the view, in CSS pixels from its top left. */
+  readonly at: readonly [number, number];
 }
 
 /** Loads one model attachment into the view once its URL is signed. */
@@ -81,6 +126,10 @@ export function FeatureScriptViewport(props: FeatureScriptViewportProps) {
   onPickRef.current = props.onPick;
   const pickingRef = useRef(props.picking);
   pickingRef.current = props.picking;
+  const onDragRef = useRef(props.onDrag);
+  onDragRef.current = props.onDrag;
+  const onReleaseRef = useRef(props.onRelease);
+  onReleaseRef.current = props.onRelease;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -96,6 +145,8 @@ export function FeatureScriptViewport(props: FeatureScriptViewportProps) {
       created = createView(canvas, {
         picking: () => pickingRef.current,
         onPick: (hit, add) => onPickRef.current(hit, add),
+        onDrag: (drag) => onDragRef.current(drag),
+        onRelease: (manipulator, changes) => onReleaseRef.current(manipulator, changes),
       });
     } catch {
       canvas.remove();
@@ -127,6 +178,7 @@ export function FeatureScriptViewport(props: FeatureScriptViewportProps) {
   }, [view, props.before]);
   useEffect(() => view?.show(props.show), [view, props.show]);
   useEffect(() => view?.setPicks(props.picks), [view, props.picks]);
+  useEffect(() => view?.setManipulators(props.manipulators), [view, props.manipulators]);
   useEffect(() => {
     if (props.fitRequest > 0) view?.fit();
   }, [view, props.fitRequest]);
@@ -180,6 +232,8 @@ function createView(
   pick: {
     readonly picking: () => boolean;
     readonly onPick: (hit: PickHit, add: boolean) => void;
+    readonly onDrag: (drag: ManipulatorDrag | null) => void;
+    readonly onRelease: FeatureScriptViewportProps["onRelease"];
   },
 ) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -201,6 +255,9 @@ function createView(
   const markers = new THREE.Group();
   markers.renderOrder = 1;
   scene.add(markers);
+  const handlesGroup = new THREE.Group();
+  scene.add(handlesGroup);
+  let handles: { readonly handle: DrawnHandle; readonly name: string | null }[] = [];
   const models: Record<Slot, THREE.Group | null> = { after: null, before: null };
   const loading: Record<Slot, string | null> = { after: null, before: null };
   let shown: Slot = "after";
@@ -215,7 +272,10 @@ function createView(
     if (frame || disposed) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      if (!disposed) renderer.render(scene, camera);
+      if (disposed) return;
+      scaleHandles();
+      renderer.render(scene, camera);
+      describeHandles();
     });
   };
   controls.addEventListener("change", render);
@@ -430,6 +490,262 @@ function createView(
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", onPointerUp);
 
+  /** The model length one pixel spans at `point`, as the camera sees it now. */
+  const worldPerPixel = (point: THREE.Vector3) =>
+    (2 * camera.position.distanceTo(point) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+    Math.max(canvas.clientHeight, 1);
+  /** Keeps each handle the same size on screen, whatever the zoom. */
+  function scaleHandles() {
+    camera.updateMatrixWorld();
+    for (const { handle } of handles) scaleHandle(handle, worldPerPixel(handle.root.position));
+  }
+  /** `point` in the view's CSS pixels from its top left. */
+  const onScreen = (point: THREE.Vector3): [number, number] => {
+    const ndc = point.clone().project(camera);
+    return [((ndc.x + 1) / 2) * canvas.clientWidth, ((1 - ndc.y) / 2) * canvas.clientHeight];
+  };
+  /**
+   * Lists where each handle's parts are on screen in the canvas's `data-handles` (JSON of key,
+   * type, part and x, y in CSS pixels), so tests and tools can grab one without reading WebGL.
+   */
+  function describeHandles() {
+    if (handles.length === 0) {
+      delete canvas.dataset.handles;
+      return;
+    }
+    canvas.dataset.handles = JSON.stringify(
+      handles.flatMap(({ handle }) =>
+        handle.hits.map((hit) => {
+          const [x, y] = onScreen(hit.grab.clone().applyMatrix4(handle.root.matrixWorld));
+          return {
+            key: handle.manipulator.key,
+            type: handle.manipulator.type,
+            part: hit.part,
+            x: Math.round(x * 10) / 10,
+            y: Math.round(y * 10) / 10,
+          };
+        }),
+      ),
+    );
+  }
+
+  /** Fades the models while a handle is dragged, so the dashed proxy reads as what's coming. */
+  const setFaded = (faded: boolean) => {
+    for (const model of [models.after, models.before])
+      model?.traverse((child) => {
+        if (!(child instanceof THREE.Mesh || child instanceof THREE.LineSegments)) return;
+        for (const material of [child.material].flat()) {
+          const own = material.userData.unfaded as
+            | { readonly transparent: boolean; readonly opacity: number }
+            | undefined;
+          if (faded && !own) {
+            material.userData.unfaded = {
+              transparent: material.transparent,
+              opacity: material.opacity,
+            };
+            material.transparent = true;
+            material.opacity = material.opacity * 0.3;
+          } else if (!faded && own) {
+            material.transparent = own.transparent;
+            material.opacity = own.opacity;
+            delete material.userData.unfaded;
+          } else continue;
+          material.needsUpdate = true;
+        }
+      });
+  };
+
+  const handleRaycaster = new THREE.Raycaster();
+  const rayAt = (event: PointerEvent): Ray => {
+    const rect = canvas.getBoundingClientRect();
+    handleRaycaster.setFromCamera(
+      new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ),
+      camera,
+    );
+    const { origin, direction } = handleRaycaster.ray;
+    return {
+      origin: [origin.x, origin.y, origin.z],
+      direction: [direction.x, direction.y, direction.z],
+    };
+  };
+  /** The handle part under the pointer, nearest the camera. */
+  const handleAt = (event: PointerEvent) => {
+    if (handles.length === 0) return null;
+    scaleHandles();
+    rayAt(event);
+    const [nearest] = handleRaycaster.intersectObjects(
+      handles.flatMap(({ handle }) => handle.hits.map((hit) => hit.mesh)),
+      false,
+    );
+    if (!nearest) return null;
+    for (const { handle, name } of handles) {
+      const hit = handle.hits.find((candidate) => candidate.mesh === nearest.object);
+      if (hit) return { handle, hit, name };
+    }
+    return null;
+  };
+
+  let dragging: {
+    readonly handle: DrawnHandle;
+    readonly drag: Drag;
+    readonly pointerId: number;
+    readonly down: readonly [number, number];
+    moved: boolean;
+    value: DragValue | null;
+    proxy: THREE.Group | null;
+  } | null = null;
+
+  /** Puts a handle back where its run drew it. */
+  const restoreHandle = (handle: DrawnHandle) => {
+    const { manipulator } = handle;
+    handle.root.position.set(...handlePoint(manipulator));
+    if (handle.arc && manipulator.type === "ANGULAR") {
+      handle.arc.geometry.dispose();
+      handle.arc.geometry = arcGeometry(manipulator, manipulator.angle);
+    }
+  };
+  /** Ends the drag; the handle stays where it was dragged until the next run redraws it. */
+  const endDrag = () => {
+    const ended = dragging;
+    if (!ended) return;
+    dragging = null;
+    window.removeEventListener("keydown", onDragKey, true);
+    if (canvas.hasPointerCapture(ended.pointerId)) canvas.releasePointerCapture(ended.pointerId);
+    if (ended.proxy) {
+      handlesGroup.remove(ended.proxy);
+      disposeHandle(ended.proxy);
+    }
+    focusHandle(ended.handle, null);
+    setFaded(false);
+    canvas.style.cursor = "";
+    pick.onDrag(null);
+    render();
+  };
+  const cancelDrag = () => {
+    if (!dragging) return;
+    restoreHandle(dragging.handle);
+    endDrag();
+  };
+  function onDragKey(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    // The drag's Escape, not the panel's or a field's.
+    event.stopPropagation();
+    event.preventDefault();
+    cancelDrag();
+  }
+
+  // Capturing, so a press on a handle starts a drag before the orbit controls see it.
+  const onHandleDown = (event: PointerEvent) => {
+    if (event.button !== 0 || dragging || pick.picking()) return;
+    const found = handleAt(event);
+    if (!found) return;
+    const drag = startDrag(found.handle.manipulator, found.hit.part, rayAt(event), found.name);
+    if (!drag) return;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    dragging = {
+      handle: found.handle,
+      drag,
+      pointerId: event.pointerId,
+      down: [event.clientX, event.clientY],
+      moved: false,
+      value: null,
+      proxy: null,
+    };
+    window.addEventListener("keydown", onDragKey, true);
+    focusHandle(found.handle, found.hit.part);
+    canvas.style.cursor = found.hit.part === "flip" ? "pointer" : "grabbing";
+    render();
+  };
+  const onHandleMove = (event: PointerEvent) => {
+    if (!dragging) {
+      // Over a handle, the cursor says it can be grabbed.
+      if (event.buttons !== 0 || pick.picking()) return;
+      const found = handleAt(event);
+      canvas.style.cursor = found ? (found.hit.part === "flip" ? "pointer" : "grab") : "";
+      return;
+    }
+    const current = dragging;
+    if (event.pointerId !== current.pointerId) return;
+    const { manipulator } = current.handle;
+    // A flip arrow flips on a click; dragging it does nothing.
+    if (manipulator.type === "FLIP") return;
+    if (
+      !current.moved &&
+      Math.hypot(event.clientX - current.down[0], event.clientY - current.down[1]) <= 3
+    )
+      return;
+    if (!current.moved) {
+      current.moved = true;
+      setFaded(true);
+    }
+    const start = new THREE.Vector3(...handlePoint(manipulator));
+    const scale = worldPerPixel(start);
+    const value = dragManipulator(current.drag, rayAt(event), { worldPerPixel: scale });
+    if (!value) return;
+    current.value = value;
+    current.handle.root.position.set(...value.at);
+    const angle =
+      manipulator.type === "ANGULAR" && typeof value.value === "number" ? value.value : null;
+    if (current.handle.arc && manipulator.type === "ANGULAR" && angle !== null) {
+      current.handle.arc.geometry.dispose();
+      current.handle.arc.geometry = arcGeometry(manipulator, angle);
+    }
+    if (current.proxy) {
+      handlesGroup.remove(current.proxy);
+      disposeHandle(current.proxy);
+    }
+    current.proxy = dragProxy(manipulator, { at: value.at, angle }, scale);
+    handlesGroup.add(current.proxy);
+    pick.onDrag({
+      key: manipulator.key,
+      label: value.label,
+      at: onScreen(new THREE.Vector3(...value.at)),
+    });
+    render();
+  };
+  const onHandleUp = (event: PointerEvent) => {
+    const ended = dragging;
+    if (!ended || event.pointerId !== ended.pointerId) return;
+    const { manipulator } = ended.handle;
+    const flip =
+      manipulator.type === "FLIP" && !ended.moved
+        ? dragManipulator(ended.drag, rayAt(event), { worldPerPixel: 1 })
+        : null;
+    const released = flip ?? (ended.moved ? ended.value : null);
+    if (!released) restoreHandle(ended.handle);
+    endDrag();
+    if (released) pick.onRelease(manipulator, released.changes);
+  };
+  const onLostCapture = () => cancelDrag();
+  canvas.addEventListener("pointerdown", onHandleDown, { capture: true });
+  canvas.addEventListener("pointermove", onHandleMove);
+  canvas.addEventListener("pointerup", onHandleUp);
+  canvas.addEventListener("lostpointercapture", onLostCapture);
+
+  /** Draws `next` in place of the handles drawn now; a drag in progress is dropped. */
+  const setManipulators = (next: readonly ViewManipulator[]) => {
+    cancelDrag();
+    for (const { handle } of handles) {
+      handlesGroup.remove(handle.root);
+      disposeHandle(handle.root);
+      if (handle.arc) {
+        handlesGroup.remove(handle.arc);
+        disposeHandle(handle.arc);
+      }
+    }
+    handles = next.map(({ manipulator, name }) => ({ handle: buildHandle(manipulator), name }));
+    for (const { handle } of handles) {
+      handlesGroup.add(handle.root);
+      if (handle.arc) handlesGroup.add(handle.arc);
+    }
+    render();
+  };
+
   return {
     load,
     setModel,
@@ -447,6 +763,7 @@ function createView(
       picks = points;
       drawPicks();
     },
+    setManipulators,
     setBackground: (color: number) => {
       renderer.setClearColor(color);
       render();
@@ -464,9 +781,15 @@ function createView(
       cancelAnimationFrame(frame);
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointerdown", onHandleDown, { capture: true });
+      canvas.removeEventListener("pointermove", onHandleMove);
+      canvas.removeEventListener("pointerup", onHandleUp);
+      canvas.removeEventListener("lostpointercapture", onLostCapture);
+      window.removeEventListener("keydown", onDragKey, true);
       controls.dispose();
       for (const object of [models.after, models.before, markers])
         if (object) disposeObject(object);
+      disposeHandle(handlesGroup);
       edgeMaterial.dispose();
       renderer.dispose();
       // Browsers cap live WebGL contexts and drop the oldest, which could be the CAD viewer's.

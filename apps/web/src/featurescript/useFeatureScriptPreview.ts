@@ -6,10 +6,11 @@ import type {
   CadFeatureScriptPreviewStep,
   EnvironmentId,
   FeatureScriptEditingState,
+  FeatureScriptManipulatorChange,
   FeatureScriptPanelPreview,
   FeatureScriptPickedConnector,
 } from "@cadsense/contracts";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { featureScriptEnvironment } from "../state/featurescript";
 import { useDebouncedValue } from "../state/queries";
@@ -84,6 +85,18 @@ const IDLE: FeatureScriptPreviewState = {
 };
 
 /**
+ * Runs a manipulator drag of the latest run: its "Manipulator Change Function" and then the
+ * feature, with the request's inputs. `keep` gets the run that took the drag and the run it
+ * started from, to keep the inputs the change set; that settings update doesn't run again. It
+ * isn't called when the change failed, or when the person changed an input meanwhile, whose own
+ * run follows.
+ */
+export type ManipulateFeatureScript = (
+  change: FeatureScriptManipulatorChange,
+  keep: (ran: FeatureScriptPanelRun, from: FeatureScriptPanelRun) => void,
+) => void;
+
+/**
  * Runs the file panel's preview whenever the script, an input, the base or the feature changes.
  * Text changes wait for the editor's save debounce; dialog changes run at once. Pass a null source
  * to stop (a file that isn't FeatureScript). Switching files starts over, and the debounced text
@@ -91,7 +104,7 @@ const IDLE: FeatureScriptPreviewState = {
  */
 export function useFeatureScriptPreview(
   request: FeatureScriptPreviewRequest,
-): FeatureScriptPreviewState {
+): FeatureScriptPreviewState & { readonly manipulate: ManipulateFeatureScript } {
   const run = useAtomCommand(featureScriptEnvironment.preview, { reportFailure: false });
   const fileKey = JSON.stringify([request.environmentId, request.cwd, request.path]);
   const edit = useMemo(() => ({ fileKey, source: request.source }), [fileKey, request.source]);
@@ -100,10 +113,6 @@ export function useFeatureScriptPreview(
   const [state, setState] = useState({ fileKey, ...IDLE });
   const requested = useRef(0);
   const applied = useRef(0);
-  const editing = useRef(request.editing);
-  editing.current = request.editing;
-  const touched = useRef(request.touched);
-  touched.current = request.touched;
   // Inputs arrive as new objects each render; their text decides when to run again.
   const inputsKey = JSON.stringify([
     request.parameters,
@@ -113,63 +122,123 @@ export function useFeatureScriptPreview(
     request.edits,
   ]);
   const { environmentId, cwd, path, base, feature } = request;
+  /** What the next run sends; the editing state and touched inputs ride along without running. */
+  const current = useRef({ ...request, fileKey, source, inputsKey, latest: state.latest });
+  current.current = {
+    ...request,
+    fileKey,
+    source,
+    inputsKey,
+    latest: state.fileKey === fileKey ? state.latest : null,
+  };
+  /**
+   * Set while the inputs a drag's run set are being kept, to what else that run sent: the input
+   * change that follows has already run, unless something else changed with it.
+   */
+  const kept = useRef<
+    | (Pick<typeof request, "base" | "feature"> & {
+        readonly fileKey: string;
+        readonly source: string;
+      })
+    | null
+  >(null);
+
+  const send = useCallback(
+    (
+      manipulation: {
+        readonly change: FeatureScriptManipulatorChange;
+        readonly keep: Parameters<ManipulateFeatureScript>[1];
+      } | null,
+    ) => {
+      const sent = current.current;
+      const { source } = sent;
+      if (source === null) return;
+      const id = ++requested.current;
+      const { fileKey } = sent;
+      const from = sent.latest;
+      setState((state) =>
+        state.fileKey === fileKey
+          ? { ...state, running: true }
+          : { fileKey, ...IDLE, running: true },
+      );
+      const [parameters, connectors, before, listKeys] = JSON.parse(sent.inputsKey) as [
+        FeatureScriptPreviewRequest["parameters"],
+        FeatureScriptPreviewRequest["connectors"],
+        FeatureScriptPreviewRequest["before"],
+        FeatureScriptPreviewRequest["listKeys"],
+      ];
+      void run({
+        environmentId: sent.environmentId,
+        input: {
+          cwd: sent.cwd,
+          path: sent.path,
+          source,
+          parameters,
+          ...(connectors.length > 0 ? { connectors } : {}),
+          ...(before.length > 0 ? { before } : {}),
+          ...(sent.base === null ? {} : { base: sent.base }),
+          ...(sent.feature === undefined ? {} : { feature: sent.feature }),
+          editing: sent.editing,
+          ...(sent.touched.length > 0 ? { touched: sent.touched } : {}),
+          ...(manipulation ? { manipulatorChange: manipulation.change } : {}),
+        },
+      }).then((result) => {
+        // Runs coalesce, so superseded calls resolve with the newest result; never go backwards.
+        if (id < applied.current) return;
+        applied.current = id;
+        const running = id !== requested.current;
+        // A superseded call resolves with a newer run, so its keys can lag until that run's own
+        // call resolves right after.
+        const latest = result._tag === "Success" ? { ...result.value, listKeys } : null;
+        if (
+          manipulation &&
+          latest?.parameters &&
+          from &&
+          !running &&
+          current.current.fileKey === fileKey &&
+          current.current.inputsKey === sent.inputsKey
+        ) {
+          kept.current = { fileKey, source, base: sent.base, feature: sent.feature };
+          manipulation.keep(latest, from);
+        }
+        setState((state) =>
+          state.fileKey !== fileKey
+            ? state
+            : latest
+              ? {
+                  fileKey,
+                  latest,
+                  lastGood: worked(latest) ? latest : state.lastGood,
+                  running,
+                  error: null,
+                }
+              : result._tag === "Success" || isAtomCommandInterrupted(result)
+                ? { ...state, running }
+                : { ...state, running, error: failureText(squashAtomCommandFailure(result)) },
+        );
+      });
+    },
+    [run],
+  );
 
   useEffect(() => {
     if (source === null) return;
-    const id = ++requested.current;
-    setState((current) =>
-      current.fileKey === fileKey
-        ? { ...current, running: true }
-        : { fileKey, ...IDLE, running: true },
-    );
-    const [parameters, connectors, before, listKeys] = JSON.parse(inputsKey) as [
-      FeatureScriptPreviewRequest["parameters"],
-      FeatureScriptPreviewRequest["connectors"],
-      FeatureScriptPreviewRequest["before"],
-      FeatureScriptPreviewRequest["listKeys"],
-    ];
-    void run({
-      environmentId,
-      input: {
-        cwd,
-        path,
-        source,
-        parameters,
-        ...(connectors.length > 0 ? { connectors } : {}),
-        ...(before.length > 0 ? { before } : {}),
-        ...(base === null ? {} : { base }),
-        ...(feature === undefined ? {} : { feature }),
-        editing: editing.current,
-        ...(touched.current.length > 0 ? { touched: touched.current } : {}),
-      },
-    }).then((result) => {
-      // Runs coalesce, so superseded calls resolve with the newest result; never go backwards.
-      if (id < applied.current) return;
-      applied.current = id;
-      const running = id !== requested.current;
-      setState((current) =>
-        current.fileKey !== fileKey
-          ? current
-          : result._tag === "Success"
-            ? (() => {
-                // A superseded call resolves with a newer run, so its keys can lag until that
-                // run's own call resolves right after.
-                const latest = { ...result.value, listKeys };
-                return {
-                  fileKey,
-                  latest,
-                  lastGood: worked(latest) ? latest : current.lastGood,
-                  running,
-                  error: null,
-                };
-              })()
-            : isAtomCommandInterrupted(result)
-              ? { ...current, running }
-              : { ...current, running, error: failureText(squashAtomCommandFailure(result)) },
-      );
-    });
-  }, [run, environmentId, cwd, path, fileKey, source, inputsKey, base, feature]);
+    const skip = kept.current;
+    kept.current = null;
+    if (
+      skip?.fileKey === fileKey &&
+      skip.source === source &&
+      skip.base === base &&
+      skip.feature === feature
+    )
+      return;
+    send(null);
+  }, [send, environmentId, cwd, path, fileKey, source, inputsKey, base, feature]);
 
-  if (state.fileKey === fileKey) return state;
-  return { ...IDLE, running: request.source !== null };
+  const manipulate = useCallback<ManipulateFeatureScript>(
+    (change, keep) => send({ change, keep }),
+    [send],
+  );
+  if (state.fileKey === fileKey) return { ...state, manipulate };
+  return { ...IDLE, running: request.source !== null, manipulate };
 }
