@@ -61,3 +61,49 @@ export const regenError = (call: BuiltinCall, name: string): never =>
       ["message", stdEnum(call, "errorstringenum.gen.fs", "ErrorStringEnum", name)],
     ]),
   );
+
+type Vec3 = readonly [number, number, number];
+
+/** A `ValueWithUnits` with one of std's unit constants, e.g. `AREA_UNITS`. */
+export function quantity(
+  call: BuiltinCall,
+  value: number,
+  units: "LENGTH_UNITS" | "AREA_UNITS" | "VOLUME_UNITS" | "ANGLE_UNITS",
+): FsTagged {
+  const meter = stdValue(call, "units.fs", "meter") as FsTagged;
+  return new FsTagged(
+    meter.tag,
+    FsMap.fromEntries([
+      ["value", value],
+      ["unit", stdValue(call, "units.fs", units)],
+    ]),
+  );
+}
+
+/** std's `Line`: origin (lengths) and unit direction. */
+export const stdLine = (call: BuiltinCall, origin: Vec3, direction: Vec3): FsTagged =>
+  stdTagged(call, "curveGeometry.fs", "Line", [
+    ["origin", lengthVector(call, origin)],
+    ["direction", unitVector(call, direction)],
+  ]);
+
+/** std's `CoordSystem`. */
+export const stdCoordSystem = (
+  call: BuiltinCall,
+  origin: Vec3,
+  xAxis: Vec3,
+  zAxis: Vec3,
+): FsTagged =>
+  stdTagged(call, "coordSystem.fs", "CoordSystem", [
+    ["origin", lengthVector(call, origin)],
+    ["xAxis", unitVector(call, xAxis)],
+    ["zAxis", unitVector(call, zAxis)],
+  ]);
+
+/** std's `Plane`. */
+export const stdPlane = (call: BuiltinCall, origin: Vec3, normal: Vec3, x: Vec3): FsTagged =>
+  stdTagged(call, "surfaceGeometry.fs", "Plane", [
+    ["origin", lengthVector(call, origin)],
+    ["normal", unitVector(call, normal)],
+    ["x", unitVector(call, x)],
+  ]);
