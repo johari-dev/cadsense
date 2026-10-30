@@ -3,10 +3,12 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodePerfHooks from "node:perf_hooks";
 import { toGlb } from "../geometry/Glb.ts";
-import { ordered, startsWith } from "../geometry/Model.ts";
-import { tessellate, type BodyMesh } from "../geometry/Tessellate.ts";
+import { ordered, startsWith, type GeometryState } from "../geometry/Model.ts";
+import type { Oc } from "../geometry/occt.ts";
+import { isDrawnBody, tessellate, type BodyMesh } from "../geometry/Tessellate.ts";
 import type { FeatureRun, FeatureScriptRuntime } from "../Runtime.ts";
 import type { FsFrame } from "../runtime/Errors.ts";
+import { STD_PREFIX, type ModuleInstance } from "../runtime/Modules.ts";
 import { formatValue, FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
 import { defaultDefinition, featureSpecs, type FeatureSpec } from "../spec/FeatureSpec.ts";
 import { positionAt } from "../syntax/Source.ts";
@@ -34,12 +36,33 @@ export interface SolidSummary {
 export interface PreviewResult {
   readonly features: readonly {
     readonly path: string;
+    readonly module: ModuleInstance;
     readonly spec: FeatureSpec;
+    /** The definition it ran with: defaults, then the step's parameters. */
+    readonly definition: FsMap;
     readonly run: FeatureRun | null;
   }[];
   readonly solids: readonly SolidSummary[];
   readonly meshes: readonly BodyMesh[];
+  /** The model before the last feature, when asked for. */
+  readonly meshesBefore: readonly BodyMesh[] | null;
+  /** What the last feature did to the model; null without a kernel or when it didn't run. */
+  readonly changes: PreviewChanges | null;
   readonly elapsedMs: number;
+}
+
+export interface PreviewChanges {
+  /** Total solid volume after the last feature minus before it. */
+  readonly volumeMm3: number;
+  /** Faces the last feature created, such as hole walls. */
+  readonly createdFaces: number;
+}
+
+/** A line in a user's script. */
+export interface SourceLocation {
+  readonly path: string;
+  readonly line: number;
+  readonly column: number;
 }
 
 /**
@@ -51,6 +74,7 @@ export function runPreview(
   runtime: FeatureScriptRuntime,
   steps: readonly PreviewStep[],
   base?: Uint8Array,
+  options: { readonly before?: boolean } = {},
 ): PreviewResult {
   runtime.loader.unloadUserModules();
   const prepared = steps.map((step) => {
@@ -78,37 +102,97 @@ export function runPreview(
     base ? { base } : {},
   );
   const elapsedMs = NodePerfHooks.performance.now() - started;
-  const { oc, geometry } = run;
-  const solids =
-    oc && geometry
-      ? ordered(geometry, (entity) => entity.type === "BODY" && entity.bodyType === "SOLID").map(
-          (body) => {
-            const props = new oc.GProp_GProps();
-            oc.BRepGProp.VolumeProperties(body.shape, props, false, false, false);
-            const count = (type: string) =>
-              ordered(geometry, (entity) => entity.body === body.id && entity.type === type).length;
-            return {
-              id: body.id,
-              createdBy: body.createdBy.join("."),
-              volumeMm3: props.Mass() * 1e9,
-              faces: count("FACE"),
-              edges: count("EDGE"),
-              vertices: count("VERTEX"),
-            };
-          },
-        )
-      : [];
+  const { oc, geometry, geometryBeforeLast } = run;
+  const solids = oc && geometry ? summarizeSolids(oc, geometry) : [];
   const lastFeature = [`Feature${steps.length}`];
-  const meshes =
-    oc && geometry
-      ? tessellate(oc, geometry, { highlight: (face) => startsWith(face.createdBy, lastFeature) })
-      : [];
+  const createdByLast = (face: { readonly createdBy: readonly string[] }) =>
+    startsWith(face.createdBy, lastFeature);
+  const meshes = oc && geometry ? tessellate(oc, geometry, { highlight: createdByLast }) : [];
+  const meshesBefore =
+    options.before && oc && geometryBeforeLast ? tessellate(oc, geometryBeforeLast) : null;
+  const totalVolume = (summaries: readonly SolidSummary[]) =>
+    summaries.reduce((sum, solid) => sum + solid.volumeMm3, 0);
+  // Only when the previewed (last) feature ran; a fault earlier stops the run before it.
+  const changes =
+    oc && geometry && geometryBeforeLast && run.features.length === steps.length
+      ? {
+          volumeMm3: totalVolume(solids) - totalVolume(summarizeSolids(oc, geometryBeforeLast)),
+          // Only faces the preview draws, so the count matches the amber faces on screen.
+          createdFaces: ordered(geometry, (body) => isDrawnBody(geometry, body)).reduce(
+            (sum, body) =>
+              sum +
+              ordered(
+                geometry,
+                (entity) =>
+                  entity.body === body.id && entity.type === "FACE" && createdByLast(entity),
+              ).length,
+            0,
+          ),
+        }
+      : null;
   return {
-    features: prepared.map(({ path, spec }, i) => ({ path, spec, run: run.features[i] ?? null })),
+    features: prepared.map(({ path, module, spec, definition }, i) => ({
+      path,
+      module,
+      spec,
+      definition,
+      run: run.features[i] ?? null,
+    })),
     solids,
     meshes,
+    meshesBefore,
+    changes,
     elapsedMs,
   };
+}
+
+/** Volume and topology counts of every solid body, in creation order. */
+function summarizeSolids(oc: Oc, geometry: GeometryState): SolidSummary[] {
+  return ordered(geometry, (entity) => entity.type === "BODY" && entity.bodyType === "SOLID").map(
+    (body) => {
+      const props = new oc.GProp_GProps();
+      oc.BRepGProp.VolumeProperties(body.shape, props, false, false, false);
+      const count = (type: string) =>
+        ordered(geometry, (entity) => entity.body === body.id && entity.type === type).length;
+      return {
+        id: body.id,
+        createdBy: body.createdBy.join("."),
+        volumeMm3: props.Mass() * 1e9,
+        faces: count("FACE"),
+        edges: count("EDGE"),
+        vertices: count("VERTEX"),
+      };
+    },
+  );
+}
+
+/**
+ * Where `stack` enters the user's own code: the first frame in a loaded module outside std. A failure
+ * inside std (a precondition, say) is reported at the user's line that called into it.
+ */
+export function userLocation(
+  runtime: FeatureScriptRuntime,
+  stack: readonly FsFrame[],
+): SourceLocation | null {
+  for (const frame of stack) {
+    if (frame.file.startsWith(STD_PREFIX)) continue;
+    const module = [...runtime.loader.loaded].find((candidate) => candidate.path === frame.file);
+    if (!module) continue;
+    return { path: frame.file, ...positionAt(module.file, frame.span.start) };
+  }
+  return null;
+}
+
+/** Why a feature failed, and where: the fault that stopped it, or the first exception std caught. */
+export function featureFailure(
+  runtime: FeatureScriptRuntime,
+  run: FeatureRun | null,
+): { readonly message: string; readonly location: SourceLocation | null } | null {
+  const cause = run?.fault ?? (run?.status === "ERROR" ? run.exceptions[0] : undefined);
+  if (cause) return { message: cause.message, location: userLocation(runtime, cause.stack) };
+  return run?.status === "ERROR"
+    ? { message: run.message ?? run.statusEnum ?? "The feature failed.", location: null }
+    : null;
 }
 
 export const VIEWS: readonly View[] = ["iso", "top", "front", "right"];
@@ -144,6 +228,7 @@ export function writePreview(
           exceptions: run?.exceptions,
         })),
         solids: result.solids,
+        changes: result.changes,
       },
       null,
       2,

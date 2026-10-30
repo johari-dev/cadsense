@@ -65,6 +65,8 @@ export function distance(oc: Oc, a: Shape, b: Shape): number {
 }
 
 const CONTAINS_TOLERANCE = 1e-7;
+/** std's `TOLERANCE.zeroLength` (math.fs), in meters: how close counts as a tie for qClosestTo. */
+const ZERO_LENGTH = 1e-8;
 
 /** Entities a std query (a map tagged `Query`) resolves to, in creation order. */
 export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
@@ -276,6 +278,19 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
       const [x, y, z] = (untag(map.getField("point")) as FsArray).map((c) => Number(untag(c)));
       const vertex = new env.oc.BRepBuilderAPI_MakeVertex(new env.oc.gp_Pnt(x!, y!, z!)).Vertex();
       return sub().filter((entity) => distance(env.oc, vertex, entity.shape) < CONTAINS_TOLERANCE);
+    }
+    case "CLOSEST_TO": {
+      // The nearest entities, and any within TOLERANCE.zeroLength of them, as std documents.
+      const [x, y, z] = (untag(map.getField("point")) as FsArray).map((c) => Number(untag(c)));
+      const vertex = new env.oc.BRepBuilderAPI_MakeVertex(new env.oc.gp_Pnt(x!, y!, z!)).Vertex();
+      const measured = sub().map((entity) => ({
+        entity,
+        distance: distance(env.oc, vertex, entity.shape),
+      }));
+      const nearest = Math.min(...measured.map((candidate) => candidate.distance));
+      return measured
+        .filter((candidate) => candidate.distance - nearest <= ZERO_LENGTH)
+        .map((candidate) => candidate.entity);
     }
     default:
       return env.unsupported(`Query type ${type ?? "(missing)"} is not supported locally yet.`);
