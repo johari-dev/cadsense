@@ -203,7 +203,7 @@ function SelectedEnvironmentProviderSettings({
 /**
  * Settings for the two built-in provider slots on one environment. Each row
  * shows the CLI's status, a one-click Install or Sign in when the CLI needs
- * it, and the enable switch.
+ * it, and the enable switch, which stays off until the CLI is installed.
  */
 function EnvironmentProviderSettings({
   environmentId,
@@ -394,12 +394,13 @@ function ProviderRow({
   readonly onSetup: (action: ServerProviderSetupAction) => void;
 }) {
   const Icon = option.icon;
+  const installed = liveProvider?.installed === true;
   const setupAction: ServerProviderSetupAction | null =
-    !enabled || liveProvider === undefined
+    liveProvider === undefined
       ? null
-      : !liveProvider.installed
+      : !installed
         ? "install"
-        : liveProvider.auth.status === "unauthenticated"
+        : enabled && liveProvider.auth.status === "unauthenticated"
           ? "signIn"
           : null;
   // Keep the button while its command runs, even if a refresh lands first.
@@ -440,9 +441,10 @@ function ProviderRow({
               {pendingSetup === "signIn" ? "Restart sign-in" : "Sign in"}
             </Button>
           ) : null}
+          {/* A provider can only be turned on once its CLI is installed. */}
           <Switch
-            checked={enabled}
-            disabled={onEnabledChange === undefined}
+            checked={enabled && installed}
+            disabled={onEnabledChange === undefined || !installed}
             onCheckedChange={(checked) => onEnabledChange?.(Boolean(checked))}
             aria-label={`Enable ${option.label}`}
           />
@@ -463,11 +465,11 @@ function ProviderStatusLine({
   readonly liveProvider: ServerProvider | undefined;
   readonly pendingSetup: ServerProviderSetupAction | undefined;
 }) {
-  if (!enabled) return <>Disabled</>;
   if (pendingSetup === "install") return <>Installing the {label} CLI with npm.</>;
   if (pendingSetup === "signIn") return <>Finish signing in to {label} in your browser.</>;
   if (liveProvider === undefined) return <>Checking status</>;
   if (!liveProvider.installed) return <>The {label} CLI is not installed.</>;
+  if (!enabled) return <>Disabled</>;
 
   const version = getProviderVersionLabel(liveProvider.version);
   const auth = liveProvider.auth;

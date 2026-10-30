@@ -105,6 +105,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -163,7 +165,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
 
       // Build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
-      // updates. Pre-provide `ChildProcessSpawner` so the check fits
+      // updates. Pre-provide the check's services so it fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
       const checkProvider = Effect.zipWith(
         checkCodexProviderStatus(effectiveConfig, undefined, processEnv),
@@ -171,7 +173,11 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         (draft, manifest) =>
           stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
         { concurrent: true },
-      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
       const snapshot = yield* makeManagedServerProvider<CodexSettings>({
         setupCommands,
         getSettings: Effect.succeed(effectiveConfig),

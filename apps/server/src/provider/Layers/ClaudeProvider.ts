@@ -11,7 +11,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@cadsense/shared/model";
-import { resolveSpawnCommand } from "@cadsense/shared/shell";
+import { isCommandAvailable, resolveSpawnCommand } from "@cadsense/shared/shell";
 import {
   query as claudeQuery,
   type Options as ClaudeQueryOptions,
@@ -414,7 +414,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       checkedAt,
       models: allModels,
       probe: {
-        installed: false,
+        // Settings only lets an installed CLI be turned on, so a disabled
+        // provider still reports whether its binary is on PATH.
+        installed: yield* isCommandAvailable(claudeSettings.binaryPath, {
+          env: resolvedEnvironment,
+        }),
         version: null,
         status: "warning",
         auth: { status: "unknown" },
