@@ -1,8 +1,11 @@
 # Check CAD review defaults
 
 Use this check when changing review guidance in `../provider/CadReviewInstructions.ts`.
-The guidance reaches Codex through developer instructions and Claude through the
-system prompt. `CadProviderTools.ts` adds a shared reminder before publication. Transport tests check delivery, not review quality.
+The guidance reaches Codex through the thread's `developerInstructions` (Codex ignores the
+developer instructions in turn/start's collaboration mode) and Claude through the system prompt.
+`CadProviderTools.ts` adds a shared reminder before publication. Transport tests check delivery,
+not review quality. To check what a model actually received, put a logging proxy in front of its
+API and read the request bodies.
 
 ## Run the review
 
@@ -501,6 +504,85 @@ never enough. Checked in the app on the final rule:
 
 Two machine restarts and a Codex usage limit interrupted the runs; every interrupted run was
 set aside and rerun rather than graded.
+
+## Recorded check: October 31, 2026, context size
+
+The question was how much context the CAD tools cost each turn and how much can go without hurting
+reviews. Same transfer, prompt, and app harness, on `acd2aae53`. A logging proxy in front of the
+model API kept every request body, so the numbers below are what the models received.
+
+Three problems with the harness itself came first:
+
+- Codex (checked on CLI 0.166) ignores `developer_instructions` in turn/start's collaboration mode
+  and sends its own Default-mode text, so no Codex review had received the CAD guidance, the capture
+  pattern, or the browser block. A probe with one marker in thread `developerInstructions` and one in
+  the collaboration mode found only the thread marker in the request. The guidance now goes on
+  thread/start and thread/resume (`buildCodexThreadInstructions`), read when the thread opens, as
+  Claude's system prompt is.
+- The seeded project's workspace sat inside a Cadsense checkout under the home directory, so Claude
+  loaded the developer's `~/.claude/CLAUDE.md` as project instructions (4.4k tokens) and both agents
+  loaded the repository's skills. A real workspace lives under the Cadsense data directory. Runs now
+  copy the seed to `/tmp` and give each agent an empty `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
+- Claude Code defers MCP tools, so Claude's first request holds only the review instructions
+  (1.7k tokens) of Cadsense's text; tool definitions arrive when it loads them. Codex renders the
+  CAD tools as TypeScript declarations inside its `exec` tool (5.1k tokens) on every request.
+
+By the end of a review, tool results were most of the context: an Opus review held 18k tokens of
+`cad_checks`, 13k to 32k of `cad_find_parts`, and up to 5k of `cad_update_view` states. Each
+`cad_find_parts` entry repeated its Onshape source block, and every view state listed the visibility
+of all 147 occurrences. Arms, each a patch on that commit:
+
+- results: the Codex guidance fix, plus results reshaped for agents in `CadProviderTools.ts`.
+  `cad_find_parts` entries take `cad_hierarchy`'s shape (no source block, instance ID, or parent ID;
+  material as its name), view states list `hiddenOccurrenceIds` instead of the visibility record,
+  and mesh and drivetrain findings keep occurrence IDs beside the reading that already names the
+  parts and volume.
+- defs: shorter tool descriptions (the decline rule once instead of three times, input shapes the
+  schema already states), Effect's one-constraint `allOf` wrappers merged, and regex patterns dropped.
+- lean3: results and defs together.
+
+One blind grader per model scored every arm. Opus 5.5 at high effort:
+
+| Arm     | Runs | Score | Writing | Weak comments | Peak context | Tokens processed per review | Median time |
+| ------- | ---- | ----- | ------- | ------------- | ------------ | --------------------------- | ----------- |
+| main    | 9    | 7.11  | 5.00    | 0.67          | 165k         | 2.99M                       | 284 s       |
+| results | 4    | 7.25  | 5.00    | 1.00          | 124k         | 1.97M                       | 233 s       |
+| defs    | 4    | 7.50  | 4.00    | 1.25          | 161k         | 2.72M                       | 272 s       |
+| lean3   | 4    | 7.75  | 4.25    | 1.25          | 141k         | 2.49M                       | 309 s       |
+
+Scores differ by item 7 (whether the reply states 5.71:1), which every arm misses in some runs.
+Weak comments drifted during the afternoon, not by arm: main runs started after 14:50 averaged 1.25,
+merging the SPARK Flex mount and the shafts hitting it into one comment, as every other arm did then.
+Writing did not drift: no main or results run scored below 5, and 9 of 16 runs with shorter
+descriptions did, mostly by publishing drafts with raw part names. One GPT-6-Luna run with the shorter
+descriptions published six drafts after a quick question where `main` declined them.
+
+GPT-6-Sol at medium effort:
+
+| Arm                | Runs | Score | Writing | Weak comments | Peak context | Tokens processed per review |
+| ------------------ | ---- | ----- | ------- | ------------- | ------------ | --------------------------- |
+| main, no guidance  | 4    | 8.00  | 2.75    | 4.75          | 86k          | 1.72M                       |
+| guidance fix alone | 3    | 7.83  | 3.33    | 3.00          | 110k         | 2.67M                       |
+| results            | 3    | 7.67  | 4.00    | 2.00          | 110k         | 2.41M                       |
+| lean3              | 3    | 8.00  | 3.00    | 3.67          | 94k          | 1.43M                       |
+
+Without guidance Sol published drafts word for word; with it, Sol rewrote more of them and inspected
+more (36 requests against 26), which costs tokens. GPT-6-Luna scored 8 on every arm but one run (7)
+and publishes the drafts almost verbatim, so this transfer cannot tell its arms apart. Codex's first
+request grew from 19.0k to 21.2k tokens with the guidance.
+
+A last check on the kept code found the largest result of all: `cad_comments_list` returned each
+comment with its model descriptor, the whole manifest, about 14k tokens per comment on this model, so
+a chat with ten comments would list 140k tokens whenever a later review starts. Agents compare models
+by `modelKey` and `snapshotId`, so the agent-facing list now leaves the descriptor out. No graded run
+covers it: the transfer is a single first review.
+
+Kept: the guidance fix and reshaped results. The shorter descriptions saved about 420 tokens per
+Codex request and nothing up front for Claude, and cost writing quality, so descriptions and
+instructions are unchanged. `cad-app-review-e2e.ts` now records each run's first and largest request
+and the tokens it processed (`totalProcessedTokens`) in `summary.json`. Two Codex app-servers that start in the same second
+sometimes exit with code 1 before any request, so runs were started 20 seconds apart. Run counts are
+small; differences under half a point or one writing point are noise.
 
 ## Matched evaluation before the review-process update
 
