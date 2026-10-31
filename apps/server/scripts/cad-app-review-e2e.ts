@@ -14,7 +14,8 @@
  *   thread.json        the chat's messages and activities
  *   final-message.md   the last assistant message
  *   report/            the HTML report, comments.json, and inspection images
- *   summary.json       model, duration, turn state, comments, targets, follow-ups, backstop comments
+ *   summary.json       model, duration, turn state, comments, targets, follow-ups, backstop comments,
+ *                      and context cost (first and largest request, tokens processed over the turn)
  *
  *   node apps/server/scripts/cad-app-review-e2e.ts --home .cadsense/gap/seed-home \
  *     --provider codex --model gpt-6-luna --effort medium --prompt-file prompt.md --out <dir> \
@@ -51,6 +52,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpServer } from "effect/unstable/http";
 
 import { makeCadMcpRenderHost } from "../src/cadMcp/CadMcpRenderHost.ts";
@@ -122,6 +124,13 @@ const logFile = NodeFS.openSync(NodePath.join(out, "server.log"), "a");
 const writeLog = (...args: unknown[]) =>
   NodeFS.writeSync(logFile, `${NodeUtil.stripVTControlCharacters(NodeUtil.format(...args))}\n`);
 console.log = console.info = console.debug = console.warn = console.error = writeLog;
+
+const decodeContextUsage = Schema.decodeUnknownOption(
+  Schema.Struct({
+    usedTokens: Schema.Number,
+    totalProcessedTokens: Schema.optionalKey(Schema.Number),
+  }),
+);
 
 const run = Effect.gen(function* () {
   const http = yield* HttpServer.HttpServer;
@@ -231,6 +240,14 @@ const run = Effect.gen(function* () {
     if (activity.kind === "tool.completed")
       tools[activity.summary] = (tools[activity.summary] ?? 0) + 1;
   const targets = comments.flatMap((comment) => comment.targets);
+  // Context-window updates track the model's context. Claude also replays the last request's usage
+  // when a turn completes, so the cost comes from the cumulative totalProcessedTokens, not a sum.
+  // Adapters leave it out while it still equals usedTokens.
+  const usage = (thread?.activities ?? []).flatMap((activity) =>
+    activity.kind === "context-window.updated"
+      ? Option.toArray(decodeContextUsage(activity.payload))
+      : [],
+  );
   const summary = {
     provider,
     model: values.model,
@@ -245,6 +262,14 @@ const run = Effect.gen(function* () {
     backstopComments: comments.filter((comment) => comment.body.includes(BACKSTOP_NOTE)).length,
     pointTargets: targets.filter((target) => target.kind === "point").length,
     partTargets: targets.filter((target) => target.kind === "part").length,
+    context: {
+      firstRequestTokens: usage[0]?.usedTokens ?? 0,
+      peakTokens: Math.max(0, ...usage.map((entry) => entry.usedTokens)),
+      processedTokens: Math.max(
+        0,
+        ...usage.map((entry) => entry.totalProcessedTokens ?? entry.usedTokens),
+      ),
+    },
   };
   NodeFS.writeFileSync(NodePath.join(out, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
