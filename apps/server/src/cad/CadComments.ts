@@ -61,6 +61,7 @@ import {
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { pruneCadCommentEvidence } from "./CadCommentEvidence.ts";
 import { cadCommentOutdatedCheck } from "./CadCommentOutdated.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 const fail = (reason: string) => new CadCommentError({ reason });
 /**
@@ -171,7 +172,8 @@ export const make = Effect.gen(function* () {
     broker = yield* CadRenderBroker,
     fs = yield* FileSystem.FileSystem,
     path = yield* Path.Path,
-    config = yield* ServerConfig;
+    config = yield* ServerConfig,
+    analytics = yield* AnalyticsService;
   const activeEvidence = new Set<string>();
   const evidenceRoot = path.join(config.stateDir, "cad", "comment-evidence");
   yield* forkParked(
@@ -392,6 +394,13 @@ export const make = Effect.gen(function* () {
       yield* engine
         .dispatch({ ...input, type: "thread.cad.comment.review", payloadHash: hash })
         .pipe(
+          Effect.tap(() =>
+            input.state === "resolved"
+              ? analytics.count("cad_comments_resolved")
+              : input.state === "dismissed"
+                ? analytics.count("cad_comments_dismissed")
+                : Effect.void,
+          ),
           Effect.catch((cause) =>
             Effect.gen(function* () {
               const currentComment = (yield* read(input.threadId)).find(
@@ -982,6 +991,8 @@ export const make = Effect.gen(function* () {
           })
           .pipe(
             Effect.uninterruptible,
+            // `comments` holds only new findings; reused ones arrive as receipts.
+            Effect.tap(() => analytics.count("cad_comments_published", comments.length)),
             Effect.catch((cause) =>
               Effect.sync(() => {
                 const failure = error(cause);

@@ -10,12 +10,16 @@
  *   node apps/server/scripts/analytics-e2e.ts --out .cadsense/analytics-e2e/run
  *
  * Phases, in order:
- *   enabled        a key is set: the boot heartbeat arrives keyed by the namespaced installation
- *                  id, never by the Codex account id planted in the fake home directory
- *   opt-out-live   the user turns analytics off while the server runs: the id file is deleted
- *   opted-out      a restart with analytics off sends nothing and creates no id
+ *   enabled        a key is set, and analytics-state.json is seeded as a run on an earlier day
+ *                  left it: that day's counts arrive as one `usage.daily` with every counter as a
+ *                  flat property, the event left unsent goes out with its uuid, `first_launch` is
+ *                  sent, and all are keyed by the namespaced installation id, never by the Codex
+ *                  account id planted in the fake home directory
+ *   opt-out-live   the user turns analytics off while the server runs: the id and state files
+ *                  are deleted
+ *   opted-out      a restart with analytics off sends nothing and creates no files
  *   opted-in       turning it back on sends again, under a new, unlinked id
- *   no-key         a build with no PostHog key (dev, forks) sends nothing and creates no id
+ *   no-key         a build with no PostHog key (dev, forks) sends nothing and creates no files
  *
  * Exits non-zero if any check fails.
  */
@@ -38,6 +42,9 @@ const baseDir = NodePath.join(out, "base");
 const userdata = NodePath.join(baseDir, "userdata");
 const idPath = NodePath.join(userdata, "anonymous-id");
 const settingsPath = NodePath.join(userdata, "settings.json");
+const statePath = NodePath.join(userdata, "analytics-state.json");
+const SEEDED_DAY = "2000-01-01";
+const SEEDED_PENDING_UUID = "0b0e2a1c-5d3f-4c1e-9a6b-7c8d9e0f1a2b";
 // A home directory with a Codex login, so the run proves analytics ignore it.
 const fakeHome = NodePath.join(out, "home");
 const CODEX_ACCOUNT_ID = "e2e-codex-account";
@@ -53,6 +60,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface CapturedEvent {
   readonly event: string;
+  readonly uuid: string;
+  readonly timestamp: string;
   readonly distinct_id: string;
   readonly properties: Record<string, unknown>;
 }
@@ -169,23 +178,66 @@ const startServer = async (name: string, withKey: boolean) => {
   };
 };
 
-const heartbeatIn = (name: string) =>
-  eventsIn(name).find((event) => event.event === "server.boot.heartbeat");
-
 // enabled
+NodeFS.mkdirSync(userdata, { recursive: true });
+NodeFS.writeFileSync(
+  statePath,
+  JSON.stringify({
+    version: 1,
+    day: SEEDED_DAY,
+    counts: { agent_turns_codex: 3, fs_runs_panel: 2, removed_in_a_later_version: 5 },
+    activeSent: true,
+    finished: [],
+    milestones: [],
+    pending: [
+      {
+        uuid: SEEDED_PENDING_UUID,
+        capturedAt: `${SEEDED_DAY}T12:00:00.000Z`,
+        payload: { event: "milestone.reached", properties: { milestone: "first_thread" } },
+      },
+    ],
+  }),
+);
 let stop = await startServer("enabled", true);
-await waitFor(() => heartbeatIn("enabled") !== undefined, 20_000);
+const summaryIn = (name: string) => eventsIn(name).find((event) => event.event === "usage.daily");
+const launchIn = (name: string) =>
+  eventsIn(name).find((event) => event.properties.milestone === "first_launch");
+await waitFor(
+  () => summaryIn("enabled") !== undefined && launchIn("enabled") !== undefined,
+  20_000,
+);
 const firstId = readId();
-const firstHeartbeat = heartbeatIn("enabled");
-check("enabled: boot heartbeat reaches the ingest", firstHeartbeat !== undefined);
+const summary = summaryIn("enabled");
+const firstLaunch = launchIn("enabled");
+check("enabled: the seeded day's counts arrive as one usage.daily", summary !== undefined, {
+  summary,
+});
+check(
+  "enabled: usage.daily is stamped on its day and carries every counter as a flat property",
+  summary?.properties.day === SEEDED_DAY &&
+    summary.properties.agent_turns_codex === 3 &&
+    summary.properties.fs_runs_panel === 2 &&
+    summary.properties.ratings_up === 0 &&
+    summary.timestamp === `${SEEDED_DAY}T23:59:59.999Z` &&
+    !("removed_in_a_later_version" in summary.properties) &&
+    !("counts" in summary.properties),
+);
+check(
+  "enabled: the event left unsent by the earlier run goes out with its uuid",
+  eventsIn("enabled").some(
+    (event) => event.uuid === SEEDED_PENDING_UUID && event.properties.milestone === "first_thread",
+  ),
+);
+check("enabled: first_launch is sent", firstLaunch !== undefined);
 check(
   "enabled: requests carry the configured key",
   requests.filter((r) => r.phase === "enabled").every((r) => r.apiKey === POSTHOG_KEY),
 );
 check(
   "enabled: distinct_id is sha256 of the namespaced installation id",
-  firstId !== null && firstHeartbeat?.distinct_id === sha256(`cadsense:v1:${firstId}`),
-  { installationId: firstId, distinctId: firstHeartbeat?.distinct_id },
+  firstId !== null &&
+    eventsIn("enabled").every((event) => event.distinct_id === sha256(`cadsense:v1:${firstId}`)),
+  { installationId: firstId, distinctId: firstLaunch?.distinct_id },
 );
 check(
   "enabled: distinct_id ignores the Codex account id",
@@ -196,15 +248,27 @@ check(
   ),
 );
 check(
-  "enabled: events never create person profiles",
-  eventsIn("enabled").every((event) => event.properties.$process_person_profile === false),
+  "enabled: events never create person profiles or look up location",
+  eventsIn("enabled").every(
+    (event) =>
+      event.properties.$process_person_profile === false &&
+      event.properties.$geoip_disable === true,
+  ),
+);
+check(
+  "enabled: launching alone doesn't mark the day active",
+  !eventsIn("enabled").some((event) => event.event === "app.active"),
+);
+check(
+  "enabled: no event is sent twice",
+  new Set(eventsIn("enabled").map((event) => event.uuid)).size === eventsIn("enabled").length,
 );
 
 // opt-out-live
 phase = "opt-out-live";
 writeSettings(false);
-const idDeleted = await waitFor(() => readId() === null, 15_000);
-check("opt-out-live: turning analytics off deletes the installation id", idDeleted);
+const idDeleted = await waitFor(() => readId() === null && !NodeFS.existsSync(statePath), 15_000);
+check("opt-out-live: turning analytics off deletes the id and state files", idDeleted);
 await stop();
 
 // opted-out
@@ -214,31 +278,35 @@ await stop();
 check("opted-out: a restart with analytics off sends nothing", eventsIn("opted-out").length === 0, {
   received: eventsIn("opted-out").map((event) => event.event),
 });
-check("opted-out: no installation id is created", readId() === null);
+check(
+  "opted-out: no id or state file is created",
+  readId() === null && !NodeFS.existsSync(statePath),
+);
 
 // opted-in
 writeSettings(true);
 stop = await startServer("opted-in", true);
-await waitFor(() => heartbeatIn("opted-in") !== undefined, 20_000);
+await waitFor(() => launchIn("opted-in") !== undefined, 20_000);
 await stop();
 const secondId = readId();
-const secondHeartbeat = heartbeatIn("opted-in");
-check("opted-in: the heartbeat is sent again", secondHeartbeat !== undefined);
+const secondLaunch = launchIn("opted-in");
+check("opted-in: sending resumes, starting over with first_launch", secondLaunch !== undefined);
 check(
   "opted-in: it uses a new installation id",
   secondId !== null &&
     secondId !== firstId &&
-    secondHeartbeat?.distinct_id !== firstHeartbeat?.distinct_id,
+    secondLaunch?.distinct_id === sha256(`cadsense:v1:${secondId}`),
   { firstId, secondId },
 );
 
 // no-key
 NodeFS.rmSync(idPath, { force: true });
+NodeFS.rmSync(statePath, { force: true });
 stop = await startServer("no-key", false);
 await sleep(5_000);
 await stop();
 check("no-key: a build without a PostHog key sends nothing", eventsIn("no-key").length === 0);
-check("no-key: no installation id is created", readId() === null);
+check("no-key: no id or state file is created", readId() === null && !NodeFS.existsSync(statePath));
 
 ingest.close();
 const failed = checks.filter((entry) => !entry.pass);

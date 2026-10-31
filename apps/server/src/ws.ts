@@ -14,8 +14,6 @@ import * as Stream from "effect/Stream";
 import {
   CadViewError,
   type AuthEnvironmentScope,
-  ClientDeviceType,
-  ClientOs,
   ClientSurface,
   CommandId,
   type DiscoveredLocalServerList,
@@ -271,8 +269,6 @@ const SHELL_RESUME_MAX_GAP = 1_000;
 const THREAD_RESUME_MAX_GAP = 1_000;
 
 const isClientSurface = Schema.is(ClientSurface);
-const isClientDeviceType = Schema.is(ClientDeviceType);
-const isClientOs = Schema.is(ClientOs);
 const MAX_CLIENT_APP_VERSION_LENGTH = 64;
 
 // Optional client identity announced on the /ws upgrade URL next to wsTicket.
@@ -295,33 +291,9 @@ function readClientConnectionOrigin(
   };
 }
 
-// Client telemetry stays in this socket's RPC layer. It must not become a
-// server-global "current client" because several client types can connect at once.
-function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) {
-  const url = HttpServerRequest.toURL(request);
-  if (Option.isNone(url)) {
-    return {};
-  }
-
-  const surface = url.value.searchParams.get("clientSurface");
-  const appVersion = url.value.searchParams.get("clientAppVersion")?.trim() ?? "";
-  const deviceType = url.value.searchParams.get("clientDeviceType");
-  const os = url.value.searchParams.get("clientOs");
-
-  return {
-    ...(isClientSurface(surface) ? { surface } : {}),
-    ...(appVersion !== "" && appVersion.length <= MAX_CLIENT_APP_VERSION_LENGTH
-      ? { appVersion, clientAppVersion: appVersion }
-      : {}),
-    ...(isClientOs(os) ? { clientOs: os } : {}),
-    ...(isClientDeviceType(deviceType) ? { clientDeviceType: deviceType } : {}),
-  };
-}
-
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
-  clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
 ) =>
   WsRpcGroup.toLayer(
@@ -344,17 +316,22 @@ const makeWsRpcLayer = (
           command,
           hasClientOrigin ? { origin: clientOrigin } : undefined,
         );
+      // Counts what the user did in this command. Turns are counted where they reach a provider
+      // (ProviderService), not here.
       const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
         switch (command.type) {
+          case "project.create":
+            return analytics.count("projects_created");
           case "thread.create":
-            return analytics.record("client.thread.started", clientAnalyticsProps);
+            return analytics.count("threads_started");
           case "thread.turn.start":
             return command.bootstrap?.createThread
-              ? Effect.andThen(
-                  analytics.record("client.thread.started", clientAnalyticsProps),
-                  analytics.record("client.turn.requested", clientAnalyticsProps),
-                )
-              : analytics.record("client.turn.requested", clientAnalyticsProps);
+              ? analytics.count("threads_started")
+              : Effect.void;
+          case "thread.message.rating.set":
+            return command.rating === null
+              ? Effect.void
+              : analytics.count(command.rating.value === "up" ? "ratings_up" : "ratings_down");
           default:
             return Effect.void;
         }
@@ -1792,7 +1769,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-        const analytics = yield* AnalyticsService.AnalyticsService;
         const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
@@ -1802,18 +1778,13 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           ),
         );
         const clientOrigin = readClientConnectionOrigin(request);
-        const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* analytics.record("client.connected", clientAnalyticsProps);
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(
-              session,
-              clientOrigin,
-              clientAnalyticsProps,
-              previewAutomationBroker,
-            ).pipe(Layer.provideMerge(RpcSerialization.layerJson)),
+            makeWsRpcLayer(session, clientOrigin, previewAutomationBroker).pipe(
+              Layer.provideMerge(RpcSerialization.layerJson),
+            ),
           ),
         );
         return yield* rpcWebSocketHttpEffect;

@@ -19,12 +19,15 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import type * as Result from "effect/Result";
 import * as Semaphore from "effect/Semaphore";
 import * as NodeURL from "node:url";
 import * as NodeWorkerThreads from "node:worker_threads";
 import { createAttachmentId } from "../attachmentStore.ts";
 import { decodeCadToolInput } from "../cad/CadViewState.ts";
 import { ServerConfig } from "../config.ts";
+import type { DailyCounter } from "../telemetry/AnalyticsEvents.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import type {
   FeatureScriptWorkerData,
   PreviewJob,
@@ -102,6 +105,12 @@ const unavailable = () => new CadViewError({ reason: "capability-unavailable" })
 
 const STATUS_RANK = { OK: 0, INFO: 1, WARNING: 2, ERROR: 3, NOT_RUN: 3 } as const;
 const STATUS_BY_RANK = ["OK", "INFO", "WARNING", "ERROR"] as const;
+const STATUS_COUNTER = {
+  OK: "fs_ok",
+  INFO: "fs_info",
+  WARNING: "fs_warning",
+  ERROR: "fs_error",
+} as const satisfies Record<(typeof STATUS_BY_RANK)[number], DailyCounter>;
 
 export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
   Effect.gen(function* () {
@@ -114,6 +123,7 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const crypto = yield* Crypto.Crypto;
+    const analytics = yield* AnalyticsService;
     const scope = yield* Effect.scope;
 
     // Bundled builds put the worker and the vendored std beside the server entry (see
@@ -253,7 +263,41 @@ export const make = (options: Partial<FeatureScriptPreviewOptions> = {}) =>
     });
 
     /** Runs one job on the worker, under the timeout, one at a time. Failures become a message. */
+    /** Counts a finished job once: its source, outcome, and total time including the queue. */
+    const countJob = (
+      job: PreviewJob,
+      outcome: Result.Result<PreviewJobResult, string>,
+      elapsedMs: number,
+    ) => {
+      const ran = outcome._tag === "Success" ? outcome.success : null;
+      const counters: DailyCounter[] = [
+        job.output.kind === "agent" ? "fs_runs_agent" : "fs_runs_panel",
+        ran === null
+          ? "fs_stopped"
+          : ran.kind === "invalid"
+            ? "fs_invalid"
+            : STATUS_COUNTER[worstStatus(ran.features)],
+        elapsedMs < 1_000
+          ? "fs_under_1s"
+          : elapsedMs < 5_000
+            ? "fs_under_5s"
+            : elapsedMs < 30_000
+              ? "fs_under_30s"
+              : "fs_over_30s",
+      ];
+      if (job.rollback !== null) counters.push("fs_runs_rollback");
+      if (job.manipulatorChange !== null) counters.push("fs_runs_manipulator");
+      if (ran?.failure?.unsupported === true) counters.push("fs_unsupported");
+      return Effect.forEach(counters, (counter) => analytics.count(counter), { discard: true });
+    };
     const runJob = (job: PreviewJob) =>
+      Effect.gen(function* () {
+        const startedAt = yield* Clock.currentTimeMillis;
+        const outcome = yield* runJobInWorker(job);
+        yield* countJob(job, outcome, (yield* Clock.currentTimeMillis) - startedAt);
+        return outcome;
+      });
+    const runJobInWorker = (job: PreviewJob) =>
       gate.withPermits(1)(
         Effect.gen(function* () {
           if (idle) yield* Fiber.interrupt(idle);

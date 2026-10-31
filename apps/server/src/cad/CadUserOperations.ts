@@ -32,6 +32,7 @@ import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
 import { CadGeometryError } from "./CadGeometry.ts";
 import { localCadElementId, localCadRootIdentity } from "../localCad/LocalCadFiles.ts";
 import { LocalCadImport, LocalCadImportError } from "../localCad/LocalCadImport.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 /** Implementations confirm native process exit while the project's durable reservation is held. */
 export class CadProjectQuiescence extends Context.Service<
@@ -202,6 +203,7 @@ export const make = Effect.gen(function* () {
   const local = yield* LocalCadImport;
   const quiescence = yield* CadProjectQuiescence;
   const crypto = yield* Crypto.Crypto;
+  const analytics = yield* AnalyticsService;
   const scope = yield* Scope.Scope;
   const jobs = new Map<string, { projectId: ProjectId; fiber: Fiber.Fiber<void> }>();
   const prune = (projectId?: ProjectId) =>
@@ -372,11 +374,20 @@ export const make = Effect.gen(function* () {
           Effect.onExit((exit) =>
             Effect.gen(function* () {
               jobs.delete(operationId);
+              const cancelled = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
+              // Syncs are imports; discovering the file or document list isn't counted.
+              if (input.kind === "sync" && !cancelled)
+                yield* analytics.count(
+                  !completed
+                    ? "cad_imports_failed"
+                    : source.kind === "onshape"
+                      ? "cad_imports_onshape"
+                      : "cad_imports_local",
+                );
               if (completed) {
                 yield* prune(input.projectId);
                 return;
               }
-              const cancelled = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
               const error = Exit.isFailure(exit)
                 ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
                 : undefined;
