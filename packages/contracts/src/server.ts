@@ -135,6 +135,24 @@ export const ServerProviderContinuation = Schema.Struct({
 });
 export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
 
+export const ServerProviderSetupAction = Schema.Literals(["install", "signIn"]);
+export type ServerProviderSetupAction = typeof ServerProviderSetupAction.Type;
+
+/**
+ * The setup command currently running for an instance, or the last one that
+ * failed. The server keeps it outside the probed snapshot, so a reload or a
+ * second window sees the same install and sign-in wait. A command
+ * that succeeds clears it.
+ */
+export const ServerProviderSetupState = Schema.Struct({
+  action: ServerProviderSetupAction,
+  status: Schema.Literals(["running", "failed"]),
+  startedAt: IsoDateTime,
+  // Why the command failed. Only set when `status` is "failed".
+  reason: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type ServerProviderSetupState = typeof ServerProviderSetupState.Type;
+
 export const ServerProvider = Schema.Struct({
   // Routing key for the configured instance this snapshot represents. This
   // is the only stable identity consumers may use for provider routing.
@@ -168,6 +186,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  setup: Schema.optionalKey(ServerProviderSetupState),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
@@ -549,12 +568,10 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
 
 /**
- * One-click provider setup from the providers settings page. `install` runs
- * the CLI's global npm install; `signIn` runs the CLI's own browser login.
+ * One-click provider setup from onboarding and the providers settings page.
+ * `install` runs the vendor's install script; `signIn` runs the CLI's own
+ * browser login. Input and errors live with the RPC below.
  */
-export const ServerProviderSetupAction = Schema.Literals(["install", "signIn"]);
-export type ServerProviderSetupAction = typeof ServerProviderSetupAction.Type;
-
 export const ServerProviderSetupInput = Schema.Struct({
   instanceId: ProviderInstanceId,
   action: ServerProviderSetupAction,

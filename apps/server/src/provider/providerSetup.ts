@@ -1,12 +1,13 @@
 /**
- * One-click provider setup behind the providers settings page: install a
- * missing CLI, or run the CLI's own browser sign-in.
+ * One-click provider setup behind onboarding and the providers settings
+ * page: install a missing CLI, or run the CLI's own browser sign-in.
  *
  * Each driver supplies the exact commands for its instance through
  * `ServerProviderShape.setupCommands`, so sign-in runs with the same
  * environment (CODEX_HOME, CLAUDE_CONFIG_DIR) the instance reads credentials
- * from. After a command exits the runner re-probes the instance and returns
- * the fresh snapshots.
+ * from. While a command runs, and after it fails, the registry publishes its
+ * state on the instance's snapshot. After a command succeeds the runner
+ * re-probes the instance and returns the fresh snapshots.
  *
  * @module providerSetup
  */
@@ -19,6 +20,7 @@ import {
 } from "@cadsense/contracts";
 import { CommandResolutionCache, resolveSpawnCommand } from "@cadsense/shared/shell";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -127,10 +129,18 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
   // A new sign-in for an instance interrupts (and kills) the previous one.
   // Codex's login server holds a fixed port, and a user who closed the
   // browser tab should not have to wait out the old attempt.
-  const signIns = yield* FiberMap.make<ProviderInstanceId, CommandResult | null, string>();
+  const signIns = yield* FiberMap.make<
+    ProviderInstanceId,
+    ReadonlyArray<ServerProvider>,
+    ServerProviderSetupError
+  >();
   // A repeat Install for an instance (say, after the page reloaded mid-install)
   // joins the install already running instead of queuing a second one.
-  const installs = yield* FiberMap.make<ProviderInstanceId, CommandResult | null, string>();
+  const installs = yield* FiberMap.make<
+    ProviderInstanceId,
+    ReadonlyArray<ServerProvider>,
+    ServerProviderSetupError
+  >();
 
   /** Run a command to completion. Fails with a user-facing reason; `null` means timed out. */
   const runCommand = (command: ProviderSetupCommand, timeout: Duration.Duration) =>
@@ -163,46 +173,69 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
       } satisfies CommandResult;
     }).pipe(Effect.scoped, Effect.timeoutOption(timeout), Effect.map(Option.getOrNull));
 
-  const run: ProviderSetupRunnerShape["run"] = Effect.fn("ProviderSetupRunner.run")(
-    function* (input) {
+  /**
+   * Runs one setup action to the end and records its state on the registry.
+   * It runs in a fiber the runner owns, so a closed browser tab does not stop
+   * a half-finished download or leave the state stuck on "running". An
+   * attempt interrupted by a newer one records nothing; the newer one owns
+   * the state.
+   */
+  const perform = (input: ServerProviderSetupInput, commands: ProviderSetupCommands) =>
+    Effect.gen(function* () {
+      const startedAt = DateTime.formatIso(yield* DateTime.now);
+      const running = providerRegistry.setSetupState(input.instanceId, {
+        action: input.action,
+        status: "running",
+        startedAt,
+      });
       const fail = (reason: string) =>
-        new ServerProviderSetupError({
-          instanceId: input.instanceId,
-          action: input.action,
-          reason,
-        });
-      const commands = yield* providerRegistry.getProviderSetupCommands(input.instanceId);
-      if (commands === undefined) {
-        return yield* fail("This provider is not running on the server.");
-      }
+        providerRegistry
+          .setSetupState(input.instanceId, {
+            action: input.action,
+            status: "failed",
+            startedAt,
+            reason,
+          })
+          .pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ServerProviderSetupError({
+                  instanceId: input.instanceId,
+                  action: input.action,
+                  reason,
+                }),
+              ),
+            ),
+          );
 
-      const result =
-        input.action === "install"
-          ? yield* Effect.suspend(() =>
-              Option.match(FiberMap.getUnsafe(installs, input.instanceId), {
-                onSome: Effect.succeed,
-                onNone: () =>
-                  FiberMap.run(
-                    installs,
-                    input.instanceId,
-                    installLock.withPermits(1)(runCommand(commands.install, INSTALL_TIMEOUT)),
-                  ),
-              }),
-            ).pipe(Effect.flatMap(Fiber.join), Effect.mapError(fail))
-          : yield* FiberMap.run(
-              signIns,
-              input.instanceId,
-              runCommand(commands.signIn, SIGN_IN_TIMEOUT),
-            ).pipe(Effect.flatMap(Fiber.join), Effect.mapError(fail));
+      yield* running;
       const label = input.action === "install" ? "Install" : "Sign-in";
-      if (result === null) {
-        return yield* fail(`${label} timed out.`);
-      }
-      if (result.exitCode !== 0) {
-        const tail = outputTail(result.output);
-        return yield* fail(
-          `${label} exited with code ${result.exitCode}.${tail ? `\n${tail}` : ""}`,
-        );
+      const command = input.action === "install" ? commands.install : commands.signIn;
+      const timeout = input.action === "install" ? INSTALL_TIMEOUT : SIGN_IN_TIMEOUT;
+      const result = yield* runCommand(command, timeout).pipe(Effect.result);
+      const commandFailure =
+        result._tag === "Failure"
+          ? result.failure
+          : result.success === null
+            ? input.action === "signIn"
+              ? `Sign-in timed out after ${Duration.toMinutes(SIGN_IN_TIMEOUT)} minutes.`
+              : `${label} timed out.`
+            : result.success.exitCode !== 0
+              ? `${label} exited with code ${result.success.exitCode}.${
+                  outputTail(result.success.output) ? `\n${outputTail(result.success.output)}` : ""
+                }`
+              : null;
+      if (commandFailure !== null) {
+        // A sign-in that ends badly may still have signed the account in,
+        // for example when the browser finished but the CLI was stopped.
+        // The CLI's own account check decides.
+        const signedIn =
+          input.action === "signIn" &&
+          (yield* providerRegistry.refreshInstance(input.instanceId)).some(
+            (provider) =>
+              provider.instanceId === input.instanceId && provider.auth.status === "authenticated",
+          );
+        if (!signedIn) return yield* fail(commandFailure);
       }
 
       if (input.action === "install") {
@@ -211,9 +244,7 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
         (yield* CommandResolutionCache).clear();
       }
       const providers = yield* providerRegistry.refreshInstance(input.instanceId);
-      const provider: ServerProvider | undefined = providers.find(
-        (candidate) => candidate.instanceId === input.instanceId,
-      );
+      const provider = providers.find((candidate) => candidate.instanceId === input.instanceId);
       if (input.action === "install" && provider?.installed !== true) {
         return yield* fail(
           `Install finished, but cadsense still cannot find ${commands.signIn.executable} on PATH.`,
@@ -222,7 +253,33 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
       if (input.action === "signIn" && provider?.auth.status === "unauthenticated") {
         return yield* fail("Sign-in finished, but the CLI still reports no signed-in account.");
       }
-      return { providers };
+      yield* providerRegistry.setSetupState(input.instanceId, null);
+      return yield* providerRegistry.getProviders;
+    });
+
+  const run: ProviderSetupRunnerShape["run"] = Effect.fn("ProviderSetupRunner.run")(
+    function* (input) {
+      const commands = yield* providerRegistry.getProviderSetupCommands(input.instanceId);
+      if (commands === undefined) {
+        return yield* new ServerProviderSetupError({
+          instanceId: input.instanceId,
+          action: input.action,
+          reason: "This provider is not running on the server.",
+        });
+      }
+      const fiber =
+        input.action === "install"
+          ? yield* Option.match(FiberMap.getUnsafe(installs, input.instanceId), {
+              onSome: Effect.succeed,
+              onNone: () =>
+                FiberMap.run(
+                  installs,
+                  input.instanceId,
+                  installLock.withPermits(1)(perform(input, commands)),
+                ),
+            })
+          : yield* FiberMap.run(signIns, input.instanceId, perform(input, commands));
+      return { providers: yield* Fiber.join(fiber) };
     },
   );
 
