@@ -158,6 +158,8 @@ def build_plate(job):
         clear_document(doc, design)
 
     body, built = build_body(design.rootComponent, plate)
+    app.activeViewport.fit()
+    adsk.doEvents()  # Show the plate while the setup is made.
 
     app.userInterface.workspaces.itemById("CAMEnvironment").activate()
     cam = adsk.cam.CAM.cast(doc.products.itemByProductType("CAMProductType"))
@@ -203,12 +205,22 @@ def build_plate(job):
             operations.append({"name": name, "state": "warning", "message": first_line(op.warning)})
         else:
             operations.append({"name": name, "state": "ok"})
+    show_toolpaths(generated)
     # Rapids at 400 in/min and no tool changes: one tool cuts the whole plate. Fusion can only time
     # operations that have toolpaths.
     seconds = (
         cam.getMachiningTime(generated, 1.0, 400 * CM, 0).machiningTime if generated.count else 0
     )
     return {"replaced": replaced, "minutes": seconds / 60, "operations": operations}
+
+
+def show_toolpaths(ops):
+    """Selects the generated operations so Fusion draws their toolpaths, and fits the view."""
+    selections = app.userInterface.activeSelections
+    selections.clear()
+    for i in range(ops.count):
+        selections.add(ops.item(i))
+    app.activeViewport.fit()
 
 
 def wait_for(done, deadline):
