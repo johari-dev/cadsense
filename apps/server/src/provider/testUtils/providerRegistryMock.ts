@@ -11,6 +11,7 @@ export const makeProviderRegistryMock = (
   refresh: () => Effect.succeed(providers),
   refreshInstance: () => Effect.succeed(providers),
   getProviderSetupCommands: () => Effect.succeed(undefined),
+  setSetupState: () => Effect.void,
   streamChanges: Stream.empty,
 });
 

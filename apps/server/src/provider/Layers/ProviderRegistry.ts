@@ -27,6 +27,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
+  type ServerProviderSetupState,
 } from "@cadsense/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -259,6 +260,27 @@ export const ProviderRegistryLive = Layer.effect(
       ),
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
+    // Setup commands running per instance, or the last one that failed. Kept
+    // apart from the probed snapshots so a re-probe or an instance rebuild
+    // cannot drop it, and so it never reaches the status cache.
+    const setupStatesRef = yield* Ref.make<
+      ReadonlyMap<ProviderInstanceId, ServerProviderSetupState>
+    >(new Map());
+    const withSetupStates = (providers: ReadonlyArray<ServerProvider>) =>
+      Ref.get(setupStatesRef).pipe(
+        Effect.map((states) =>
+          states.size === 0
+            ? providers
+            : providers.map((provider) => {
+                const setup = states.get(snapshotInstanceKey(provider));
+                return setup === undefined ? provider : { ...provider, setup };
+              }),
+        ),
+      );
+    const publishProviders = (providers: ReadonlyArray<ServerProvider>) =>
+      withSetupStates(providers).pipe(
+        Effect.flatMap((overlaid) => PubSub.publish(changesPubSub, overlaid)),
+      );
 
     // Live-source registry — the dynamic counterpart to the boot-time
     // `bootSources`. Keyed by `instanceId`; the stored `ProviderInstance`
@@ -339,7 +361,7 @@ export const ProviderRegistryLive = Layer.effect(
           });
         }
         if (options?.publish !== false) {
-          yield* PubSub.publish(changesPubSub, providers);
+          yield* publishProviders(providers);
         }
       }
 
@@ -516,7 +538,7 @@ export const ProviderRegistryLive = Layer.effect(
           },
         );
         if (haveProvidersChanged(previousProviders, providers)) {
-          yield* PubSub.publish(changesPubSub, providers);
+          yield* publishProviders(providers);
         }
       }),
     );
@@ -595,13 +617,31 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* Ref.get(providersRef);
     });
 
+    const setSetupState = (
+      instanceId: ProviderInstanceId,
+      state: ServerProviderSetupState | null,
+    ) =>
+      Ref.update(setupStatesRef, (states) => {
+        const next = new Map(states);
+        if (state === null) next.delete(instanceId);
+        else next.set(instanceId, state);
+        return next;
+      }).pipe(Effect.andThen(Ref.get(providersRef)), Effect.flatMap(publishProviders));
+
     return {
-      getProviders: Ref.get(providersRef),
+      getProviders: Ref.get(providersRef).pipe(Effect.flatMap(withSetupStates)),
       refresh: (provider?: ProviderDriverKind) =>
-        refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
+        refresh(provider).pipe(
+          Effect.catchCause(recoverRefreshFailure),
+          Effect.flatMap(withSetupStates),
+        ),
       refreshInstance: (instanceId: ProviderInstanceId) =>
-        refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
+        refreshInstance(instanceId).pipe(
+          Effect.catchCause(recoverRefreshFailure),
+          Effect.flatMap(withSetupStates),
+        ),
       getProviderSetupCommands,
+      setSetupState,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

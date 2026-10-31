@@ -6,7 +6,12 @@
  *
  * @module ProviderRegistry
  */
-import type { ProviderInstanceId, ProviderDriverKind, ServerProvider } from "@cadsense/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderDriverKind,
+  ServerProvider,
+  ServerProviderSetupState,
+} from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
@@ -49,6 +54,15 @@ export interface ProviderRegistryShape {
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ProviderSetupCommands | undefined>;
 
+  /**
+   * Record the setup command running for an instance, or the last one that
+   * failed; `null` clears it. Every snapshot the registry returns or publishes
+   * carries it as `setup`. It is never written to the status cache.
+   */
+  readonly setSetupState: (
+    instanceId: ProviderInstanceId,
+    state: ServerProviderSetupState | null,
+  ) => Effect.Effect<void>;
   /**
    * Stream of provider snapshot updates — one emission per aggregated
    * change. The array contains the full current state.
