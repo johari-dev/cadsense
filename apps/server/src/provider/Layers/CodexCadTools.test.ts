@@ -263,6 +263,7 @@ it.effect(
           "cad_update_view",
           "cad_capture",
           "cad_part_drawing",
+          "cad_plate_cam",
         ],
       );
       yield* runtime.close;

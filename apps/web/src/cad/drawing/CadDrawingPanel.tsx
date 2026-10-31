@@ -1,32 +1,21 @@
 // The right panel's Part drawing section: print-ready sheets for the parts in a
 // `RightPanelDrawing`, built in the browser from the snapshot's cached part meshes. A group
 // selection keeps only parts the shop draws; plates and printed parts are counted, not drawn.
-import { useAtomValue } from "@effect/atom-react";
-import { CadSnapshotManifest, type ScopedThreadRef } from "@cadsense/contracts";
+import type { ScopedThreadRef } from "@cadsense/contracts";
 import { CaretLeftIcon, CaretRightIcon, PrinterIcon } from "~/lib/icons";
-import * as Schema from "effect/Schema";
-import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
-import type { RightPanelDrawing } from "../../rightPanelStore";
-import { cadPanelEnvironment } from "../../state/cadPanel";
-import { useEnvironmentHttpBaseUrl } from "../../state/environments";
+import { useRightPanelStore, type RightPanelDrawing } from "../../rightPanelStore";
+import { routeCounts, useCadSnapshotAssets, useShopRoutes } from "../useCadSnapshotAssets";
 import {
-  analyzePart,
+  MAX_ANALYZED_TRIANGLES,
   projectView,
   viewSpecs,
   type DrawingView,
   type PartAnalysis,
 } from "./analysis";
-import {
-  glbExtents,
-  resolveDrawingSheets,
-  shopRoute,
-  type DrawingSheetEntry,
-  type ShopRoute,
-} from "./drawingModel";
-import { loadGlbPart } from "./loadPart";
+import { resolveDrawingSheets, type DrawingSheetEntry } from "./drawingModel";
 import { SHEET_H, SHEET_W } from "./sheetKit";
 import { VARIANTS, describePart, type SheetData, type VariantKey } from "./sheets";
 import {
@@ -39,8 +28,6 @@ import {
   type Units,
 } from "./shopKnowledge";
 
-const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
-const MAX_TRIANGLES = 150_000;
 const SHEET_STYLE = {
   "--sheet-font": '"Inter", "Helvetica Neue", Arial, sans-serif',
 } as CSSProperties;
@@ -50,28 +37,24 @@ interface Prepared {
   readonly views: Record<"front" | "top" | "right" | "iso", DrawingView>;
 }
 
-// Parts keep their bytes and analysis for the session; the same mesh always draws the same way.
-const assetBySha = new Map<string, Promise<ArrayBuffer>>();
+// Views are projected once per mesh for the session; the same mesh always draws the same way.
 const preparedBySha = new Map<string, Promise<Prepared>>();
 
-const prepare = (sha256: string, fetchAsset: (sha256: string) => Promise<ArrayBuffer>) => {
+const prepare = (sha256: string, analyze: (sha256: string) => Promise<PartAnalysis>) => {
   const cached = preparedBySha.get(sha256);
   if (cached) return cached;
-  const work = fetchAsset(sha256)
-    .then(loadGlbPart)
-    .then((mesh) => {
-      const part = analyzePart(mesh);
-      const specs = viewSpecs(part.frame);
-      return {
-        part,
-        views: {
-          front: projectView(part, specs.front),
-          top: projectView(part, specs.top),
-          right: projectView(part, specs.right),
-          iso: projectView(part, specs.iso),
-        },
-      };
-    });
+  const work = analyze(sha256).then((part) => {
+    const specs = viewSpecs(part.frame);
+    return {
+      part,
+      views: {
+        front: projectView(part, specs.front),
+        top: projectView(part, specs.top),
+        right: projectView(part, specs.right),
+        iso: projectView(part, specs.iso),
+      },
+    };
+  });
   work.catch(() => preparedBySha.delete(sha256));
   preparedBySha.set(sha256, work);
   return work;
@@ -131,16 +114,10 @@ export function CadDrawingPanel({
   threadRef: ScopedThreadRef;
   drawing: RightPanelDrawing;
 }) {
-  const sceneAtom = cadPanelEnvironment.scene({
-    environmentId: threadRef.environmentId,
-    input: { threadId: threadRef.threadId, snapshotId: drawing.snapshotId },
-  });
-  // Mounting the lease keeps the scene ticket alive while the drawing is open.
-  const lease = useAtomValue(sceneAtom);
-  const ticket = AsyncResult.isSuccess(lease) ? lease.value : null;
-  const baseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
-  const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { manifest, error, setError, fetchAsset, analyze } = useCadSnapshotAssets(
+    threadRef,
+    drawing.snapshotId,
+  );
   const [index, setIndex] = useState(0);
   const [variant, setVariant] = useState<VariantKey>("A");
   const [units, setUnits] = useState<Units>("in");
@@ -149,48 +126,6 @@ export function CadDrawingPanel({
   const [prepared, setPrepared] = useState<Record<string, Prepared>>({});
   const [printing, setPrinting] = useState<SheetData[] | null>(null);
   const printRoot = useRef<HTMLDivElement>(null);
-
-  const fetchFromScene = useMemo(() => {
-    if (!ticket || !baseUrl) return null;
-    return async (path: string) => {
-      const response = await fetch(
-        new URL(
-          `api/cad-panel/${ticket.sceneId}${path}`,
-          baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
-        ),
-        {
-          credentials: "omit",
-          headers: { "x-cad-panel-token": ticket.token },
-        },
-      );
-      if (!response.ok) throw new Error("CAD scene unavailable");
-      return response;
-    };
-  }, [ticket, baseUrl]);
-  const fetchAsset = useMemo(() => {
-    if (!fetchFromScene) return null;
-    return (sha256: string) => {
-      const cached = assetBySha.get(sha256);
-      if (cached) return cached;
-      const bytes = fetchFromScene(`/${sha256}`).then((response) => response.arrayBuffer());
-      bytes.catch(() => assetBySha.delete(sha256));
-      assetBySha.set(sha256, bytes);
-      return bytes;
-    };
-  }, [fetchFromScene]);
-  const [routes, setRoutes] = useState<Record<string, ShopRoute> | null>(null);
-
-  useEffect(() => {
-    if (!fetchFromScene || manifest) return;
-    let live = true;
-    fetchFromScene("?delivery=meshopt-bin-v1")
-      .then((response) => response.json())
-      .then((json) => live && setManifest(decodeManifest(json)))
-      .catch((cause: unknown) => live && setError(String(cause)));
-    return () => {
-      live = false;
-    };
-  }, [fetchFromScene, manifest]);
 
   const candidates = useMemo(
     () => (manifest ? resolveDrawingSheets(manifest, drawing.occurrenceIds) : []),
@@ -206,27 +141,8 @@ export function CadDrawingPanel({
       ),
     [manifest, drawing.occurrenceIds],
   );
-  useEffect(() => {
-    if (!isGroup || !fetchAsset) return;
-    // Nothing to sort: an empty map, so the panel says nothing needs a drawing.
-    if (candidates.length === 0) {
-      setRoutes({});
-      return;
-    }
-    let live = true;
-    Promise.all(
-      candidates.map(async (candidate) => {
-        const extents = glbExtents(new Uint8Array(await fetchAsset(candidate.sha256)));
-        // By part, not mesh: two parts can share a mesh and differ in material.
-        return [candidate.geometryKey, shopRoute(candidate.material, extents)] as const;
-      }),
-    )
-      .then((entries) => live && setRoutes(Object.fromEntries(entries)))
-      .catch((cause: unknown) => live && setError(String(cause)));
-    return () => {
-      live = false;
-    };
-  }, [isGroup, fetchAsset, candidates]);
+  // Routes filter a group; for parts picked one by one they only drive the CAM hint.
+  const routes = useShopRoutes(candidates, fetchAsset, true, setError);
   const sheets = useMemo(
     () =>
       isGroup
@@ -236,22 +152,23 @@ export function CadDrawingPanel({
         : candidates,
     [isGroup, candidates, routes],
   );
-  const skipped = useMemo(() => {
-    const count = (route: ShopRoute) =>
-      candidates
-        .filter((candidate) => !candidate.named && routes?.[candidate.geometryKey] === route)
-        .reduce((sum, candidate) => sum + candidate.qty, 0);
-    return isGroup && routes ? { cnc: count("cnc"), print: count("print") } : null;
-  }, [isGroup, candidates, routes]);
+  const skipped = isGroup && routes ? routeCounts(candidates, routes) : null;
+  const openCam = () =>
+    useRightPanelStore.getState().openCam(threadRef, {
+      snapshotId: drawing.snapshotId,
+      occurrenceIds: drawing.occurrenceIds,
+      title: drawing.title,
+    });
   const entry = sheets[Math.min(index, Math.max(0, sheets.length - 1))] ?? null;
   const ready = entry ? prepared[entry.sha256] : undefined;
 
   useEffect(() => {
-    if (!entry || !fetchAsset || prepared[entry.sha256] || entry.triangles > MAX_TRIANGLES) return;
+    if (!entry || !analyze || prepared[entry.sha256] || entry.triangles > MAX_ANALYZED_TRIANGLES)
+      return;
     let live = true;
     // Let the "Drawing" state paint before the main thread is busy.
     const timer = setTimeout(() => {
-      prepare(entry.sha256, fetchAsset)
+      prepare(entry.sha256, analyze)
         .then((value) => live && setPrepared((current) => ({ ...current, [entry.sha256]: value })))
         .catch((cause: unknown) => live && setError(String(cause)));
     }, 30);
@@ -259,7 +176,7 @@ export function CadDrawingPanel({
       live = false;
       clearTimeout(timer);
     };
-  }, [entry, fetchAsset, prepared]);
+  }, [entry, analyze, prepared, setError]);
 
   const revision = manifest?.root.microversionId.slice(0, 8) ?? "";
   const data =
@@ -269,14 +186,14 @@ export function CadDrawingPanel({
   const current = VARIANTS.find((v) => v.key === variant)!;
 
   const printAll = async () => {
-    if (!fetchAsset) return;
+    if (!analyze) return;
     const all = await Promise.all(
       sheets
-        .filter((sheet) => sheet.triangles <= MAX_TRIANGLES)
+        .filter((sheet) => sheet.triangles <= MAX_ANALYZED_TRIANGLES)
         .map(async (sheet) =>
           buildSheet(
             sheet,
-            await prepare(sheet.sha256, fetchAsset),
+            await prepare(sheet.sha256, analyze),
             form,
             choices[sheet.geometryKey],
             units,
@@ -308,10 +225,6 @@ export function CadDrawingPanel({
   const updateChoices = (key: string, update: (current: PartChoices) => PartChoices) =>
     setChoices((all) => ({ ...all, [key]: update(all[key] ?? { readings: {} }) }));
 
-  if (AsyncResult.isFailure(lease))
-    return (
-      <div className="p-4 text-sm text-muted-foreground">The local CAD scene is unavailable.</div>
-    );
   if (error)
     return <div className="p-4 text-sm text-destructive">Could not draw this part: {error}</div>;
   if (!manifest || (isGroup && !routes))
@@ -382,6 +295,17 @@ export function CadDrawingPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {!isGroup && entry && routes?.[entry.geometryKey] === "cnc" && (
+          <div
+            className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs text-muted-foreground"
+            data-testid="cad-drawing-cnc-hint"
+          >
+            <span className="flex-1">This is a plate, usually cut on the router from a DXF.</span>
+            <Button size="xs" variant="outline" onClick={openCam}>
+              Open in CAM
+            </Button>
+          </div>
+        )}
         <div className="bg-[var(--cad-viewport-background)] p-3">
           {data ? (
             <svg
@@ -394,7 +318,7 @@ export function CadDrawingPanel({
             </svg>
           ) : (
             <div className="flex aspect-[11/8.5] w-full items-center justify-center text-sm text-muted-foreground">
-              {entry && entry.triangles > MAX_TRIANGLES
+              {entry && entry.triangles > MAX_ANALYZED_TRIANGLES
                 ? "This part is too detailed to draw yet."
                 : "Drawing…"}
             </div>
@@ -426,6 +350,15 @@ export function CadDrawingPanel({
             data-testid="cad-drawing-skipped"
           >
             Not drawn: {skippedText(skipped)}
+            {skipped && skipped.cnc > 0 && (
+              <button
+                type="button"
+                className="ml-1 underline-offset-2 hover:text-foreground hover:underline"
+                onClick={openCam}
+              >
+                Open the plates in CAM
+              </button>
+            )}
           </p>
         )}
 

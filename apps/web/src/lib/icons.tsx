@@ -31,6 +31,8 @@ import {
   IconCheck,
   IconChevronDown,
   IconFileDescription,
+  IconPlayerPause,
+  IconTools,
   IconPrinter,
   IconChevronLeft,
   IconChevronRight,
@@ -188,7 +190,9 @@ export const CopyIcon = tablerIcon(IconCopy);
 export const CpuIcon = tablerIcon(IconCpu);
 export const CrosshairIcon = tablerIcon(IconCrosshair);
 export const PartDrawingIcon = tablerIcon(IconFileDescription);
+export const RouterIcon = tablerIcon(IconTools);
 export const PrinterIcon = tablerIcon(IconPrinter);
+export const PauseIcon = tablerIcon(IconPlayerPause);
 export const CubeIcon = tablerIcon(IconCube);
 export const CursorClickIcon = tablerIcon(IconClick);
 export const CursorIcon = tablerIcon(IconPointer);

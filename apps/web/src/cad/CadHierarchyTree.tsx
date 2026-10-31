@@ -8,7 +8,7 @@ import {
   IntersectIcon as Blend,
 } from "~/lib/icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PartDrawingIcon } from "~/lib/icons";
+import { PartDrawingIcon, RouterIcon } from "~/lib/icons";
 import { partName } from "./drawing/drawingModel";
 import { isBoughtPart } from "./drawing/shopKnowledge";
 import { Button } from "../components/ui/button";
@@ -24,6 +24,7 @@ export function CadHierarchyTree({
   onChange,
   fullHeight = false,
   onOpenDrawing,
+  onOpenCam,
 }: {
   manifest: CadSnapshotManifest;
   view: CadViewState;
@@ -32,6 +33,8 @@ export function CadHierarchyTree({
   fullHeight?: boolean;
   /** Right-clicking a row offers a part drawing, or a packet of drawings for an assembly. */
   onOpenDrawing?: (occurrenceIds: string[], title: string) => void;
+  /** Right-clicking also offers router CAM for a plate, or for the plates in an assembly. */
+  onOpenCam?: (occurrenceIds: string[], title: string) => void;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
   const highlighted = useMemo(
@@ -298,6 +301,21 @@ export function CadHierarchyTree({
                       ? "No made parts to draw"
                       : "Make drawings for this group"}
                 </button>
+                {onOpenCam && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={count === 0}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent disabled:opacity-50"
+                    onClick={() => {
+                      setMenu(null);
+                      onOpenCam([menu.id], partName(node));
+                    }}
+                  >
+                    <RouterIcon size={14} />
+                    {single ? "Open in CAM" : "CAM plates in this group"}
+                  </button>
+                )}
                 <button
                   type="button"
                   role="menuitem"

@@ -4,6 +4,7 @@ import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   hasCadSource,
   CAD_PART_DRAWING_ACTIVITY,
+  CAD_PLATE_CAM_ACTIVITY,
   CadPartDrawingInput,
   EventId,
   type CadPartDrawingCard,
@@ -95,6 +96,8 @@ export interface CadAgentTools {
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
   /** Posts a part drawing card to the chat; the web draws the sheets. */
   readonly partDrawing: (input: unknown) => Effect.Effect<unknown, CadViewError>;
+  /** Posts a plate CAM card to the chat; the web plans the cut. */
+  readonly plateCam: (input: unknown) => Effect.Effect<unknown, CadViewError>;
 }
 export interface CadViewingShape {
   readonly watchActivity: (threadId: ThreadId) => Stream.Stream<CadToolActivityState>;
@@ -515,7 +518,9 @@ export const make = Effect.gen(function* () {
               );
             }),
           );
-        const partDrawing: CadAgentTools["partDrawing"] = (input) =>
+        // Shop drawings and plate CAM share one flow: resolve the selection, route each part by
+        // its mesh, keep the parts this tool makes, and post a card that opens them in the panel.
+        const openShopCard = (input: unknown, mode: "drawing" | "cam") =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
               const initialized = yield* initialize();
@@ -534,9 +539,10 @@ export const make = Effect.gen(function* () {
                   details: `occurrenceIds must be unsuppressed part, assembly, or Part Studio occurrences from cad_hierarchy or cad_find_parts: ${unknown.join(", ")}`,
                 });
               const candidates = resolveDrawingSheets(snapshot, request.occurrenceIds);
-              // Parts named one by one are drawn as asked. An assembly draws only the parts the shop
-              // draws: plates go to the router and printed parts to the printer. Only those parts'
-              // meshes are read, and their extents are cached across calls.
+              const isGroup = request.occurrenceIds.some((id) => nodes.get(id)?.kind !== "part");
+              // Parts named one by one are kept as asked; an assembly keeps the parts this tool
+              // makes: drawings for stock parts, CAM for plates. Only those parts' meshes are read,
+              // and their extents are cached across calls.
               const routed = yield* Effect.forEach(candidates, (candidate) =>
                 Effect.gen(function* () {
                   if (candidate.named) return { candidate, route: "named" as const };
@@ -551,33 +557,42 @@ export const make = Effect.gen(function* () {
                   return { candidate, route: shopRoute(candidate.material, extents) };
                 }),
               );
-              const sheets = routed
-                .filter((entry) => entry.route === "named" || entry.route === "drawing")
+              const keep = (route: ShopRoute | "named") =>
+                route === "named" || route === (mode === "cam" ? "cnc" : "drawing");
+              const kept = routed
+                .filter((entry) => keep(entry.route))
                 .map((entry) => entry.candidate);
-              const skippedQty = (route: ShopRoute) =>
+              const qtyOf = (route: ShopRoute) =>
                 routed
-                  .filter((entry) => entry.route === route)
+                  .filter((entry) => entry.route === route && !keep(entry.route))
                   .reduce((sum, entry) => sum + entry.candidate.qty, 0);
-              const skipped = { cnc: skippedQty("cnc"), print: skippedQty("print") };
-              if (sheets.length === 0)
+              const skipped = { cnc: qtyOf("cnc"), print: qtyOf("print") };
+              const needsDrawing = qtyOf("drawing");
+              if (kept.length === 0)
                 return yield* new CadViewError({
                   reason: "invalid-operation",
-                  details: `Nothing in the selection needs a drawing: bought parts are skipped, ${skipped.cnc} plate instances go to the router, and ${skipped.print} printed part instances go to the printer.`,
+                  details:
+                    mode === "cam"
+                      ? `None of the selected parts is a plate. ${needsDrawing} part instances need shop drawings (cad_part_drawing) and ${skipped.print} are printed.`
+                      : `Nothing in the selection needs a drawing: bought parts are skipped, ${skipped.cnc} plate instances go to the router (cad_plate_cam), and ${skipped.print} printed part instances go to the printer.`,
                 });
               const first = nodes.get(request.occurrenceIds[0]!)!;
+              const noun = `${mode === "cam" ? "plate" : "part"}${kept.length === 1 ? "" : "s"}`;
               const title =
                 request.title ??
-                (request.occurrenceIds.length === 1 ? partName(first) : `${sheets.length} parts`);
+                (request.occurrenceIds.length === 1 ? partName(first) : `${kept.length} ${noun}`);
               const card: CadPartDrawingCard = {
                 snapshotId: snapshot.snapshotId,
                 occurrenceIds: [...request.occurrenceIds],
                 title,
-                sheets: sheets.map((sheet) => ({
-                  name: sheet.name,
-                  qty: sheet.qty,
-                  material: sheet.material,
+                sheets: kept.map((part) => ({
+                  name: part.name,
+                  qty: part.qty,
+                  material: part.material,
                 })),
-                ...(skipped.cnc + skipped.print > 0 ? { skipped } : {}),
+                ...(mode === "drawing" && isGroup && skipped.cnc + skipped.print > 0
+                  ? { skipped }
+                  : {}),
               };
               const createdAt = DateTime.formatIso(yield* DateTime.now);
               const id = yield* commandId;
@@ -586,26 +601,39 @@ export const make = Effect.gen(function* () {
                 commandId: id,
                 threadId: session.threadId,
                 activity: {
-                  id: EventId.make(`cad-drawing-${id}`),
+                  id: EventId.make(`cad-${mode}-${id}`),
                   tone: "info",
-                  kind: CAD_PART_DRAWING_ACTIVITY,
+                  kind: mode === "cam" ? CAD_PLATE_CAM_ACTIVITY : CAD_PART_DRAWING_ACTIVITY,
                   summary:
-                    sheets.length === 1 ? `Part drawing: ${title}` : `Part drawings: ${title}`,
+                    mode === "cam"
+                      ? `CAM: ${title}`
+                      : kept.length === 1
+                        ? `Part drawing: ${title}`
+                        : `Part drawings: ${title}`,
                   payload: card,
                   turnId: turnId ?? null,
                   createdAt,
                 },
                 createdAt,
               });
-              return {
-                opened: true,
-                title,
-                sheets: card.sheets,
-                notDrawn: { platesForTheRouter: skipped.cnc, printedParts: skipped.print },
-                note: "The sheets are open in the user's Part drawing panel, where they can switch sheet styles and print. Dimensions come from this model; tap sizes are guessed from hole diameters and the user confirms them there. Reply in two or three sentences: what you drew and anything the shop should know, such as a material that needs a decision. Do not describe the card or panel, and do not repeat dimensions.",
-              };
+              return mode === "cam"
+                ? {
+                    opened: true,
+                    title,
+                    plates: card.sheets,
+                    note: "The plates are open in the user's CAM panel: tool paths for holes, pockets, cutouts, and the outside profile with tabs, a cut-time estimate, and a DXF export. The user picks the tool and feeds there and posts G-code in their own CAM program. Reply in two or three sentences: what you opened and anything the router operator should know, such as features open only on the bottom face. Do not describe the card or panel.",
+                  }
+                : {
+                    opened: true,
+                    title,
+                    sheets: card.sheets,
+                    notDrawn: { platesForTheRouter: skipped.cnc, printedParts: skipped.print },
+                    note: "The sheets are open in the user's Part drawing panel, where they can switch sheet styles and print. Dimensions come from this model; tap sizes are guessed from hole diameters and the user confirms them there. Reply in two or three sentences: what you drew and anything the shop should know, such as a material that needs a decision. Do not describe the card or panel, and do not repeat dimensions.",
+                  };
             }),
           );
+        const partDrawing: CadAgentTools["partDrawing"] = (input) => openShopCard(input, "drawing");
+        const plateCam: CadAgentTools["plateCam"] = (input) => openShopCard(input, "cam");
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -716,6 +744,7 @@ export const make = Effect.gen(function* () {
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
           partDrawing: (input) => activity.track(session.threadId, turnId, partDrawing(input)),
+          plateCam: (input) => activity.track(session.threadId, turnId, plateCam(input)),
         });
       }),
     );

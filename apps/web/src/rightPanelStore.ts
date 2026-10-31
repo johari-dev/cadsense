@@ -8,10 +8,17 @@ import { resolveStorage } from "./lib/storage";
 /**
  * The right panel's sections, in fallback order. The first available one of CAD
  * and Files is the panel's home: CAD on CAD projects, Files elsewhere. The others
- * take over the panel when something opens them, and Drawing, Agents, and Browser only
+ * take over the panel when something opens them, and Drawing, CAM, Agents, and Browser only
  * show while they have something to show (see `resolveRightPanelSection`).
  */
-export const RIGHT_PANEL_SECTIONS = ["cad", "files", "drawing", "agents", "browser"] as const;
+export const RIGHT_PANEL_SECTIONS = [
+  "cad",
+  "files",
+  "drawing",
+  "cam",
+  "agents",
+  "browser",
+] as const;
 export type RightPanelSection = (typeof RIGHT_PANEL_SECTIONS)[number];
 
 /** The file shown inside the Files section. */
@@ -42,12 +49,15 @@ export interface ThreadRightPanelState {
   browserTabId: string | null;
   /** Drawing shown in Drawing; missing in state saved before drawings existed. */
   drawing?: RightPanelDrawing | null;
+  /** Plates shown in CAM, the same shape as a drawing's parts. */
+  cam?: RightPanelDrawing | null;
 }
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   open: (ref: ScopedThreadRef, section: Exclude<RightPanelSection, "browser">) => void;
   openDrawing: (ref: ScopedThreadRef, drawing: Omit<RightPanelDrawing, "requestId">) => void;
+  openCam: (ref: ScopedThreadRef, cam: Omit<RightPanelDrawing, "requestId">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   closeFile: (ref: ScopedThreadRef) => void;
@@ -76,7 +86,8 @@ function isEmpty(state: ThreadRightPanelState): boolean {
     state.section === null &&
     state.file === null &&
     !state.browserTabId &&
-    !state.drawing
+    !state.drawing &&
+    !state.cam
   );
 }
 
@@ -113,6 +124,13 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             isOpen: true,
             section: "drawing",
             drawing: { ...drawing, requestId: (current.drawing?.requestId ?? 0) + 1 },
+          })),
+        openCam: (ref, cam) =>
+          update(ref, (current) => ({
+            ...current,
+            isOpen: true,
+            section: "cam",
+            cam: { ...cam, requestId: (current.cam?.requestId ?? 0) + 1 },
           })),
         openBrowser: (ref, tabId) =>
           update(ref, (current) => ({

@@ -25,7 +25,7 @@ export interface PartMesh {
   readonly triangles: Uint32Array;
 }
 
-interface Edge {
+export interface Edge {
   readonly a: number;
   readonly b: number;
   readonly faces: number[];
@@ -217,6 +217,9 @@ export const weldMesh = (
 };
 
 const CREASE_COS = Math.cos((25 * Math.PI) / 180);
+
+/** analyzePart runs on the main thread; parts with more triangles than this are not analyzed. */
+export const MAX_ANALYZED_TRIANGLES = 150_000;
 
 export const analyzePart = (mesh: PartMesh): PartAnalysis => {
   const { positions, triangles } = mesh;
@@ -1010,7 +1013,7 @@ const sinkBetween = (outer: number, inner: number, depth: number, rim: Vec3): Co
     : null;
 
 /** True when a ray from `origin` along `direction` leaves the part without touching a face. */
-const rayLeaves = (
+export const rayLeaves = (
   positions: Float64Array,
   triangles: Uint32Array,
   origin: Vec3,
