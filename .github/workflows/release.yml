@@ -346,6 +346,9 @@ jobs:
         shell: bash
         env:
           CADSENSE_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
+          # Baked into the server bundle (apps/server/vite.config.ts). Without it, the release
+          # sends no usage analytics.
+          CADSENSE_POSTHOG_KEY: ${{ secrets.CADSENSE_POSTHOG_KEY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}

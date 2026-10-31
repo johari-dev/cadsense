@@ -64,6 +64,10 @@ export default mergeConfig(
       },
       define: {
         __CADSENSE_BUILD_CHANNEL__: JSON.stringify(serverBuildChannel),
+        // Cadsense's PostHog project key, from the release workflow's CADSENSE_POSTHOG_KEY secret.
+        // Local and fork builds have none, so their bundles send no usage analytics. The key is
+        // write-only, so shipping it inside the app is fine. See src/telemetry/AnalyticsService.ts.
+        __CADSENSE_POSTHOG_KEY__: JSON.stringify(process.env.CADSENSE_POSTHOG_KEY ?? ""),
       },
     },
     test: {

@@ -349,6 +349,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
+      ...(settings.enableUsageAnalytics !== DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics
+        ? ["Usage analytics"]
+        : []),
     ],
     [
       isTextGenerationModelDirty,
@@ -361,6 +364,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.enableAgentBrowserAccess,
+      settings.enableUsageAnalytics,
       settings.streamAssistantText,
       settings.showPermissionSettings,
       settings.showContextWindowIndicator,
@@ -404,6 +408,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       browserDefaultAppearance: DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance,
       browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
+      enableUsageAnalytics: DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics,
     });
     onRestored?.();
   }, [changedSettingLabels, onRestored, updateSettings]);
@@ -1133,6 +1138,32 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
                 }}
               />
             </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("usage-analytics")}
+          description="Send anonymous usage data, such as how many turns and CAD previews you run, to help improve Cadsense. It never includes prompts, files, or CAD data. Turning this off also deletes this install's anonymous id."
+          resetAction={
+            settings.enableUsageAnalytics !== DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics ? (
+              <SettingResetButton
+                label="usage analytics"
+                onClick={() =>
+                  updateSettings({
+                    enableUsageAnalytics: DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.enableUsageAnalytics}
+              onCheckedChange={(checked) =>
+                updateSettings({ enableUsageAnalytics: Boolean(checked) })
+              }
+              aria-label="Share anonymous usage analytics"
+            />
           }
         />
       </SettingsSection>

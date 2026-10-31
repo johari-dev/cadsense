@@ -3,170 +3,63 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
-import * as References from "effect/References";
 
 import * as ServerConfig from "../config.ts";
 import * as Identify from "./Identify.ts";
 
-interface CapturedLog {
-  readonly message: unknown;
-  readonly annotations: Readonly<Record<string, unknown>>;
-}
+const namespacedSha256 = (installationId: string) =>
+  NodeCrypto.createHash("sha256").update(`cadsense:v1:${installationId}`, "utf8").digest("hex");
 
-const sha256 = (value: string) =>
-  NodeCrypto.createHash("sha256").update(value, "utf8").digest("hex");
-
-const makeCaptureLogger = (logs: CapturedLog[]) =>
-  Logger.make(({ fiber, message }) => {
-    logs.push({
-      message,
-      annotations: fiber.getRef(References.CurrentLogAnnotations),
-    });
-  });
-
-const findIdentityLog = (
-  logs: ReadonlyArray<CapturedLog>,
-  source: Identify.TelemetryIdentitySource,
-  errorTag: string,
-) => logs.find((log) => log.annotations.source === source && log.annotations.errorTag === errorTag);
-
-it("preserves exact telemetry identity causes without deriving messages from them", () => {
-  const decodeCause = new Error("private nested decode details");
-  const decodeError = new Identify.TelemetryIdentityDecodeError({
-    source: "codex",
-    filePath: "/tmp/auth.json",
-    cause: decodeCause,
-  });
-  const readCause = new Error("private nested read details");
-  const readError = new Identify.TelemetryIdentityReadError({
-    source: "anonymous",
-    filePath: "/tmp/anonymous-id",
-    cause: readCause,
-  });
-
-  assert.strictEqual(decodeError.cause, decodeCause);
-  assert.strictEqual(readError.cause, readCause);
-  assert.notInclude(decodeError.message, decodeCause.message);
-  assert.notInclude(readError.message, readCause.message);
-});
+const testConfig = (prefix: string) => ServerConfig.layerTest(process.cwd(), { prefix });
 
 it.layer(NodeServices.layer)("telemetry identity", (it) => {
-  it.effect("uses the persisted anonymous id when provider identities are absent", () =>
+  it.effect("hashes the persisted installation id with the Cadsense namespace", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* fileSystem.writeFileString(config.anonymousIdPath, "persisted-installation-id\n");
+
+      assert.equal(
+        yield* Identify.getTelemetryIdentifier,
+        namespacedSha256("persisted-installation-id"),
+      );
+    }).pipe(Effect.provide(testConfig("cadsense-telemetry-identify-persisted-"))),
+  );
+
+  it.effect("never derives the id from provider account files", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const anonymousId = "persisted-anonymous-id";
+      const codexAuthPath = path.join(config.baseDir, "home", ".codex", "auth.json");
+      yield* fileSystem.makeDirectory(path.dirname(codexAuthPath), { recursive: true });
+      yield* fileSystem.writeFileString(codexAuthPath, '{"tokens":{"account_id":"acct"}}');
 
-      yield* fileSystem.writeFileString(config.anonymousIdPath, anonymousId);
+      const identifier = yield* Identify.getTelemetryIdentifier;
+      const installationId = yield* fileSystem.readFileString(config.anonymousIdPath);
 
-      const identifier = yield* Identify.getTelemetryIdentifierForHome(
-        path.join(config.baseDir, "home"),
-      );
-
-      assert.equal(identifier, sha256(anonymousId));
-    }).pipe(
-      Effect.provide(
-        ServerConfig.layerTest(process.cwd(), {
-          prefix: "cadsense-telemetry-identify-anonymous-",
-        }),
-      ),
-    ),
+      assert.equal(identifier, namespacedSha256(installationId));
+      assert.notEqual(identifier, namespacedSha256("acct"));
+    }).pipe(Effect.provide(testConfig("cadsense-telemetry-identify-providers-"))),
   );
 
-  it.effect("logs structured decode context and falls back from malformed Codex auth", () => {
-    const logs: CapturedLog[] = [];
-    const logger = makeCaptureLogger(logs);
-
-    return Effect.gen(function* () {
+  it.effect("starts a new, unlinked id after the old one is forgotten", () =>
+    Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const homeDirectory = path.join(config.baseDir, "home");
-      const codexAuthPath = path.join(homeDirectory, ".codex", "auth.json");
-      const anonymousId = "decode-fallback-anonymous-id";
-      const privateAccessToken = "private-codex-access-token";
 
-      yield* fileSystem.makeDirectory(path.dirname(codexAuthPath), { recursive: true });
-      yield* fileSystem.writeFileString(
-        codexAuthPath,
-        `{"tokens":{"access_token":"${privateAccessToken}"}}`,
-      );
-      yield* fileSystem.writeFileString(config.anonymousIdPath, anonymousId);
+      const first = yield* Identify.getTelemetryIdentifier;
+      assert.equal(yield* Identify.getTelemetryIdentifier, first);
 
-      const identifier = yield* Identify.getTelemetryIdentifierForHome(homeDirectory);
+      yield* Identify.forgetTelemetryIdentity;
+      assert.isFalse(yield* fileSystem.exists(config.anonymousIdPath));
+      // Forgetting an id that is already gone is a no-op, not an error.
+      yield* Identify.forgetTelemetryIdentity;
 
-      assert.equal(identifier, sha256(anonymousId));
-      const decodeLog = findIdentityLog(logs, "codex", "TelemetryIdentityDecodeError");
-      assert.isDefined(decodeLog);
-      assert.equal(
-        decodeLog?.message,
-        `Failed to decode codex telemetry identity at '${codexAuthPath}'.`,
-      );
-
-      assert.equal(decodeLog?.annotations.filePath, codexAuthPath);
-      assert.equal(decodeLog?.annotations.causeKind, "schema");
-      assert.notProperty(decodeLog?.annotations ?? {}, "cause");
-      const errorStack = decodeLog?.annotations.errorStack;
-      assert.isString(errorStack);
-      assert.include(errorStack, "Failed to decode codex telemetry identity");
-      const annotations = Object.values(decodeLog?.annotations ?? {})
-        .map(String)
-        .join("\n");
-      assert.notInclude(annotations, privateAccessToken);
-    }).pipe(
-      Effect.provide(
-        Layer.merge(
-          ServerConfig.layerTest(process.cwd(), {
-            prefix: "cadsense-telemetry-identify-decode-",
-          }),
-          Logger.layer([logger], { mergeWithExisting: false }),
-        ),
-      ),
-    );
-  });
-
-  it.effect("does not overwrite the anonymous id path after a non-NotFound read failure", () => {
-    const logs: CapturedLog[] = [];
-    const logger = makeCaptureLogger(logs);
-
-    return Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const homeDirectory = path.join(config.baseDir, "home");
-
-      yield* fileSystem.makeDirectory(config.anonymousIdPath);
-
-      const identifier = yield* Identify.getTelemetryIdentifierForHome(homeDirectory);
-
-      assert.isNull(identifier);
-      assert.deepEqual(yield* fileSystem.readDirectory(config.anonymousIdPath), []);
-
-      const readLog = findIdentityLog(logs, "anonymous", "TelemetryIdentityReadError");
-      assert.isDefined(readLog);
-      assert.equal(readLog?.annotations.filePath, config.anonymousIdPath);
-      assert.equal(readLog?.annotations.causeKind, "platform");
-      assert.notEqual(readLog?.annotations.platformReason, "NotFound");
-      assert.notProperty(readLog?.annotations ?? {}, "cause");
-      const errorStack = readLog?.annotations.errorStack;
-      assert.isString(errorStack);
-      assert.include(errorStack, "Failed to read anonymous telemetry identity");
-      assert.isUndefined(
-        findIdentityLog(logs, "anonymous", "TelemetryAnonymousIdPersistenceError"),
-      );
-    }).pipe(
-      Effect.provide(
-        Layer.merge(
-          ServerConfig.layerTest(process.cwd(), {
-            prefix: "cadsense-telemetry-identify-read-",
-          }),
-          Logger.layer([logger], { mergeWithExisting: false }),
-        ),
-      ),
-    );
-  });
+      const second = yield* Identify.getTelemetryIdentifier;
+      assert.isNotNull(second);
+      assert.notEqual(second, first);
+    }).pipe(Effect.provide(testConfig("cadsense-telemetry-identify-forget-"))),
+  );
 });
