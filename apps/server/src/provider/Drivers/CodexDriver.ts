@@ -22,6 +22,7 @@
  * @module provider/Drivers/CodexDriver
  */
 import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@cadsense/contracts";
+import { HostProcessPlatform } from "@cadsense/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -45,7 +46,7 @@ import * as ModelManifest from "../ModelManifest.ts";
 import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { npmGlobalInstallCommand, type ProviderSetupCommands } from "../providerSetup.ts";
+import { installScriptCommand, type ProviderSetupCommands } from "../providerSetup.ts";
 import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
@@ -137,7 +138,14 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // `effectiveHomePath` is the shadow home when one is configured, so
       // `codex login` writes auth.json where this instance reads it.
       const setupCommands: ProviderSetupCommands = {
-        install: npmGlobalInstallCommand("@openai/codex"),
+        // Installs to ~/.local/bin, or %LOCALAPPDATA%\Programs\OpenAI\Codex\bin
+        // on Windows. CODEX_NON_INTERACTIVE stops it asking questions on the
+        // server's terminal.
+        install: installScriptCommand(yield* HostProcessPlatform, {
+          posix: { url: "https://chatgpt.com/codex/install.sh", shell: "sh" },
+          windowsUrl: "https://chatgpt.com/codex/install.ps1",
+          env: { ...processEnv, CODEX_NON_INTERACTIVE: "1" },
+        }),
         signIn: {
           executable: effectiveConfig.binaryPath,
           args: ["login"],
