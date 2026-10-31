@@ -1,17 +1,19 @@
 // The right panel's CAM section: a router plan for plates. A setup row, the plate with its tool
 // paths, a timeline that replays the cut by operation, and the operations table. A group keeps
-// only its plates.
+// only its plates. Send to Fusion builds the same operations there, where the team posts G-code.
 import type { ScopedThreadRef } from "@cadsense/contracts";
-import { CaretLeftIcon, CaretRightIcon, PauseIcon, PlayIcon } from "~/lib/icons";
+import { CaretDownIcon, CaretLeftIcon, CaretRightIcon, PauseIcon, PlayIcon } from "~/lib/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "../../components/ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../lib/utils";
 import { useRightPanelStore, type RightPanelDrawing } from "../../rightPanelStore";
-import { MAX_ANALYZED_TRIANGLES, type Vec2 } from "../drawing/analysis";
+import { MAX_ANALYZED_TRIANGLES, type PartAnalysis, type Vec2 } from "../drawing/analysis";
 import { resolveDrawingSheets } from "../drawing/drawingModel";
 import { routeCounts, useCadSnapshotAssets, useShopRoutes } from "../useCadSnapshotAssets";
 import { downloadText, plateDxf } from "./dxf";
+import { sendPlateToFusion, type FusionPlateResult } from "./fusion";
 import { plateGeometry, type PlateGeometry } from "./plateGeometry";
 import {
   DEFAULT_CAM,
@@ -25,6 +27,23 @@ import {
 const TOOLS = [0.125, 0.1575, 0.1875, 0.25] as const; // 1/8", 4 mm, 3/16", 1/4"
 // The 3D viewer's highlight, so a selected operation reads the same as a highlighted part.
 const HIGHLIGHT = "#ffbf36";
+
+type PlateState = PlateGeometry | "not-a-plate" | "too-detailed" | { readonly error: string };
+/** A part's plate geometry, or why there is none. */
+const readPlate = (
+  part: { readonly sha256: string; readonly triangles: number },
+  analyze: (sha256: string) => Promise<PartAnalysis>,
+): Promise<PlateState> =>
+  part.triangles > MAX_ANALYZED_TRIANGLES
+    ? Promise.resolve("too-detailed")
+    : analyze(part.sha256)
+        .then((analysis) => plateGeometry(analysis) ?? ("not-a-plate" as const))
+        .catch((cause: unknown) => ({ error: String(cause) }));
+
+type FusionState =
+  | { readonly status: "sending" }
+  | { readonly status: "sent"; readonly result: FusionPlateResult }
+  | { readonly status: "failed"; readonly error: string };
 
 export function CadCamPanel({
   threadRef,
@@ -40,9 +59,9 @@ export function CadCamPanel({
   const [index, setIndex] = useState(0);
   const [settings, setSettings] = useState<CamSettings>(DEFAULT_CAM);
   // Per plate: its geometry, or why there is none. One bad mesh must not hide the other plates.
-  const [plates, setPlates] = useState<
-    Record<string, PlateGeometry | "not-a-plate" | "too-detailed" | { readonly error: string }>
-  >({});
+  const [plates, setPlates] = useState<Record<string, PlateState>>({});
+  // Per plate: its last send to Fusion. Kept across settings changes; sending again replaces it.
+  const [fusion, setFusion] = useState<Record<string, FusionState>>({});
 
   const candidates = useMemo(
     () => (manifest ? resolveDrawingSheets(manifest, cam.occurrenceIds) : []),
@@ -70,23 +89,47 @@ export function CadCamPanel({
   const plate = entry ? plates[entry.sha256] : undefined;
   const ready = plate && typeof plate === "object" && "outline" in plate ? plate : null;
   const plan = useMemo(() => (ready ? planPlate(ready, settings) : null), [ready, settings]);
+  const sent = entry ? fusion[entry.sha256] : undefined;
+  const sending = Object.values(fusion).some((state) => state.status === "sending");
 
   useEffect(() => {
     if (!entry || !analyze || plates[entry.sha256]) return;
     const sha256 = entry.sha256;
-    if (entry.triangles > MAX_ANALYZED_TRIANGLES) {
-      setPlates((current) => ({ ...current, [sha256]: "too-detailed" }));
-      return;
-    }
     let live = true;
-    analyze(sha256)
-      .then((part) => plateGeometry(part) ?? ("not-a-plate" as const))
-      .catch((cause: unknown) => ({ error: String(cause) }))
-      .then((result) => live && setPlates((current) => ({ ...current, [sha256]: result })));
+    void readPlate(entry, analyze).then(
+      (result) => live && setPlates((current) => ({ ...current, [sha256]: result })),
+    );
     return () => {
       live = false;
     };
   }, [entry, analyze, plates]);
+
+  // Sends plates one at a time, so Fusion builds one document before starting the next. A part
+  // that is not a plate fails on its own; the rest still go.
+  const sendToFusion = async (targets: readonly (typeof parts)[number][]) => {
+    for (const part of targets) {
+      setFusion((current) => ({ ...current, [part.sha256]: { status: "sending" } }));
+      const geometry =
+        plates[part.sha256] ??
+        (analyze ? await readPlate(part, analyze) : { error: "The model is still loading." });
+      setPlates((current) => ({ ...current, [part.sha256]: geometry }));
+      const next: FusionState =
+        typeof geometry === "object" && "outline" in geometry
+          ? await sendPlateToFusion({
+              key: part.sha256,
+              name: part.name,
+              plate: geometry,
+              settings,
+            })
+              .then((result) => ({ status: "sent" as const, result }))
+              .catch((cause: unknown) => ({
+                status: "failed" as const,
+                error: cause instanceof Error ? cause.message : String(cause),
+              }))
+          : { status: "failed", error: "Not a plate the router can cut." };
+      setFusion((current) => ({ ...current, [part.sha256]: next }));
+    }
+  };
 
   const openDrawing = () =>
     useRightPanelStore.getState().openDrawing(threadRef, {
@@ -153,6 +196,7 @@ export function CadCamPanel({
         )}
         <Button
           size="sm"
+          variant="outline"
           disabled={!ready}
           onClick={() =>
             ready &&
@@ -162,7 +206,32 @@ export function CadCamPanel({
         >
           Export DXF
         </Button>
+        {parts.length > 1 ? (
+          <Menu>
+            <MenuTrigger render={<Button size="sm" disabled={sending} />}>
+              {sending ? "Sending…" : "Send to Fusion"}
+              <CaretDownIcon />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem disabled={!ready} onClick={() => entry && void sendToFusion([entry])}>
+                This plate
+              </MenuItem>
+              <MenuItem onClick={() => void sendToFusion(parts)}>
+                All {parts.length} plates
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        ) : (
+          <Button
+            size="sm"
+            disabled={!ready || sending}
+            onClick={() => entry && void sendToFusion([entry])}
+          >
+            {sending ? "Sending…" : "Send to Fusion"}
+          </Button>
+        )}
       </div>
+      {sent && <FusionStatus state={sent} />}
 
       <div className="flex shrink-0 flex-wrap gap-2.5 border-b border-border px-3.5 pb-3">
         <Field label="Tool">
@@ -251,12 +320,13 @@ export function CadCamPanel({
                 type="button"
                 onClick={() => setIndex(i)}
                 className={cn(
-                  "shrink-0 rounded-md border px-2 py-1 text-xs",
+                  "flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs",
                   i === index
                     ? "border-ring bg-accent"
                     : "border-border text-muted-foreground hover:text-foreground",
                 )}
               >
+                {fusion[part.sha256] && <FusionDot state={fusion[part.sha256]!} />}
                 {part.qty}× {part.name}
               </button>
             ))}
@@ -266,6 +336,58 @@ export function CadCamPanel({
     </div>
   );
 }
+
+/**
+ * What Fusion made of the plate: its machining time, and every operation it could not generate
+ * cleanly, with the reason.
+ */
+const FusionStatus = ({ state }: { state: FusionState }) => {
+  if (state.status === "sending")
+    return (
+      <p className="shrink-0 px-3.5 pb-2.5 text-xs text-muted-foreground">Building in Fusion…</p>
+    );
+  if (state.status === "failed")
+    return (
+      <p role="alert" className="shrink-0 px-3.5 pb-2.5 text-xs text-destructive">
+        {state.error}
+      </p>
+    );
+  const { result } = state;
+  const problems = result.operations.filter((op) => op.state !== "ok");
+  return (
+    <div className="shrink-0 space-y-1 px-3.5 pb-2.5 text-xs" data-testid="cad-cam-fusion">
+      <p className="text-muted-foreground">
+        {result.replaced ? "Rebuilt in Fusion" : "In Fusion"} · {result.operations.length}{" "}
+        operations ·{" "}
+        <span className="font-mono text-foreground tabular-nums">{clock(result.minutes)}</span>{" "}
+        machining
+        {problems.length === 0 && " · ready to post"}
+      </p>
+      {problems.map((op) => (
+        <p key={op.name} className={op.state === "error" ? "text-destructive" : "text-warning"}>
+          {op.name}: {op.message ?? (op.state === "error" ? "failed to generate" : "has warnings")}
+        </p>
+      ))}
+    </div>
+  );
+};
+
+/** A plate chip's Fusion state: sending, generated cleanly, or needs a look. */
+const FusionDot = ({ state }: { state: FusionState }) => (
+  <span
+    aria-hidden
+    className={cn(
+      "size-1.5 rounded-full",
+      state.status === "sending"
+        ? "bg-muted-foreground"
+        : state.status === "failed" || state.result.operations.some((op) => op.state === "error")
+          ? "bg-destructive"
+          : state.result.operations.some((op) => op.state === "warning")
+            ? "bg-warning"
+            : "bg-success",
+    )}
+  />
+);
 
 /**
  * Preview, timeline, and operations table for one plan. They share one cursor: the selected or
