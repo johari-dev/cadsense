@@ -10,6 +10,7 @@ import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
+  PermissionUpdate,
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -4086,6 +4087,8 @@ describe("ClaudeAdapterLive", () => {
         if (requested._tag !== "Some" || requested.value.type !== "request.opened") {
           return;
         }
+        // Only Bash relabels its session button; other tools keep the default.
+        assert.equal(requested.value.payload.options, undefined);
         const runtimeRequestId = requested.value.requestId;
         assert.equal(typeof runtimeRequestId, "string");
         if (runtimeRequestId === undefined) {
@@ -4127,12 +4130,150 @@ describe("ClaudeAdapterLive", () => {
 
       // Received suggestions are reused but rescoped to the session —
       // echoing "localSettings" would persist a session-only choice to disk.
-      const bashPermissionPromise = canUseTool(
-        "Bash",
-        { command: "ls" },
+      const fetchPermissionPromise = canUseTool(
+        "WebFetch",
+        { url: "https://example.com/docs" },
         {
           signal: new AbortController().signal,
           suggestions: [
+            {
+              type: "addRules",
+              rules: [{ toolName: "WebFetch", ruleContent: "domain:example.com" }],
+              behavior: "allow",
+              destination: "localSettings",
+            },
+          ],
+          toolUseID: "tool-use-fetch-1",
+        },
+      );
+      yield* respondToNextRequest;
+      const fetchPermission = (yield* Effect.promise(
+        () => fetchPermissionPromise,
+      )) as PermissionResult;
+      assert.equal(fetchPermission.behavior, "allow");
+      if (fetchPermission.behavior !== "allow") {
+        return;
+      }
+      assert.deepEqual(fetchPermission.updatedPermissions, [
+        {
+          type: "addRules",
+          rules: [{ toolName: "WebFetch", ruleContent: "domain:example.com" }],
+          behavior: "allow",
+          destination: "session",
+        },
+      ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  // Claude Code's Bash suggestions only match the literal command it saw
+  // (`python3 -` for a heredoc, a whole `sed -i ...` line) or are missing, so
+  // a session approval has to cover Bash itself, and the button has to say so.
+  it.effect("acceptForSession allows Bash for the session and the button says so", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "run some commands",
+        attachments: [],
+      });
+      yield* Stream.take(adapter.streamEvents, 1).pipe(Stream.runDrain);
+
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool;
+      assert.equal(typeof canUseTool, "function");
+      if (!canUseTool) {
+        return;
+      }
+
+      const askBash = (
+        command: string,
+        suggestions: PermissionUpdate[] | undefined,
+        decision: "accept" | "acceptForSession",
+      ) =>
+        Effect.gen(function* () {
+          const permission = canUseTool(
+            "Bash",
+            { command },
+            {
+              signal: new AbortController().signal,
+              ...(suggestions ? { suggestions } : {}),
+              toolUseID: `tool-${command}`,
+            },
+          );
+          const requested = yield* Stream.runHead(adapter.streamEvents);
+          if (requested._tag !== "Some" || requested.value.type !== "request.opened") {
+            return assert.fail("expected request.opened");
+          }
+          assert.deepEqual(requested.value.payload.options, [
+            { decision: "cancel", label: "Cancel" },
+            { decision: "decline", label: "Decline" },
+            { decision: "acceptForSession", label: "Allow Bash this session" },
+            { decision: "accept", label: "Approve" },
+          ]);
+          yield* adapter.respondToRequest(
+            session.threadId,
+            ApprovalRequestId.make(requested.value.requestId ?? ""),
+            decision,
+          );
+          yield* Stream.take(adapter.streamEvents, 1).pipe(Stream.runDrain);
+          const result = (yield* Effect.promise(() => permission)) as PermissionResult;
+          if (result.behavior !== "allow") {
+            return assert.fail("expected allow");
+          }
+          return result.updatedPermissions;
+        });
+      const allowBashForSession: Array<PermissionUpdate> = [
+        {
+          type: "addRules",
+          rules: [{ toolName: "Bash" }],
+          behavior: "allow",
+          destination: "session",
+        },
+      ];
+
+      // What Claude Code 2.1.287 suggested for a python heredoc followed by a
+      // grep pipeline: an exact rule no later heredoc can match.
+      assert.deepEqual(
+        yield* askBash(
+          "python3 - <<'EOF'\nprint(open('cad/robot-plate.step').read()[:80])\nEOF\ngrep -c ADVANCED_FACE cad/robot-plate.step",
+          [
+            {
+              type: "addRules",
+              rules: [{ toolName: "Bash", ruleContent: "python3 -" }],
+              behavior: "allow",
+              destination: "localSettings",
+            },
+          ],
+          "acceptForSession",
+        ),
+        allowBashForSession,
+      );
+      // For `sed -i ... && grep ...` it suggested nothing.
+      assert.deepEqual(
+        yield* askBash(
+          "sed -i 's#a#b#' robot-plate-wiring.fs && grep -n b robot-plate-wiring.fs",
+          undefined,
+          "acceptForSession",
+        ),
+        allowBashForSession,
+      );
+      // Approving once must not grant anything for later commands.
+      assert.equal(
+        yield* askBash(
+          "ls",
+          [
             {
               type: "addRules",
               rules: [{ toolName: "Bash", ruleContent: "ls" }],
@@ -4140,25 +4281,10 @@ describe("ClaudeAdapterLive", () => {
               destination: "localSettings",
             },
           ],
-          toolUseID: "tool-use-bash-1",
-        },
+          "accept",
+        ),
+        undefined,
       );
-      yield* respondToNextRequest;
-      const bashPermission = (yield* Effect.promise(
-        () => bashPermissionPromise,
-      )) as PermissionResult;
-      assert.equal(bashPermission.behavior, "allow");
-      if (bashPermission.behavior !== "allow") {
-        return;
-      }
-      assert.deepEqual(bashPermission.updatedPermissions, [
-        {
-          type: "addRules",
-          rules: [{ toolName: "Bash", ruleContent: "ls" }],
-          behavior: "allow",
-          destination: "session",
-        },
-      ]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
