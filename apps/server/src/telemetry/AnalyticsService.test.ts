@@ -10,6 +10,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { HostProcessArchitecture, HostProcessPlatform } from "@cadsense/shared/hostProcess";
 
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { getTelemetryIdentifier } from "./Identify.ts";
 import * as AnalyticsService from "./AnalyticsService.ts";
 
@@ -53,7 +54,10 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
         prefix: "cadsense-telemetry-base-",
       });
-      const telemetryLayer = AnalyticsService.layer.pipe(Layer.provide(serverConfigLayer));
+      const telemetryLayer = AnalyticsService.layer.pipe(
+        Layer.provide(serverConfigLayer),
+        Layer.provide(ServerSettings.layerTest()),
+      );
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
           CADSENSE_TELEMETRY_ENABLED: true,

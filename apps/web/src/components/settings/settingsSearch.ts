@@ -60,6 +60,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Thread title model",
     to: "/settings/general",
   },
+  { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
   {
     id: "streaming-text",
