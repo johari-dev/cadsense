@@ -403,7 +403,6 @@ export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
 export const ServerSettings = Schema.Struct({
   streamAssistantText: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
    * Whether agents may drive the in-app preview browser. Turning this off
    * withholds the MCP credential, so the `cadsense` server (and with it every
@@ -586,7 +585,6 @@ const ClaudeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   streamAssistantText: Schema.optionalKey(Schema.Boolean),
-  enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({

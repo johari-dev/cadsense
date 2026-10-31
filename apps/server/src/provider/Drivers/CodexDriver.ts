@@ -27,12 +27,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
@@ -43,16 +45,7 @@ import * as ModelManifest from "../ModelManifest.ts";
 import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import {
-  enrichProviderSnapshotWithVersionAdvisory,
-  makePackageManagedProviderMaintenanceResolver,
-  resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
-import {
-  haveProviderSnapshotSettingsChanged,
-  makeProviderSnapshotSettingsSource,
-  type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
+import { npmGlobalInstallCommand, type ProviderSetupCommands } from "../providerSetup.ts";
 import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
@@ -61,12 +54,6 @@ import {
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
-const UPDATE = makePackageManagedProviderMaintenanceResolver({
-  provider: DRIVER_KIND,
-  npmPackageName: "@openai/codex",
-  homebrewFormula: "codex",
-  nativeUpdate: null,
-});
 
 /**
  * Services the driver needs to materialize an instance. Surfaced as the
@@ -118,8 +105,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettingsService;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -147,10 +134,21 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      });
+      // `effectiveHomePath` is the shadow home when one is configured, so
+      // `codex login` writes auth.json where this instance reads it.
+      const setupCommands: ProviderSetupCommands = {
+        install: npmGlobalInstallCommand("@openai/codex"),
+        signIn: {
+          executable: effectiveConfig.binaryPath,
+          args: ["login"],
+          env: {
+            ...processEnv,
+            ...(homeLayout.effectiveHomePath
+              ? { CODEX_HOME: expandHomePath(homeLayout.effectiveHomePath) }
+              : {}),
+          },
+        },
+      };
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -167,7 +165,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
 
       // Build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
-      // updates. Pre-provide `ChildProcessSpawner` so the check fits
+      // updates. Pre-provide the check's services so it fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
       const checkProvider = Effect.zipWith(
         checkCodexProviderStatus(effectiveConfig, undefined, processEnv),
@@ -175,28 +173,27 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         (draft, manifest) =>
           stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
         { concurrent: true },
-      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
-      const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
-        maintenanceCapabilities,
-        getSettings: snapshotSettings.getSettings,
-        streamSettings: snapshotSettings.streamSettings,
-        haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
+      const snapshot = yield* makeManagedServerProvider<CodexSettings>({
+        setupCommands,
+        getSettings: Effect.succeed(effectiveConfig),
+        streamSettings: Stream.empty,
+        haveSettingsChanged: () => false,
         initialSnapshot: (settings) =>
           Effect.zipWith(
-            makePendingCodexProvider(settings.provider),
+            makePendingCodexProvider(settings, processEnv),
             modelManifest.current,
             (draft, manifest) =>
               stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
+          ).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           ),
         checkProvider,
-        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
-          enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
-            enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-          }).pipe(
-            Effect.provideService(HttpClient.HttpClient, httpClient),
-            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
-          ),
       }).pipe(
         Effect.mapError(
           (cause) =>

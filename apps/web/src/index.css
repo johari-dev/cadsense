@@ -1871,15 +1871,6 @@ code {
   overflow-wrap: anywhere;
 }
 
-@keyframes provider-update-pill-countdown {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
-}
-
 @keyframes ultrathink-rainbow {
   0% {
     background-position: 0% 50%;

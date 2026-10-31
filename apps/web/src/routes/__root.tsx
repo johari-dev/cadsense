@@ -15,7 +15,6 @@ import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { AddProjectDialog } from "../components/AddProjectDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { Button } from "../components/ui/button";
 import {
@@ -74,7 +73,6 @@ function RootRouteView() {
         <ConfirmDialogHost />
         <SlowRpcRequestToastCoordinator />
         <EventRouter />
-        <ProviderUpdateLaunchNotification />
         {appShell}
       </AnchoredToastProvider>
     </ToastProvider>

@@ -27,7 +27,6 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
-  type ServerProviderUpdateState,
 } from "@cadsense/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -52,7 +51,6 @@ import {
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
 const loadProviders = (
@@ -68,12 +66,6 @@ const loadProviders = (
       concurrency: "unbounded",
     },
   );
-
-const makeManualProviderMaintenanceCapabilities = (provider: ProviderDriverKind) =>
-  makeManualOnlyProviderMaintenanceCapabilities({
-    provider,
-    packageName: null,
-  });
 
 const hasModelCapabilities = (model: ServerProvider["models"][number]): boolean =>
   (model.capabilities?.optionDescriptors?.length ?? 0) > 0;
@@ -267,9 +259,6 @@ export const ProviderRegistryLive = Layer.effect(
       ),
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
-    const maintenanceActionStatesRef = yield* Ref.make<
-      ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
-    >(new Map());
 
     // Live-source registry — the dynamic counterpart to the boot-time
     // `bootSources`. Keyed by `instanceId`; the stored `ProviderInstance`
@@ -307,21 +296,6 @@ export const ProviderRegistryLive = Layer.effect(
         );
       });
 
-    const applyProviderUpdateState = Effect.fn("applyProviderUpdateState")(function* (
-      provider: ServerProvider,
-    ) {
-      const maintenanceActionStates = yield* Ref.get(maintenanceActionStatesRef);
-      const updateState = maintenanceActionStates.get(provider.instanceId)?.update;
-      if (!updateState) {
-        const { updateState: _updateState, ...providerWithoutUpdateState } = provider;
-        return providerWithoutUpdateState;
-      }
-      return {
-        ...provider,
-        updateState,
-      };
-    });
-
     const upsertProviders = Effect.fn("upsertProviders")(function* (
       nextProviders: ReadonlyArray<ServerProvider>,
       options?: {
@@ -330,13 +304,6 @@ export const ProviderRegistryLive = Layer.effect(
         readonly replace?: boolean;
       },
     ) {
-      const nextProvidersWithUpdateState = yield* Effect.forEach(
-        nextProviders,
-        applyProviderUpdateState,
-        {
-          concurrency: "unbounded",
-        },
-      );
       const [previousProviders, providers, providersToPersist] = yield* Ref.modify(
         providersRef,
         (previousProviders) => {
@@ -345,7 +312,7 @@ export const ProviderRegistryLive = Layer.effect(
           );
           const updatedKeys = new Set<ProviderInstanceId>();
 
-          for (const provider of nextProvidersWithUpdateState) {
+          for (const provider of nextProviders) {
             const key = snapshotInstanceKey(provider);
             updatedKeys.add(key);
             mergedProviders.set(
@@ -387,45 +354,6 @@ export const ProviderRegistryLive = Layer.effect(
     ) {
       return yield* upsertProviders([provider], options);
     });
-
-    const setProviderMaintenanceActionState = Effect.fn("setProviderMaintenanceActionState")(
-      function* (input: {
-        readonly instanceId: ProviderInstanceId;
-        readonly action: "update";
-        readonly state: ServerProviderUpdateState | null;
-      }) {
-        yield* Ref.update(maintenanceActionStatesRef, (previous) => {
-          const previousActions = previous.get(input.instanceId);
-          const nextActions = { ...previousActions };
-          if (input.state === null || input.state.status === "idle") {
-            delete nextActions[input.action];
-          } else {
-            nextActions[input.action] = input.state;
-          }
-
-          const next = new Map(previous);
-          if (Object.keys(nextActions).length === 0) {
-            next.delete(input.instanceId);
-          } else {
-            next.set(input.instanceId, nextActions);
-          }
-          return next;
-        });
-
-        const existingProviders = yield* Ref.get(providersRef);
-        const matchingProvider = existingProviders.find(
-          (candidate) => candidate.instanceId === input.instanceId,
-        );
-        if (!matchingProvider) {
-          return existingProviders;
-        }
-
-        const nextProvider = yield* applyProviderUpdateState(matchingProvider);
-        return yield* upsertProviders([nextProvider], {
-          persist: false,
-        });
-      },
-    );
 
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
@@ -474,16 +402,10 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* refreshOneSource(providerSource);
     });
 
-    const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
-      "getProviderMaintenanceCapabilitiesForInstance",
-    )(function* (instanceId: ProviderInstanceId, provider: ProviderDriverKind) {
-      const instance = Array.from((yield* Ref.get(liveSubsRef)).values()).find(
-        (candidate) => candidate.instanceId === instanceId,
-      );
-      return (
-        instance?.snapshot.maintenanceCapabilities ??
-        makeManualProviderMaintenanceCapabilities(provider)
-      );
+    const getProviderSetupCommands = Effect.fn("getProviderSetupCommands")(function* (
+      instanceId: ProviderInstanceId,
+    ) {
+      return (yield* Ref.get(liveSubsRef)).get(instanceId)?.snapshot.setupCommands;
     });
 
     /**
@@ -596,15 +518,6 @@ export const ProviderRegistryLive = Layer.effect(
         if (haveProvidersChanged(previousProviders, providers)) {
           yield* PubSub.publish(changesPubSub, providers);
         }
-        yield* Ref.update(maintenanceActionStatesRef, (previous) => {
-          const next = new Map(previous);
-          for (const instanceId of previous.keys()) {
-            if (!knownInstanceIds.has(instanceId)) {
-              next.delete(instanceId);
-            }
-          }
-          return next;
-        });
       }),
     );
     const syncLiveSourcesAndContinue = syncLiveSources.pipe(
@@ -688,8 +601,7 @@ export const ProviderRegistryLive = Layer.effect(
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
-      getProviderMaintenanceCapabilitiesForInstance,
-      setProviderMaintenanceActionState,
+      getProviderSetupCommands,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

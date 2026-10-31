@@ -6,18 +6,11 @@
  *
  * @module ProviderRegistry
  */
-import type {
-  ProviderInstanceId,
-  ProviderDriverKind,
-  ServerProvider,
-  ServerProviderUpdateState,
-} from "@cadsense/contracts";
+import type { ProviderInstanceId, ProviderDriverKind, ServerProvider } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
-import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
-
-export type ProviderMaintenanceActionKind = "update";
+import type { ProviderSetupCommands } from "../providerSetup.ts";
 
 export interface ProviderRegistryShape {
   /**
@@ -49,25 +42,12 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
-   * Resolve the maintenance capabilities owned by one live provider instance.
-   * Falls back to manual-only capabilities when the instance is not live.
+   * Install and sign-in commands for one live provider instance, or
+   * `undefined` when the instance is not running.
    */
-  readonly getProviderMaintenanceCapabilitiesForInstance: (
+  readonly getProviderSetupCommands: (
     instanceId: ProviderInstanceId,
-    provider: ProviderDriverKind,
-  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
-
-  /**
-   * Apply volatile maintenance-action state to one configured instance.
-   * This state is never persisted to disk. Today only update actions are
-   * projected onto `ServerProvider.updateState`; install/auth actions can
-   * extend this action map without adding driver-scoped APIs.
-   */
-  readonly setProviderMaintenanceActionState: (input: {
-    readonly instanceId: ProviderInstanceId;
-    readonly action: ProviderMaintenanceActionKind;
-    readonly state: ServerProviderUpdateState | null;
-  }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+  ) => Effect.Effect<ProviderSetupCommands | undefined>;
 
   /**
    * Stream of provider snapshot updates — one emission per aggregated

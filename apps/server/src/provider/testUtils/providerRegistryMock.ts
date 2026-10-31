@@ -3,7 +3,6 @@ import type { ServerProvider } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 export const makeProviderRegistryMock = (
   providers: ReadonlyArray<ServerProvider> = [],
@@ -11,9 +10,7 @@ export const makeProviderRegistryMock = (
   getProviders: Effect.succeed(providers),
   refresh: () => Effect.succeed(providers),
   refreshInstance: () => Effect.succeed(providers),
-  getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-    Effect.succeed(makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null })),
-  setProviderMaintenanceActionState: () => Effect.succeed(providers),
+  getProviderSetupCommands: () => Effect.succeed(undefined),
   streamChanges: Stream.empty,
 });
 

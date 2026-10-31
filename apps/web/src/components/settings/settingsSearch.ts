@@ -43,11 +43,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
-    id: "provider-update-checks",
-    title: "Provider update checks",
-    to: "/settings/general",
-  },
-  {
     id: "add-project-starts-in",
     title: "Default project folder",
     to: "/settings/general",
