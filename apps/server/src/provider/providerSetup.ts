@@ -17,7 +17,7 @@ import {
   type ServerProviderSetupInput,
   type ServerProviderUpdatedPayload,
 } from "@cadsense/contracts";
-import { resolveSpawnCommand } from "@cadsense/shared/shell";
+import { CommandResolutionCache, resolveSpawnCommand } from "@cadsense/shared/shell";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -43,16 +43,50 @@ export interface ProviderSetupCommands {
   readonly signIn: ProviderSetupCommand;
 }
 
-/** Global npm install of a provider CLI package at its latest version. */
-export function npmGlobalInstallCommand(packageName: string): ProviderSetupCommand {
+/**
+ * A vendor's standalone install script. Each one downloads a native binary,
+ * so installing needs no Node or npm, only the shell the OS already has.
+ */
+export interface InstallScript {
+  /** macOS and Linux: fetched with curl and piped into `shell`. */
+  readonly posix: { readonly url: string; readonly shell: "sh" | "bash" };
+  /** Windows: run in PowerShell with `irm <url> | iex`. */
+  readonly windowsUrl: string;
+  /** Full environment for the script. Omit to inherit the server's. */
+  readonly env?: NodeJS.ProcessEnv | undefined;
+}
+
+/** The command that runs a vendor install script on `platform`. */
+export function installScriptCommand(
+  platform: NodeJS.Platform,
+  script: InstallScript,
+): ProviderSetupCommand {
+  if (platform === "win32") {
+    return {
+      executable: "powershell",
+      // -NonInteractive makes a stray Read-Host fail instead of hanging.
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        `irm ${script.windowsUrl} | iex`,
+      ],
+      env: script.env,
+    };
+  }
   return {
-    executable: "npm",
-    // npm 12 blocks install scripts by default and still exits 0, so a
-    // package whose postinstall finishes the install (claude copies its
-    // native binary over a placeholder stub) would be left broken. Allow
-    // this one package's scripts. Older npm warns about the flag and
-    // continues.
-    args: ["install", "-g", `--allow-scripts=${packageName}`, `${packageName}@latest`],
+    executable: "bash",
+    // pipefail turns a failed download into a failed install, not an empty
+    // script that exits 0. The URL goes in as $1 so it needs no quoting.
+    args: [
+      "-c",
+      `set -o pipefail; curl -fsSL "$1" | ${script.posix.shell}`,
+      "bash",
+      script.posix.url,
+    ],
+    env: script.env,
   };
 }
 
@@ -88,7 +122,7 @@ function outputTail(output: string): string {
 export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  // Global npm installs share one prefix, so run them one at a time.
+  // Installers write shared folders such as ~/.local/bin, so run one at a time.
   const installLock = yield* Semaphore.make(1);
   // A new sign-in for an instance interrupts (and kills) the previous one.
   // Codex's login server holds a fixed port, and a user who closed the
@@ -171,6 +205,11 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
         );
       }
 
+      if (input.action === "install") {
+        // PATH lookups remember "not found" for 30s. Forget that so the
+        // re-probe sees the binary the installer just wrote.
+        (yield* CommandResolutionCache).clear();
+      }
       const providers = yield* providerRegistry.refreshInstance(input.instanceId);
       const provider: ServerProvider | undefined = providers.find(
         (candidate) => candidate.instanceId === input.instanceId,

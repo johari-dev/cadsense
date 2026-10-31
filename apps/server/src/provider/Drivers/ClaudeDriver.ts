@@ -13,6 +13,7 @@
  * @module provider/Drivers/ClaudeDriver
  */
 import { ClaudeSettings, ProviderDriverKind, type ServerProvider } from "@cadsense/contracts";
+import { HostProcessPlatform } from "@cadsense/shared/hostProcess";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
@@ -47,7 +48,7 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { npmGlobalInstallCommand, type ProviderSetupCommands } from "../providerSetup.ts";
+import { installScriptCommand, type ProviderSetupCommands } from "../providerSetup.ts";
 import {
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
@@ -112,7 +113,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // Sign in with the instance's CLAUDE_CONFIG_DIR so the credentials land
       // where this instance reads them.
       const setupCommands: ProviderSetupCommands = {
-        install: npmGlobalInstallCommand("@anthropic-ai/claude-code"),
+        // Installs to ~/.local/bin (%USERPROFILE%\.local\bin on Windows).
+        install: installScriptCommand(yield* HostProcessPlatform, {
+          posix: { url: "https://claude.ai/install.sh", shell: "bash" },
+          windowsUrl: "https://claude.ai/install.ps1",
+        }),
         signIn: {
           executable: effectiveConfig.binaryPath,
           args: ["auth", "login"],

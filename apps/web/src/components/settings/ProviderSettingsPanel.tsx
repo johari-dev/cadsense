@@ -479,7 +479,7 @@ function ProviderStatusLine({
   readonly liveProvider: ServerProvider | undefined;
   readonly pendingSetup: ServerProviderSetupAction | undefined;
 }) {
-  if (pendingSetup === "install") return <>Installing the {label} CLI with npm.</>;
+  if (pendingSetup === "install") return <>Installing the {label} CLI.</>;
   if (pendingSetup === "signIn") return <>Finish signing in to {label} in your browser.</>;
   if (liveProvider === undefined) return <>Checking status</>;
   if (!liveProvider.installed) return <>The {label} CLI is not installed.</>;
