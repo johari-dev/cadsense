@@ -13,6 +13,7 @@ import type * as Scope from "effect/Scope";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import { ServerConfig, layerTest } from "../config.ts";
 import { make } from "./FeatureScriptPreviews.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 /**
  * The file panel's dialog parity with Onshape, through the real worker thread. Failure modes: an
@@ -66,13 +67,19 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    FileSystem.FileSystem | Path.Path | Crypto.Crypto | Scope.Scope | ServerConfig
+    | FileSystem.FileSystem
+    | Path.Path
+    | Crypto.Crypto
+    | Scope.Scope
+    | ServerConfig
+    | AnalyticsService
   >,
 ) =>
   effect.pipe(
     Effect.scoped,
     Effect.provide(
       layerTest(process.cwd(), { prefix: "cadsense-fs-parity-state-" }).pipe(
+        Layer.provideMerge(AnalyticsService.layerTest),
         Layer.provideMerge(NodeServices.layer),
       ),
     ),

@@ -14,6 +14,7 @@ import { ThreadId } from "@cadsense/contracts";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import { ServerConfig, layerTest } from "../config.ts";
 import { make, type FeatureScriptPreviewOptions } from "./FeatureScriptPreviews.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 /**
  * Runs previews through the real worker thread. Failure modes covered: a path that leaves the
@@ -81,13 +82,19 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    FileSystem.FileSystem | Path.Path | Crypto.Crypto | Scope.Scope | ServerConfig
+    | FileSystem.FileSystem
+    | Path.Path
+    | Crypto.Crypto
+    | Scope.Scope
+    | ServerConfig
+    | AnalyticsService
   >,
 ) =>
   effect.pipe(
     Effect.scoped,
     Effect.provide(
       layerTest(process.cwd(), { prefix: "cadsense-fs-preview-state-" }).pipe(
+        Layer.provideMerge(AnalyticsService.layerTest),
         Layer.provideMerge(NodeServices.layer),
       ),
     ),

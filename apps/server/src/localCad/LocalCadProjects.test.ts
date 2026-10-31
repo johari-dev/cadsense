@@ -62,6 +62,7 @@ import * as LocalCadImport from "./LocalCadImport.ts";
 import { LocalCadProjects, layer as localCadProjectsLayer } from "./LocalCadProjects.ts";
 import * as SolidWorksBridge from "./SolidWorksBridge.ts";
 import { planSolidWorksFiles, readSolidWorksReferences } from "./SolidWorksFiles.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 const FIXTURE = new URL("./testFixtures/dm1-id-214.stp", import.meta.url).pathname;
 const onshapeSource = Schema.decodeUnknownSync(OnshapeProjectSource)({
@@ -87,6 +88,7 @@ const engine = Layer.mergeAll(
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provideMerge(SqlitePersistenceMemory),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "cadsense-local-cad-" })),
+  Layer.provideMerge(AnalyticsService.layerTest),
   Layer.provideMerge(NodeServices.layer),
 );
 const store = Layer.effect(CadSnapshotStore, makeStore).pipe(

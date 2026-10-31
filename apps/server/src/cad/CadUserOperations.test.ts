@@ -24,6 +24,7 @@ import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisitio
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { CadProjectQuiescence, make } from "./CadUserOperations.ts";
 import { LocalCadImport } from "../localCad/LocalCadImport.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 const unused = () => Effect.die("Unexpected test operation");
 const projectId = ProjectId.make("cad-user-operations");
@@ -59,6 +60,7 @@ const harness = Effect.fn(function* (options?: {
     if (options?.diskFull) return yield* new CadSnapshotStoreError({ reason: "disk-space" });
   });
   const dependencies = Layer.mergeAll(
+    AnalyticsService.layerTest,
     Layer.succeed(OrchestrationEngineService, {
       readEvents: () => Stream.empty,
       subscribeDomainEvents: unused(),

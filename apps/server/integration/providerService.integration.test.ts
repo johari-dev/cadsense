@@ -26,6 +26,7 @@ import {
 import * as ServerConfig from "../src/config.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
+import type { DailyCounter } from "../src/telemetry/AnalyticsEvents.ts";
 import { SqlitePersistenceMemory } from "../src/persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../src/persistence/ProviderSessionRuntime.ts";
 
@@ -56,22 +57,20 @@ interface IntegrationFixture {
   readonly layer: Layer.Layer<ProviderService, unknown, never>;
 }
 
-interface RecordedAnalyticsEvent {
-  readonly event: string;
-  readonly properties: Readonly<Record<string, unknown>> | undefined;
-}
-
 /**
- * Analytics layer that keeps captured events in memory so tests can assert on
- * telemetry payloads. `AnalyticsService.layerTest` discards them.
+ * Analytics layer that keeps counted counters in memory, in order, so tests can assert on them.
+ * `AnalyticsService.layerTest` discards them.
  */
 const makeRecordingAnalytics = Effect.gen(function* () {
-  const recorded = yield* Ref.make<ReadonlyArray<RecordedAnalyticsEvent>>([]);
+  const recorded = yield* Ref.make<ReadonlyArray<DailyCounter>>([]);
   const layer = Layer.succeed(
     AnalyticsService,
     AnalyticsService.of({
-      record: (event, properties) =>
-        Ref.update(recorded, (current) => [...current, { event, properties }]),
+      count: (counter, by = 1) =>
+        Ref.update(recorded, (current) => [
+          ...current,
+          ...Array.from({ length: by }, () => counter),
+        ]),
       flush: Effect.void,
     }),
   );
@@ -274,7 +273,7 @@ it.live("runs multi-turn tool/approval flow", () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.live("reports runtime mode per turn and on mode transitions", () =>
+it.live("counts each session start and each turn under its provider", () =>
   Effect.gen(function* () {
     const analytics = yield* makeRecordingAnalytics;
     const fixture = yield* makeIntegrationFixture({ analytics: analytics.layer });
@@ -300,8 +299,7 @@ it.live("reports runtime mode per turn and on mode transitions", () =>
         response: { events: codexTurnTextFixture },
       });
 
-      // Toggling the mode restarts the session, which is the only place the
-      // transition is observable.
+      // Toggling the mode restarts the session, so it counts as a second start.
       yield* startSession("full-access");
       yield* runTurn({
         provider,
@@ -314,17 +312,13 @@ it.live("reports runtime mode per turn and on mode transitions", () =>
       const recorded = yield* analytics.get;
 
       assert.deepEqual(
-        recorded
-          .filter((entry) => entry.event === "provider.turn.sent")
-          .map((entry) => entry.properties?.runtimeMode),
-        ["approval-required", "full-access"],
-      );
-
-      assert.deepEqual(
-        recorded
-          .filter((entry) => entry.event === "provider.runtime_mode.changed")
-          .map((entry) => [entry.properties?.from, entry.properties?.to]),
-        [["approval-required", "full-access"]],
+        recorded.filter((counter) => counter.startsWith("agent_")),
+        [
+          "agent_sessions_started",
+          "agent_turns_codex",
+          "agent_sessions_started",
+          "agent_turns_codex",
+        ],
       );
     }).pipe(Effect.provide(fixture.layer));
   }).pipe(Effect.provide(NodeServices.layer)),
