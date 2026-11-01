@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import * as HttpServer from "effect/unstable/http/HttpServer";
@@ -14,6 +15,7 @@ import { HostProcessArchitecture, HostProcessPlatform } from "@cadsense/shared/h
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as AnalyticsService from "./AnalyticsService.ts";
+import * as ErrorReports from "./ErrorReports.ts";
 
 const SentEvent = Schema.Struct({
   event: Schema.String,
@@ -59,6 +61,39 @@ const makeHarness = (prefix: string) => {
 };
 
 it.layer(NodeServices.layer)("AnalyticsService", (it) => {
+  it.effect("sends each failure once, and at most three error reports a day", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness("cadsense-telemetry-errors-");
+      ErrorReports.takeReports();
+      const logError = (message: string) =>
+        Effect.logError(message).pipe(Effect.provide(Logger.layer([ErrorReports.logger])));
+      yield* Effect.gen(function* () {
+        yield* Layer.launch(harness.ingest).pipe(Effect.forkScoped);
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        yield* logError("Provider refresh failed");
+        yield* logError("Provider refresh failed");
+        yield* analytics.flush;
+        yield* logError("Provider refresh failed");
+        yield* logError("Snapshot load failed");
+        yield* logError("Asset signing key failed");
+        yield* logError("Upload failed");
+        yield* analytics.flush;
+      }).pipe(Effect.provide(harness.layer));
+
+      const reports = harness.sent.filter((event) => event.event === "$exception");
+      assert.deepEqual(
+        reports.map(
+          (event) =>
+            (event.properties.$exception_list as ReadonlyArray<{ readonly value: string }>)[0]
+              ?.value,
+        ),
+        ["Provider refresh failed", "Snapshot load failed", "Asset signing key failed"],
+      );
+      // Errors alone don't make an install active.
+      assert.isFalse(harness.sent.some((event) => event.event === "app.active"));
+    }),
+  );
+
   it.effect("a reached milestone is sent without marking the day active", () =>
     Effect.gen(function* () {
       const harness = makeHarness("cadsense-telemetry-reach-");
