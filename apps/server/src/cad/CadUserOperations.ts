@@ -32,6 +32,7 @@ import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
 import { CadGeometryError } from "./CadGeometry.ts";
 import { localCadElementId, localCadRootIdentity } from "../localCad/LocalCadFiles.ts";
 import { LocalCadImport, LocalCadImportError } from "../localCad/LocalCadImport.ts";
+import type { DailyCounter } from "../telemetry/AnalyticsEvents.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 /** Implementations confirm native process exit while the project's durable reservation is held. */
@@ -191,6 +192,46 @@ const failureReason = (error: unknown, source: "onshape" | "local"): string => {
   // The outcome schema caps reasons, and a reason that does not fit cannot be recorded at all.
   const room = MAX_OUTCOME_REASON_LENGTH - suffix.length;
   return `${detail.length > room ? `${detail.slice(0, room - 1).trimEnd()}…` : detail}${suffix}`;
+};
+
+const ONSHAPE_FAILURE_COUNTER = {
+  OnshapeInvalidCredentialsError: "cad_import_errors_onshape_auth",
+  OnshapeInsufficientPermissionsError: "cad_import_errors_onshape_auth",
+  OnshapeConnectionNotFoundError: "cad_import_errors_onshape_auth",
+  OnshapeInvalidHostError: "cad_import_errors_onshape_auth",
+  OnshapeAnnualQuotaExceededError: "cad_import_errors_onshape_limit",
+  OnshapeRateLimitError: "cad_import_errors_onshape_limit",
+  OnshapeVerificationThrottledError: "cad_import_errors_onshape_limit",
+  OnshapeNetworkError: "cad_import_errors_onshape_network",
+  OnshapeResponseError: "cad_import_errors_onshape_network",
+  OnshapeRedirectError: "cad_import_errors_onshape_network",
+  OnshapeConnectionConflictError: "cad_import_errors_other",
+  OnshapeConnectionPersistenceError: "cad_import_errors_other",
+} as const satisfies Record<OnshapeConnectionError["_tag"], DailyCounter>;
+
+const LOCAL_IMPORT_FAILURE_COUNTER = {
+  "too-large": "cad_import_errors_too_large",
+  unreadable: "cad_import_errors_file",
+  "no-geometry": "cad_import_errors_file",
+  "no-file-list": "cad_import_errors_file",
+  "missing-files": "cad_import_errors_file",
+  "solidworks-unavailable": "cad_import_errors_solidworks",
+  "solidworks-file-open": "cad_import_errors_solidworks",
+  "solidworks-failed": "cad_import_errors_solidworks",
+  "solidworks-timeout": "cad_import_errors_solidworks",
+  "solidworks-no-configuration": "cad_import_errors_solidworks",
+} as const satisfies Record<LocalCadImportError["reason"], DailyCounter>;
+
+/** The `cad_import_errors_*` counter for the error that stopped an import (see `failureReason`). */
+const failureCounter = (error: unknown): DailyCounter => {
+  if (isLocalCadError(error)) return "cad_import_errors_file";
+  if (isLocalCadImportError(error)) return LOCAL_IMPORT_FAILURE_COUNTER[error.reason];
+  if (isCadGeometryError(error) && error.reason === "too-large")
+    return "cad_import_errors_too_large";
+  if (isOnshapeExportError(error)) return "cad_import_errors_onshape_export";
+  if (isCadSnapshotStoreError(error)) return "cad_import_errors_storage";
+  if (isOnshapeConnectionError(error)) return ONSHAPE_FAILURE_COUNTER[error._tag];
+  return "cad_import_errors_other";
 };
 
 /** Only user RPC handlers receive this service. Accepted jobs outlive route and socket changes. */
@@ -375,22 +416,24 @@ export const make = Effect.gen(function* () {
             Effect.gen(function* () {
               jobs.delete(operationId);
               const cancelled = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
+              const error = Exit.isFailure(exit)
+                ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
+                : undefined;
               // Syncs are imports; discovering the file or document list isn't counted.
-              if (input.kind === "sync" && !cancelled)
-                yield* analytics.count(
-                  !completed
-                    ? "cad_imports_failed"
-                    : source.kind === "onshape"
-                      ? "cad_imports_onshape"
-                      : "cad_imports_local",
-                );
+              if (input.kind === "sync" && !cancelled) {
+                if (completed)
+                  yield* analytics.count(
+                    source.kind === "onshape" ? "cad_imports_onshape" : "cad_imports_local",
+                  );
+                else {
+                  yield* analytics.count("cad_imports_failed");
+                  yield* analytics.count(failureCounter(error));
+                }
+              }
               if (completed) {
                 yield* prune(input.projectId);
                 return;
               }
-              const error = Exit.isFailure(exit)
-                ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
-                : undefined;
               // The outcome's reason is written for people; the log keeps the cause.
               if (Exit.isFailure(exit) && !cancelled)
                 yield* Effect.logWarning("CAD operation failed", {

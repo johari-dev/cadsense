@@ -7,7 +7,8 @@
  * environment (CODEX_HOME, CLAUDE_CONFIG_DIR) the instance reads credentials
  * from. While a command runs, and after it fails, the registry publishes its
  * state on the instance's snapshot. After a command succeeds the runner
- * re-probes the instance and returns the fresh snapshots.
+ * re-probes the instance and returns the fresh snapshots. Each finished attempt
+ * counts toward usage analytics as an ok or failed install or sign-in.
  *
  * @module providerSetup
  */
@@ -31,6 +32,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
 
 export interface ProviderSetupCommand {
@@ -123,6 +125,7 @@ function outputTail(output: string): string {
 
 export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
   const providerRegistry = yield* ProviderRegistry;
+  const analytics = yield* AnalyticsService;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   // Installers write shared folders such as ~/.local/bin, so run one at a time.
   const installLock = yield* Semaphore.make(1);
@@ -189,14 +192,19 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
         startedAt,
       });
       const fail = (reason: string) =>
-        providerRegistry
-          .setSetupState(input.instanceId, {
-            action: input.action,
-            status: "failed",
-            startedAt,
-            reason,
-          })
+        analytics
+          .count(
+            input.action === "install" ? "provider_installs_failed" : "provider_signins_failed",
+          )
           .pipe(
+            Effect.andThen(
+              providerRegistry.setSetupState(input.instanceId, {
+                action: input.action,
+                status: "failed",
+                startedAt,
+                reason,
+              }),
+            ),
             Effect.andThen(
               Effect.fail(
                 new ServerProviderSetupError({
@@ -254,6 +262,10 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
         return yield* fail("Sign-in finished, but the CLI still reports no signed-in account.");
       }
       yield* providerRegistry.setSetupState(input.instanceId, null);
+      // A probe that timed out reads "unknown"; only a confirmed account counts as signed in.
+      if (input.action === "install") yield* analytics.count("provider_installs_ok");
+      else if (provider?.auth.status === "authenticated")
+        yield* analytics.count("provider_signins_ok");
       return yield* providerRegistry.getProviders;
     });
 

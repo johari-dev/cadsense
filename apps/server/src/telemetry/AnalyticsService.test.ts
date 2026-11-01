@@ -24,43 +24,71 @@ const SentEvent = Schema.Struct({
 type SentEvent = typeof SentEvent.Type;
 const decodeBatch = Schema.decodeUnknownEffect(Schema.Struct({ batch: Schema.Array(SentEvent) }));
 
+/** The real service against an in-process ingest; `sent` collects every event it receives. */
+const makeHarness = (prefix: string) => {
+  const sent: SentEvent[] = [];
+  const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix });
+  const ingest = HttpServer.serve(
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const body = yield* decodeBatch(yield* request.json);
+      sent.push(...body.batch);
+      return HttpServerResponse.jsonUnsafe({});
+    }).pipe(Effect.orDie),
+  );
+  const analyticsLayer = AnalyticsService.layer.pipe(
+    Layer.provide(serverConfigLayer),
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(
+      ConfigProvider.layer(
+        ConfigProvider.fromUnknown({
+          CADSENSE_POSTHOG_KEY: "phc_test_key",
+          CADSENSE_POSTHOG_HOST: "http://localhost",
+        }),
+      ),
+    ),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(HostProcessPlatform, "linux"),
+        Layer.succeed(HostProcessArchitecture, "arm64"),
+      ),
+    ),
+    Layer.provideMerge(NodeHttpServer.layerTest),
+  );
+  return { sent, ingest, layer: Layer.merge(analyticsLayer, serverConfigLayer) };
+};
+
 it.layer(NodeServices.layer)("AnalyticsService", (it) => {
+  it.effect("a reached milestone is sent without marking the day active", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness("cadsense-telemetry-reach-");
+      yield* Effect.gen(function* () {
+        yield* Layer.launch(harness.ingest).pipe(Effect.forkScoped);
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        yield* analytics.reach("first_provider_ready");
+        yield* analytics.reach("first_provider_ready");
+        yield* analytics.flush;
+        yield* analytics.reach("first_provider_ready");
+        yield* analytics.flush;
+      }).pipe(Effect.provide(harness.layer));
+
+      assert.deepEqual(
+        harness.sent.map((event) => [event.event, event.properties.milestone]),
+        [
+          ["milestone.reached", "first_launch"],
+          ["milestone.reached", "first_provider_ready"],
+        ],
+      );
+    }),
+  );
+
   it.effect("turns counts into active, milestone, and next-day summary events", () =>
     Effect.gen(function* () {
-      const sent: SentEvent[] = [];
-      const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-        prefix: "cadsense-telemetry-counts-",
-      });
-      const ingest = HttpServer.serve(
-        Effect.gen(function* () {
-          const request = yield* HttpServerRequest.HttpServerRequest;
-          const body = yield* decodeBatch(yield* request.json);
-          sent.push(...body.batch);
-          return HttpServerResponse.jsonUnsafe({});
-        }).pipe(Effect.orDie),
-      );
-      const analyticsLayer = AnalyticsService.layer.pipe(
-        Layer.provide(serverConfigLayer),
-        Layer.provide(ServerSettings.layerTest()),
-        Layer.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({
-              CADSENSE_POSTHOG_KEY: "phc_test_key",
-              CADSENSE_POSTHOG_HOST: "http://localhost",
-            }),
-          ),
-        ),
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(HostProcessPlatform, "linux"),
-            Layer.succeed(HostProcessArchitecture, "arm64"),
-          ),
-        ),
-        Layer.provideMerge(NodeHttpServer.layerTest),
-      );
+      const harness = makeHarness("cadsense-telemetry-counts-");
+      const sent = harness.sent;
 
       yield* Effect.gen(function* () {
-        yield* Layer.launch(ingest).pipe(Effect.forkScoped);
+        yield* Layer.launch(harness.ingest).pipe(Effect.forkScoped);
         const analytics = yield* AnalyticsService.AnalyticsService;
 
         // The test clock starts at 1970-01-01T00:00:00Z.
@@ -83,7 +111,7 @@ it.layer(NodeServices.layer)("AnalyticsService", (it) => {
         yield* TestClock.adjust("1 day");
         yield* analytics.count("ratings_up");
         yield* analytics.flush;
-      }).pipe(Effect.provide(Layer.merge(analyticsLayer, serverConfigLayer)));
+      }).pipe(Effect.provide(harness.layer));
 
       const summaries = sent.filter((event) => event.event === "usage.daily");
       assert.equal(summaries.length, 1);

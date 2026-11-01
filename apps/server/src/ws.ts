@@ -20,6 +20,7 @@ import {
   EventId,
   type FileManagerRevealKind,
   type OrchestrationClientOrigin,
+  type MessageRating,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
@@ -93,6 +94,7 @@ import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import { RATING_REASON_COUNTER } from "./telemetry/AnalyticsEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
@@ -317,8 +319,13 @@ const makeWsRpcLayer = (
           hasClientOrigin ? { origin: clientOrigin } : undefined,
         );
       // Counts what the user did in this command. Turns are counted where they reach a provider
-      // (ProviderService), not here.
-      const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
+      // (ProviderService), not here. `previousRating` is the rated message's rating before this
+      // command: the thumbs-down popover saves the rating again with its reason, and that save
+      // shouldn't count a second thumbs down.
+      const recordClientCommandAnalytics = (
+        command: OrchestrationCommand,
+        previousRating: MessageRating | undefined,
+      ) => {
         switch (command.type) {
           case "project.create":
             return analytics.count("projects_created");
@@ -328,14 +335,35 @@ const makeWsRpcLayer = (
             return command.bootstrap?.createThread
               ? analytics.count("threads_started")
               : Effect.void;
-          case "thread.message.rating.set":
-            return command.rating === null
-              ? Effect.void
-              : analytics.count(command.rating.value === "up" ? "ratings_up" : "ratings_down");
+          case "thread.message.rating.set": {
+            const rating = command.rating;
+            if (rating === null) return Effect.void;
+            if (rating.value === "up")
+              return previousRating?.value === "up" ? Effect.void : analytics.count("ratings_up");
+            const wasDown = previousRating?.value === "down";
+            const reason = rating.reason;
+            const reasonIsNew =
+              reason !== undefined && reason !== (wasDown ? previousRating.reason : undefined);
+            return Effect.all(
+              [
+                wasDown ? Effect.void : analytics.count("ratings_down"),
+                reasonIsNew ? analytics.count(RATING_REASON_COUNTER[reason]) : Effect.void,
+              ],
+              { discard: true },
+            );
+          }
           default:
             return Effect.void;
         }
       };
+      /** The rating a rating command replaces; undefined for other commands or if unreadable. */
+      const readPreviousRating = (command: OrchestrationCommand) =>
+        command.type !== "thread.message.rating.set"
+          ? Effect.succeed(undefined)
+          : projectionSnapshotQuery.getThreadMessage(command.threadId, command.messageId).pipe(
+              Effect.map((message) => (Option.isSome(message) ? message.value.rating : undefined)),
+              Effect.orElseSucceed(() => undefined),
+            );
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const previewManager = yield* PreviewManager.PreviewManager;
@@ -962,10 +990,11 @@ const makeWsRpcLayer = (
                     ),
                   )
                 : false;
+              const previousRating = yield* readPreviousRating(normalizedCommand);
               const result = yield* dispatchNormalizedCommand(normalizedCommand).pipe(
                 Effect.tapError(() => cleanupFailedUploadedAttachments(command, normalizedCommand)),
               );
-              yield* recordClientCommandAnalytics(normalizedCommand);
+              yield* recordClientCommandAnalytics(normalizedCommand, previousRating);
               if (archiveCommand) {
                 if (shouldStopSessionAfterCommand) {
                   yield* Effect.gen(function* () {
