@@ -170,24 +170,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS arm64
-            runner: macos-26
-            platform: mac
-            target: dmg
-            arch: arm64
-            rust_target: aarch64-apple-darwin
-          - label: macOS x64
-            runner: macos-26
-            platform: mac
-            target: dmg
-            arch: x64
-            rust_target: x86_64-apple-darwin
-          - label: Linux x64
-            runner: ubuntu-24.04
-            platform: linux
-            target: AppImage
-            arch: x64
-            rust_target: x86_64-unknown-linux-gnu
+          # Releases ship Windows only for now. To bring macOS or Linux back,
+          # uncomment its entries here, its asset globs in both publish steps
+          # (*.dmg + *.zip for macOS, *.AppImage for Linux), and, for Linux,
+          # the publish_aur job. Unsigned macOS installs can never take an
+          # update, so set up the Apple signing secrets before enabling it.
+          # - label: macOS arm64
+          #   runner: macos-26
+          #   platform: mac
+          #   target: dmg
+          #   arch: arm64
+          #   rust_target: aarch64-apple-darwin
+          # - label: macOS x64
+          #   runner: macos-26
+          #   platform: mac
+          #   target: dmg
+          #   arch: x64
+          #   rust_target: x86_64-apple-darwin
+          # - label: Linux x64
+          #   runner: ubuntu-24.04
+          #   platform: linux
+          #   target: AppImage
+          #   arch: x64
+          #   rust_target: x86_64-unknown-linux-gnu
           - label: Windows x64
             runner: windows-2025
             platform: win
@@ -543,9 +548,6 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.AppImage
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
@@ -563,24 +565,22 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.AppImage
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
-  publish_aur:
-    name: Publish AUR package
-    needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
-    uses: ./.github/workflows/publish-aur.yml
-    with:
-      release_tag: ${{ needs.preflight.outputs.tag }}
-    secrets:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+  # Disabled while releases ship no Linux AppImage; the AUR packages wrap it.
+  # publish_aur:
+  #   name: Publish AUR package
+  #   needs: [preflight, release]
+  #   if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
+  #   uses: ./.github/workflows/publish-aur.yml
+  #   with:
+  #     release_tag: ${{ needs.preflight.outputs.tag }}
+  #   secrets:
+  #     AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
   finalize:
     name: Finalize release
