@@ -1,0 +1,10 @@
+{
+  "description": "opThicken of a 20 mm square region, 3 mm up and 2 mm down.",
+  "steps": [{ "file": "feature.fs", "feature": "thickenedPlate" }],
+  "expect": {
+    "source": "analytic: 20 x 20 x 5",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 2000, "faces": 6, "edges": 12, "vertices": 8 }],
+    "variables": { "minZ": -2, "maxZ": 3 }
+  }
+}

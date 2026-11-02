@@ -403,7 +403,6 @@ export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
 export const ServerSettings = Schema.Struct({
   streamAssistantText: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
    * Whether agents may drive the in-app preview browser. Turning this off
    * withholds the MCP credential, so the `cadsense` server (and with it every
@@ -415,6 +414,13 @@ export const ServerSettings = Schema.Struct({
    * prompt construction both happen on the local backend.
    */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Whether the backend sends anonymous usage analytics (see
+   * apps/server/src/telemetry/AnalyticsService.ts). Turning it off drops queued
+   * events and deletes the installation id, so turning it back on starts a new,
+   * unlinked id. Server-authoritative because only the backend sends events.
+   */
+  enableUsageAnalytics: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
   // consumers should resolve `backgroundActivity` instead.
@@ -586,8 +592,8 @@ const ClaudeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   streamAssistantText: Schema.optionalKey(Schema.Boolean),
-  enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  enableUsageAnalytics: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

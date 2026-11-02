@@ -42,7 +42,10 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
-import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
+import {
+  buildCodexDeveloperInstructions,
+  buildCodexThreadInstructions,
+} from "../CodexDeveloperInstructions.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
 import type { CadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import { handleCodexCadCall, codexCadFailure } from "./CodexCadTools.ts";
@@ -791,14 +794,19 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  /** See buildCodexThreadInstructions. A custom `start` may replace it. */
+  readonly developerInstructions?: string | undefined;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
-  const startParams = buildThreadStartParams({
-    cwd: input.cwd,
-    runtimeMode: input.runtimeMode,
-    model: input.requestedModel,
-    serviceTier: input.serviceTier,
-  });
+  const startParams = {
+    ...buildThreadStartParams({
+      cwd: input.cwd,
+      runtimeMode: input.runtimeMode,
+      model: input.requestedModel,
+      serviceTier: input.serviceTier,
+    }),
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
+  };
   const start = () =>
     input.start ? input.start(startParams) : input.client.request("thread/start", startParams);
 
@@ -2588,16 +2596,35 @@ export const makeCodexSessionRuntime = (
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
+      const cadGuidance = options.cad
+        ? {
+            learnings: options.cadReviewLearnings ? yield* options.cadReviewLearnings : [],
+            designBrief: options.designBrief ? yield* options.designBrief : null,
+          }
+        : null;
+      /** Thread instructions for a thread with or without CAD tools. */
+      const threadInstructions = (cad: boolean) =>
+        buildCodexThreadInstructions(
+          hasConfiguredMcpServer(options.appServerArgs),
+          cad ? cadGuidance : null,
+        );
+      const withInstructions = (params: EffectCodexSchema.V2ThreadStartParams, cad: boolean) => {
+        const { developerInstructions: _replaced, ...rest } = params;
+        const developerInstructions = threadInstructions(cad);
+        return developerInstructions ? { ...rest, developerInstructions } : rest;
+      };
 
       const opened = yield* openCodexThread({
         client,
+        // A resumed thread keeps the tools it started with.
+        developerInstructions: threadInstructions(!!options.cad && cadToolsEnabled),
         ...(options.cad
           ? {
               start: (params: EffectCodexSchema.V2ThreadStartParams) => {
                 cadToolsEnabled = true;
                 return client.raw
                   .request("thread/start", {
-                    ...params,
+                    ...withInstructions(params, true),
                     dynamicTools: cadToolDefinitions,
                   })
                   .pipe(
@@ -2619,7 +2646,7 @@ export const makeCodexSessionRuntime = (
                         /dynamic.?tools|experimental/i.test(error.message),
                       () => {
                         cadToolsEnabled = false;
-                        return client.request("thread/start", params);
+                        return client.request("thread/start", withInstructions(params, false));
                       },
                     ),
                   );

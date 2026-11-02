@@ -1,0 +1,301 @@
+// @effect-diagnostics nodeBuiltinImport:off - a worker thread entry that talks over its parent port.
+/**
+ * Runs FeatureScript previews off the server's main thread. OpenCascade calls are synchronous and a
+ * preview can take seconds, so FeatureScriptPreviews keeps one of these warm, sends it one job at a
+ * time, and terminates it on timeout. Std and OpenCascade load as soon as the worker starts, with a
+ * small preview to warm them, so a replacement started early is ready for its first job.
+ */
+import type {
+  CadFeatureScriptPreviewResult,
+  FeatureScriptChanges,
+  FeatureScriptFailure,
+  FeatureScriptPanelPreview,
+} from "@cadsense/contracts";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeWorkerThreads from "node:worker_threads";
+import {
+  describePreview,
+  dialogInputs,
+  featureFailure,
+  FeatureScriptRuntime,
+  featureSpecs,
+  formatDiagnostic,
+  formatValue,
+  FsFault,
+  FsThrow,
+  locate,
+  ModuleLoadError,
+  runPreview,
+  toGlb,
+  writePreview,
+  type PickedConnector,
+  type PreviewStep,
+  type SolidSummary,
+  type View,
+} from "@cadsense/featurescript";
+
+type PreviewOptions = NonNullable<Parameters<typeof runPreview>[3]>;
+
+export interface FeatureScriptWorkerData {
+  /** The vendored std directory as a file URL, when it isn't beside the package source. */
+  readonly stdDir: string | null;
+}
+
+/**
+ * Where a job's results go. An agent's preview writes every view, a GLB and a report to `outDir`
+ * and returns the `view` PNG. The file panel's writes only the GLBs it shows, before and after the
+ * feature, and returns the feature's dialog.
+ */
+export type PreviewOutput =
+  | { readonly kind: "agent"; readonly view: View; readonly outDir: string }
+  | { readonly kind: "panel"; readonly after: string; readonly before: string };
+
+export interface PreviewJob {
+  readonly id: number;
+  readonly steps: readonly PreviewStep[];
+  /**
+   * The workspace (its real path) that `.fs` files the steps import are read from, relative to the
+   * importing file, and their size limit.
+   */
+  readonly workspace: { readonly root: string; readonly maxModuleBytes: number };
+  /** Points picked in the panel, made into mate connectors before the features run. */
+  readonly connectors: readonly PickedConnector[];
+  /** A STEP file whose bodies are created by `makeId("Base")`. */
+  readonly base: Uint8Array | null;
+  /** Panel jobs run the last feature as Onshape's dialog does; see `runPreview`'s `editing`. */
+  readonly editing: PreviewOptions["editing"] | null;
+  /** A manipulator of the last feature was dragged; see `runPreview`'s `manipulatorChange`. */
+  readonly manipulatorChange: PreviewOptions["manipulatorChange"] | null;
+  /**
+   * Panel jobs rolled back: only this many steps run, and the model they leave is the "after"
+   * GLB, with no dialog; see `runPreview`'s `rollback`.
+   */
+  readonly rollback: number | null;
+  readonly output: PreviewOutput;
+}
+
+/** Every result carries the WASM memory the worker holds, which only grows, to know when to replace it. */
+export type PreviewJobResult = { readonly memoryBytes: number } & (
+  | {
+      readonly id: number;
+      readonly kind: "ran";
+      readonly summary: string;
+      readonly failure: FeatureScriptFailure | null;
+      readonly changes: FeatureScriptChanges | null;
+      readonly features: CadFeatureScriptPreviewResult["features"];
+      readonly solids: readonly SolidSummary[];
+      readonly elapsedMs: number;
+      /** The `view` PNG, for agent jobs. */
+      readonly png: Uint8Array | null;
+      /** Panel jobs: the last feature's dialog, and which GLBs were written (none for no bodies). */
+      readonly panel:
+        | (Pick<
+            FeatureScriptPanelPreview,
+            | "features"
+            | "feature"
+            | "inputs"
+            | "notice"
+            | "errorEntities"
+            | "editing"
+            | "manipulators"
+            | "parameters"
+            | "featureStatus"
+          > & {
+            readonly after: boolean;
+            readonly before: boolean;
+          })
+        | null;
+    }
+  /** The script couldn't run: syntax errors, a missing feature, a bad parameter or base file. */
+  | {
+      readonly id: number;
+      readonly kind: "invalid";
+      readonly summary: string;
+      readonly failure: FeatureScriptFailure;
+    }
+);
+
+/** A message for a preview that couldn't start, with file:line:column for syntax errors. */
+const describeFailure = (error: unknown): string => {
+  if (error instanceof ModuleLoadError)
+    return [
+      error.message,
+      ...error.diagnostics.map((diagnostic) =>
+        error.file ? formatDiagnostic(locate(error.file, diagnostic)) : diagnostic.message,
+      ),
+    ].join("\n");
+  if (error instanceof FsThrow) return `A parameter threw ${formatValue(error.value)}.`;
+  if (error instanceof FsFault || error instanceof Error) return error.message;
+  return String(error);
+};
+
+/** The first syntax error, located; otherwise the whole description. */
+const locateFailure = (error: unknown, summary: string): FeatureScriptFailure => {
+  const first = error instanceof ModuleLoadError ? error.diagnostics[0] : undefined;
+  if (error instanceof ModuleLoadError && error.file && first) {
+    const located = locate(error.file, first);
+    return {
+      message: located.message,
+      location: { path: located.file, line: located.start.line, column: located.start.column },
+      unsupported: false,
+    };
+  }
+  return { message: summary, location: null, unsupported: false };
+};
+
+/**
+ * Reads a module the job's scripts import, by workspace-relative path. Anything that isn't a `.fs`
+ * file inside the workspace (through links too) or is over the limit reads as missing.
+ */
+const readImport = ({ root, maxModuleBytes }: PreviewJob["workspace"], relative: string) => {
+  if (!relative.endsWith(".fs")) return undefined;
+  try {
+    const real = NodeFS.realpathSync(NodePath.resolve(root, relative));
+    const inside = NodePath.relative(root, real);
+    if (inside.startsWith("..") || NodePath.isAbsolute(inside)) return undefined;
+    const info = NodeFS.statSync(real);
+    if (!info.isFile() || info.size > maxModuleBytes) return undefined;
+    return NodeFS.readFileSync(real, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+const port = NodeWorkerThreads.parentPort;
+const { stdDir } = NodeWorkerThreads.workerData as FeatureScriptWorkerData;
+/** The running job's workspace; the warm runtime reads imports through it. */
+let workspace: PreviewJob["workspace"] | undefined;
+
+/** A cube, run once at startup so std's modules, OpenCascade and the mesher are loaded. */
+const WARM_UP = `FeatureScript 3083;
+import(path : "onshape/std/geometry.fs", version : "3083.0");
+annotation { "Feature Type Name" : "Warm up" }
+export const warmUp = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition {}
+    {
+        fCuboid(context, id + "c", { "corner1" : vector(0, 0, 0) * millimeter, "corner2" : vector(1, 1, 1) * millimeter });
+    });
+`;
+// OpenCascade failing to load surfaces on the first job, which awaits this. The warm-up itself is
+// best-effort: whatever broke it, the first job reports.
+const runtime = FeatureScriptRuntime.withGeometry({
+  ...(stdDir ? { stdDir: new URL(stdDir) } : {}),
+  readModule: (path) => (workspace ? readImport(workspace, path) : undefined),
+}).then((loaded) => {
+  try {
+    runPreview(loaded, [{ path: "warm-up.fs", source: WARM_UP }]);
+  } catch {}
+  return loaded;
+});
+
+const run = async (job: PreviewJob): Promise<PreviewJobResult> => {
+  const loaded = await runtime;
+  workspace = job.workspace;
+  const { output } = job;
+  let result;
+  try {
+    result = runPreview(loaded, job.steps, job.base ?? undefined, {
+      before: output.kind === "panel",
+      connectors: job.connectors,
+      ...(job.editing ? { editing: job.editing } : {}),
+      ...(job.manipulatorChange ? { manipulatorChange: job.manipulatorChange } : {}),
+      ...(job.rollback === null ? {} : { rollback: job.rollback }),
+    });
+  } catch (error) {
+    const summary = describeFailure(error);
+    return {
+      id: job.id,
+      kind: "invalid",
+      summary,
+      failure: locateFailure(error, summary),
+      memoryBytes: loaded.memoryBytes(),
+    };
+  }
+  const failure =
+    result.features
+      .map(({ run }) => featureFailure(loaded, run))
+      .find((failure) => failure !== null) ?? null;
+  const last = result.features.at(-1);
+  let png: Uint8Array | null = null;
+  let panel: Extract<PreviewJobResult, { kind: "ran" }>["panel"] = null;
+  if (output.kind === "agent") {
+    writePreview(result, output.outDir, {
+      steps: job.steps.map(({ path, feature, parameters }) => ({ path, feature, parameters })),
+    });
+    png = NodeFS.readFileSync(NodePath.join(output.outDir, `${output.view}.png`));
+  } else if (job.rollback !== null) {
+    // Rolled back, the previewed feature didn't run: just the model, which may be the base alone.
+    if (result.meshes.length) NodeFS.writeFileSync(output.after, toGlb(result.meshes));
+    panel = {
+      features: [],
+      feature: null,
+      inputs: [],
+      notice: null,
+      errorEntities: 0,
+      editing: null,
+      manipulators: [],
+      featureStatus: null,
+      parameters: null,
+      after: result.meshes.length > 0,
+      before: false,
+    };
+  } else if (last) {
+    const meshesBefore = result.meshesBefore ?? [];
+    if (result.meshes.length) NodeFS.writeFileSync(output.after, toGlb(result.meshes));
+    if (meshesBefore.length) NodeFS.writeFileSync(output.before, toGlb(meshesBefore));
+    panel = {
+      features: featureSpecs(loaded.interpreter, last.module).map(({ name, typeName }) => ({
+        name,
+        typeName,
+      })),
+      feature: last.spec.name,
+      inputs: dialogInputs(loaded, last.module, last.spec, last.definition, {
+        faulty: last.run?.faultyParameters ?? [],
+        expressions: last.shown,
+      }),
+      // The previewed feature's own notice, or else the first earlier one's, named.
+      notice:
+        last.notice ??
+        result.features.flatMap(({ spec, notice }) =>
+          notice ? [{ ...notice, message: `${spec.typeName}: ${notice.message}` }] : [],
+        )[0] ??
+        null,
+      errorEntities: result.errorEntities,
+      editing: result.editing,
+      manipulators: result.manipulators,
+      featureStatus: last.run?.status ?? null,
+      parameters: result.parameters,
+      after: result.meshes.length > 0,
+      before: meshesBefore.length > 0,
+    };
+  }
+  return {
+    id: job.id,
+    kind: "ran",
+    summary: describePreview(loaded, result),
+    failure,
+    changes: result.changes,
+    features: result.features.map(({ path, spec, run }) => ({
+      path,
+      feature: spec.name,
+      typeName: spec.typeName,
+      status: run?.status ?? "NOT_RUN",
+      message: run?.message ?? null,
+      // Why it failed: the fault that stopped it, the exception behind its error, or else its
+      // reported message.
+      cause: featureFailure(loaded, run)?.message ?? null,
+    })),
+    solids: result.solids,
+    elapsedMs: result.elapsedMs,
+    png,
+    panel,
+    memoryBytes: loaded.memoryBytes(),
+  };
+};
+
+// A rejected job (OpenCascade failed to load, the disk is full) crashes the worker; the parent
+// reports that as a failed preview and starts a fresh worker next time.
+port?.on("message", (job: PreviewJob) => {
+  void run(job).then((result) => port.postMessage(result));
+});

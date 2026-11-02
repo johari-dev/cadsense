@@ -29,6 +29,7 @@ import { OtlpTracer } from "effect/unstable/observability";
 
 import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
+import { compressCadResponse } from "./cad/CadHttpCompression.ts";
 import {
   ATTACHMENT_UPLOAD_ROUTE_PREFIX,
   storeAttachmentUpload,
@@ -87,7 +88,7 @@ export function assetResponseHeaders(
   },
 ): Record<string, string> {
   const lowerPath = filePath.toLowerCase();
-  const inlineVideoMimeType = options?.mimeType?.split(";", 1)[0]?.trim();
+  const declaredMimeType = options?.mimeType?.split(";", 1)[0]?.trim();
   return {
     "Cache-Control": "private, max-age=3600",
     "X-Content-Type-Options": "nosniff",
@@ -100,11 +101,14 @@ export function assetResponseHeaders(
               ? options.mimeType
               : "application/octet-stream",
         }
-      : inlineVideoMimeType !== undefined && isSafeInlineVideoMimeType(inlineVideoMimeType)
-        ? { "Content-Type": inlineVideoMimeType }
-        : lowerPath.endsWith(".html") || lowerPath.endsWith(".htm")
-          ? { "Content-Type": "text/html; charset=utf-8" }
-          : {}),
+      : declaredMimeType !== undefined && isSafeInlineVideoMimeType(declaredMimeType)
+        ? { "Content-Type": declaredMimeType }
+        : // Browsers don't render glTF; naming it lets the model be compressed.
+          declaredMimeType === "model/gltf-binary"
+          ? { "Content-Type": "model/gltf-binary" }
+          : lowerPath.endsWith(".html") || lowerPath.endsWith(".htm")
+            ? { "Content-Type": "text/html; charset=utf-8" }
+            : {}),
     ...(!options?.download && lowerPath.endsWith(".svg")
       ? { "Content-Security-Policy": SVG_CONTENT_SECURITY_POLICY }
       : {}),
@@ -282,7 +286,11 @@ export const assetRouteLayer = HttpRouter.add(
     }).pipe(
       Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
-  }),
+  }).pipe(
+    // Models (the FeatureScript panel's, after every preview) are raw float buffers that gzip to
+    // about a third; everything else is left as it is.
+    compressCadResponse,
+  ),
 );
 
 export const attachmentUploadRouteLayer = HttpRouter.add(

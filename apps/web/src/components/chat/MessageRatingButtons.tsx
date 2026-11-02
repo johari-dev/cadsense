@@ -7,10 +7,12 @@ import {
 import { ThumbsDownIcon, ThumbsUpIcon, type Icon as AppIcon } from "~/lib/icons";
 import { memo, useRef, useState, type Ref } from "react";
 
+import { usePrimarySettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Popover, PopoverDescription, PopoverPopup, PopoverTitle } from "../ui/popover";
 import { Toggle } from "../ui/toggle";
@@ -29,6 +31,8 @@ const REASON_LABELS = {
  * active one clears it. A thumbs down saves right away, then asks for an
  * optional reason; dismissing that popover keeps the rating. While the popover
  * is open the thumbs down carries `data-popup-open` so the row stays visible.
+ * With usage analytics on, the popover also offers to send the note to the
+ * Cadsense team; otherwise the note never leaves this machine.
  */
 export const MessageRatingButtons = memo(function MessageRatingButtons({
   threadRef,
@@ -40,6 +44,7 @@ export const MessageRatingButtons = memo(function MessageRatingButtons({
   rating: MessageRating | undefined;
 }) {
   const setMessageRating = useAtomCommand(threadEnvironment.setMessageRating);
+  const canShareNote = usePrimarySettings((settings) => settings.enableUsageAnalytics);
   const thumbsDownRef = useRef<HTMLButtonElement>(null);
   const [askingReason, setAskingReason] = useState(false);
   const save = (next: MessageRating | null) => {
@@ -75,6 +80,7 @@ export const MessageRatingButtons = memo(function MessageRatingButtons({
       <Popover open={askingReason} onOpenChange={setAskingReason}>
         <PopoverPopup anchor={thumbsDownRef} side="bottom" align="start" className="w-80">
           <RatingReasonForm
+            canShareNote={canShareNote}
             onSubmit={(details) => {
               save({ value: "down", ...details });
               setAskingReason(false);
@@ -130,14 +136,20 @@ function RatingButton({
   );
 }
 
-/** Optional details for a thumbs down. Sending needs a reason or a note. */
+/**
+ * Optional details for a thumbs down. Sending needs a reason or a note. With
+ * `canShareNote`, a checkbox (off by default) sends the note to the team too.
+ */
 function RatingReasonForm({
+  canShareNote,
   onSubmit,
 }: {
-  onSubmit: (details: { reason?: MessageRatingReason; note?: string }) => void;
+  canShareNote: boolean;
+  onSubmit: (details: { reason?: MessageRatingReason; note?: string; shareNote?: true }) => void;
 }) {
   const [reason, setReason] = useState<MessageRatingReason | null>(null);
   const [note, setNote] = useState("");
+  const [shareNote, setShareNote] = useState(false);
   const trimmedNote = note.trim();
 
   return (
@@ -148,6 +160,7 @@ function RatingReasonForm({
         onSubmit({
           ...(reason !== null ? { reason } : {}),
           ...(trimmedNote ? { note: trimmedNote } : {}),
+          ...(trimmedNote && canShareNote && shareNote ? { shareNote: true } : {}),
         });
       }}
     >
@@ -178,6 +191,16 @@ function RatingReasonForm({
         value={note}
         onChange={(event) => setNote(event.target.value)}
       />
+      {canShareNote ? (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Checkbox
+            checked={shareNote}
+            disabled={trimmedNote === ""}
+            onCheckedChange={(checked) => setShareNote(checked)}
+          />
+          Send this note to the Cadsense team
+        </label>
+      ) : null}
       <Button
         type="submit"
         size="xs"

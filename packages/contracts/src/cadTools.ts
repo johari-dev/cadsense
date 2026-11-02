@@ -7,6 +7,7 @@ import {
   CadCommentInspectInput,
   CadCommentsPublishToolInput,
 } from "./cadComments.ts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadMeasureInput } from "./cadMeasure.ts";
 import { CadDriveOptionsInput } from "./cadDriveOptions.ts";
@@ -287,6 +288,114 @@ export const CadDiffResult = Schema.Struct({
 });
 export type CadDiffResult = typeof CadDiffResult.Type;
 
+const WorkspaceFile = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
+/** One feature to run: a workspace `.fs` file, which feature in it, and inputs as FeatureScript expressions. */
+export const CadFeatureScriptPreviewStep = Schema.Struct({
+  path: WorkspaceFile,
+  feature: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
+  parameters: Schema.optionalKey(
+    Schema.Record(
+      Schema.String.check(Schema.isMaxLength(256)),
+      // A list input is one expression; a hundred picked waypoints are about 12 KB.
+      Schema.String.check(Schema.isMaxLength(64 * 1024)),
+    ),
+  ),
+});
+export type CadFeatureScriptPreviewStep = typeof CadFeatureScriptPreviewStep.Type;
+export const FEATURESCRIPT_PREVIEW_VIEWS = ["iso", "top", "front", "right"] as const;
+/** Runs `before` features, then this one, locally on top of an optional workspace STEP `base`. */
+export const CadFeatureScriptPreviewInput = Schema.Struct({
+  ...CadFeatureScriptPreviewStep.fields,
+  before: Schema.optionalKey(
+    Schema.Array(CadFeatureScriptPreviewStep).check(Schema.isMaxLength(16)),
+  ),
+  base: Schema.optionalKey(WorkspaceFile),
+  view: Schema.optionalKey(Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS)),
+});
+export type CadFeatureScriptPreviewInput = typeof CadFeatureScriptPreviewInput.Type;
+export const FEATURESCRIPT_PREVIEW_STATUSES = [
+  "OK",
+  "INFO",
+  "WARNING",
+  "ERROR",
+  "INVALID",
+  "STOPPED",
+] as const;
+export type FeatureScriptPreviewStatus = (typeof FEATURESCRIPT_PREVIEW_STATUSES)[number];
+/** A line in a workspace script; line and column start at 1. */
+export const FeatureScriptLocation = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Int,
+  column: Schema.Int,
+});
+export type FeatureScriptLocation = typeof FeatureScriptLocation.Type;
+/**
+ * The first thing that went wrong: a syntax error, the cause of the first failed feature, or why the
+ * preview stopped. A failure inside std is located at the user's line that called into it.
+ */
+export const FeatureScriptFailure = Schema.Struct({
+  message: Schema.String,
+  location: Schema.NullOr(FeatureScriptLocation),
+  /** The local runtime can't run something the script calls, such as `opImportForeign`. */
+  unsupported: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type FeatureScriptFailure = typeof FeatureScriptFailure.Type;
+/** What the previewed (last) feature did to the model. */
+export const FeatureScriptChanges = Schema.Struct({
+  /** Solid volume after the feature minus before it. */
+  volumeMm3: Schema.Number,
+  /** Faces the feature created, the ones drawn in amber. */
+  createdFaces: Schema.Int,
+});
+export type FeatureScriptChanges = typeof FeatureScriptChanges.Type;
+export const CadFeatureScriptPreviewResult = Schema.Struct({
+  /**
+   * The worst feature status. INVALID: the script didn't load (syntax errors, a missing feature, a
+   * bad parameter or base file). STOPPED: the preview timed out or its worker crashed.
+   */
+  status: Schema.Literals(FEATURESCRIPT_PREVIEW_STATUSES),
+  /** Inputs, outcome and cause per feature, and the resulting solids, as plain text. */
+  summary: Schema.String,
+  failure: Schema.NullOr(FeatureScriptFailure),
+  changes: Schema.NullOr(FeatureScriptChanges),
+  features: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      feature: Schema.String,
+      typeName: Schema.String,
+      status: Schema.Literals(["OK", "INFO", "WARNING", "ERROR", "NOT_RUN"]),
+      message: Schema.NullOr(Schema.String),
+      cause: Schema.NullOr(Schema.String),
+    }),
+  ),
+  solids: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      createdBy: Schema.String,
+      /** The name the script gave it with setProperty. */
+      name: Schema.NullOr(Schema.String),
+      volumeMm3: Schema.Number,
+      /** Axis-aligned bounding box. */
+      boundsMm: Schema.Struct({
+        min: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+        max: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+      }),
+      faces: Schema.Int,
+      edges: Schema.Int,
+      vertices: Schema.Int,
+    }),
+  ),
+  /** PNGs of every view, result.glb and report.json, when the features ran. */
+  artifacts: Schema.NullOr(
+    Schema.Struct({
+      directory: Schema.String,
+      image: Schema.String,
+      view: Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS),
+    }),
+  ),
+});
+export type CadFeatureScriptPreviewResult = typeof CadFeatureScriptPreviewResult.Type;
+
 /** Live tool feedback includes the rendered pose; historical capture records keep their own pose. */
 export const CadCaptureToolResult = Schema.Struct({
   ...CadCaptureResult.fields,
@@ -308,4 +417,5 @@ export const CAD_TOOL_INPUTS = {
   cad_drive_options: CadDriveOptionsInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
+  cad_featurescript_preview: CadFeatureScriptPreviewInput,
 } as const;

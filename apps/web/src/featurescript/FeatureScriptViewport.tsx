@@ -1,0 +1,799 @@
+import type { EnvironmentId } from "@cadsense/contracts";
+import { useEffect, useRef, useState } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+import { useAssetUrl } from "../assets/assetUrls";
+import { observeCadAppearance } from "../cad/CadAppearance";
+import { CAD_CAMERA_FOV } from "../cad/CadSceneModel";
+import { cn } from "../lib/utils";
+import type { ModelPoint, PickHit } from "./featureScriptDialog";
+import {
+  arcGeometry,
+  buildHandle,
+  disposeHandle,
+  dragProxy,
+  focusHandle,
+  scaleHandle,
+  type DrawnHandle,
+} from "./featureScriptHandles";
+import {
+  dragManipulator,
+  handlePoint,
+  startDrag,
+  type Drag,
+  type DragValue,
+  type DrawnManipulator,
+  type Ray,
+} from "./featureScriptManipulators";
+import { bodyNode, edgeMiddle, faceProbe, isOutline, isPickable } from "./featureScriptScene";
+import {
+  snapToOutline,
+  type ClickedSurface,
+  type ProjectedOutline,
+  type ProjectedPoint,
+  type ProjectedSegment,
+} from "./featureScriptSnap";
+
+/** The renderer's view toward the model, matching the iso PNGs agents get. */
+const ISO = new THREE.Vector3(1, 1, 1).normalize();
+const PICK_COLOR = 0x60a5fa;
+/** Error vertices, in screen pixels. */
+const ERROR_POINT_SIZE = 7;
+
+export interface FeatureScriptViewportProps {
+  readonly environmentId: EnvironmentId;
+  /**
+   * GLB attachment ids from the panel preview: meters, Z up, feature faces in material 1, error
+   * entities in material 2 (edges and vertices as lines and points), each body's B-rep edges and
+   * vertices as lines and points in material 3.
+   */
+  readonly after: string | null;
+  readonly before: string | null;
+  readonly show: "after" | "before";
+  /** Grey the model out, for the last good run shown under a failure. */
+  readonly stale: boolean;
+  readonly picking: boolean;
+  /** The model was clicked while picking; `add` when shift was held. */
+  readonly onPick: (hit: PickHit, add: boolean) => void;
+  readonly picks: readonly ModelPoint[];
+  /** Bumped to fit the camera to the model again. */
+  readonly fitRequest: number;
+  /**
+   * The previewed feature's manipulators to draw and drag, each with the dialog row it drives
+   * (its name labels the value while dragging); empty to draw none. A new array redraws them.
+   */
+  readonly manipulators: readonly ViewManipulator[];
+  /** A handle is being dragged (where its value shows, in the view's pixels), or null when not. */
+  readonly onDrag: (drag: ManipulatorDrag | null) => void;
+  /** A drag was released (or a flip arrow clicked): the manipulator and its changed fields. */
+  readonly onRelease: (
+    manipulator: DrawnManipulator,
+    changes: Readonly<Record<string, string>>,
+  ) => void;
+  /** A model couldn't be fetched or read (pruned, say); the view keeps what it had. */
+  readonly onLoadFailed: (attachmentId: string) => void;
+}
+
+/** A manipulator to draw, and the name of the dialog row it drives, if the dialog shows one. */
+export interface ViewManipulator {
+  readonly manipulator: DrawnManipulator;
+  readonly name: string | null;
+}
+
+/** A drag in progress, for the panel: what's dragged, its value, and where it shows. */
+export interface ManipulatorDrag {
+  readonly key: string;
+  /** What the handle shows, e.g. `Z offset 40 mm`. */
+  readonly label: string;
+  /** The handle's position in the view, in CSS pixels from its top left. */
+  readonly at: readonly [number, number];
+}
+
+/** Loads one model attachment into the view once its URL is signed. */
+function ModelSlot(props: {
+  readonly environmentId: EnvironmentId;
+  readonly attachmentId: string;
+  readonly load: (url: string) => void;
+}) {
+  const url = useAssetUrl(props.environmentId, {
+    _tag: "attachment",
+    attachmentId: props.attachmentId,
+    fileName: "preview.glb",
+    mimeType: "model/gltf-binary",
+  });
+  const loadRef = useRef(props.load);
+  loadRef.current = props.load;
+  useEffect(() => {
+    if (url) loadRef.current(url);
+  }, [url]);
+  return null;
+}
+
+/**
+ * The file panel's model view. Draws only when something changes (orbiting, a new model, a
+ * resize), never in a loop. A new run's model replaces the old one once it has loaded, and the
+ * camera stays where the person left it.
+ */
+export function FeatureScriptViewport(props: FeatureScriptViewportProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // State, not a ref: the model loaders below mount only once the view exists, since child
+  // effects run before this component's own.
+  const [view, setView] = useState<View | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const onPickRef = useRef(props.onPick);
+  onPickRef.current = props.onPick;
+  const pickingRef = useRef(props.picking);
+  pickingRef.current = props.picking;
+  const onDragRef = useRef(props.onDrag);
+  onDragRef.current = props.onDrag;
+  const onReleaseRef = useRef(props.onRelease);
+  onReleaseRef.current = props.onRelease;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    // Each view owns its canvas, so releasing its WebGL context on the way out can't break the
+    // next view (React mounts effects twice in development).
+    const canvas = document.createElement("canvas");
+    canvas.className = "block h-full w-full outline-none";
+    canvas.setAttribute("aria-label", "FeatureScript preview model");
+    container.append(canvas);
+    let created: View;
+    try {
+      created = createView(canvas, {
+        picking: () => pickingRef.current,
+        onPick: (hit, add) => onPickRef.current(hit, add),
+        onDrag: (drag) => onDragRef.current(drag),
+        onRelease: (manipulator, changes) => onReleaseRef.current(manipulator, changes),
+      });
+    } catch {
+      canvas.remove();
+      setUnavailable(true);
+      return;
+    }
+    setView(created);
+    const resize = new ResizeObserver(() =>
+      created.resize(container.clientWidth, container.clientHeight),
+    );
+    resize.observe(container);
+    const stopAppearance = observeCadAppearance((appearance) =>
+      created.setBackground(appearance.background),
+    );
+    return () => {
+      resize.disconnect();
+      stopAppearance();
+      created.dispose();
+      canvas.remove();
+      setView(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (props.after === null) view?.setModel("after", null);
+  }, [view, props.after]);
+  useEffect(() => {
+    if (props.before === null) view?.setModel("before", null);
+  }, [view, props.before]);
+  useEffect(() => view?.show(props.show), [view, props.show]);
+  useEffect(() => view?.setPicks(props.picks), [view, props.picks]);
+  useEffect(() => view?.setManipulators(props.manipulators), [view, props.manipulators]);
+  useEffect(() => {
+    if (props.fitRequest > 0) view?.fit();
+  }, [view, props.fitRequest]);
+
+  return (
+    <div
+      ref={containerRef}
+      className={cn(
+        "absolute inset-0",
+        props.picking ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing",
+        props.stale && "opacity-40 grayscale",
+      )}
+    >
+      {unavailable ? (
+        <p className="flex h-full items-center justify-center px-8 text-center text-xs text-muted-foreground">
+          The 3D preview needs WebGL, which isn't available here.
+        </p>
+      ) : null}
+      {view && props.after ? (
+        <ModelSlot
+          environmentId={props.environmentId}
+          attachmentId={props.after}
+          load={(url) =>
+            void view.load("after", url).then((loaded) => {
+              if (!loaded && props.after) props.onLoadFailed(props.after);
+            })
+          }
+        />
+      ) : null}
+      {view && props.before ? (
+        <ModelSlot
+          environmentId={props.environmentId}
+          attachmentId={props.before}
+          load={(url) =>
+            void view.load("before", url).then((loaded) => {
+              if (!loaded && props.before) props.onLoadFailed(props.before);
+            })
+          }
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type Slot = "after" | "before";
+type View = ReturnType<typeof createView>;
+
+/** The three.js side of the viewport, kept out of React. */
+function createView(
+  canvas: HTMLCanvasElement,
+  pick: {
+    readonly picking: () => boolean;
+    readonly onPick: (hit: PickHit, add: boolean) => void;
+    readonly onDrag: (drag: ManipulatorDrag | null) => void;
+    readonly onRelease: FeatureScriptViewportProps["onRelease"];
+  },
+) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping;
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x89939f, 1.5));
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  key.position.set(3, -4, 5);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xffffff, 1);
+  fill.position.set(-3, 2, 1);
+  scene.add(fill);
+  const camera = new THREE.PerspectiveCamera(CAD_CAMERA_FOV, 1, 1e-4, 100);
+  camera.up.set(0, 0, 1);
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = false;
+  const markers = new THREE.Group();
+  markers.renderOrder = 1;
+  scene.add(markers);
+  const handlesGroup = new THREE.Group();
+  scene.add(handlesGroup);
+  let handles: { readonly handle: DrawnHandle; readonly name: string | null }[] = [];
+  const models: Record<Slot, THREE.Group | null> = { after: null, before: null };
+  const loading: Record<Slot, string | null> = { after: null, before: null };
+  let shown: Slot = "after";
+  let picks: readonly ModelPoint[] = [];
+  /** Until the person moves the camera, it stays fitted to the model as the panel resizes. */
+  let autoFit = true;
+  let fitted = false;
+  let disposed = false;
+  let frame = 0;
+
+  const render = () => {
+    if (frame || disposed) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (disposed) return;
+      scaleHandles();
+      renderer.render(scene, camera);
+      describeHandles();
+    });
+  };
+  controls.addEventListener("change", render);
+  controls.addEventListener("start", () => {
+    autoFit = false;
+  });
+
+  const bounds = () => {
+    const box = new THREE.Box3();
+    for (const model of [models.after, models.before]) if (model) box.expandByObject(model);
+    return box;
+  };
+  const fit = () => {
+    const box = bounds();
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-4);
+    // The narrower of the two fields of view decides, so a tall panel doesn't crop the sides.
+    const halfVertical = THREE.MathUtils.degToRad(CAD_CAMERA_FOV / 2);
+    const halfHorizontal = Math.atan(Math.tan(halfVertical) * camera.aspect);
+    const distance = (radius * 1.05) / Math.sin(Math.min(halfVertical, halfHorizontal));
+    camera.position.copy(center).addScaledVector(ISO, distance);
+    camera.near = distance / 100;
+    camera.far = distance * 100;
+    camera.updateProjectionMatrix();
+    controls.target.copy(center);
+    controls.update();
+    fitted = true;
+    render();
+  };
+
+  const disposeObject = (object: THREE.Object3D) =>
+    object.traverse((child) => {
+      if (
+        child instanceof THREE.Mesh ||
+        child instanceof THREE.LineSegments ||
+        child instanceof THREE.Points
+      ) {
+        child.geometry.dispose();
+        for (const material of [child.material].flat()) material.dispose();
+      }
+    });
+  // The model's edges. Copies keep the GLB outline material's mark, so a click finds them.
+  const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1d2126 });
+  edgeMaterial.userData = { outline: true };
+
+  const setModel = (slot: Slot, model: THREE.Group | null) => {
+    // Clearing a slot also cancels its pending load, so an older run's model can't come back.
+    if (model === null) loading[slot] = null;
+    const previous = models[slot];
+    if (previous) {
+      scene.remove(previous);
+      disposeObject(previous);
+    }
+    models[slot] = model;
+    if (model) {
+      model.visible = slot === shown;
+      scene.add(model);
+      if (!fitted) fit();
+    }
+    // Marker size follows the model's.
+    drawPicks();
+  };
+
+  /** Picked points as dots drawn over the model. */
+  function drawPicks() {
+    for (const marker of markers.children) disposeObject(marker);
+    markers.clear();
+    const size = Math.max(bounds().getSize(new THREE.Vector3()).length(), 1e-3) * 0.008;
+    for (const point of picks) {
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(size, 16, 12),
+        new THREE.MeshBasicMaterial({ color: PICK_COLOR, depthTest: false }),
+      );
+      marker.position.set(...point);
+      markers.add(marker);
+    }
+    render();
+  }
+
+  const loader = new GLTFLoader();
+  /**
+   * Loads a model into `slot`; false when it's gone or broken, which leaves the slot as it was.
+   * A load overtaken by a newer one (or a cleared slot) is dropped and counts as loaded.
+   */
+  const load = async (slot: Slot, url: string): Promise<boolean> => {
+    loading[slot] = url;
+    let gltf;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return false;
+      gltf = await loader.parseAsync(await response.arrayBuffer(), "");
+    } catch {
+      return false;
+    }
+    // A newer run's model may have been asked for meanwhile.
+    if (disposed || loading[slot] !== url) {
+      disposeObject(gltf.scene);
+      return true;
+    }
+    gltf.scene.traverse((child) => {
+      if (isOutline(child)) {
+        // A body's edges, every B-rep one, drawn as the model's edges always were; its vertices
+        // are there to snap clicks to, not drawn.
+        if (child instanceof THREE.Points) child.visible = false;
+        else {
+          for (const material of [child.material].flat()) material.dispose();
+          child.material = edgeMaterial.clone();
+        }
+      } else if (child instanceof THREE.Points || child instanceof THREE.LineSegments) {
+        // Error edges and vertices draw over the faces they sit on, and vertices at a fixed size.
+        child.renderOrder = 2;
+        for (const material of [child.material].flat()) {
+          material.depthTest = false;
+          if (material instanceof THREE.PointsMaterial) {
+            material.size = ERROR_POINT_SIZE;
+            material.sizeAttenuation = false;
+          }
+        }
+      } else if (child instanceof THREE.Mesh)
+        for (const material of [child.material].flat()) material.side = THREE.DoubleSide;
+    });
+    setModel(slot, gltf.scene);
+    return true;
+  };
+
+  /**
+   * The outline of the body `object` is part of (its edges as drawn, and its vertices), projected
+   * into the canvas's pixels.
+   */
+  const outlineOf = (object: THREE.Object3D, rect: DOMRect): ProjectedOutline => {
+    const edges: ProjectedSegment[] = [];
+    const vertices: ProjectedPoint[] = [];
+    bodyNode(object)?.traverse((child) => {
+      if (!isOutline(child)) return;
+      const positions = child.geometry.getAttribute("position");
+      const project = (i: number): ProjectedPoint => {
+        const world = new THREE.Vector3()
+          .fromBufferAttribute(positions, i)
+          .applyMatrix4(child.matrixWorld);
+        const ndc = world.clone().project(camera);
+        return {
+          screen: [((ndc.x + 1) / 2) * rect.width, ((1 - ndc.y) / 2) * rect.height],
+          world: [world.x, world.y, world.z],
+          depth: -world.clone().applyMatrix4(camera.matrixWorldInverse).z,
+        };
+      };
+      if (child instanceof THREE.Points)
+        for (let i = 0; i < positions.count; i++) vertices.push(project(i));
+      else
+        for (let i = 0; i + 1 < positions.count; i += 2)
+          edges.push({ a: project(i), b: project(i + 1), exact: edgeMiddle(child, i) });
+    });
+    return { edges, vertices };
+  };
+
+  const raycaster = new THREE.Raycaster();
+  let down: { x: number; y: number } | null = null;
+  const onPointerDown = (event: PointerEvent) => {
+    down = { x: event.clientX, y: event.clientY };
+  };
+  const onPointerUp = (event: PointerEvent) => {
+    const start = down;
+    down = null;
+    // A drag orbits; only a click picks.
+    if (
+      !start ||
+      !pick.picking() ||
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4
+    )
+      return;
+    const model = models[shown];
+    if (!model) return;
+    const rect = canvas.getBoundingClientRect();
+    raycaster.setFromCamera(
+      new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ),
+      camera,
+    );
+    const hit = raycaster
+      .intersectObject(model, true)
+      .find((intersection) => isPickable(intersection.object));
+    if (!hit) return;
+    // The clicked face's normal, turned toward the camera: the side the person clicked on.
+    const normal = (hit.face?.normal.clone() ?? raycaster.ray.direction.clone().negate())
+      .transformDirection(hit.object.matrixWorld)
+      .normalize();
+    if (normal.dot(raycaster.ray.direction) > 0) normal.negate();
+    // The edge or vertex the click is on, of the clicked body's.
+    const point: ModelPoint = [hit.point.x, hit.point.y, hit.point.z];
+    const surface = {
+      point,
+      normal: [normal.x, normal.y, normal.z],
+      eye: [camera.position.x, camera.position.y, camera.position.z],
+      worldPerPixel:
+        (2 *
+          camera.position.distanceTo(hit.point) *
+          Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+        rect.height,
+    } satisfies ClickedSurface;
+    const snapped = snapToOutline(
+      outlineOf(hit.object, rect),
+      [event.clientX - rect.left, event.clientY - rect.top],
+      surface,
+    );
+    // The face the hit triangle draws, by its probe.
+    const face = hit.face ? faceProbe(hit.object, hit.face.a) : null;
+    pick.onPick({ point, normal: surface.normal, face, ...snapped }, event.shiftKey);
+  };
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointerup", onPointerUp);
+
+  /** The model length one pixel spans at `point`, as the camera sees it now. */
+  const worldPerPixel = (point: THREE.Vector3) =>
+    (2 * camera.position.distanceTo(point) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+    Math.max(canvas.clientHeight, 1);
+  /** Keeps each handle the same size on screen, whatever the zoom. */
+  function scaleHandles() {
+    camera.updateMatrixWorld();
+    for (const { handle } of handles) scaleHandle(handle, worldPerPixel(handle.root.position));
+  }
+  /** `point` in the view's CSS pixels from its top left. */
+  const onScreen = (point: THREE.Vector3): [number, number] => {
+    const ndc = point.clone().project(camera);
+    return [((ndc.x + 1) / 2) * canvas.clientWidth, ((1 - ndc.y) / 2) * canvas.clientHeight];
+  };
+  /**
+   * Lists where each handle's parts are on screen in the canvas's `data-handles` (JSON of key,
+   * type, part and x, y in CSS pixels), so tests and tools can grab one without reading WebGL.
+   */
+  function describeHandles() {
+    if (handles.length === 0) {
+      delete canvas.dataset.handles;
+      return;
+    }
+    canvas.dataset.handles = JSON.stringify(
+      handles.flatMap(({ handle }) =>
+        handle.hits.map((hit) => {
+          const [x, y] = onScreen(hit.grab.clone().applyMatrix4(handle.root.matrixWorld));
+          return {
+            key: handle.manipulator.key,
+            type: handle.manipulator.type,
+            part: hit.part,
+            x: Math.round(x * 10) / 10,
+            y: Math.round(y * 10) / 10,
+          };
+        }),
+      ),
+    );
+  }
+
+  /** Fades the models while a handle is dragged, so the dashed proxy reads as what's coming. */
+  const setFaded = (faded: boolean) => {
+    for (const model of [models.after, models.before])
+      model?.traverse((child) => {
+        if (!(child instanceof THREE.Mesh || child instanceof THREE.LineSegments)) return;
+        for (const material of [child.material].flat()) {
+          const own = material.userData.unfaded as
+            | { readonly transparent: boolean; readonly opacity: number }
+            | undefined;
+          if (faded && !own) {
+            material.userData.unfaded = {
+              transparent: material.transparent,
+              opacity: material.opacity,
+            };
+            material.transparent = true;
+            material.opacity = material.opacity * 0.3;
+          } else if (!faded && own) {
+            material.transparent = own.transparent;
+            material.opacity = own.opacity;
+            delete material.userData.unfaded;
+          } else continue;
+          material.needsUpdate = true;
+        }
+      });
+  };
+
+  const handleRaycaster = new THREE.Raycaster();
+  const rayAt = (event: PointerEvent): Ray => {
+    const rect = canvas.getBoundingClientRect();
+    handleRaycaster.setFromCamera(
+      new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ),
+      camera,
+    );
+    const { origin, direction } = handleRaycaster.ray;
+    return {
+      origin: [origin.x, origin.y, origin.z],
+      direction: [direction.x, direction.y, direction.z],
+    };
+  };
+  /** The handle part under the pointer, nearest the camera. */
+  const handleAt = (event: PointerEvent) => {
+    if (handles.length === 0) return null;
+    scaleHandles();
+    rayAt(event);
+    const [nearest] = handleRaycaster.intersectObjects(
+      handles.flatMap(({ handle }) => handle.hits.map((hit) => hit.mesh)),
+      false,
+    );
+    if (!nearest) return null;
+    for (const { handle, name } of handles) {
+      const hit = handle.hits.find((candidate) => candidate.mesh === nearest.object);
+      if (hit) return { handle, hit, name };
+    }
+    return null;
+  };
+
+  let dragging: {
+    readonly handle: DrawnHandle;
+    readonly drag: Drag;
+    readonly pointerId: number;
+    readonly down: readonly [number, number];
+    moved: boolean;
+    value: DragValue | null;
+    proxy: THREE.Group | null;
+  } | null = null;
+
+  /** Puts a handle back where its run drew it. */
+  const restoreHandle = (handle: DrawnHandle) => {
+    const { manipulator } = handle;
+    handle.root.position.set(...handlePoint(manipulator));
+    if (handle.arc && manipulator.type === "ANGULAR") {
+      handle.arc.geometry.dispose();
+      handle.arc.geometry = arcGeometry(manipulator, manipulator.angle);
+    }
+  };
+  /** Ends the drag; the handle stays where it was dragged until the next run redraws it. */
+  const endDrag = () => {
+    const ended = dragging;
+    if (!ended) return;
+    dragging = null;
+    window.removeEventListener("keydown", onDragKey, true);
+    if (canvas.hasPointerCapture(ended.pointerId)) canvas.releasePointerCapture(ended.pointerId);
+    if (ended.proxy) {
+      handlesGroup.remove(ended.proxy);
+      disposeHandle(ended.proxy);
+    }
+    focusHandle(ended.handle, null);
+    setFaded(false);
+    canvas.style.cursor = "";
+    pick.onDrag(null);
+    render();
+  };
+  const cancelDrag = () => {
+    if (!dragging) return;
+    restoreHandle(dragging.handle);
+    endDrag();
+  };
+  function onDragKey(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    // The drag's Escape, not the panel's or a field's.
+    event.stopPropagation();
+    event.preventDefault();
+    cancelDrag();
+  }
+
+  // Capturing, so a press on a handle starts a drag before the orbit controls see it.
+  const onHandleDown = (event: PointerEvent) => {
+    if (event.button !== 0 || dragging || pick.picking()) return;
+    const found = handleAt(event);
+    if (!found) return;
+    const drag = startDrag(found.handle.manipulator, found.hit.part, rayAt(event), found.name);
+    if (!drag) return;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    dragging = {
+      handle: found.handle,
+      drag,
+      pointerId: event.pointerId,
+      down: [event.clientX, event.clientY],
+      moved: false,
+      value: null,
+      proxy: null,
+    };
+    window.addEventListener("keydown", onDragKey, true);
+    focusHandle(found.handle, found.hit.part);
+    canvas.style.cursor = found.hit.part === "flip" ? "pointer" : "grabbing";
+    render();
+  };
+  const onHandleMove = (event: PointerEvent) => {
+    if (!dragging) {
+      // Over a handle, the cursor says it can be grabbed.
+      if (event.buttons !== 0 || pick.picking()) return;
+      const found = handleAt(event);
+      canvas.style.cursor = found ? (found.hit.part === "flip" ? "pointer" : "grab") : "";
+      return;
+    }
+    const current = dragging;
+    if (event.pointerId !== current.pointerId) return;
+    const { manipulator } = current.handle;
+    // A flip arrow flips on a click; dragging it does nothing.
+    if (manipulator.type === "FLIP") return;
+    if (
+      !current.moved &&
+      Math.hypot(event.clientX - current.down[0], event.clientY - current.down[1]) <= 3
+    )
+      return;
+    if (!current.moved) {
+      current.moved = true;
+      setFaded(true);
+    }
+    const start = new THREE.Vector3(...handlePoint(manipulator));
+    const scale = worldPerPixel(start);
+    const value = dragManipulator(current.drag, rayAt(event), { worldPerPixel: scale });
+    if (!value) return;
+    current.value = value;
+    current.handle.root.position.set(...value.at);
+    const angle =
+      manipulator.type === "ANGULAR" && typeof value.value === "number" ? value.value : null;
+    if (current.handle.arc && manipulator.type === "ANGULAR" && angle !== null) {
+      current.handle.arc.geometry.dispose();
+      current.handle.arc.geometry = arcGeometry(manipulator, angle);
+    }
+    if (current.proxy) {
+      handlesGroup.remove(current.proxy);
+      disposeHandle(current.proxy);
+    }
+    current.proxy = dragProxy(manipulator, { at: value.at, angle }, scale);
+    handlesGroup.add(current.proxy);
+    pick.onDrag({
+      key: manipulator.key,
+      label: value.label,
+      at: onScreen(new THREE.Vector3(...value.at)),
+    });
+    render();
+  };
+  const onHandleUp = (event: PointerEvent) => {
+    const ended = dragging;
+    if (!ended || event.pointerId !== ended.pointerId) return;
+    const { manipulator } = ended.handle;
+    const flip =
+      manipulator.type === "FLIP" && !ended.moved
+        ? dragManipulator(ended.drag, rayAt(event), { worldPerPixel: 1 })
+        : null;
+    const released = flip ?? (ended.moved ? ended.value : null);
+    if (!released) restoreHandle(ended.handle);
+    endDrag();
+    if (released) pick.onRelease(manipulator, released.changes);
+  };
+  const onLostCapture = () => cancelDrag();
+  canvas.addEventListener("pointerdown", onHandleDown, { capture: true });
+  canvas.addEventListener("pointermove", onHandleMove);
+  canvas.addEventListener("pointerup", onHandleUp);
+  canvas.addEventListener("lostpointercapture", onLostCapture);
+
+  /** Draws `next` in place of the handles drawn now; a drag in progress is dropped. */
+  const setManipulators = (next: readonly ViewManipulator[]) => {
+    cancelDrag();
+    for (const { handle } of handles) {
+      handlesGroup.remove(handle.root);
+      disposeHandle(handle.root);
+      if (handle.arc) {
+        handlesGroup.remove(handle.arc);
+        disposeHandle(handle.arc);
+      }
+    }
+    handles = next.map(({ manipulator, name }) => ({ handle: buildHandle(manipulator), name }));
+    for (const { handle } of handles) {
+      handlesGroup.add(handle.root);
+      if (handle.arc) handlesGroup.add(handle.arc);
+    }
+    render();
+  };
+
+  return {
+    load,
+    setModel,
+    fit: () => {
+      autoFit = true;
+      fit();
+    },
+    show: (slot: Slot) => {
+      shown = slot;
+      if (models.after) models.after.visible = slot === "after";
+      if (models.before) models.before.visible = slot === "before";
+      render();
+    },
+    setPicks: (points: readonly ModelPoint[]) => {
+      picks = points;
+      drawPicks();
+    },
+    setManipulators,
+    setBackground: (color: number) => {
+      renderer.setClearColor(color);
+      render();
+    },
+    resize: (width: number, height: number) => {
+      if (width === 0 || height === 0) return;
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      if (autoFit && fitted) fit();
+      render();
+    },
+    dispose: () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointerdown", onHandleDown, { capture: true });
+      canvas.removeEventListener("pointermove", onHandleMove);
+      canvas.removeEventListener("pointerup", onHandleUp);
+      canvas.removeEventListener("lostpointercapture", onLostCapture);
+      window.removeEventListener("keydown", onDragKey, true);
+      controls.dispose();
+      for (const object of [models.after, models.before, markers])
+        if (object) disposeObject(object);
+      disposeHandle(handlesGroup);
+      edgeMaterial.dispose();
+      renderer.dispose();
+      // Browsers cap live WebGL contexts and drop the oldest, which could be the CAD viewer's.
+      renderer.forceContextLoss();
+    },
+  };
+}

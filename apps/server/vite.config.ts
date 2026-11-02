@@ -38,7 +38,13 @@ export default mergeConfig(
       },
     },
     pack: {
-      entry: ["src/bin.ts"],
+      // FeatureScript previews run in a worker thread with its own entry. It reads the vendored std
+      // from dist/featurescript-std (see FeatureScriptPreviews.ts).
+      entry: {
+        bin: "src/bin.ts",
+        "featurescript-worker": "src/featurescript/FeatureScriptWorker.ts",
+      },
+      copy: [{ from: "../../packages/featurescript/std", to: "dist", rename: "featurescript-std" }],
       outDir: "dist",
       sourcemap: true,
       clean: true,
@@ -58,6 +64,10 @@ export default mergeConfig(
       },
       define: {
         __CADSENSE_BUILD_CHANNEL__: JSON.stringify(serverBuildChannel),
+        // Cadsense's PostHog project key, from the release workflow's CADSENSE_POSTHOG_KEY secret.
+        // Local and fork builds have none, so their bundles send no usage analytics. The key is
+        // write-only, so shipping it inside the app is fine. See src/telemetry/AnalyticsService.ts.
+        __CADSENSE_POSTHOG_KEY__: JSON.stringify(process.env.CADSENSE_POSTHOG_KEY ?? ""),
       },
     },
     test: {

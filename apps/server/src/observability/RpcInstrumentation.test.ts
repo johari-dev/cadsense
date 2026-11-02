@@ -4,6 +4,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Logger from "effect/Logger";
 import * as Metric from "effect/Metric";
 import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
@@ -14,6 +15,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./RpcInstrumentation.ts";
+import * as ErrorReports from "../telemetry/ErrorReports.ts";
 
 const hasMetricSnapshot = (
   snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
@@ -65,6 +67,29 @@ const collectSpanNames = <A, E, R>(
   });
 
 describe("RpcInstrumentation", () => {
+  it.effect("reports a unary RPC handler's defect, but not its expected failure", () =>
+    Effect.gen(function* () {
+      ErrorReports.takeReports();
+      const withReports = Logger.layer([ErrorReports.logger]);
+      yield* Effect.exit(
+        observeRpcEffect("rpc.test.fails", Effect.fail("expected")).pipe(
+          Effect.provide(withReports),
+        ),
+      );
+      assert.lengthOf(ErrorReports.takeReports(), 0);
+
+      yield* Effect.exit(
+        observeRpcEffect("rpc.test.dies", Effect.die(new TypeError("bug"))).pipe(
+          Effect.provide(withReports),
+        ),
+      );
+      assert.deepEqual(
+        ErrorReports.takeReports().map(({ report }) => [report.type, report.value]),
+        [["TypeError", "RPC rpc.test.dies died"]],
+      );
+    }),
+  );
+
   it.effect("records success metrics for unary RPC handlers", () =>
     Effect.gen(function* () {
       yield* observeRpcEffect("rpc.instrumentation.success", Effect.succeed("ok"), {

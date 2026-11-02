@@ -43,11 +43,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
-    id: "provider-update-checks",
-    title: "Provider update checks",
-    to: "/settings/general",
-  },
-  {
     id: "add-project-starts-in",
     title: "Default project folder",
     to: "/settings/general",
@@ -65,6 +60,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Thread title model",
     to: "/settings/general",
   },
+  { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
   {
     id: "streaming-text",

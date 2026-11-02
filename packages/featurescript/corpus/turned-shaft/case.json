@@ -1,0 +1,9 @@
+{
+  "description": "A stepped shaft revolved from a sketched profile with std's revolve.",
+  "steps": [{ "file": "feature.fs", "feature": "turnedShaft" }],
+  "expect": {
+    "source": "analytic: PI * (10^2 * 20 + 6^2 * 30) mm^3; full circles have no vertices",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 9676.1054, "faces": 5, "edges": 4, "vertices": 0 }]
+  }
+}

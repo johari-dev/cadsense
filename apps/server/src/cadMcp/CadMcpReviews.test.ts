@@ -33,6 +33,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { makeCadMcpReviews, onshapeUrlProblem } from "./CadMcpReviews.ts";
 import { cadMcpToolDefinitions } from "./CadMcpTools.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 // Ways cad_open's offline URL check can fail: a valid tab URL rejected, a dropped /e/ tab or a
 // short ID left for a network error to hide, or a non-document path accepted.
@@ -95,6 +96,7 @@ const engine = Layer.mergeAll(
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provideMerge(SqlitePersistenceMemory),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "cadsense-mcp-local-" })),
+  Layer.provideMerge(AnalyticsService.layerTest),
   Layer.provideMerge(NodeServices.layer),
 );
 const store = Layer.effect(CadSnapshotStore, makeStore).pipe(

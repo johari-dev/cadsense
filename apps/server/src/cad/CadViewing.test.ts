@@ -1,10 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
-  CadChecksResult,
   CadCommentError,
   CadDiffResult,
   CadSnapshotManifest,
-  CadFindPartsResult,
+  CadFindPartsEntry,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   OnshapeProjectSource,
@@ -37,12 +36,17 @@ import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { CadViewing, make } from "./CadViewing.ts";
 import { CadComments } from "./CadComments.ts";
-import { makeCadProviderTools } from "../provider/CadProviderTools.ts";
+import { CadAgentChecksResult, makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import { BACKSTOP_NOTE } from "../provider/CadCheckBackstop.ts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import type { Options as ClaudeOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ClaudeSettings, EnvironmentId } from "@cadsense/contracts";
+import {
+  CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+  type CadFeatureScriptPreviewCard,
+  ClaudeSettings,
+  EnvironmentId,
+} from "@cadsense/contracts";
 import { makeClaudeAdapter } from "../provider/Layers/ClaudeAdapter.ts";
 import { SYNTHETIC_CLAUDE_MODEL_CATALOG } from "../provider/ClaudeModelCatalog.testFixtures.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -63,6 +67,11 @@ import * as Queue from "effect/Queue";
 import * as Option from "effect/Option";
 import { make as makeRenderBroker } from "./CadRenderBroker.ts";
 import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
+import {
+  FeatureScriptPreviews,
+  make as makeFeatureScriptPreviews,
+} from "../featurescript/FeatureScriptPreviews.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 const now = "2026-09-05T00:00:00Z";
 const claudeSettings = Schema.decodeSync(ClaudeSettings)({});
@@ -107,6 +116,55 @@ it.effect("dispatches read-only measurements through an activation with revision
     assert.equal(next.result.distanceMeters, 5);
     yield* tools.end(null, turnId, "completed");
     assert.equal(h.pins(), 0);
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
+it.live("previews a FeatureScript from the project workspace through the agent's CAD tools", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-fs-" });
+    yield* fs.writeFileString(
+      `${workspaceRoot}/cube.fs`,
+      `FeatureScript 3083;
+import(path : "onshape/std/geometry.fs", version : "3083.0");
+annotation { "Feature Type Name" : "Cube" }
+export const cube = defineFeature(function(context is Context, id is Id, definition is map)
+    precondition {}
+    {
+        fCuboid(context, id + "c", { "corner1" : vector(0, 0, 0) * millimeter, "corner2" : vector(10, 10, 10) * millimeter });
+    });
+`,
+    );
+    const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+    const service = yield* h.recreate.pipe(
+      Effect.provideService(FeatureScriptPreviews, yield* makeFeatureScriptPreviews()),
+    );
+    const tools = yield* makeCadProviderTools(threadId).pipe(
+      Effect.provideService(CadViewing, service),
+    );
+    const turnId = TurnId.make("featurescript-preview");
+    const delivery = yield* tools.invoke(null, turnId, "cad_featurescript_preview", {
+      path: "cube.fs",
+    });
+    assert.deepInclude(delivery.result, { status: "OK" });
+    assert.ok(delivery.png && delivery.png.byteLength > 0);
+    // The chat card is for people; the agent gets the result and image only.
+    assert.notProperty(delivery, "card");
+    const thread = yield* (yield* ProjectionSnapshotQuery).getThreadDetailById(threadId);
+    assert.equal(thread._tag, "Some");
+    const cards =
+      thread._tag === "Some"
+        ? thread.value.activities.filter(
+            (activity) => activity.kind === CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+          )
+        : [];
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.turnId, turnId);
+    const card = cards[0]?.payload as CadFeatureScriptPreviewCard;
+    assert.deepInclude(card, { status: "OK", path: "cube.fs", typeName: "Cube" });
+    assert.closeTo(card.changes!.volumeMm3, 1000, 1e-6);
+    assert.equal(card.changes!.createdFaces, 6);
+    yield* tools.end(null, turnId, "completed");
   }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
@@ -487,6 +545,7 @@ const dependencies = Layer.mergeAll(
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provideMerge(SqlitePersistenceMemory),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "cadsense-cad-viewing-" })),
+  Layer.provideMerge(AnalyticsService.layerTest),
   Layer.provideMerge(NodeServices.layer),
 );
 const unused = () => Effect.die("Unexpected store operation");
@@ -769,7 +828,7 @@ const fullIds = (value: unknown): unknown =>
       : item,
   );
 const decodeRevision = Schema.decodeUnknownEffect(Schema.Struct({ revision: Schema.Int }));
-const decodeChecksResult = Schema.decodeUnknownEffect(CadChecksResult);
+const decodeChecksResult = Schema.decodeUnknownEffect(CadAgentChecksResult);
 const decodeDiffResult = Schema.decodeUnknownEffect(CadDiffResult);
 const decodeChecks = (value: unknown) => decodeChecksResult(fullIds(value));
 interface CubeBlock {
@@ -883,16 +942,20 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
       (yield* tools.invoke(null, turnId, "cad_checks", { expectedRevision: context.revision }))
         .result,
     );
+    // Agents read the overlap from its plain-language reading, beside the occurrence IDs.
     assert.deepEqual(
-      first.findings.map((finding) => [
-        finding.check,
-        finding.occurrences.map((occurrence) => occurrence.name),
-      ]),
-      [["mesh-interference", ["Block A", "Block B"]]],
+      first.findings.map((finding) => finding.check),
+      ["mesh-interference"],
     );
     const interference = first.findings[0]!;
-    if (interference.check === "mesh-interference")
-      assert.closeTo(interference.intersectionVolume, 0.01 * 0.05 * 0.05, 1e-10);
+    assert.isTrue(interference.check === "mesh-interference");
+    if (interference.check === "mesh-interference") {
+      assert.lengthOf(interference.occurrenceIds, 2);
+      assert.match(interference.reading, /Block A/);
+      assert.match(interference.reading, /Block B/);
+      // 0.01 x 0.05 x 0.05 m shared is 1.5 in³.
+      assert.match(interference.reading, /1\.5 in³/);
+    }
     assert.equal(first.summary.partOccurrences, 2);
     assert.equal(first.summary.meshUnknown, 0);
     // One bounds read, cached for the activation, and one triangle read for this call.
@@ -1988,8 +2051,25 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 
-const decodeFindPartsResult = Schema.decodeUnknownEffect(CadFindPartsResult);
+// What agents read from cad_find_parts: the hierarchy-like entry shape, without source blocks.
+const decodeFindPartsResult = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    entries: Schema.Array(
+      Schema.Struct({
+        occurrenceId: CadFindPartsEntry.fields.occurrenceId,
+        name: CadFindPartsEntry.fields.name,
+        bounds: CadFindPartsEntry.fields.bounds,
+      }),
+    ),
+  }),
+);
 const decodeFindParts = (value: unknown) => decodeFindPartsResult(fullIds(value));
+const decodeRawComments = Schema.decodeUnknownEffect(
+  Schema.Struct({ comments: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)) }),
+);
+const decodeRawEntries = Schema.decodeUnknownEffect(
+  Schema.Struct({ entries: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)) }),
+);
 it.effect("searches pinned metadata through native tools without view changes", () =>
   Effect.gen(function* () {
     const h = yield* harness();
@@ -2009,6 +2089,10 @@ it.effect("searches pinned metadata through native tools without view changes", 
       result.entries.map((entry) => entry.occurrenceId),
       [snapshot.nodes[0]!.id],
     );
+    // Source identity and instance IDs stay out of what the agent reads.
+    const [raw] = (yield* decodeRawEntries(delivery.result)).entries;
+    assert.notProperty(raw, "source");
+    assert.notProperty(raw, "instanceId");
     assert.deepEqual(yield* provider.invoke(null, turn, "cad_context", {}), context);
     yield* provider.invoke(null, turn, "cad_update_view", {
       expectedRevision: 0,
@@ -2089,7 +2173,10 @@ const PublishedItems = Schema.Struct({
   ),
 });
 const decodePublishedItems = Schema.decodeUnknownSync(PublishedItems);
-const fakeComments = (options: { readonly failList?: boolean } = {}) => {
+/** `listed` replaces what cad_comments_list returns, for tests that need full comment records. */
+const fakeComments = (
+  options: { readonly failList?: boolean; readonly listed?: readonly unknown[] } = {},
+) => {
   const publications: (typeof PublishedItems.Type)["items"][] = [];
   const comments: { targets: readonly { occurrenceId: string }[] }[] = [];
   const service: CadComments["Service"] = {
@@ -2100,7 +2187,11 @@ const fakeComments = (options: { readonly failList?: boolean } = {}) => {
             return options.failList
               ? Effect.fail(new CadCommentError({ reason: "unavailable" }))
               : Effect.succeed({
-                  result: { comments, catalogVersion: publications.length, nextCursor: null },
+                  result: {
+                    comments: options.listed ?? comments,
+                    catalogVersion: publications.length,
+                    nextCursor: null,
+                  },
                 });
           const { items } = decodePublishedItems(input);
           publications.push(items);
@@ -2462,6 +2553,47 @@ const Pending = Schema.Struct({
   ),
 });
 const decodePending = Schema.decodeUnknownEffect(Pending);
+it.effect("lists comments for agents without each comment's model descriptor", () =>
+  Effect.gen(function* () {
+    const comment = {
+      id: "finding-1",
+      threadId,
+      rootId: snapshot.rootId,
+      snapshotId: snapshot.snapshotId,
+      modelKey: "5".repeat(64),
+      // Stands in for the manifest descriptor, about 14k tokens on a 146-part assembly.
+      modelDescriptor: "descriptor ".repeat(1000),
+      title: "Check the intake",
+      body: "The intake mount looks unsupported.",
+      severity: "concern",
+      category: "structure",
+      targets: [
+        {
+          kind: "part",
+          label: "Intake",
+          occurrenceId: blockId(5),
+          preciseLocationLimitation: "Whole part.",
+        },
+      ],
+      link: null,
+      state: "open",
+      version: 0,
+      number: 1,
+      createdAt: now,
+      turnId: "first-review",
+      outdated: null,
+      proposal: null,
+    };
+    const { tools } = yield* duplicateScene(fakeComments({ listed: [comment] }).service);
+    const [listed] = (yield* decodeRawComments(
+      (yield* tools.invoke(null, TurnId.make("list-comments"), "cad_comments_list", {})).result,
+    )).comments;
+    assert.equal(listed?.["title"], "Check the intake");
+    assert.equal(listed?.["snapshotId"], snapshot.snapshotId);
+    assert.notProperty(listed, "modelDescriptor");
+  }).pipe(Effect.scoped, Effect.provide(dependencies)),
+);
+
 it.effect("publishes drafts by key, once, filling the catalog version", () =>
   Effect.gen(function* () {
     const comments = fakeComments();

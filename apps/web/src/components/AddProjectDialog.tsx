@@ -57,7 +57,7 @@ export function AddProjectDialog() {
     () =>
       onOpenCommandPalette((detail) => {
         if (detail.open !== "add-project" || busyRef.current) return;
-        setKind(null);
+        setKind(detail.kind ?? null);
         setSelectedId(null);
         setError(null);
         setOpen(true);

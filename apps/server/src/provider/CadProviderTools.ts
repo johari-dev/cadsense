@@ -1,8 +1,13 @@
 import {
   CAD_CAPTURE_SIZE,
   CAD_TOOL_INPUTS,
+  CadCheckFinding,
   CadChecksResult,
+  CadCommentsListResult,
+  CadHash,
+  type CadFindPartsEntry,
   CadViewError,
+  type CadViewState,
   type ThreadId,
   type TurnId,
 } from "@cadsense/contracts";
@@ -66,7 +71,7 @@ const descriptions = {
   cad_measure:
     'Read bounded measurements at {expectedRevision,snapshotId}. For points use {mode:"point-distance",from:{space:"world",point:[x,y,z]},to:{space:"part",occurrenceId,point:[x,y,z]}}. Coordinates are meters in original assembled Z-up world or part CAD coordinates before the occurrence transform. Points are caller-specified and unverified; never copy exploded display coordinates. For approximate unsigned triangle-surface separation use {mode:"surface-clearance",fromOccurrenceId,toOccurrenceId}, with part occurrence IDs from cad_hierarchy. Geometry uses original assembled placements regardless of visibility or explosion. Check status: unknown has no measurement. Positive surface distance does not exclude solid containment, and zero does not prove penetration. Results provide mesh provenance and uncertainty, not manufacturing tolerance.',
   cad_find_parts:
-    "Search the selected cached snapshot using snapshotId and expectedRevision from cad_context. nameQuery and materialName are case-insensitive substrings; bodyType is a case-insensitive exact match. sourcePartKey finds repeated instances of the same source/configuration. kind defaults to part; use all to include assemblies. visibility defaults to all and uses effective visibility, including hidden ancestors, isolation and suppression. All supplied filters combine. Results contain stable occurrence IDs, source identity, assembly paths, and bounds, the part's world box {min,max,size} in meters at its assembled placement (Z up, explosion ignored; null when suppressed, not a part, or unknown). No filters returns a bounded page. limit defaults to 25, maximum 50. Serialized results are capped at 64 KiB, so pages may contain fewer entries than limit. Continue with nextCursor and the same filters, limit, snapshot and revision. Order follows the immutable manifest. Missing metadata and material names are explicit; massKg is per occurrence and null means unknown, not zero. Text fields are capped at 256 characters; paths retain the nearest 16 ancestors, with truncation indicators. Reads only stored part bounds, never the network; the view is unchanged.",
+    "Search the selected cached snapshot using snapshotId and expectedRevision from cad_context. nameQuery and materialName are case-insensitive substrings; bodyType is a case-insensitive exact match. sourcePartKey finds repeated instances of the same source/configuration. kind defaults to part; use all to include assemblies. visibility defaults to all and uses effective visibility, including hidden ancestors, isolation and suppression. All supplied filters combine. Results contain stable occurrence IDs, sourcePartKey, material name, assembly paths, and bounds, the part's world box {min,max,size} in meters at its assembled placement (Z up, explosion ignored; null when suppressed, not a part, or unknown). No filters returns a bounded page. limit defaults to 25, maximum 50. Serialized results are capped at 64 KiB, so pages may contain fewer entries than limit. Continue with nextCursor and the same filters, limit, snapshot and revision. Order follows the immutable manifest. material is null when unknown; massKg is per occurrence and null means unknown, not zero. Text fields are capped at 256 characters; paths retain the nearest 16 ancestors, with truncation indicators. Reads only stored part bounds, never the network; the view is unchanged.",
   cad_drive_options: [
     "Find stock FRC gears, pulleys and belts, or sprockets and chain that reach a target ratio, sized to the model. Call it whenever the user asks what ratio, gears, belts, or chain to use or how fast something will spin, even when the model has no drive parts yet; do not work out ratios or center distances yourself.",
     'Input: {expectedRevision, target, driverOccurrenceId?, drivenOccurrenceId?, centerInches?, motor?, rollerDiameterInches?, families?, driverBore?, maxStages?, tolerancePercent?, limit?}. target is {kind:"reduction",reduction} (above 1 slows the output), {kind:"output-rpm",rpm}, or {kind:"surface-speed",feetPerSecond}. Speed targets use the motor\'s free speed, from motor or from the driver part\'s name.',
@@ -81,8 +86,15 @@ const descriptions = {
     "For relative adjustments, use state.camera.pose only when camera.kind is pose and camera.fit is null; otherwise capture first and use the returned cameraPose. To center on a point while preserving angle and distance, translate position by newTarget-oldTarget and set target to newTarget. To look at a point from a fixed eye, change only target. To zoom in/out, multiply/divide zoom (positive, at most 100000).",
     'For example: {expectedRevision:0,operations:[{type:"camera-pose",pose:{position:[0.2,-0.3,0.15],target:[0.02,0,0.01],up:[0,0,1],projection:"perspective",zoom:2}}]}. A camera-pose disables automatic fitting. A later fit recenters on the requested visible components (or all visible geometry for []) and resets zoom to 1, preserving the viewing direction and projection.',
     'Inspection operations replace their previous selection: {type:"highlight",occurrenceIds:[id]} applies amber highlighting; {type:"ghost",occurrenceIds:[id],opacity:0.05..0.95} makes those subtrees translucent. Empty occurrenceIds clears that effect. {type:"section",planes:[{normal:[1,0,0],constant:0}]} replaces up to 6 clipping planes; [] clears sections. Normals must have unit length; constants are meters, bounded to ±1e9. A point remains visible when dot(normal,point)+constant>=0 for every plane. Planes use displayed world coordinates after explosion. Sections are uncapped mesh clipping, not CAD cuts or measurable geometry. Transparent front surfaces make point picking ambiguous; hide them or reset ghosting before locating a precise comment. {type:"reset-inspection"} clears highlight, ghosting, and sections without changing camera, explosion, or visibility.',
-    "Use the returned revision for the next update or capture. Changes remain private until captured.",
+    "Use the returned revision for the next update or capture; the returned state lists hidden parts in hiddenOccurrenceIds. Changes remain private until captured.",
     "An invalid-operation error includes details naming the field or operation to correct; fix it and retry.",
+  ].join(" "),
+  cad_featurescript_preview: [
+    "Run an Onshape custom feature (FeatureScript) locally and see what it does, without calling Onshape. Use it after writing or editing a .fs file, and again after each fix.",
+    `Input: {path, feature?, parameters?, before?, base?, view?}. path is a .fs file in the project workspace. feature names its defineFeature constant (default: the first one). parameters maps input ids to FeatureScript expressions evaluated in the script, for example {count:"8", diameter:"6 * millimeter", face:'qContainsPoint(qCreatedBy(makeId("Base"), EntityType.FACE), vector(50, 30, 10) * millimeter)'}; unset inputs take their defaults.`,
+    'before lists features to run first as Feature1, Feature2, ..., so queries can reference what they create with makeId("Feature1"). base is a STEP file in the workspace (exported from the Part Studio) whose bodies are created by makeId("Base"). view picks the returned image: iso (default), top, front or right. To place geometry on a base, read the bounding boxes of the base solids from a preview instead of parsing the STEP file. A script can import another .fs file in the workspace by a path relative to itself, for example import(path : "wire-run.fs", version : ""); Onshape imports by element id instead, so tell the user to change that line when they paste the script into Onshape.',
+    "Returns status, a summary of each feature's inputs, outcome and cause with file:line:column, failure (the first error and its line in your script), changes (the volume the previewed feature added or removed in mm^3 and how many faces it created), the resulting solids (base bodies included) with names set by setProperty, volumes in mm^3, bounding boxes in mm, and face, edge and vertex counts, and a PNG with the faces the previewed feature created in amber. INVALID means the script did not load: fix the reported lines. ERROR comes with its cause. STOPPED means it timed out or crashed. The user sees each preview as a card in the chat and can rerun the script with other inputs in the file panel.",
+    "This runs Onshape's own standard library on OpenCascade, not Onshape: results usually match, so say the user should confirm in Onshape before relying on it. A cause like '@opImportForeign is not supported locally yet' is a gap in the local runtime, not a bug in the script.",
   ].join(" "),
   cad_capture:
     "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-* errors are rendering failures, not CAD being off: follow their details to recover.",
@@ -98,6 +110,7 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_measure",
   "cad_find_parts",
   "cad_drive_options",
+  "cad_featurescript_preview",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -158,20 +171,116 @@ export const mcpCadToolError = (error: CadViewError) => ({
   isError: true,
   content: [{ type: "text" as const, text: encodeCadViewError(error) }],
 });
+/**
+ * The view state as agents read it. The full `visibility` record repeats every occurrence after an
+ * isolate or show (147 entries on a small assembly), so agents get only the hidden ones.
+ */
+const agentViewState = ({ visibility, ...state }: CadViewState) => ({
+  ...state,
+  hiddenOccurrenceIds: Object.keys(visibility).filter((id) => visibility[id] === false),
+});
+const fourDigits = (value: number) => Number(value.toPrecision(4));
+/**
+ * A cad_find_parts entry as agents read it, in the shape cad_hierarchy uses: no Onshape source
+ * block, instance ID, or parent ID (the last assemblyPath entry), material as its name, defaults
+ * left out.
+ */
+const agentFoundPart = ({
+  parentOccurrenceId: _parent,
+  instanceId: _instance,
+  source: _source,
+  metadataAvailable: _metadata,
+  material,
+  massKg,
+  suppressed,
+  omittedAncestorCount,
+  textTruncated,
+  ...entry
+}: CadFindPartsEntry) => ({
+  ...entry,
+  material: material.name,
+  massKg: massKg === null ? null : fourDigits(massKg),
+  ...(suppressed ? { suppressed } : {}),
+  ...(omittedAncestorCount > 0 ? { omittedAncestorCount } : {}),
+  ...(textTruncated ? { textTruncated } : {}),
+});
+const [MeshFinding, DrivetrainFinding, ...OtherFindings] = CadCheckFinding.members;
+const OccurrenceIds = Schema.Array(CadHash);
+/**
+ * A cad_checks finding as agents read it. Mesh readings and drivetrain summaries already name the
+ * parts and state the shared volume, so those findings carry only the occurrence IDs beside them.
+ * Findings without a reading keep their names and numbers.
+ */
+export const CadAgentCheckFinding = Schema.Union([
+  Schema.Struct({
+    check: MeshFinding.fields.check,
+    occurrenceIds: OccurrenceIds,
+    reading: MeshFinding.fields.reading,
+  }),
+  Schema.Struct({
+    check: DrivetrainFinding.fields.check,
+    kind: DrivetrainFinding.fields.kind,
+    problem: DrivetrainFinding.fields.problem,
+    summary: DrivetrainFinding.fields.summary,
+    occurrenceIds: OccurrenceIds,
+  }),
+  ...OtherFindings,
+]);
+/** cad_checks as agents read it. */
+export const CadAgentChecksResult = CadChecksResult.pipe(
+  Schema.fieldsAssign({ findings: Schema.Array(CadAgentCheckFinding) }),
+);
+const agentCheckFinding = (finding: CadCheckFinding): typeof CadAgentCheckFinding.Type => {
+  const occurrenceIds = finding.occurrences.map((occurrence) => occurrence.occurrenceId);
+  switch (finding.check) {
+    case "mesh-interference":
+      return { check: finding.check, occurrenceIds, reading: finding.reading };
+    case "drivetrain":
+      return {
+        check: finding.check,
+        kind: finding.kind,
+        problem: finding.problem,
+        summary: finding.summary,
+        occurrenceIds,
+      };
+    default:
+      return finding;
+  }
+};
+const decodeCommentsList = Schema.decodeUnknownOption(CadCommentsListResult);
+/**
+ * cad_comments_list as agents read it. Every comment carries its model's descriptor, the whole
+ * manifest (about 14k tokens on a 146-part assembly), so a chat with ten comments would list 140k
+ * tokens. Agents compare models by modelKey and snapshotId, so the descriptor stays out.
+ */
+const agentCommentsList = (result: unknown) =>
+  Option.match(decodeCommentsList(result), {
+    onNone: () => result,
+    onSome: (list) => ({
+      ...list,
+      comments: list.comments.map(({ modelDescriptor: _descriptor, ...comment }) => comment),
+    }),
+  });
 export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
   tools: CadAgentTools,
   name: string,
   input: unknown,
 ): Effect.fn.Return<CadToolDelivery, CadViewError> {
   switch (name) {
-    case "cad_comments_list":
+    case "cad_comments_list": {
+      if (!tools.comments) return yield* new CadViewError({ reason: "capability-unavailable" });
+      const listed = yield* tools.comments(name, input);
+      return { ...listed, result: agentCommentsList(listed.result) };
+    }
     case "cad_comment_locate":
     case "cad_comment_inspect":
     case "cad_comments_publish":
       if (!tools.comments) return yield* new CadViewError({ reason: "capability-unavailable" });
       return yield* tools.comments(name, input);
-    case "cad_context":
-      return { result: yield* tools.context() };
+    case "cad_context": {
+      const context = yield* tools.context();
+      return { result: { ...context, state: context.state && agentViewState(context.state) } };
+    }
     case "cad_hierarchy":
       return { result: yield* tools.hierarchy(input) };
     case "cad_checks":
@@ -180,14 +289,18 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.diff(input) };
     case "cad_measure":
       return { result: yield* tools.measure(input) };
-    case "cad_find_parts":
-      return { result: yield* tools.findParts(input) };
+    case "cad_find_parts": {
+      const found = yield* tools.findParts(input);
+      return { result: { ...found, entries: found.entries.map(agentFoundPart) } };
+    }
     case "cad_drive_options":
       return { result: yield* tools.driveOptions(input) };
     case "cad_update_view":
-      return { result: yield* tools.updateView(input) };
+      return { result: agentViewState(yield* tools.updateView(input)) };
     case "cad_capture":
       return yield* tools.capture(input);
+    case "cad_featurescript_preview":
+      return yield* tools.featureScriptPreview(input);
     default:
       return yield* new CadViewError({ reason: "capability-unavailable" });
   }
@@ -356,7 +469,14 @@ export const makeCadProviderTools = Effect.fn("makeCadProviderTools")(function* 
         );
         recordCadChecks(entry.ledger, checks.value, placed.result);
         yield* refreshRemaining;
-        return { ...delivery, result: ids.shorten(placed.result), pngs: placed.pngs };
+        return {
+          ...delivery,
+          result: ids.shorten({
+            ...placed.result,
+            findings: placed.result.findings.map(agentCheckFinding),
+          }),
+          pngs: placed.pngs,
+        };
       }
     }
     if (typeof delivery.result !== "object" || delivery.result === null)
