@@ -19,6 +19,10 @@
  *                  are deleted
  *   opted-out      a restart with analytics off sends nothing and creates no files
  *   opted-in       turning it back on sends again, under a new, unlinked id
+ *   error-report   a provider instance with a broken config in settings.json makes the server
+ *                  log an error: it arrives as one `$exception` with the code's message and no
+ *                  local path
+ *   error-repeat   a restart that logs the same error the same day sends nothing new
  *   no-key         a build with no PostHog key (dev, forks) sends nothing and creates no files
  *
  * Exits non-zero if any check fails.
@@ -298,6 +302,67 @@ check(
     secondLaunch?.distinct_id === sha256(`cadsense:v1:${secondId}`),
   { firstId, secondId },
 );
+
+// error-report
+const writeBrokenProviderInstance = (broken: boolean) => {
+  const current = JSON.parse(NodeFS.readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+  const { providerInstances: _previous, ...rest } = current;
+  NodeFS.writeFileSync(
+    settingsPath,
+    JSON.stringify(
+      broken
+        ? {
+            ...rest,
+            providerInstances: {
+              codex_e2e_broken: { driver: "codex", config: { binaryPath: 123, enabled: "no" } },
+            },
+          }
+        : rest,
+      null,
+      2,
+    ),
+  );
+};
+const reportsIn = (name: string) => eventsIn(name).filter((event) => event.event === "$exception");
+writeBrokenProviderInstance(true);
+stop = await startServer("error-report", true);
+await waitFor(() => reportsIn("error-report").length > 0, 20_000);
+await sleep(3_000);
+await stop();
+const errorReports = reportsIn("error-report");
+const reportValues = errorReports.map(
+  (event) =>
+    (event.properties.$exception_list as ReadonlyArray<{ type: string; value: string }>)[0],
+);
+check(
+  "error-report: the broken config's error log arrives once as an $exception",
+  reportValues.filter((entry) => entry?.value === "Failed to decode provider instance config")
+    .length === 1,
+  { reportValues },
+);
+check(
+  "error-report: reports carry no local path",
+  !JSON.stringify(errorReports).includes(out) && !JSON.stringify(errorReports).includes(fakeHome),
+);
+check(
+  "error-report: reports are keyed by the installation id",
+  errorReports.every((event) => event.distinct_id === secondLaunch?.distinct_id),
+);
+
+// error-repeat
+stop = await startServer("error-repeat", true);
+await sleep(6_000);
+await stop();
+check(
+  "error-repeat: the same error after a restart that day isn't sent again",
+  !reportsIn("error-repeat").some(
+    (event) =>
+      (event.properties.$exception_list as ReadonlyArray<{ value: string }>)[0]?.value ===
+      "Failed to decode provider instance config",
+  ),
+  { received: reportsIn("error-repeat").length },
+);
+writeBrokenProviderInstance(false);
 
 // no-key
 NodeFS.rmSync(idPath, { force: true });

@@ -134,6 +134,29 @@ export const AnalyticsDay = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
+/** One stack frame of an error report, reduced to a file name so no local path leaves the app. */
+const ErrorFrame = Schema.Struct({
+  platform: Schema.Literal("node:javascript"),
+  filename: Schema.String,
+  function: Schema.String,
+  lineno: Schema.Int,
+  colno: Schema.Int,
+  in_app: Schema.Boolean,
+});
+
+/**
+ * A server error in PostHog's `$exception` shape (see ErrorReports.ts). `type` is the error's
+ * tag or class name and `value` the log message the code wrote; the error's own message, which
+ * can quote user data, is never sent.
+ */
+export const ErrorReport = Schema.Struct({
+  type: Schema.String,
+  value: Schema.String,
+  mechanism: Schema.Struct({ handled: Schema.Boolean, synthetic: Schema.Boolean }),
+  stacktrace: Schema.Struct({ type: Schema.Literal("raw"), frames: Schema.Array(ErrorFrame) }),
+});
+export type ErrorReport = typeof ErrorReport.Type;
+
 /**
  * The events the service sends:
  * - `app.active`: the first counted action of a UTC day, sent right away, so active-install
@@ -141,6 +164,8 @@ const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
  * - `usage.daily`: every nonzero counter for a finished day, sent at UTC midnight or on the next
  *   launch.
  * - `milestone.reached`: an onboarding step, once per installation.
+ * - `$exception`: a server error for PostHog error tracking, at most a few per install per day.
+ *   PostHog bills these separately from the events above.
  */
 export const AnalyticsEvent = Schema.Union([
   Schema.Struct({
@@ -157,6 +182,10 @@ export const AnalyticsEvent = Schema.Union([
   Schema.Struct({
     event: Schema.Literal("milestone.reached"),
     properties: Schema.Struct({ milestone: Milestone }),
+  }),
+  Schema.Struct({
+    event: Schema.Literal("$exception"),
+    properties: Schema.Struct({ $exception_list: Schema.Array(ErrorReport) }),
   }),
 ]);
 export type AnalyticsEvent = typeof AnalyticsEvent.Type;

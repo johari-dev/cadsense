@@ -3,7 +3,8 @@
  *
  * Call sites increment typed daily counters (see AnalyticsEvents.ts). The service keeps today's
  * counts, turns them into a few events, and sends those in batches keyed by the anonymous
- * installation id from Identify.ts. Counts, reached milestones, and unsent events persist in
+ * installation id from Identify.ts. It also sends a few of the server's error logs a day to
+ * PostHog error tracking (see ErrorReports.ts). Counts, reached milestones, and unsent events persist in
  * `analytics-state.json` in the state directory, so a restart or a day offline loses nothing.
  *
  * Events are sent only when all three hold:
@@ -49,6 +50,7 @@ import {
   MILESTONE_BY_COUNTER,
   Milestone,
 } from "./AnalyticsEvents.ts";
+import { takeReports } from "./ErrorReports.ts";
 import { forgetTelemetryIdentity, getTelemetryIdentifier } from "./Identify.ts";
 
 // Replaced with the release build's CADSENSE_POSTHOG_KEY when the server is bundled. Unbundled
@@ -68,6 +70,11 @@ const MAX_PENDING_EVENTS = 200;
 const PERSIST_INTERVAL_MS = 10_000;
 /** After a failed send, wait this long before trying again. */
 const SEND_RETRY_DELAY_MS = 60_000;
+/**
+ * Distinct error reports sent per install per UTC day. Repeats of a sent failure are dropped.
+ * Worst case 3 per active install a day; PostHog's free plan drops anything past its quota.
+ */
+const MAX_ERROR_REPORTS_PER_DAY = 3;
 
 const TelemetryEnvConfig = Config.all({
   posthogKey: Config.string("CADSENSE_POSTHOG_KEY").pipe(Config.option),
@@ -100,6 +107,8 @@ const AnalyticsState = Schema.Struct({
   counts: Counts,
   /** Whether `app.active` was already queued for `day`. */
   activeSent: Schema.Boolean,
+  /** Fingerprints of the error reports queued on `day`, so a restart doesn't send them again. */
+  reportedErrors: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** Finished days whose counts still need a `usage.daily` event. */
   finished: Schema.Array(Schema.Struct({ day: AnalyticsDay, counts: Counts })),
   /** Milestones already queued or sent. Each is sent once per installation. */
@@ -114,6 +123,7 @@ const EMPTY_STATE: AnalyticsState = {
   day: null,
   counts: {},
   activeSent: false,
+  reportedErrors: [],
   finished: [],
   milestones: [],
   pending: [],
@@ -138,7 +148,7 @@ const rollOver = (state: AnalyticsState, today: string): AnalyticsState => {
     state.day !== null && Object.keys(state.counts).length > 0
       ? [...state.finished, { day: state.day, counts: state.counts }]
       : state.finished;
-  return { ...state, day: today, counts: {}, activeSent: false, finished };
+  return { ...state, day: today, counts: {}, activeSent: false, reportedErrors: [], finished };
 };
 
 /**
@@ -331,17 +341,12 @@ export const make = Effect.gen(function* () {
       );
     });
 
-  /** Queues whatever the state calls for (see `dueEvents`), giving each event its uuid. */
-  const queueDueEvents = (nowMillis: number) =>
+  /** Appends `payloads` to the unsent events, giving each its uuid. */
+  const enqueue = (payloads: ReadonlyArray<AnalyticsEvent>, nowMillis: number) =>
     Effect.gen(function* () {
-      const today = utcDay(nowMillis);
-      const reachedDirectly = yield* Ref.get(reachedRef);
-      const due = yield* Ref.modify(stateRef, (current) =>
-        dueEvents(rollOver(current, today), reachedDirectly),
-      );
-      if (due.length === 0) return;
+      if (payloads.length === 0) return;
       const now = DateTime.formatIso(DateTime.makeUnsafe(nowMillis));
-      const queued = yield* Effect.forEach(due, (payload) =>
+      const queued = yield* Effect.forEach(payloads, (payload) =>
         crypto.randomUUIDv4.pipe(
           Effect.map(
             (uuid): PendingEvent => ({
@@ -364,6 +369,41 @@ export const make = Effect.gen(function* () {
         };
       });
       yield* Ref.set(dirtyRef, true);
+    });
+
+  /** Queues whatever the state calls for (see `dueEvents`). */
+  const queueDueEvents = (nowMillis: number) =>
+    Effect.gen(function* () {
+      const today = utcDay(nowMillis);
+      const reachedDirectly = yield* Ref.get(reachedRef);
+      const due = yield* Ref.modify(stateRef, (current) =>
+        dueEvents(rollOver(current, today), reachedDirectly),
+      );
+      yield* enqueue(due, nowMillis);
+    });
+
+  /**
+   * Queues the error reports ErrorReports.ts holds: each failure once a day, and at most
+   * {@link MAX_ERROR_REPORTS_PER_DAY} a day.
+   */
+  const queueErrorReports = (nowMillis: number) =>
+    Effect.gen(function* () {
+      const held = takeReports();
+      if (held.length === 0) return;
+      const today = utcDay(nowMillis);
+      const fresh = yield* Ref.modify(stateRef, (current) => {
+        const state = rollOver(current, today);
+        const reported = new Set(state.reportedErrors);
+        const fresh: AnalyticsEvent[] = [];
+        for (const { fingerprint, report } of held) {
+          if (reported.size >= MAX_ERROR_REPORTS_PER_DAY) break;
+          if (reported.has(fingerprint)) continue;
+          reported.add(fingerprint);
+          fresh.push({ event: "$exception", properties: { $exception_list: [report] } });
+        }
+        return [fresh, { ...state, reportedErrors: [...reported] }];
+      });
+      yield* enqueue(fresh, nowMillis);
     });
 
   const persist = Effect.gen(function* () {
@@ -463,12 +503,16 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const allowed = yield* readUserAllows;
       yield* Ref.set(allowedRef, allowed);
-      if (!allowed) return yield* forgetEverything;
+      if (!allowed) {
+        takeReports();
+        return yield* forgetEverything;
+      }
       // Counting may write the state file again, so a later opt-out must delete it again.
       yield* Ref.set(forgottenRef, false);
 
       const nowMillis = yield* Clock.currentTimeMillis;
       yield* queueDueEvents(nowMillis);
+      yield* queueErrorReports(nowMillis);
       if (final || nowMillis >= (yield* Ref.get(nextSendAtRef))) {
         // Shutdown waits for the last send, so keep it short there.
         yield* sendPending(final ? "2 seconds" : "10 seconds").pipe(
