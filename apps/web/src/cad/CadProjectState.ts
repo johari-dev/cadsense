@@ -43,6 +43,36 @@ export function isCadProjectRunActive(
   );
 }
 
+/**
+ * Why a CAD sync cannot start now, for the panel's Sync tooltip, or null when it can. Mirrors the
+ * server's reserve checks (`requireProjectCadIdle`): CAD is on, no CAD operation runs, and every
+ * chat in the project is idle, this one included. Names up to three of the chats that block it.
+ */
+export function cadSyncBlocker(
+  project: CadProjectRef,
+  threads: readonly ThreadShell[],
+): string | null {
+  if (project.cad?.enabled === false)
+    return "CAD access is off for this project. Turn it on in project settings.";
+  if (project.cad?.operation) return "Wait for the current CAD operation to finish.";
+  const busy = new Set<ThreadId>(project.cad?.pendingPresentations?.map((item) => item.threadId));
+  for (const thread of threads)
+    if (isProjectThread(project, thread) && isCadThreadRunActive(thread)) busy.add(thread.id);
+  if (busy.size === 0) return null;
+  // A pending presentation can belong to a chat this client has not loaded; it counts unnamed.
+  const titles = threads
+    .filter((thread) => isProjectThread(project, thread) && busy.has(thread.id))
+    .map((thread) => thread.title);
+  if (busy.size === 1)
+    return titles[0]
+      ? `${titles[0]} is running in this project. Sync after it finishes.`
+      : "A chat in this project is running. Sync after it finishes.";
+  const shown = titles.slice(0, 3);
+  const more = busy.size - shown.length;
+  const names = shown.length ? `: ${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""}` : "";
+  return `${busy.size} chats in this project are running${names}. Sync after they finish.`;
+}
+
 /** Visible explanation for a locked CAD panel. */
 export interface CadPanelLockStatus {
   readonly message: string;

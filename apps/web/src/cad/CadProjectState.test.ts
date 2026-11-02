@@ -12,6 +12,7 @@ import { expect, it } from "vite-plus/test";
 import type { Project, ThreadShell } from "../types";
 import {
   cadPanelLockStatus,
+  cadSyncBlocker,
   findCadThreadRunBlocker,
   isCadProjectRunActive,
 } from "./CadProjectState";
@@ -191,4 +192,87 @@ it("explains operations and returns null once nothing locks the panel", () => {
     agent: false,
   });
   expect(cadPanelLockStatus({ blocker, panel: idle, operation: null })).toBeNull();
+});
+
+// The header Sync button mirrors the server's reserve checks (`requireProjectCadIdle`): every chat
+// in the project must be idle, no CAD operation may run, and CAD must be on.
+it("lets a sync start only when every chat in the project is idle", () => {
+  const elsewhere = {
+    ...shell("elsewhere", "Other project", "turn-1"),
+    projectId: ProjectId.make("p2"),
+  };
+  const otherEnvironment = {
+    ...shell("remote", "Other machine", "turn-2"),
+    environmentId: EnvironmentId.make("env-2"),
+  };
+  expect(
+    cadSyncBlocker(project, [shell("self", "This chat", null), elsewhere, otherEnvironment]),
+  ).toBeNull();
+});
+
+it("names the running chats that block a sync", () => {
+  expect(cadSyncBlocker(project, [shell("a", "Bracket review", "turn-1")])).toBe(
+    "Bracket review is running in this project. Sync after it finishes.",
+  );
+  expect(
+    cadSyncBlocker(project, [
+      shell("a", "Bracket review", "turn-1"),
+      shell("b", "Idle chat", null),
+      shell("c", "Wiring check", "turn-2"),
+    ]),
+  ).toBe(
+    "2 chats in this project are running: Bracket review, Wiring check. Sync after they finish.",
+  );
+  expect(
+    cadSyncBlocker(
+      project,
+      ["A", "B", "C", "D", "E"].map((title) => shell(title, title, `turn-${title}`)),
+    ),
+  ).toBe("5 chats in this project are running: A, B, C, and 2 more. Sync after they finish.");
+});
+
+it("counts a chat whose capture presentation is still pending, even when it is not loaded", () => {
+  const presenting = (threadId: string) => ({
+    ...project,
+    cad: {
+      ...project.cad,
+      pendingPresentations: [
+        {
+          threadId: ThreadId.make(threadId),
+          turnId: TurnId.make("turn-9"),
+          captureId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+          rootId: CadHash.make("1".repeat(64)),
+        },
+      ],
+    },
+  });
+  expect(cadSyncBlocker(presenting("other"), [shell("other", "Gearbox review", null)])).toBe(
+    "Gearbox review is running in this project. Sync after it finishes.",
+  );
+  expect(cadSyncBlocker(presenting("unloaded"), [])).toBe(
+    "A chat in this project is running. Sync after it finishes.",
+  );
+});
+
+it("blocks a sync while CAD is off or another CAD operation runs", () => {
+  expect(cadSyncBlocker({ ...project, cad: { ...project.cad, enabled: false } }, [])).toBe(
+    "CAD access is off for this project. Turn it on in project settings.",
+  );
+  expect(
+    cadSyncBlocker(
+      {
+        ...project,
+        cad: {
+          ...project.cad,
+          operation: {
+            operationId: CadSnapshotId.make("00000000-0000-4000-8000-000000000003"),
+            kind: "discover",
+            root: null,
+            startedAt: now,
+          },
+        },
+      },
+      [],
+    ),
+  ).toBe("Wait for the current CAD operation to finish.");
 });
