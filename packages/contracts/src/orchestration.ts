@@ -312,7 +312,9 @@ export type MessageRatingReason = typeof MessageRatingReason.Type;
 
 /**
  * A user's thumbs up or down on a completed assistant response. Only a thumbs
- * down carries the optional reason and short note.
+ * down carries the optional reason and short note. `shareNote` records that the
+ * user chose to send the note to the Cadsense team (see the server's usage
+ * analytics); without it the note stays on this machine.
  */
 export const MessageRating = Schema.Union([
   Schema.Struct({ value: Schema.Literal("up") }),
@@ -320,6 +322,7 @@ export const MessageRating = Schema.Union([
     value: Schema.Literal("down"),
     reason: Schema.optionalKey(MessageRatingReason),
     note: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+    shareNote: Schema.optionalKey(Schema.Literal(true)),
   }),
 ]);
 export type MessageRating = typeof MessageRating.Type;

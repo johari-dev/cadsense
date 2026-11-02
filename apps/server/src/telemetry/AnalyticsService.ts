@@ -47,6 +47,7 @@ import {
   AnalyticsEvent,
   DAILY_COUNTERS,
   type DailyCounter,
+  type FeedbackNote,
   MILESTONE_BY_COUNTER,
   Milestone,
 } from "./AnalyticsEvents.ts";
@@ -212,6 +213,12 @@ export class AnalyticsService extends Context.Service<
      */
     readonly reach: (milestone: Milestone) => Effect.Effect<void>;
 
+    /**
+     * Sends a thumbs-down note the user chose to share, on the next tick. Does nothing while
+     * the user has usage analytics off.
+     */
+    readonly sendFeedback: (feedback: FeedbackNote) => Effect.Effect<void>;
+
     /** Sends everything due now. Runs every second on its own, and at shutdown. */
     readonly flush: Effect.Effect<void>;
   }
@@ -222,6 +229,7 @@ export class AnalyticsService extends Context.Service<
     AnalyticsService.of({
       count: () => Effect.void,
       reach: () => Effect.void,
+      sendFeedback: () => Effect.void,
       flush: Effect.void,
     }),
   );
@@ -247,6 +255,7 @@ export const make = Effect.gen(function* () {
     return AnalyticsService.of({
       count: () => Effect.void,
       reach: () => Effect.void,
+      sendFeedback: () => Effect.void,
       flush: Effect.void,
     });
   }
@@ -300,6 +309,8 @@ export const make = Effect.gen(function* () {
   // Milestones passed to `reach`. Kept in memory only: a run that ends before the next tick
   // reaches them again on the next launch.
   const reachedRef = yield* Ref.make<ReadonlySet<Milestone>>(new Set());
+  // Shared notes waiting for the next tick, which is the only writer of `pending`.
+  const feedbackRef = yield* Ref.make<ReadonlyArray<FeedbackNote>>([]);
   // Whether the id and state file were deleted since analytics last ran, so an opted-out
   // install deletes them once instead of on every tick.
   const forgottenRef = yield* Ref.make(false);
@@ -339,6 +350,12 @@ export const make = Effect.gen(function* () {
       yield* Ref.update(reachedRef, (reached) =>
         reached.has(milestone) ? reached : new Set([...reached, milestone]),
       );
+    });
+
+  const sendFeedback: AnalyticsService["Service"]["sendFeedback"] = (feedback) =>
+    Effect.gen(function* () {
+      if (!(yield* Ref.get(allowedRef))) return;
+      yield* Ref.update(feedbackRef, (notes) => [...notes, feedback]);
     });
 
   /** Appends `payloads` to the unsent events, giving each its uuid. */
@@ -428,6 +445,7 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(dirtyRef, false);
     yield* Ref.set(identifierRef, null);
     yield* Ref.set(reachedRef, new Set());
+    yield* Ref.set(feedbackRef, []);
     if (yield* Ref.get(forgottenRef)) return;
     yield* forgetTelemetryIdentity.pipe(Effect.provideContext(identityServices));
     yield* fileSystem
@@ -513,6 +531,11 @@ export const make = Effect.gen(function* () {
       const nowMillis = yield* Clock.currentTimeMillis;
       yield* queueDueEvents(nowMillis);
       yield* queueErrorReports(nowMillis);
+      const notes = yield* Ref.getAndSet(feedbackRef, []);
+      yield* enqueue(
+        notes.map((properties) => ({ event: "feedback.sent", properties })),
+        nowMillis,
+      );
       if (final || nowMillis >= (yield* Ref.get(nextSendAtRef))) {
         // Shutdown waits for the last send, so keep it short there.
         yield* sendPending(final ? "2 seconds" : "10 seconds").pipe(
@@ -538,7 +561,7 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.forkScoped);
   yield* Effect.addFinalizer(() => tick(true));
 
-  return AnalyticsService.of({ count, reach, flush: tick(false) });
+  return AnalyticsService.of({ count, reach, sendFeedback, flush: tick(false) });
 });
 
 export const layer = Layer.effect(AnalyticsService, make);

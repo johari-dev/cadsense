@@ -83,6 +83,7 @@ const harness = Effect.fn(function* (options?: {
       AnalyticsService.of({
         count: (counter) => Ref.update(counted, (values) => [...values, counter]),
         reach: () => Effect.void,
+        sendFeedback: () => Effect.void,
         flush: Effect.void,
       }),
     ),
