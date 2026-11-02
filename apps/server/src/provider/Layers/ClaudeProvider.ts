@@ -11,7 +11,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@cadsense/shared/model";
-import { resolveSpawnCommand } from "@cadsense/shared/shell";
+import { isCommandAvailable, resolveSpawnCommand } from "@cadsense/shared/shell";
 import {
   query as claudeQuery,
   type Options as ClaudeQueryOptions,
@@ -414,7 +414,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       checkedAt,
       models: allModels,
       probe: {
-        installed: false,
+        // Settings only lets an installed CLI be turned on, so a disabled
+        // provider still reports whether its binary is on PATH.
+        installed: yield* isCommandAvailable(claudeSettings.binaryPath, {
+          env: resolvedEnvironment,
+        }),
         version: null,
         status: "warning",
         auth: { status: "unknown" },
@@ -529,6 +533,29 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  // A signed-out CLI still initializes, but reports no token source. Only
+  // first-party auth can be signed out; Bedrock and Vertex use cloud creds.
+  if (
+    capabilities.tokenSource === "none" &&
+    (capabilities.apiProvider ?? "firstParty") === "firstParty"
+  ) {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      slashCommands: dedupedSlashCommands,
+      skills,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Claude is not signed in.",
+      },
+    });
+  }
+
   const authMetadata =
     claudeAuthMetadata({
       subscriptionType: capabilities.subscriptionType,
@@ -560,9 +587,13 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 export const makePendingClaudeProvider = (
   claudeSettings: ClaudeSettings,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
-): Effect.Effect<ServerProviderDraft> =>
+  environment: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<ServerProviderDraft, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const checkedAt = yield* nowIso;
+    // Report whether the binary is on PATH before the first probe lands, so
+    // settings does not offer Install for a CLI that is already there.
+    const installed = yield* isCommandAvailable(claudeSettings.binaryPath, { env: environment });
     const models = providerModelsFromSettings(
       modelCatalog.models.map((entry) => entry.model),
       claudeSettings.customModels,
@@ -576,7 +607,7 @@ export const makePendingClaudeProvider = (
         checkedAt,
         models,
         probe: {
-          installed: false,
+          installed,
           version: null,
           status: "warning",
           auth: { status: "unknown" },
@@ -591,7 +622,7 @@ export const makePendingClaudeProvider = (
       checkedAt,
       models,
       probe: {
-        installed: false,
+        installed,
         version: null,
         status: "warning",
         auth: { status: "unknown" },

@@ -1,4 +1,4 @@
-import { TriangleAlertIcon } from "lucide-react";
+import { WarningIcon as TriangleAlertIcon } from "~/lib/icons";
 import { useCallback, useEffect, useState } from "react";
 import { isElectron } from "../../env";
 import { useMediaQuery } from "../../hooks/useMediaQuery";

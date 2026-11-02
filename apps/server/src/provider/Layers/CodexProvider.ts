@@ -1,8 +1,10 @@
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -25,7 +27,7 @@ import type {
 import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@cadsense/contracts";
 
 import { createModelCapabilities } from "@cadsense/shared/model";
-import { resolveSpawnCommand } from "@cadsense/shared/shell";
+import { isCommandAvailable, resolveSpawnCommand } from "@cadsense/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import {
   AUTH_PROBE_TIMEOUT_MS,
@@ -431,9 +433,13 @@ const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvi
 
 const makePendingCodexProvider = (
   codexSettings: CodexSettings,
-): Effect.Effect<ServerProviderDraft> =>
+  environment: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<ServerProviderDraft, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
+    // Report whether the binary is on PATH before the first probe lands, so
+    // settings does not offer Install for a CLI that is already there.
+    const installed = yield* isCommandAvailable(codexSettings.binaryPath, { env: environment });
     const models = emptyCodexModelsFromSettings(codexSettings);
 
     if (!codexSettings.enabled) {
@@ -444,7 +450,7 @@ const makePendingCodexProvider = (
         models,
         skills: [],
         probe: {
-          installed: false,
+          installed,
           version: null,
           status: "warning",
           auth: { status: "unknown" },
@@ -460,7 +466,7 @@ const makePendingCodexProvider = (
       models,
       skills: [],
       probe: {
-        installed: false,
+        installed,
         version: null,
         status: "warning",
         auth: { status: "unknown" },
@@ -516,7 +522,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
-  ChildProcessSpawner.ChildProcessSpawner
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
   const resolvedEnvironment = environment ?? process.env;
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -530,7 +536,11 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       models: emptyModels,
       skills: [],
       probe: {
-        installed: false,
+        // Settings only lets an installed CLI be turned on, so a disabled
+        // provider still reports whether its binary is on PATH.
+        installed: yield* isCommandAvailable(codexSettings.binaryPath, {
+          env: resolvedEnvironment,
+        }),
         version: null,
         status: "warning",
         auth: { status: "unknown" },

@@ -7,7 +7,6 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
-import * as ServerSettings from "../serverSettings.ts";
 import {
   BUNDLED_MODEL_MANIFEST,
   classifyModels,
@@ -254,14 +253,9 @@ const httpClientLayer = (handler: () => Response) =>
     HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handler()))),
   );
 
-const serviceLayers = (input: {
-  readonly prefix: string;
-  readonly response: () => Response;
-  readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
-}) =>
+const serviceLayers = (input: { readonly prefix: string; readonly response: () => Response }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
-    Layer.provideMerge(ServerSettings.layerTest(input.settings ?? {})),
     Layer.provideMerge(httpClientLayer(input.response)),
   );
 
@@ -328,29 +322,4 @@ describe("ModelManifest service", () => {
       ),
     );
   });
-
-  it.live("does not fetch when provider update checks are disabled", () =>
-    Effect.gen(function* () {
-      let fetchCount = 0;
-      const service = yield* make.pipe(
-        Effect.provide(
-          httpClientLayer(() => {
-            fetchCount += 1;
-            return Response.json(REMOTE_MANIFEST);
-          }),
-        ),
-      );
-      assert.deepStrictEqual(yield* service.refresh, BUNDLED_MODEL_MANIFEST);
-      assert.strictEqual(fetchCount, 0);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        serviceLayers({
-          prefix: "model-manifest-optout-test",
-          response: () => Response.json(REMOTE_MANIFEST),
-          settings: { enableProviderUpdateChecks: false },
-        }),
-      ),
-    ),
-  );
 });

@@ -1,9 +1,10 @@
+import { useModelThumbnail } from "../cad/modelThumbnails";
 import type { EnvironmentId, OnshapeProjectSource } from "@cadsense/contracts";
 import {
   getProjectFaviconCacheKey,
   isProjectFaviconFallbackUrl,
 } from "@cadsense/shared/projectFavicon";
-import { FolderIcon } from "lucide-react";
+import { FolderIcon } from "~/lib/icons";
 import type { ComponentType } from "react";
 import { useState } from "react";
 import { useAssetUrlState } from "../assets/assetUrls";
@@ -17,9 +18,11 @@ type ProjectFaviconProps = {
   className?: string | undefined;
   fallbackIcon?: ComponentType<{ className?: string }>;
   onshapeSource?: OnshapeProjectSource | undefined;
+  cadSnapshotId?: string | undefined;
 };
 
 export function ProjectFavicon(input: ProjectFaviconProps) {
+  if (input.cadSnapshotId) return <ProjectModelThumbnail {...input} />;
   if (input.onshapeSource) {
     return (
       <img
@@ -30,6 +33,21 @@ export function ProjectFavicon(input: ProjectFaviconProps) {
     );
   }
   return <LocalProjectFavicon {...input} />;
+}
+
+function ProjectModelThumbnail(input: ProjectFaviconProps) {
+  const thumbnail = useModelThumbnail(input.environmentId, input.cadSnapshotId).url;
+  if (thumbnail)
+    return (
+      <img
+        src={thumbnail}
+        alt=""
+        // A thumbnail fills its tile edge to edge: the padding callers give small favicons
+        // would inset it and show the image's own edge inside the tile's border.
+        className={cn("size-7 shrink-0 rounded object-cover", input.className, "p-0")}
+      />
+    );
+  return <ProjectFavicon {...input} cadSnapshotId={undefined} />;
 }
 
 function LocalProjectFavicon(input: ProjectFaviconProps) {

@@ -1,21 +1,12 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
-const stageArtworkState = vi.hoisted(() => ({
-  mode: "none" as "artwork" | "none",
-  variant: null as "nightly" | "dev" | null,
-}));
-
-vi.mock("~/hooks/useSettings", () => ({
-  useEnvironmentIdentificationMode: () => stageArtworkState.mode,
-}));
-vi.mock("../SidebarStageBackdrop", () => ({
-  StageBackdropButtonArt: ({ variant }: { variant: string }) => `stage-${variant}`,
-  useSidebarStageBackdropVariant: (enabled = true) => (enabled ? stageArtworkState.variant : null),
-}));
-
-import { ComposerPrimaryActions, formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
+import {
+  COMPOSER_ICON_ACTION_CLASS_NAME,
+  ComposerPrimaryActions,
+  formatPendingPrimaryActionLabel,
+} from "./ComposerPrimaryActions";
 
 function renderPendingActions(isRunning: boolean) {
   return renderToStaticMarkup(
@@ -103,11 +94,6 @@ function renderSendButton(sendDisabledReason: string | null = null) {
     }),
   );
 }
-
-afterEach(() => {
-  stageArtworkState.mode = "none";
-  stageArtworkState.variant = null;
-});
 
 describe("formatPendingPrimaryActionLabel", () => {
   it("returns 'Submitting...' while responding", () => {
@@ -216,29 +202,21 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("keeps stop and send at the same size across running states", () => {
-    expect(renderPendingActions(true)).toContain("size-8");
-    expect(renderStandaloneStop()).toContain("size-8");
-    expect(renderSendButton()).toContain("size-8");
+    expect(renderPendingActions(true)).toContain("size-7.5");
+    expect(renderStandaloneStop()).toContain("size-7.5");
+    expect(renderSendButton()).toContain("size-7.5");
   });
 
-  it("renders stage artwork inside the send button when artwork identification is active", () => {
-    stageArtworkState.mode = "artwork";
-    stageArtworkState.variant = "nightly";
+  it("renders send and stop as quiet icon buttons with no fill", () => {
+    const send = renderSendButton();
+    const stop = renderStandaloneStop();
 
-    const markup = renderSendButton();
-
-    expect(markup).toContain("stage-nightly");
-    expect(markup).toContain("bg-transparent text-white");
-    expect(markup).not.toContain("bg-message-action text-message-action-foreground");
-  });
-
-  it("keeps the normal send-button fill when artwork identification is inactive", () => {
-    stageArtworkState.variant = "nightly";
-
-    const markup = renderSendButton();
-
-    expect(markup).not.toContain("stage-nightly");
-    expect(markup).toContain("bg-message-action text-message-action-foreground");
+    // Static markup escapes the "&" in the class's arbitrary variant.
+    const quiet = COMPOSER_ICON_ACTION_CLASS_NAME.replaceAll("&", "&amp;");
+    expect(send).toContain(quiet);
+    expect(stop).toContain(quiet);
+    expect(send).not.toContain("bg-message-action");
+    expect(stop).not.toContain("bg-destructive");
   });
 
   it("only renders stop while running when Enter-to-send is available", () => {
@@ -254,7 +232,7 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Stop generation"');
     expect(markup).toContain('aria-label="Send message"');
     expect(markup).toContain('type="submit"');
-    expect(markup).toContain("size-8");
+    expect(markup).toContain("size-7.5");
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {

@@ -21,8 +21,8 @@ const sections = [
   description="How cadsense Tools, Inc. handles information when you use cadsense, app.cadsense.app, and cadsense.app."
   heading="cadsense Privacy Policy"
   lede="This Privacy Policy describes how cadsense Tools, Inc. collects, uses, and shares personal information when you use the cadsense desktop, mobile, and hosted web applications, visit the cadsense.app marketing site, or use the optional cadsense Connect service."
-  effectiveDate="2026-07-14"
-  lastUpdated="2026-07-14"
+  effectiveDate="2026-11-01"
+  lastUpdated="2026-11-01"
   sections={sections}
 >
   <section id="introduction">
@@ -80,6 +80,21 @@ const sections = [
               Activities, we process push tokens and limited activity information needed to provide
               those features, such as project and thread titles, model name, status, and activity
               headline.
+            </li>
+            <li>
+              <strong>Anonymous usage analytics.</strong> Unless you turn it off, the cadsense desktop
+              app sends usage analytics, such as counts of agent turns, CAD imports, and CAD preview
+              runs and failures, along with the app version, operating system, and processor
+              architecture. These events are keyed by a random identifier created for your
+              installation. It is not derived from your accounts, and we do not link it to your
+              name, email address, or any cadsense or AI-provider account. Usage analytics never
+              include your prompts, agent responses, file names or contents, or CAD data. When the
+              app hits an error, usage analytics may also include a short error report: the kind
+              of error, the message cadsense's code logged with folder paths removed, and the names
+              of cadsense's own code files involved. The app sends at most three a day. When you
+              give a response a thumbs down, you can choose to send the note you wrote, and the
+              reason you picked, to the cadsense team. The app sends a note only when you tick the
+              box for it.
             </li>
             <li>
               <strong>Information you provide to us.</strong> We collect information that you choose
@@ -240,6 +255,15 @@ const sections = [
               >.
             </li>
             <li>
+              <strong>PostHog</strong> <em>(PostHog, Inc.)</em>.<br />
+              We use PostHog to receive and analyze anonymous usage analytics from the desktop app.
+              PostHog may receive your IP address as part of each request; we configure PostHog to
+              discard it.<br />
+              You can view PostHog's privacy policy here:{" "}<a href="https://posthog.com/privacy"
+                >https://posthog.com/privacy</a
+              >.
+            </li>
+            <li>
               <strong>Axiom</strong> <em>(Axiom, Inc.)</em>.<br />
               We use Axiom for operational diagnostics that help us maintain and troubleshoot the
               Services.<br />
@@ -328,6 +352,14 @@ const sections = [
             and notification permissions in your device settings.
           </p>
 
+          <h3>Usage Analytics</h3>
+          <p>
+            You can stop the desktop app from sending usage analytics by turning off
+            {" "}<strong>Settings → General → Usage analytics</strong>. Turning it off discards
+            analytics that have not been sent yet and deletes your installation's random identifier,
+            so if you turn analytics back on, new events cannot be linked to earlier ones.
+          </p>
+
           <h3>Cookies and Local Data</h3>
           <p>
             You can use your browser settings to stop accepting or to delete cookies, although some
@@ -343,7 +375,7 @@ const sections = [
             information while your account or the relevant feature is active and for as long as
             reasonably necessary to provide the Services, protect them from abuse, comply with law,
             and resolve disputes. Operational diagnostic traces are configured to expire after 30
-            days. Some records may remain longer in backups or where retention is required for
+            days. Usage analytics are kept for up to one year. Some records may remain longer in backups or where retention is required for
             security, fraud prevention, or legal compliance.
           </p>
           <p>

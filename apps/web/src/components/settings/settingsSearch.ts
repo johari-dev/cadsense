@@ -30,11 +30,10 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "cad-storage",
-    title: "CAD storage, retained Onshape projects, restore and cleanup",
+    title: "CAD storage, removed Onshape and local CAD projects, restore and cleanup",
     to: "/settings/cad-storage",
   },
   { id: "interface-font", title: "Interface font", to: "/settings/appearance" },
-  { id: "glass-opacity", title: "Transparency", to: "/settings/appearance" },
   { id: "prompt-font", title: "Prompt font", to: "/settings/appearance" },
   { id: "font-smoothing", title: "Font smoothing", to: "/settings/appearance" },
   { id: "show-permission-settings", title: "Show permission settings", to: "/settings/appearance" },
@@ -44,13 +43,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
-    id: "provider-update-checks",
-    title: "Provider update checks",
-    to: "/settings/general",
-  },
-  {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    title: "Default project folder",
     to: "/settings/general",
   },
   { id: "archive-confirmation", title: "Archive confirmation", to: "/settings/general" },
@@ -63,9 +57,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "text-generation-model",
-    title: "Text generation model",
+    title: "Thread title model",
     to: "/settings/general",
   },
+  { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
   {
     id: "streaming-text",

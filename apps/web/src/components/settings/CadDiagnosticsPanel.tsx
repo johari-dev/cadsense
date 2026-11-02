@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { BoxIcon } from "lucide-react";
+import { CubeIcon as BoxIcon } from "~/lib/icons";
 import { cadDiagnostics } from "../../cad/CadDiagnostics";
 import { SettingsSection } from "./settingsLayout";
 

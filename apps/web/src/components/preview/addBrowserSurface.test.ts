@@ -51,10 +51,7 @@ describe("addBrowserSurface", () => {
     });
     expect(Object.keys(readThreadPreviewState(threadRef).sessions)).toEqual(["tab-1", "tab-2"]);
     expect(
-      selectThreadRightPanelState(
-        useRightPanelStore.getState().byThreadKey,
-        threadRef,
-      ).surfaces.map((surface) => surface.id),
-    ).toEqual(["browser:tab-1", "browser:tab-2"]);
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef),
+    ).toMatchObject({ isOpen: true, section: "browser", browserTabId: "tab-2" });
   });
 });

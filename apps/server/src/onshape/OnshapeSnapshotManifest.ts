@@ -120,7 +120,8 @@ export const snapshotRootId = (
     root.elementId,
     root.configuration,
   ]);
-const nodeId = (rootId: string, path: readonly string[]) => hash([rootId, path]);
+/** Root-qualified occurrence ID. `completeSnapshotManifest` requires every node to use it. */
+export const snapshotNodeId = (rootId: string, path: readonly string[]) => hash([rootId, path]);
 export const snapshotPartStudioKey = (source: CadPartStudioSource) =>
   hash([
     source.host,
@@ -162,7 +163,7 @@ const validateContext = Effect.fn("validateSnapshotContext")(function* (input: C
   return context;
 });
 const rootNode = (context: CadSnapshotContext): CadSnapshotNode => ({
-  id: nodeId(context.rootId, []),
+  id: snapshotNodeId(context.rootId, []),
   parentId: null,
   occurrencePath: [],
   instanceId: null,
@@ -231,7 +232,7 @@ export const parseAssemblySnapshotDraft = Effect.fn("parseAssemblySnapshotDraft"
   }
   const occurrences = new Map<string, typeof Occurrence.Type>();
   for (const occurrence of definition.rootAssembly.occurrences) {
-    const key = nodeId(context.rootId, occurrence.path);
+    const key = snapshotNodeId(context.rootId, occurrence.path);
     if (occurrences.has(key) || !validAffine(occurrence.transform))
       return yield* invalid("invalid-topology");
     occurrences.set(key, occurrence);
@@ -254,12 +255,12 @@ export const parseAssemblySnapshotDraft = Effect.fn("parseAssemblySnapshotDraft"
     for (const instance of frame.assembly.instances) {
       const path = [...frame.path, instance.id];
       if (path.length > 128 || nodes.length >= 100_000) return yield* invalid("invalid-topology");
-      const pathKey = nodeId(context.rootId, path);
+      const pathKey = snapshotNodeId(context.rootId, path);
       const occurrence = occurrences.get(pathKey);
       const suppressed = frame.suppressed || instance.suppressed;
       if (!suppressed && !occurrence) return yield* invalid("missing-reference");
       if (occurrence) visited.add(pathKey);
-      const id = nodeId(context.rootId, path);
+      const id = snapshotNodeId(context.rootId, path);
       const visible = !suppressed && frame.visible && !(occurrence?.hidden ?? false);
       let sourcePartKey: string | null = null;
       if (instance.type === "Part") {
@@ -446,7 +447,7 @@ export const parsePartStudioSnapshotDraft = Effect.fn("parsePartStudioSnapshotDr
     const geometryKey = snapshotGeometryKey(source);
     parts.push({ geometryKey, source, geometryRequired: true, metadata: metadataValue(row) });
     nodes.push({
-      id: nodeId(context.rootId, [row.partId]),
+      id: snapshotNodeId(context.rootId, [row.partId]),
       parentId: nodes[0]!.id,
       occurrencePath: [row.partId],
       instanceId: null,
@@ -514,7 +515,7 @@ export const completeSnapshotManifest = Effect.fn("completeSnapshotManifest")(fu
   for (const node of draft.nodes) {
     if (
       ids.has(node.id) ||
-      node.id !== nodeId(draft.rootId, node.occurrencePath) ||
+      node.id !== snapshotNodeId(draft.rootId, node.occurrencePath) ||
       !validAffine(node.transform) ||
       (node.sourcePartKey !== null && !partKeys.has(node.sourcePartKey))
     )
@@ -525,7 +526,7 @@ export const completeSnapshotManifest = Effect.fn("completeSnapshotManifest")(fu
     if (
       node.occurrencePath.length === 0
         ? node.parentId !== null
-        : node.parentId !== nodeId(draft.rootId, node.occurrencePath.slice(0, -1)) ||
+        : node.parentId !== snapshotNodeId(draft.rootId, node.occurrencePath.slice(0, -1)) ||
           !ids.has(node.parentId)
     )
       return yield* invalid("invalid-topology");

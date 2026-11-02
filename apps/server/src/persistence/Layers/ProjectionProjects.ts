@@ -8,6 +8,7 @@ import * as Struct from "effect/Struct";
 import {
   ModelSelection,
   CadProjectState,
+  LocalCadProjectSource,
   OnshapeProjectSource,
   onshapeProjectSourceIdentity,
 } from "@cadsense/contracts";
@@ -24,6 +25,7 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     onshapeSource: Schema.NullOr(Schema.fromJsonString(OnshapeProjectSource)),
+    localCadSource: Schema.optionalKey(Schema.NullOr(Schema.fromJsonString(LocalCadProjectSource))),
     cad: Schema.optionalKey(Schema.NullOr(Schema.fromJsonString(CadProjectState))),
   }),
 );
@@ -42,6 +44,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root,
           default_model_selection_json,
           onshape_source_json,
+          local_cad_source_json,
           cad_json,
           onshape_source_key,
           created_at,
@@ -54,6 +57,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.workspaceRoot},
           ${row.defaultModelSelection !== null ? JSON.stringify(row.defaultModelSelection) : null},
           ${row.onshapeSource !== null ? JSON.stringify(row.onshapeSource) : null},
+          ${row.localCadSource ? JSON.stringify(row.localCadSource) : null},
           ${row.cad ? JSON.stringify(row.cad) : null},
           ${row.onshapeSource !== null ? onshapeProjectSourceIdentity(row.onshapeSource) : null},
           ${row.createdAt},
@@ -66,6 +70,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root = excluded.workspace_root,
           default_model_selection_json = excluded.default_model_selection_json,
           onshape_source_json = excluded.onshape_source_json,
+          local_cad_source_json = excluded.local_cad_source_json,
           cad_json = excluded.cad_json,
           onshape_source_key = excluded.onshape_source_key,
           created_at = excluded.created_at,
@@ -85,6 +90,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           onshape_source_json AS "onshapeSource",
+          local_cad_source_json AS "localCadSource",
           cad_json AS "cad",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -105,6 +111,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           onshape_source_json AS "onshapeSource",
+          local_cad_source_json AS "localCadSource",
           cad_json AS "cad",
           created_at AS "createdAt",
           updated_at AS "updatedAt",

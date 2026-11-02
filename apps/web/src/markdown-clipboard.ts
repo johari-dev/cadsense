@@ -310,7 +310,7 @@ function sanitizedHtmlFrom(container: Element): string {
 }
 
 export function chatMarkdownClipboardPayload(
-  selection: Selection,
+  selection: Pick<Selection, "rangeCount" | "getRangeAt">,
 ): MarkdownClipboardPayload | null {
   const texts: string[] = [];
   const htmls: string[] = [];

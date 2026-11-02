@@ -299,11 +299,9 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverRefreshProviders,
       concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
     }),
-    updateProvider: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:update-provider",
-      tag: WS_METHODS.serverUpdateProvider,
-      scheduler: configScheduler,
-      concurrency: configConcurrency,
+    runProviderSetup: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:run-provider-setup",
+      tag: WS_METHODS.serverRunProviderSetup,
     }),
     upsertKeybinding: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:upsert-keybinding",

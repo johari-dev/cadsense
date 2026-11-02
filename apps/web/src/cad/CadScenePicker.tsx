@@ -1,4 +1,5 @@
-import { ChevronDown } from "lucide-react";
+import { ArrowSquareOutIcon, CaretDownIcon as ChevronDown } from "~/lib/icons";
+import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { readLocalApi } from "../localApi";
@@ -17,22 +18,38 @@ export function CadScenePicker({
   disabled,
   onSelect,
   documentUrl,
+  openFile,
 }: {
   scenes: ReadonlyArray<{ id: string; label: string }>;
   selectedId: string | null;
   disabled: boolean;
   onSelect: (id: string) => void;
   documentUrl?: string | undefined;
+  /** A local CAD file's counterpart to the Onshape link: opens the shown file in its own app. */
+  openFile?: { action: string; onOpen: () => void } | undefined;
 }) {
   const onlyScene = scenes.length === 1 ? scenes[0] : undefined;
   const selected = scenes.find((scene) => scene.id === selectedId);
   const label = onlyScene?.label ?? selected?.label ?? "CAD";
+  // The document reads as a link: the source's logo (Onshape) leads its name, and an external-link
+  // icon follows it, inside a chip that lights up on hover.
+  const linkContent = (
+    <>
+      {documentUrl ? (
+        <img src="/onshape.svg" alt="Onshape" className="size-3.5 shrink-0 object-contain" />
+      ) : null}
+      <span className="truncate">{label}</span>
+      <ArrowSquareOutIcon aria-hidden className="size-3 shrink-0 opacity-70" />
+    </>
+  );
+  const linkClassName =
+    "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
   const heading = documentUrl ? (
     <a
       href={documentUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className="min-w-0 flex-1 truncate rounded-sm py-2 text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+      className={linkClassName}
       onClick={(event) => {
         const api = readLocalApi();
         if (!api) return;
@@ -46,17 +63,24 @@ export function CadScenePicker({
         });
       }}
     >
-      {label}
+      {linkContent}
     </a>
+  ) : openFile ? (
+    <button type="button" className={cn(linkClassName, "text-left")} onClick={openFile.onOpen}>
+      {linkContent}
+    </button>
   ) : (
-    <h2 className="min-w-0 flex-1 truncate py-2 text-sm font-medium">{label}</h2>
+    <h2 className="min-w-0 flex-1 truncate py-2 text-xs font-normal text-muted-foreground">
+      {label}
+    </h2>
   );
+  const action = documentUrl ? "Open in Onshape" : openFile?.action;
   if (scenes.length === 0 || onlyScene) {
     return (
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <Tooltip>
           <TooltipTrigger render={heading} />
-          <TooltipPopup>{documentUrl ? `${label} · Open in Onshape` : label}</TooltipPopup>
+          <TooltipPopup>{action ? `${label} · ${action}` : label}</TooltipPopup>
         </Tooltip>
         {onlyScene && selectedId !== onlyScene.id && (
           <Button
@@ -73,10 +97,12 @@ export function CadScenePicker({
   }
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3">
-      {documentUrl && (
+      {action && (
         <Tooltip>
           <TooltipTrigger render={heading} />
-          <TooltipPopup>{label} · Open in Onshape</TooltipPopup>
+          <TooltipPopup>
+            {label} · {action}
+          </TooltipPopup>
         </Tooltip>
       )}
       <Select
@@ -89,13 +115,11 @@ export function CadScenePicker({
         <SelectTrigger
           aria-label="CAD scene"
           className={
-            documentUrl
-              ? "w-9 shrink-0 justify-center px-2"
-              : "w-full min-w-0 gap-3 px-3 py-2 text-sm"
+            action ? "w-9 shrink-0 justify-center px-2" : "w-full min-w-0 gap-3 px-3 py-2 text-sm"
           }
           icon={<ChevronDown className="size-4 shrink-0 opacity-60" />}
         >
-          <SelectValue className={documentUrl ? "sr-only" : undefined}>
+          <SelectValue className={action ? "sr-only" : undefined}>
             {selected?.label ?? "Select CAD"}
           </SelectValue>
         </SelectTrigger>

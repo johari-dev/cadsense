@@ -50,6 +50,7 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
+import * as ProviderSetup from "./provider/providerSetup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
@@ -78,10 +79,15 @@ import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
+import * as LocalCadImport from "./localCad/LocalCadImport.ts";
+import * as LocalCadProjects from "./localCad/LocalCadProjects.ts";
+import * as SolidWorksBridge from "./localCad/SolidWorksBridge.ts";
 import * as CadStorage from "./cad/CadStorage.ts";
 import * as CadRenderBroker from "./cad/CadRenderBroker.ts";
 import * as CadRenderLifecycle from "./cad/CadRenderLifecycle.ts";
 import * as CadCaptureArtifacts from "./cad/CadCaptureArtifacts.ts";
+import * as CadDriveCatalog from "./cad/CadDriveCatalog.ts";
+import * as FeatureScriptPreviews from "./featurescript/FeatureScriptPreviews.ts";
 import * as CadViewing from "./cad/CadViewing.ts";
 import * as CadPanel from "./cad/CadPanel.ts";
 import { routeLayer as cadPanelRouteLayer } from "./cad/panelHttp.ts";
@@ -257,22 +263,30 @@ const OnshapeLayerLive = OnshapeProjects.layer.pipe(
 
 const CadSnapshotStoreLayerLive = CadSnapshotStore.layer.pipe(Layer.provide(PersistenceLayerLive));
 
-const CadAcquisitionLayerLive = OnshapeSnapshotAcquisition.layer.pipe(
-  Layer.provideMerge(CadSnapshotStoreLayerLive),
-  Layer.provideMerge(OnshapeCadRoots.layer),
-);
+const CadAcquisitionLayerLive = Layer.mergeAll(
+  OnshapeSnapshotAcquisition.layer,
+  LocalCadImport.layer.pipe(
+    Layer.provide(WorkspacePaths.layer),
+    Layer.provide(SolidWorksBridge.layer),
+  ),
+).pipe(Layer.provideMerge(CadSnapshotStoreLayerLive), Layer.provideMerge(OnshapeCadRoots.layer));
 const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadViewing.layer),
+  Layer.provideMerge(CadDriveCatalog.layer),
   Layer.provideMerge(CadComments.layer),
   Layer.provideMerge(ClaudeCadCapabilities.layer),
   Layer.provideMerge(CadCaptureArtifacts.layer),
+  Layer.provideMerge(FeatureScriptPreviews.layer()),
   Layer.provideMerge(CadRenderBroker.layer),
   Layer.provideMerge(CadSnapshotStoreLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
 );
 const AgentRuntimeLayerLive = Layer.mergeAll(
-  CadUserOperations.layer,
+  LocalCadProjects.layer.pipe(
+    Layer.provideMerge(CadUserOperations.layer),
+    Layer.provide(WorkspacePaths.layer),
+  ),
   CadStorage.layer,
   CadPresentation.reactorLayer,
   CadRenderLifecycle.layer,
@@ -305,6 +319,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(PreviewLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
+  // Server-wide so the install lock and running sign-ins outlive any one
+  // websocket connection.
+  Layer.provideMerge(ProviderSetup.layer),
   Layer.provideMerge(ProviderRegistryLive),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
@@ -333,7 +350,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
-  Layer.provideMerge(AnalyticsService.layer),
+  Layer.provideMerge(AnalyticsService.layer.pipe(Layer.provide(ServerSettingsLayerLive))),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),

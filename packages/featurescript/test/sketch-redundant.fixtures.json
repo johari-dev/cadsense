@@ -1,0 +1,3116 @@
+[
+  {
+    "name": "seed11-trial-1142",
+    "parentMoved": 0.09201688048467066,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.021792599347568723, 0.012496501009048947],
+        "end": [-0.01749697525466292, -0.015690433493979437]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.01749697525466292, -0.015690433493979437],
+        "end": [0.021662656812644267, -0.012440685484415055]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.021662656812644267, -0.012440685484415055],
+        "end": [0.017588497776417404, 0.015509456621935307]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.017588497776417404, 0.015509456621935307],
+        "end": [-0.021792599347568723, 0.012496501009048947]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a4",
+        "type": "ANGLE",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.5707963267948966,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a5",
+        "type": "ANGLE",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.5707963267948966,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v6",
+        "type": "VERTICAL",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l7",
+        "type": "LENGTH",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.034504252050306765,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e9",
+        "type": "EQUAL",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed11-trial-414",
+    "parentMoved": 0.07089160683888153,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.002864051284887916, 0.018768006025134506],
+        "end": [-0.015341215311913566, 0.01255610869801381]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.015341215311913566, 0.01255610869801381],
+        "end": [-0.018912477590990726, -0.006307076665638846]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.018912477590990726, -0.006307076665638846],
+        "end": [-0.0032504047535902576, -0.020210754505351453]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.0032504047535902576, -0.020210754505351453],
+        "end": [0.01506750830565947, -0.012749762810621823]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [0.01506750830565947, -0.012749762810621823],
+        "end": [0.018167806988150976, 0.006628254737920581]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [0.018167806988150976, 0.006628254737920581],
+        "end": [0.002864051284887916, 0.018768006025134506]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l6",
+        "type": "LENGTH",
+        "first": { "entity": "s5", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.021080910356753,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h7",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l9",
+        "type": "LENGTH",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.028626919239120058,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h10",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f11",
+        "type": "FIX",
+        "first": { "entity": "s1", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e12",
+        "type": "EQUAL",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed23-trial-1067",
+    "parentMoved": 0.06665307172700807,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.01769679402151961, -0.015717995823355778],
+        "end": [0.021561417436199534, 0.012215912983234909]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [0.021561417436199534, 0.012215912983234909],
+        "end": [-0.0173956096502656, 0.01572372348978861]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.0173956096502656, 0.01572372348978861],
+        "end": [-0.022296527699416348, -0.012214106868433806]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.022296527699416348, -0.012214106868433806],
+        "end": [0.01769679402151961, -0.015717995823355778]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v4",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l5",
+        "type": "LENGTH",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.023510148389502498,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v6",
+        "type": "VERTICAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v7",
+        "type": "VERTICAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l8",
+        "type": "LENGTH",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03086699271149328,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h9",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q10",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v11",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed23-trial-1198",
+    "parentMoved": 0.05378508063555807,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.016906667895986424, -0.009230046541389349],
+        "end": [0.0002869518152638958, -0.02097944922645842]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [0.0002869518152638958, -0.02097944922645842],
+        "end": [0.017306582446188424, -0.009184716580150843]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.017306582446188424, -0.009184716580150843],
+        "end": [0.017698995991418935, 0.009888346475814895]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.017698995991418935, 0.009888346475814895],
+        "end": [-0.00023995392536564275, 0.018872984746358932]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [-0.00023995392536564275, 0.018872984746358932],
+        "end": [-0.016655099478225223, 0.010658959137677525]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [-0.016655099478225223, 0.010658959137677525],
+        "end": [-0.016906667895986424, -0.009230046541389349]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h6",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h7",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s5", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v8",
+        "type": "VERTICAL",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e9",
+        "type": "EQUAL",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q10",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h11",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p12",
+        "type": "PARALLEL",
+        "first": { "entity": "s4", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l13",
+        "type": "LENGTH",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.027988500582514564,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f14",
+        "type": "FIX",
+        "first": { "entity": "s2", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed23-trial-1367",
+    "parentMoved": 0.07562325177766856,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.013304996712183133, -0.017995224278772814],
+        "end": [0.02414447524957882, -0.01104941438067679]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [0.02414447524957882, -0.01104941438067679],
+        "end": [0.013428222964625, 0.01705884906920643]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.013428222964625, 0.01705884906920643],
+        "end": [-0.02380262243173521, 0.010569723878055715]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.02380262243173521, 0.010569723878055715],
+        "end": [-0.013304996712183133, -0.017995224278772814]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e4",
+        "type": "EQUAL",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h5",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a6",
+        "type": "ANGLE",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.5707963267948966,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l7",
+        "type": "LENGTH",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.026753075866379344,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e9",
+        "type": "EQUAL",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v10",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed23-trial-1481",
+    "parentMoved": 0.09563469566757232,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.01813316889783326, 0.01551842110914673],
+        "end": [-0.021710094193799045, 0.012994277390910153]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.021710094193799045, 0.012994277390910153],
+        "end": [-0.01794851613525975, -0.015059440536057412]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.01794851613525975, -0.015059440536057412],
+        "end": [0.02179658610597703, -0.012324709415382754]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.02179658610597703, -0.012324709415382754],
+        "end": [0.01813316889783326, 0.01551842110914673]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a4",
+        "type": "ANGLE",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.5707963267948966,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v5",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l6",
+        "type": "LENGTH",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.036395251653806894,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e7",
+        "type": "EQUAL",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h9",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h10",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a11",
+        "type": "ANGLE",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.5707963267948966,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed23-trial-181",
+    "parentMoved": 0.12627227654328516,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.006917465981275637, 0.01882728454311592],
+        "end": [-0.019693311686714177, 0.0032632938228346186]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.019693311686714177, 0.0032632938228346186],
+        "end": [-0.012793555309631855, -0.015209308397431462]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.012793555309631855, -0.015209308397431462],
+        "end": [0.006845556514297516, -0.01860969604438497]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.006845556514297516, -0.01860969604438497],
+        "end": [0.019503209857827, -0.003504731929580781]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [0.019503209857827, -0.003504731929580781],
+        "end": [0.01294329522706928, 0.015488100768230826]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [0.01294329522706928, 0.015488100768230826],
+        "end": [-0.006917465981275637, 0.01882728454311592]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f6",
+        "type": "FIX",
+        "first": { "entity": "s0", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p7",
+        "type": "PARALLEL",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p9",
+        "type": "PARALLEL",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l10",
+        "type": "LENGTH",
+        "first": { "entity": "s5", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03696539101282386,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f11",
+        "type": "FIX",
+        "first": { "entity": "s4", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v12",
+        "type": "VERTICAL",
+        "first": { "entity": "s5", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q13",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q14",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-1052",
+    "parentMoved": 0.07047350092698196,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.01224375010622411, 0.018428679571271915],
+        "end": [-0.009819685244637671, 0.017504894861104226]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.009819685244637671, 0.017504894861104226],
+        "end": [-0.019461157559453764, -0.0004409445155759726]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.019461157559453764, -0.0004409445155759726],
+        "end": [-0.010546321811907516, -0.017751336992187772]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.010546321811907516, -0.017751336992187772],
+        "end": [0.009916411911818657, -0.019819799550108364]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [0.009916411911818657, -0.019819799550108364],
+        "end": [0.02085804946696173, -0.001996765997988644]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [0.02085804946696173, -0.001996765997988644],
+        "end": [0.01224375010622411, 0.018428679571271915]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l6",
+        "type": "LENGTH",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.024913200517144615,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p7",
+        "type": "PARALLEL",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s5", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l8",
+        "type": "LENGTH",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.02654577007356369,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f9",
+        "type": "FIX",
+        "first": { "entity": "s0", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h10",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a11",
+        "type": "ANGLE",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a12",
+        "type": "ANGLE",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p13",
+        "type": "PARALLEL",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e14",
+        "type": "EQUAL",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-1282",
+    "parentMoved": 0.11971198093789519,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.008595012626375307, -0.017785525908124957],
+        "end": [0.02050390460045358, -0.0020186909997410357]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [0.02050390460045358, -0.0020186909997410357],
+        "end": [0.010933836003838336, 0.01600114308563264]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.010933836003838336, 0.01600114308563264],
+        "end": [-0.007552533577406772, 0.018730901921970813]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.007552533577406772, 0.018730901921970813],
+        "end": [-0.019569239893318793, 0.0009284238141115685]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [-0.019569239893318793, 0.0009284238141115685],
+        "end": [-0.011054424878338843, -0.01673835681585669]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [-0.011054424878338843, -0.01673835681585669],
+        "end": [0.008595012626375307, -0.017785525908124957]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v6",
+        "type": "VERTICAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a7",
+        "type": "ANGLE",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l8",
+        "type": "LENGTH",
+        "first": { "entity": "s5", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03709224017434392,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v9",
+        "type": "VERTICAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q10",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l11",
+        "type": "LENGTH",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03127209818282728,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p12",
+        "type": "PARALLEL",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s5", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v13",
+        "type": "VERTICAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l14",
+        "type": "LENGTH",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.030137903073401147,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f15",
+        "type": "FIX",
+        "first": { "entity": "s3", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h16",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-1371",
+    "parentMoved": 0.04930797731676595,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.01931710730278652, -0.00487877668610857],
+        "end": [-0.005551295406576863, -0.019388105752065204]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.005551295406576863, -0.019388105752065204],
+        "end": [0.014662852931279278, -0.013940652650559484]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.014662852931279278, -0.013940652650559484],
+        "end": [0.018958661918079947, 0.005487195922653272]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.018958661918079947, 0.005487195922653272],
+        "end": [0.005253404013599957, 0.01972746398886392]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [0.005253404013599957, 0.01972746398886392],
+        "end": [-0.014068967055230057, 0.014380571410043279]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [-0.014068967055230057, 0.014380571410043279],
+        "end": [-0.01931710730278652, -0.00487877668610857]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p6",
+        "type": "PARALLEL",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q7",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l8",
+        "type": "LENGTH",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.024450980396685647,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l9",
+        "type": "LENGTH",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.02060353411389679,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v10",
+        "type": "VERTICAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e11",
+        "type": "EQUAL",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a12",
+        "type": "ANGLE",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-1466",
+    "parentMoved": 0.14282887434663782,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.017170658339023107, 0.014596349835267709],
+        "end": [-0.023208763078222387, 0.013308934675366224]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.023208763078222387, 0.013308934675366224],
+        "end": [-0.018643688072413206, -0.011807078922603104]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.018643688072413206, -0.011807078922603104],
+        "end": [0.022484992232203942, -0.017725543707639787]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.022484992232203942, -0.017725543707639787],
+        "end": [0.017170658339023107, 0.014596349835267709]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v4",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f5",
+        "type": "FIX",
+        "first": { "entity": "s0", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f6",
+        "type": "FIX",
+        "first": { "entity": "s2", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l7",
+        "type": "LENGTH",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03126171936106948,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p8",
+        "type": "PARALLEL",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-1877",
+    "parentMoved": 0.10392562124707398,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.023152182205298983, -0.011213319443744756],
+        "end": [0.0153344597835909, -0.016743458829715317]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [0.0153344597835909, -0.016743458829715317],
+        "end": [0.023507487728330976, 0.011233245042554222]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.023507487728330976, 0.011233245042554222],
+        "end": [-0.01564492059298115, 0.016828635407360296]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.01564492059298115, 0.016828635407360296],
+        "end": [-0.023152182205298983, -0.011213319443744756]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e4",
+        "type": "EQUAL",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f5",
+        "type": "FIX",
+        "first": { "entity": "s3", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l6",
+        "type": "LENGTH",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.02253957302427831,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l7",
+        "type": "LENGTH",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03323402694111412,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f9",
+        "type": "FIX",
+        "first": { "entity": "s3", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v10",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q11",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-491",
+    "parentMoved": 0.08064913762365225,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.019628607085590836, 0.015271360266899183],
+        "end": [-0.020124050637045972, 0.01412833147864334]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.020124050637045972, 0.01412833147864334],
+        "end": [-0.019622361029180243, -0.014293890173968595]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.019622361029180243, -0.014293890173968595],
+        "end": [0.020463902521375598, -0.01423771155067701]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.020463902521375598, -0.01423771155067701],
+        "end": [0.019628607085590836, 0.015271360266899183]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l4",
+        "type": "LENGTH",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03415970431601615,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l5",
+        "type": "LENGTH",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.02204201911904012,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v6",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e7",
+        "type": "EQUAL",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a9",
+        "type": "ANGLE",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.5707963267948966,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-783",
+    "parentMoved": 0.07008560064998509,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [0.020004204829058906, 0.002345871841039804],
+        "end": [0.00787106034385241, 0.0184402038251474]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [0.00787106034385241, 0.0184402038251474],
+        "end": [-0.012027096026063099, 0.016050784807238223]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.012027096026063099, 0.016050784807238223],
+        "end": [-0.019795558013505295, -0.002418842831537874]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [-0.019795558013505295, -0.002418842831537874],
+        "end": [-0.007894497644932823, -0.018350923083630302]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [-0.007894497644932823, -0.018350923083630302],
+        "end": [0.011768518703914118, -0.015959838165258974]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [0.011768518703914118, -0.015959838165258974],
+        "end": [0.020004204829058906, 0.002345871841039804]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v6",
+        "type": "VERTICAL",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h7",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s5", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l8",
+        "type": "LENGTH",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.02514654748614251,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q9",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a10",
+        "type": "ANGLE",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e11",
+        "type": "EQUAL",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f12",
+        "type": "FIX",
+        "first": { "entity": "s2", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l13",
+        "type": "LENGTH",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.038358364262785,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-876",
+    "parentMoved": 0.1422356132502261,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.021652057961557978, 0.012663429291344671],
+        "end": [-0.017671516941141517, -0.015626727022463233]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.017671516941141517, -0.015626727022463233],
+        "end": [0.021533820464590434, -0.01268104082475627]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.021533820464590434, -0.01268104082475627],
+        "end": [0.017674474892420394, 0.015341014166462144]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.017674474892420394, 0.015341014166462144],
+        "end": [-0.021652057961557978, 0.012663429291344671]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h4",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f5",
+        "type": "FIX",
+        "first": { "entity": "s1", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q6",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s2", "part": null },
+        "second": { "entity": "s3", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h7",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p8",
+        "type": "PARALLEL",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q9",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l10",
+        "type": "LENGTH",
+        "first": { "entity": "s2", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03729125343602675,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-894",
+    "parentMoved": 0.07534463160098281,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.016520047429352355, 0.011792223412829836],
+        "end": [-0.018421318018948488, -0.008453321297957075]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.018421318018948488, -0.008453321297957075],
+        "end": [-0.001204082939952532, -0.01961271715077336]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [-0.001204082939952532, -0.01961271715077336],
+        "end": [0.0161500362266547, -0.011570507152189097]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.0161500362266547, -0.011570507152189097],
+        "end": [0.017806510608030873, 0.008385166005503738]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [0.017806510608030873, 0.008385166005503738],
+        "end": [0.0017180826770597291, 0.020406298711397]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [0.0017180826770597291, 0.020406298711397],
+        "end": [-0.016520047429352355, 0.011792223412829836]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "e6",
+        "type": "EQUAL",
+        "first": { "entity": "s0", "part": null },
+        "second": { "entity": "s1", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a7",
+        "type": "ANGLE",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s4", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "h8",
+        "type": "HORIZONTAL",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q9",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s4", "part": null },
+        "second": { "entity": "s5", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "a10",
+        "type": "ANGLE",
+        "first": { "entity": "s5", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": 1.0471975511965976,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l11",
+        "type": "LENGTH",
+        "first": { "entity": "s3", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.03521602106756346,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  },
+  {
+    "name": "seed37-trial-988",
+    "parentMoved": 0.08944815474588001,
+    "entities": [
+      {
+        "construction": false,
+        "id": "s0",
+        "kind": "line",
+        "start": [-0.01993198764956096, 0.00043698874048679197],
+        "end": [-0.010597202433417762, -0.017191432445150333]
+      },
+      {
+        "construction": false,
+        "id": "s1",
+        "kind": "line",
+        "start": [-0.010597202433417762, -0.017191432445150333],
+        "end": [0.009507931531794743, -0.01755829403006582]
+      },
+      {
+        "construction": false,
+        "id": "s2",
+        "kind": "line",
+        "start": [0.009507931531794743, -0.01755829403006582],
+        "end": [0.019932237652116623, -0.0006351957874156975]
+      },
+      {
+        "construction": false,
+        "id": "s3",
+        "kind": "line",
+        "start": [0.019932237652116623, -0.0006351957874156975],
+        "end": [0.010531364699194492, 0.017056633354687226]
+      },
+      {
+        "construction": false,
+        "id": "s4",
+        "kind": "line",
+        "start": [0.010531364699194492, 0.017056633354687226],
+        "end": [-0.00947624494526587, 0.017714753820793162]
+      },
+      {
+        "construction": false,
+        "id": "s5",
+        "kind": "line",
+        "start": [-0.00947624494526587, 0.017714753820793162],
+        "end": [-0.01993198764956096, 0.00043698874048679197]
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c0",
+        "type": "COINCIDENT",
+        "first": { "entity": "s0", "part": "end" },
+        "second": { "entity": "s1", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c1",
+        "type": "COINCIDENT",
+        "first": { "entity": "s1", "part": "end" },
+        "second": { "entity": "s2", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c2",
+        "type": "COINCIDENT",
+        "first": { "entity": "s2", "part": "end" },
+        "second": { "entity": "s3", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c3",
+        "type": "COINCIDENT",
+        "first": { "entity": "s3", "part": "end" },
+        "second": { "entity": "s4", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c4",
+        "type": "COINCIDENT",
+        "first": { "entity": "s4", "part": "end" },
+        "second": { "entity": "s5", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "c5",
+        "type": "COINCIDENT",
+        "first": { "entity": "s5", "part": "end" },
+        "second": { "entity": "s0", "part": "start" },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "p6",
+        "type": "PARALLEL",
+        "first": { "entity": "s3", "part": null },
+        "second": { "entity": "s0", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f7",
+        "type": "FIX",
+        "first": { "entity": "s5", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q8",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "l9",
+        "type": "LENGTH",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": 0.034978225985531804,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "f10",
+        "type": "FIX",
+        "first": { "entity": "s2", "part": "start" },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v11",
+        "type": "VERTICAL",
+        "first": { "entity": "s1", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v12",
+        "type": "VERTICAL",
+        "first": { "entity": "s0", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "v13",
+        "type": "VERTICAL",
+        "first": { "entity": "s4", "part": null },
+        "second": null,
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      },
+      {
+        "id": "q14",
+        "type": "PERPENDICULAR",
+        "first": { "entity": "s1", "part": null },
+        "second": { "entity": "s2", "part": null },
+        "mirror": null,
+        "length": null,
+        "angle": null,
+        "direction": "MINIMUM",
+        "alignment": "UNSPECIFIED"
+      }
+    ]
+  }
+]

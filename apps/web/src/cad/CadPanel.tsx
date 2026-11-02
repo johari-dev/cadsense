@@ -1,13 +1,13 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   CadSnapshotManifest,
+  isSolidWorksFile,
   type CadComment,
   type CadViewState,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   useCallback,
   useContext,
@@ -17,9 +17,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Button } from "../components/ui/button";
+import { createPortal } from "react-dom";
 import { CadLoadingProgress, type CadLoadProgress } from "./CadLoadingProgress";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { useEnvironmentHttpBaseUrl } from "../state/environments";
 import { useThreadShells } from "../state/entities";
 import { cadPanelEnvironment } from "../state/cadPanel";
@@ -28,31 +27,87 @@ import type { Project } from "../types";
 import type { CadSceneRenderer } from "./CadSceneRenderer";
 import { loadCadAssetDelivery } from "./CadAssetDelivery";
 import { cadVisibleViewer } from "./CadVisibleViewer";
-import { CadHierarchyTree } from "./CadHierarchyTree";
+import { CadViewChanges } from "./CadViewChanges";
 import {
   cadPanelLockStatus,
-  findCadProjectRunBlocker,
+  findCadThreadRunBlocker,
   type CadPanelLockStatus,
 } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
+import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
+import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
+import { CadLocalSyncButton } from "./CadLocalSyncButton";
+import { CadFilePrompt } from "./CadFilePrompt";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
-import { useResizableWidth } from "../hooks/useResizableWidth";
+import { useOpenInFileManager } from "../components/chat/OpenInExplorerButton";
+import { toastManager } from "../components/ui/toast";
+import { resolvePathLinkTarget } from "../path-links";
 import "./CadPanel.css";
 import {
   EMPTY_CAD_PANEL_REVIEW,
   useCadCommentReviewStore,
   type CadPanelReviewSession,
+  type CadCommentLocation,
 } from "./cadCommentReviewStore";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
-import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
+import {
+  CAD_COMMENTS_CARD_WIDTH,
+  CadCommentsCard,
+  type CadCommentsCardProps,
+} from "./CadCommentsCard";
+import { holdInspection } from "../components/sidebarInspection";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
+/**
+ * Overlay chrome fits and comment focus keep the model clear of: the parts chip along the top,
+ * the camera toolbar along the bottom, and a floating comments card (12px from the right edge)
+ * plus 32px of clearance. A docked card sits beside the canvas, so it needs no inset. The
+ * compact preview shows no chip or toolbar.
+ */
+const frameInsets = (compact: boolean, cardFloating: boolean) => ({
+  top: compact ? 0 : 48,
+  bottom: compact ? 0 : 64,
+  right: cardFloating ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
+});
+/**
+ * Whether a view change should travel to its new camera rather than jump: a new comment capture,
+ * an explosion change, a different preset, or a different fitted pose (Fit, or a view cube edge or
+ * corner). A pose without `fit` is an orbit the user already made, so it applies in place.
+ */
+export function animatesViewChange(
+  previous: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+  next: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+) {
+  if (next.captureId && next.captureId !== previous.captureId) return true;
+  if (next.explosion !== previous.explosion) return true;
+  const camera = next.camera;
+  if (camera.kind === "preset")
+    return previous.camera.kind !== "preset" || previous.camera.preset !== camera.preset;
+  return camera.fit !== null && JSON.stringify(camera) !== JSON.stringify(previous.camera);
+}
+/** Width of the docked comments column, in CSS px. */
+const DOCK_WIDTH = 320;
+/**
+ * Below this scene width the open comments card floats over the viewport; at or above it, the
+ * card docks as a column beside a viewport that keeps at least 420px, so it never covers the
+ * model. The default CAD panel in a 1440px window (about 760px) docks.
+ */
+const DOCK_MIN_WIDTH = DOCK_WIDTH + 420;
+const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -128,43 +183,48 @@ export function CadScene({
   const ticket = AsyncResult.isSuccess(lease) ? lease.value : null;
   const canvas = useRef<HTMLDivElement>(null);
   const renderer = commentsCard.renderer;
+  // Where the primary pointer went down on the viewer, to tell a click from an orbit drag.
+  const press = useRef<{ id: number; x: number; y: number } | null>(null);
   const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
-  const latest = useRef({ view, disabled, onChange });
+  // The docked comments column, mounted while the scene is wide enough to dock (hidden while the
+  // card is closed), so the card can portal into it from the moment it opens.
+  const [dock, setDock] = useState<HTMLElement | null>(null);
+  const [dockable, setDockable] = useState(false);
+  const sceneRow = useRef<HTMLDivElement>(null);
+  const cardFloating = commentsCard.open && !dock;
+  const latest = useRef({ view, disabled, onChange, compact, cardFloating });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
-  const [treeOpen, setTreeOpen] = useState(false);
-  const sceneContainer = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number | null>(null);
-  const maxTreeWidth = Math.max(1, Math.min(480, (containerWidth ?? 1067) * 0.45));
-  const minTreeWidth = Math.min(180, maxTreeWidth);
-  const treeResize = useResizableWidth({
-    storageKey: "cadsense:cad-components-width",
-    defaultWidth: 256,
-    minWidth: minTreeWidth,
-    maxWidth: maxTreeWidth,
-    edge: "right",
-  });
-  const cancelTreeResize = treeResize.cancelResize;
-  useLayoutEffect(() => {
-    if (!fullscreen || disabled) cancelTreeResize();
-  }, [fullscreen, disabled, cancelTreeResize]);
-  useLayoutEffect(() => {
-    if (!fullscreen || !sceneContainer.current) return;
-    const node = sceneContainer.current;
-    const measure = () => setContainerWidth(node.clientWidth);
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    measure();
-    return () => observer.disconnect();
-  }, [fullscreen]);
   const previousCapture = useRef(captureId);
   const previousCamera = useRef(view.camera);
   const previousExplosion = useRef(view.explosion);
   const applied = useRef<{ manifest: CadSnapshotManifest | null; state: string } | null>(null);
   useLayoutEffect(() => {
-    latest.current = { view, disabled, onChange };
-  }, [disabled, onChange, view]);
+    latest.current = { view, disabled, onChange, compact, cardFloating };
+  }, [cardFloating, compact, disabled, onChange, view]);
+  useLayoutEffect(() => {
+    const row = sceneRow.current;
+    if (compact || !row) return;
+    const measure = () => setDockable(row.getBoundingClientRect().width >= DOCK_MIN_WIDTH);
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    measure();
+    return () => observer.disconnect();
+  }, [compact]);
+  const docked = commentsCard.open && dock !== null;
+  // Docked comments are an inspection: the app sidebar folds to its icon rail. The hold
+  // re-renders the app layout synchronously, so the fold (and the width this panel takes back
+  // from it) starts animating in the same frame as the dock column. The canvas follows every
+  // frame of that animation through its ResizeObserver below.
+  useLayoutEffect(() => (docked ? holdInspection("cad-comments-docked") : undefined), [docked]);
+  // A layout effect, so the card's focus (a passive effect) already frames clear of the card it
+  // just opened. Closing the card ends its review afterwards, which recenters the model.
+  useLayoutEffect(() => {
+    renderer.current?.setFrameInsets(frameInsets(compact, cardFloating), {
+      reducedMotion: prefersReducedMotion(),
+    });
+  }, [cardFloating, compact]);
   useLayoutEffect(() => {
     try {
       renderer.current?.setInteractive(!disabled);
@@ -180,11 +240,14 @@ export function CadScene({
       applied.current = { manifest, state: serialized };
       if (manifest) {
         if (
-          ((captureId && previousCapture.current !== captureId) ||
-            previousExplosion.current !== view.explosion ||
-            (view.camera.kind === "preset" &&
-              (previousCamera.current.kind !== "preset" ||
-                previousCamera.current.preset !== view.camera.preset))) &&
+          animatesViewChange(
+            {
+              camera: previousCamera.current,
+              explosion: previousExplosion.current,
+              captureId: previousCapture.current,
+            },
+            { camera: view.camera, explosion: view.explosion, captureId },
+          ) &&
           !matchMedia("(prefers-reduced-motion: reduce)").matches
         )
           renderer.current?.transition(view);
@@ -197,6 +260,19 @@ export function CadScene({
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
   }, [captureId, manifest, view]);
+  // The server keeps one thumbnail per snapshot. Capture it only when the server has none.
+  const environmentId = threadRef.environmentId;
+  const thumbnailMissing = useModelThumbnail(environmentId, view.snapshotId).missing;
+  const saveThumbnail = useAtomCommand(cadThumbnailEnvironment.save, { reportFailure: false });
+  useLayoutEffect(() => {
+    const current = renderer.current;
+    const snapshotId = view.snapshotId;
+    if (!thumbnailMissing || !current || manifest?.snapshotId !== snapshotId) return;
+    void saveModelThumbnail(environmentId, snapshotId, current, async (image) => {
+      const result = await saveThumbnail({ environmentId, input: { snapshotId, image } });
+      return result._tag === "Success";
+    });
+  }, [environmentId, manifest, saveThumbnail, thumbnailMissing, view.snapshotId]);
   // OrbitControls disconnects from canvas.getRootNode(); dispose before React detaches that root.
   useLayoutEffect(() => {
     if (!baseUrl || !canvas.current) return;
@@ -223,6 +299,9 @@ export function CadScene({
     const { renderer: current, canvas: node, diagnostics } = attachment;
     attachmentRef.current = attachment;
     renderer.current = current;
+    current.setFrameInsets(frameInsets(latest.current.compact, latest.current.cardFloating), {
+      reducedMotion: true,
+    });
     const stopLoad = attachment.watchLoad(view.snapshotId, (state) => {
       try {
         if (state.status === "idle") {
@@ -355,113 +434,89 @@ export function CadScene({
   const unavailable =
     error ?? (AsyncResult.isFailure(lease) ? "The local CAD scene is unavailable." : null);
   return (
-    <div
-      ref={sceneContainer}
-      className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}
-    >
+    <div className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}>
       {/* The wrapper holds the viewer's minimum height so the strip never pushes it over the tree. */}
       <div className={`flex ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 flex-col`}>
-        <div
-          className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
-        >
+        {/* The viewport and, when docked, the comments column beside it. Viewport overlays stay
+            inside the viewport, so they follow its narrower width. */}
+        <div ref={sceneRow} className="flex min-h-0 min-w-0 flex-1">
           <div
-            ref={canvas}
-            className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
-            style={{ pointerEvents: disabled ? "none" : "auto" }}
-          />
-          {(!manifest || unavailable) && (
+            className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
+          >
             <div
-              className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
-              role="status"
-            >
-              {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
-            </div>
-          )}
-          <CadCommentsCard
-            {...commentsCard}
-            manifest={manifest}
-            displayedSnapshotId={view.snapshotId}
-          />
-          {manifest && !unavailable && !compact && (
-            <CadCameraToolbar view={view} disabled={disabled} onChange={onChange} />
-          )}
+              ref={canvas}
+              className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""}`}
+              style={{ pointerEvents: disabled ? "none" : "auto" }}
+              onPointerDown={(event) => {
+                press.current =
+                  event.isPrimary && event.button === 0
+                    ? { id: event.pointerId, x: event.clientX, y: event.clientY }
+                    : null;
+              }}
+              onPointerUp={(event) => {
+                // A click (not a drag) on empty space leaves the focused comment.
+                const start = press.current;
+                press.current = null;
+                if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
+                if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+                const box = event.currentTarget.getBoundingClientRect();
+                if (renderer.current?.isEmptyAt(event.clientX - box.left, event.clientY - box.top))
+                  commentsCard.clearSelection();
+              }}
+            />
+            {(!manifest || unavailable) && (
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
+                role="status"
+              >
+                {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
+              </div>
+            )}
+            <CadCommentsCard
+              {...commentsCard}
+              manifest={manifest}
+              displayedSnapshotId={view.snapshotId}
+              dock={dock}
+            />
+            {manifest && !unavailable && !compact && (
+              <CadCameraToolbar
+                renderer={renderer}
+                view={view}
+                disabled={disabled}
+                onChange={onChange}
+              />
+            )}
+            {manifest && !unavailable && !compact && (
+              <CadViewChanges
+                manifest={manifest}
+                view={view}
+                disabled={disabled}
+                onChange={onChange}
+                belowRevisionNotice={commentsCard.historical}
+              />
+            )}
+          </div>
+          {dockable &&
+            !compact && (
+              // The column animates its width (CadPanel.css); its content keeps the full width
+              // from the first frame, rides the column's moving left edge, and is clipped, so it
+              // slides in without reflowing. The card portals into the inner surface.
+              <aside
+                aria-label="Comments panel"
+                data-open={commentsCard.open}
+                style={{ width: commentsCard.open ? DOCK_WIDTH : 0 }}
+                className="cad-comments-dock-column shrink-0 overflow-hidden"
+              >
+                <div
+                  ref={setDock}
+                  style={{ width: DOCK_WIDTH }}
+                  className="flex h-full flex-col border-l bg-popover text-popover-foreground"
+                />
+              </aside>
+            )}
         </div>
         {lockStatus && <CadLockStrip status={lockStatus} />}
       </div>
-      {manifest && !compact && (
-        <Collapsible
-          open={fullscreen || treeOpen}
-          onOpenChange={(open) => {
-            if (!fullscreen) setTreeOpen(open);
-          }}
-          className={
-            fullscreen
-              ? `relative order-first flex min-h-0 shrink-0 flex-col border-r ${disabled ? "cursor-not-allowed [&_:disabled]:cursor-not-allowed [&_[aria-label='CAD_components']]:grayscale [&_[aria-label='CAD_components']]:opacity-55" : ""}`
-              : `shrink-0 ${disabled ? "cursor-not-allowed [&_:disabled]:cursor-not-allowed [&_[aria-label='CAD_components']]:grayscale [&_[aria-label='CAD_components']]:opacity-55" : ""}`
-          }
-          style={fullscreen ? { width: treeResize.width } : undefined}
-        >
-          <CollapsibleTrigger
-            render={
-              <Button
-                variant="ghost"
-                className={`w-full shrink-0 justify-start rounded-none px-3 text-xs disabled:opacity-100 ${disabled ? "text-muted-foreground" : ""} ${fullscreen ? "" : `border-t ${treeOpen ? "" : "h-10 pb-1 sm:h-9"}`}`}
-                disabled={disabled || fullscreen}
-              />
-            }
-            disabled={disabled || fullscreen}
-          >
-            {!fullscreen && (treeOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}{" "}
-            Components{" "}
-            <span className="ml-auto text-muted-foreground">{manifest.nodes.length}</span>
-          </CollapsibleTrigger>
-          <CollapsiblePanel className={fullscreen ? "flex min-h-0 flex-1 flex-col" : undefined}>
-            <CadHierarchyTree
-              manifest={manifest}
-              view={view}
-              disabled={disabled}
-              onChange={onChange}
-              fullHeight={fullscreen}
-            />
-          </CollapsiblePanel>
-          {fullscreen && (
-            <div
-              role="separator"
-              aria-label="Resize CAD components"
-              aria-orientation="vertical"
-              aria-valuemin={Math.round(minTreeWidth)}
-              aria-valuemax={Math.round(maxTreeWidth)}
-              aria-valuenow={Math.round(treeResize.width)}
-              aria-disabled={disabled}
-              tabIndex={disabled ? -1 : 0}
-              className={`absolute inset-y-0 -right-1 z-10 w-2 touch-none outline-none focus-visible:bg-ring/40 ${disabled ? "cursor-not-allowed" : "cursor-col-resize hover:bg-border/70"}`}
-              {...(disabled ? {} : treeResize.handlers)}
-              onPointerDown={(event) => {
-                if (disabled) return;
-                event.currentTarget.focus();
-                treeResize.handlers.onPointerDown(event);
-              }}
-              onKeyDown={(event) => {
-                if (disabled) return;
-                const step = event.shiftKey ? 40 : 10;
-                const next =
-                  event.key === "ArrowLeft"
-                    ? treeResize.width - step
-                    : event.key === "ArrowRight"
-                      ? treeResize.width + step
-                      : event.key === "Home"
-                        ? minTreeWidth
-                        : event.key === "End"
-                          ? maxTreeWidth
-                          : null;
-                if (next === null) return;
-                event.preventDefault();
-                treeResize.setWidth(next);
-              }}
-            />
-          )}
-        </Collapsible>
-      )}
     </div>
   );
 }
@@ -471,13 +526,16 @@ export function CadPanel({
   threadRef,
   fullscreen = false,
   compact = false,
+  titleSlot = null,
   onOpenComments,
 }: {
   project: Project;
   threadRef: ScopedThreadRef;
   fullscreen?: boolean;
   compact?: boolean;
-  onOpenComments?: (target?: { id: string; target: number }) => void;
+  /** The right panel's title row. The scene picker renders there when given, else in its own row. */
+  titleSlot?: HTMLElement | null;
+  onOpenComments?: (target?: { id: string; target: CadCommentLocation }) => void;
 }) {
   const state = useAtomValue(
     cadPanelEnvironment.watch({
@@ -505,6 +563,7 @@ export function CadPanel({
     ? commentState.value.captureViews
     : EMPTY_CAPTURE_VIEWS;
   const renderer = useRef<CadSceneRenderer | null>(null);
+  const openPath = useOpenInFileManager();
   const reviewKey = scopedThreadKey(threadRef);
   const { commentsOpen, selection, historicalView, savedCurrent, localFraming, localView } =
     useCadCommentReviewStore((state) => state.sessions[reviewKey] ?? EMPTY_CAD_PANEL_REVIEW);
@@ -547,7 +606,7 @@ export function CadPanel({
     useCadCommentReviewStore.getState().consume(threadRef);
   }, [compact, pendingReview, threadRef, updateReview]);
   const threads = useThreadShells();
-  const runBlocker = findCadProjectRunBlocker(project, threads, threadRef.threadId);
+  const runBlocker = findCadThreadRunBlocker(project, threads, threadRef.threadId);
   const save = useAtomCommand(cadPanelEnvironment.save, { reportFailure: false });
   const [error, setError] = useState<string | null>(null);
   const data = AsyncResult.isSuccess(state) ? state.value : null;
@@ -557,10 +616,10 @@ export function CadPanel({
   );
   const locked = !!runBlocker || data?.agentControlling || !!project.cad?.operation || !data;
   const lockStatus = cadPanelLockStatus({
-    threadId: threadRef.threadId,
     blocker: runBlocker,
     panel: data,
     operation: project.cad?.operation?.kind ?? null,
+    localCadFile: project.localCadSource?.filePath ?? null,
   });
   // Comments and history keep the viewer usable locally, so only a real lock gets the strip.
   const viewerLocked = locked && !commentsOpen && !historicalView;
@@ -604,7 +663,7 @@ export function CadPanel({
     setError(null);
     edits.select(next);
   };
-  const choose = (comment: CadComment, target: number) => {
+  const choose = (comment: CadComment, target: CadCommentLocation) => {
     if (onOpenComments) {
       onOpenComments({ id: comment.id, target });
       return;
@@ -674,49 +733,86 @@ export function CadPanel({
     }));
   };
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
+  const shownRootId = view?.rootId ?? data?.unavailableRootId ?? null;
+  const shownElementId = project.cad?.roots.find((root) => root.rootId === shownRootId)?.elementId;
+  // A local CAD project's catalog names each root by its file's path in the project folder.
+  const shownFile = project.localCadSource
+    ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
+    : undefined;
+  // The header row: the scene picker and, for a local CAD file, its Sync button.
+  const scenePicker = !compact && (
+    <>
+      <CadScenePicker
+        documentUrl={project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined}
+        openFile={
+          shownFile
+            ? {
+                // Its default app is SolidWorks wherever Cadsense can convert the file.
+                action: isSolidWorksFile(shownFile) ? "Open in SolidWorks" : "Open file",
+                onOpen: () =>
+                  void openPath(
+                    project.environmentId,
+                    resolvePathLinkTarget(shownFile, project.workspaceRoot),
+                    false,
+                  ).then((opened) => {
+                    if (!opened)
+                      toastManager.add({
+                        type: "error",
+                        title: `Could not open ${shownFile}`,
+                        description: "Check that the file is still in the project folder.",
+                      });
+                  }),
+              }
+            : undefined
+        }
+        scenes={roots.map((root) => {
+          const name =
+            project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
+            (root.kind === "assembly" ? "Assembly" : "Part Studio");
+          return {
+            id: root.rootId,
+            label: roots.some(
+              (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
+            )
+              ? `${name} · ${root.configuration}`
+              : name,
+          };
+        })}
+        selectedId={shownRootId}
+        disabled={locked || !!historicalView}
+        onSelect={(id) => {
+          const root = roots.find((root) => root.rootId === id);
+          if (root?.current)
+            void change({
+              rootId: root.rootId,
+              snapshotId: root.current.snapshotId,
+              revision: 0,
+              camera: { kind: "preset", preset: "isometric", fit: [] },
+              visibility: {},
+              isolatedOccurrenceIds: [],
+              explosion: 0,
+            });
+        }}
+      />
+      <CadLocalSyncButton
+        project={project}
+        rootId={shownRootId}
+        disabled={!!runBlocker || !!data?.agentControlling || !!historicalView}
+      />
+    </>
+  );
   return (
     <section
       aria-label="CAD panel"
       data-cad-agent-controlling={agentControl}
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      {!compact && (
-        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-          <CadScenePicker
-            documentUrl={
-              project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined
-            }
-            scenes={roots.map((root) => {
-              const name =
-                project.cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)
-                  ?.name ?? (root.kind === "assembly" ? "Assembly" : "Part Studio");
-              return {
-                id: root.rootId,
-                label: roots.some(
-                  (other) => other.rootId !== root.rootId && other.elementId === root.elementId,
-                )
-                  ? `${name} · ${root.configuration}`
-                  : name,
-              };
-            })}
-            selectedId={view?.rootId ?? data?.unavailableRootId ?? null}
-            disabled={locked || !!historicalView}
-            onSelect={(id) => {
-              const root = roots.find((root) => root.rootId === id);
-              if (root?.current)
-                void change({
-                  rootId: root.rootId,
-                  snapshotId: root.current.snapshotId,
-                  revision: 0,
-                  camera: { kind: "preset", preset: "isometric", fit: [] },
-                  visibility: {},
-                  isolatedOccurrenceIds: [],
-                  explosion: 0,
-                });
-            }}
-          />
-        </div>
-      )}
+      {scenePicker &&
+        (titleSlot ? (
+          createPortal(scenePicker, titleSlot)
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">{scenePicker}</div>
+        ))}
       {error && (
         <p role="alert" className="border-b px-3 py-2 text-xs text-destructive">
           {error}
@@ -756,6 +852,8 @@ export function CadPanel({
         !AsyncResult.isFailure(state) &&
         cadVisibleViewer.hasResident(threadRef.environmentId) ? (
         <PendingCadScene environmentId={threadRef.environmentId} />
+      ) : data && !data.unavailableRootId && !roots.length && project.localCadSource ? (
+        <CadFilePrompt project={project} />
       ) : (
         <div
           role="status"

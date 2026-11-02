@@ -23,6 +23,20 @@ import {
 } from "./CadSnapshotStore.ts";
 
 const bytes = new Uint8Array([1, 2, 3, 4]);
+// Only the RIFF/WEBP and JPEG signatures matter to the store.
+const webp = (fill: number) =>
+  new Uint8Array([
+    ...new TextEncoder().encode("RIFF"),
+    4,
+    0,
+    0,
+    0,
+    ...new TextEncoder().encode("WEBP"),
+    fill,
+  ]);
+const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]);
+const thumbnails = (dir: string) =>
+  Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "thumbnails")).then((n) => n.sort()));
 const firstId = "00000000-0000-4000-8000-000000000001";
 const secondId = "00000000-0000-4000-8000-000000000002";
 const root = Schema.decodeUnknownSync(CadSnapshotRoot)({
@@ -552,6 +566,94 @@ describe("CadSnapshotStore", () => {
         });
         assert.strictEqual((yield* Effect.flip(store.putAsset(bytes))).reason, "unavailable");
         assert.deepStrictEqual(yield* Effect.promise(() => NodeFSP.readdir(external)), []);
+      }),
+    ),
+  );
+});
+
+describe("CadSnapshotStore thumbnails", () => {
+  it.effect("keeps the first thumbnail of a published snapshot and ignores later uploads", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        yield* store.publish(yield* fixture(store));
+        yield* store.putThumbnail(firstId, webp(1));
+        // A second tab, or a client in another format, must not replace or add a thumbnail.
+        yield* store.putThumbnail(firstId, webp(2));
+        yield* store.putThumbnail(firstId, jpeg);
+        assert.deepStrictEqual(yield* thumbnails(dir), [`${firstId}.webp`]);
+        const saved = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(dir, "thumbnails", `${firstId}.webp`)),
+        );
+        assert.deepStrictEqual(Array.from(saved), Array.from(webp(1)));
+      }),
+    ),
+  );
+  it.effect("rejects thumbnails for unknown snapshots and bytes that are not a small image", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        assert.strictEqual(
+          (yield* Effect.flip(store.putThumbnail(firstId, webp(1)))).reason,
+          "unavailable",
+        );
+        yield* store.publish(yield* fixture(store));
+        assert.strictEqual(
+          (yield* Effect.flip(store.putThumbnail(firstId, new Uint8Array([137, 80, 78, 71]))))
+            .reason,
+          "corrupt",
+        );
+        const oversized = new Uint8Array(64 * 1024 + 1);
+        oversized.set(webp(1));
+        assert.strictEqual(
+          (yield* Effect.flip(store.putThumbnail(firstId, oversized))).reason,
+          "corrupt",
+        );
+        assert.deepStrictEqual(yield* thumbnails(dir), []);
+        yield* store.putThumbnail(firstId, jpeg);
+        assert.deepStrictEqual(yield* thumbnails(dir), [`${firstId}.jpg`]);
+      }),
+    ),
+  );
+  it.effect("republishing an unchanged snapshot keeps its thumbnail", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        const manifest = yield* fixture(store);
+        yield* store.publish(manifest);
+        yield* store.putThumbnail(firstId, webp(1));
+        yield* store.publish(manifest);
+        assert.deepStrictEqual(yield* thumbnails(dir), [`${firstId}.webp`]);
+      }),
+    ),
+  );
+  it.effect("removing a snapshot deletes its thumbnail and refuses later uploads for it", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        yield* store.publish(yield* fixture(store));
+        yield* store.publish(yield* fixture(store, secondId));
+        yield* store.putThumbnail(firstId, webp(1));
+        yield* store.putThumbnail(secondId, jpeg);
+        yield* store.remove([firstId], []);
+        assert.deepStrictEqual(yield* thumbnails(dir), [`${secondId}.jpg`]);
+        // A client still showing the superseded snapshot uploads late.
+        yield* Effect.flip(store.putThumbnail(firstId, webp(1)));
+        assert.deepStrictEqual(yield* thumbnails(dir), [`${secondId}.jpg`]);
+      }),
+    ),
+  );
+  it.effect("startup deletes thumbnails whose snapshot has no manifest", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        yield* store.publish(yield* fixture(store));
+        yield* store.putThumbnail(firstId, webp(1));
+        // Left by a crash between removing a manifest and its thumbnail.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(dir, "thumbnails", `${secondId}.webp`), webp(2)),
+        );
+        yield* make.pipe(
+          Effect.provideService(CadDiskSpace, {
+            availableBytes: () => Effect.succeed(CAD_DISK_RESERVE_BYTES * 2),
+          }),
+        );
+        assert.deepStrictEqual(yield* thumbnails(dir), [`${firstId}.webp`]);
       }),
     ),
   );

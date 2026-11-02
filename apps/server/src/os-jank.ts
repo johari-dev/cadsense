@@ -30,7 +30,15 @@ function hydratePosixPath(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): vo
   }
 
   const launchctlPath = platform === "darwin" && !shellPath ? readPathFromLaunchctl() : undefined;
-  const mergedPath = mergePathEntries(shellPath ?? launchctlPath, env.PATH, platform);
+  // The Codex and Claude install scripts put binaries in ~/.local/bin, which
+  // many login shells (stock macOS zsh) leave off PATH. Append it last so the
+  // user's own PATH order still wins.
+  const home = env.HOME?.trim();
+  const mergedPath = mergePathEntries(
+    mergePathEntries(shellPath ?? launchctlPath, env.PATH, platform),
+    home ? `${home}/.local/bin` : undefined,
+    platform,
+  );
   if (mergedPath) {
     env.PATH = mergedPath;
   }

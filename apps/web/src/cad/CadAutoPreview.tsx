@@ -12,6 +12,11 @@ import { useCadFloatingStore } from "./cadFloatingStore";
 import { cadActivityIndicator } from "./CadActivityIndicator";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 
+// Threads whose CAD panel was considered for auto-opening this session. The right panel
+// store drops a thread's state once it empties, so without this the panel could reopen
+// on a later view update or visit after the user moved away from it.
+const autoOpenedThreads = new Set<string>();
+
 /** Watch metadata even when CAD is closed; only mount the renderer when it is shown. */
 export function CadAutoPreview({
   project,
@@ -38,6 +43,14 @@ export function CadAutoPreview({
   const visible = useCadFloatingStore(
     (store) => store.byThread[scopedThreadKey(threadRef)]?.visible ?? false,
   );
+  useLayoutEffect(() => {
+    const key = scopedThreadKey(threadRef);
+    if (autoOpenedThreads.has(key)) return;
+    if (!data?.view || !project.cad?.roots.some((root) => root.current)) return;
+    autoOpenedThreads.add(key);
+    const panels = useRightPanelStore.getState();
+    if (!panels.byThreadKey[key]) panels.open(threadRef, "cad");
+  }, [data?.view, project.cad?.roots, threadRef]);
   const activityTurn = data?.agentActivityTurnId ?? null;
   const noticeRun = runId ?? activityTurn;
   useLayoutEffect(() => {

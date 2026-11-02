@@ -4,7 +4,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
+import {
+  CaretRightIcon as ChevronRight,
+  CodeIcon as Code2,
+  EyeIcon as Eye,
+  TreeStructureIcon as FolderTree,
+  GlobeIcon as Globe2,
+  CircleNotchIcon as LoaderCircle,
+  XIcon as X,
+} from "~/lib/icons";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -16,6 +24,7 @@ import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/path-links";
+import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -23,7 +32,6 @@ import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { assetEnvironment } from "~/state/assets";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
-import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
@@ -31,9 +39,11 @@ import FileBrowserPanel from "./FileBrowserPanel";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
-import { FileSaveCoordinator } from "./fileSaveCoordinator";
+import { EditableFileSurface, useFileSaveCoordinator } from "./EditableFileSurface";
+import { isFeatureScriptFile } from "~/featurescript/featureScriptFiles";
+
+import { FeatureScriptFile } from "./FeatureScriptFile";
 import {
-  confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
   setProjectFileQueryData,
   useProjectFileQuery,
@@ -48,6 +58,8 @@ interface FilePreviewPanelProps {
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
+  /** Leaves the open file and goes back to the file tree. */
+  onCloseFile: () => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
@@ -55,7 +67,6 @@ interface FilePreviewPanelProps {
 
 const FILE_EXPLORER_STORAGE_KEY = "cadsense.fileExplorerOpen";
 const RENDER_MARKDOWN_STORAGE_KEY = "cadsense.renderMarkdown";
-const FILE_SAVE_DEBOUNCE_MS = 500;
 
 function WorkspaceImagePreview(props: {
   readonly environmentId: EnvironmentId;
@@ -96,92 +107,6 @@ function WorkspaceImagePreview(props: {
     <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
       <LoaderCircle className="size-5 animate-spin" />
     </div>
-  );
-}
-
-function useFileSaveCoordinator(input: {
-  environmentId: EnvironmentId;
-  cwd: string;
-  relativePath: string;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
-}) {
-  const writeFile = useAtomCommand(projectEnvironment.writeFile);
-  const coordinator = useMemo(
-    () =>
-      new FileSaveCoordinator({
-        debounceMs: FILE_SAVE_DEBOUNCE_MS,
-        onPendingChange: (pending) => input.onPendingChange(input.relativePath, pending),
-        persist: (contents) =>
-          writeFile({
-            environmentId: input.environmentId,
-            input: { cwd: input.cwd, relativePath: input.relativePath, contents },
-          }),
-        onConfirmed: (contents) =>
-          confirmProjectFileQueryData(input.environmentId, input.cwd, input.relativePath, contents),
-      }),
-    [input.cwd, input.environmentId, input.onPendingChange, input.relativePath, writeFile],
-  );
-  useEffect(() => () => coordinator.dispose(), [coordinator]);
-  return coordinator;
-}
-
-function lineOffset(contents: string, line: number): number {
-  if (line <= 1) return 0;
-  let cursor = 0;
-  for (let currentLine = 1; currentLine < line; currentLine += 1) {
-    const next = contents.indexOf("\n", cursor);
-    if (next < 0) return contents.length;
-    cursor = next + 1;
-  }
-  return cursor;
-}
-
-function EditableFileSurface(props: {
-  environmentId: EnvironmentId;
-  cwd: string;
-  relativePath: string;
-  contents: string;
-  revealLine: number | null;
-  revealRequestId: number;
-  wordWrap: boolean;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
-}) {
-  const [contents, setContents] = useState(props.contents);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const save = useFileSaveCoordinator(props);
-  useEffect(() => setContents(props.contents), [props.contents, props.relativePath]);
-  useEffect(() => {
-    if (props.revealLine === null) return;
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const offset = lineOffset(contents, props.revealLine);
-    textarea.focus({ preventScroll: true });
-    textarea.setSelectionRange(offset, offset);
-    const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 20;
-    textarea.scrollTop = Math.max(
-      0,
-      (props.revealLine - 1) * lineHeight - textarea.clientHeight / 2,
-    );
-  }, [contents, props.revealLine, props.revealRequestId]);
-
-  return (
-    <textarea
-      ref={textareaRef}
-      aria-label={`Edit ${props.relativePath}`}
-      className={cn(
-        "min-h-0 flex-1 resize-none border-0 bg-code-background p-4 font-mono text-code-foreground outline-none",
-        props.wordWrap ? "whitespace-pre-wrap" : "whitespace-pre overflow-x-auto",
-      )}
-      spellCheck={false}
-      value={contents}
-      wrap={props.wordWrap ? "soft" : "off"}
-      onChange={(event) => {
-        const next = event.currentTarget.value;
-        setContents(next);
-        setProjectFileQueryData(props.environmentId, props.cwd, props.relativePath, next);
-        save.change(next);
-      }}
-    />
   );
 }
 
@@ -268,7 +193,20 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
     null,
   );
   const breadcrumbRef = useRef<HTMLDivElement>(null);
+  const [featureScriptHeader, setFeatureScriptHeader] = useState<HTMLDivElement | null>(null);
   const isMarkdown = props.relativePath ? isMarkdownPreviewFile(props.relativePath) : false;
+  // Decided once per opened file, so editing the header doesn't swap the editor out mid-keystroke.
+  const [featureScript, setFeatureScript] = useState<{ path: string; is: boolean } | null>(null);
+  if (
+    props.relativePath &&
+    file.data?.relativePath === props.relativePath &&
+    featureScript?.path !== props.relativePath
+  )
+    setFeatureScript({
+      path: props.relativePath,
+      is: isFeatureScriptFile(props.relativePath, file.data.contents),
+    });
+  const isFeatureScript = featureScript?.path === props.relativePath && featureScript.is;
   const renderMarkdown =
     isMarkdown &&
     renderMarkdownPreferred &&
@@ -373,6 +311,9 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
               ))}
             </div>
           </ScrollArea>
+          {isFeatureScript ? (
+            <div ref={setFeatureScriptHeader} className="flex shrink-0 items-center gap-1.5" />
+          ) : null}
           {absolutePath ? (
             <OpenInExplorerButton environmentId={props.environmentId} path={absolutePath} reveal />
           ) : null}
@@ -439,6 +380,22 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
               {explorerOpen ? "Hide file explorer" : "Show file explorer"}
             </TooltipPopup>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label="Close file"
+                  className="text-muted-foreground hover:text-foreground"
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={props.onCloseFile}
+                />
+              }
+            >
+              <X className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup>Close file</TooltipPopup>
+          </Tooltip>
         </div>
       ) : null}
       {props.relativePath && file.data?.truncated ? (
@@ -470,7 +427,21 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
               <LoaderCircle className="size-5 animate-spin" />
             </div>
           ) : props.relativePath && file.data ? (
-            isMarkdown && renderMarkdown ? (
+            isFeatureScript && !file.data.truncated ? (
+              <FeatureScriptFile
+                key={props.relativePath}
+                environmentId={props.environmentId}
+                cwd={props.cwd}
+                relativePath={props.relativePath}
+                threadRef={props.threadRef}
+                contents={file.data.contents}
+                revealLine={props.revealLine}
+                revealRequestId={props.revealRequestId}
+                wordWrap={wordWrap}
+                onPendingChange={props.onPendingChange}
+                headerSlot={featureScriptHeader}
+              />
+            ) : isMarkdown && renderMarkdown ? (
               <RenderedMarkdownSurface
                 environmentId={props.environmentId}
                 cwd={props.cwd}
