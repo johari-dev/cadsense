@@ -40,6 +40,13 @@ export const defaultCadRoot = <
   );
 };
 
+/**
+ * Serialized budget for one page of a paged CAD tool result. It stays well under Claude's MCP
+ * output limit, because Claude saves a larger result to a file that the agent can only read with a
+ * shell command waiting on a permission prompt.
+ */
+export const CAD_TOOL_PAGE_BYTES = 32 * 1024;
+
 /** Decodes agent input, returning the schema's field errors so the agent can correct and retry. */
 export const decodeCadToolInput = <S extends Schema.Top>(schema: S, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input, { errors: "all" }).pipe(
