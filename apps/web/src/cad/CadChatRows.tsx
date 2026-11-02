@@ -327,9 +327,10 @@ export function CadPartDrawings({
           Open drawing
         </button>
       </div>
-      {listed.map((sheet) => (
+      {/* Mirrored or reworked parts can share a name, so a row's place is its key. */}
+      {listed.map((sheet, index) => (
         <button
-          key={sheet.name}
+          key={index}
           type="button"
           className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
           onClick={open}
