@@ -1,7 +1,10 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
-import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
+import {
+  SidebarSimpleIcon as PanelLeftCloseIcon,
+  SidebarSimpleIcon as PanelLeftIcon,
+} from "~/lib/icons";
 import * as React from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
@@ -95,6 +98,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  collapsedLayout = "offcanvas",
   className,
   style,
   children,
@@ -103,6 +107,12 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * How the collapsed sidebar renders, matching the Sidebar's `collapsible`. A collapsed icon
+   * rail still takes room at the left, so the wrapper reports `data-sidebar-state="rail"`
+   * and titlebars skip the inset they keep clear of the floating sidebar toggle.
+   */
+  collapsedLayout?: "offcanvas" | "icon";
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
@@ -160,7 +170,10 @@ function SidebarProvider({
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
-        data-sidebar-state={state}
+        data-sidebar-state={
+          // Mobile renders the sidebar as a sheet, so a closed one leaves no rail behind.
+          state === "collapsed" && collapsedLayout === "icon" && !isMobile ? "rail" : state
+        }
         data-slot="sidebar-wrapper"
         style={
           {
@@ -281,7 +294,9 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-150 ease-out motion-reduce:transition-none",
+            // Same duration and easing as the right panel's width (PreviewPanelShell), which takes
+            // back the width the folded rail frees, so the chat column slides as one piece.
+            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -292,7 +307,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-150 ease-out motion-reduce:transition-none",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -813,7 +828,8 @@ const sidebarMenuButtonVariants = cva(
         sm: "h-7 rounded-lg p-2 text-xs",
       },
       variant: {
-        default: "font-medium text-sidebar-muted-foreground/80",
+        // Available items use the secondary tier; only disabled items (opacity-50) read dim.
+        default: "font-medium text-sidebar-muted-foreground",
         outline: "bg-sidebar-control-surface ring-1 ring-sidebar-border",
       },
     },

@@ -63,11 +63,58 @@ const project = {
   }),
   environmentId: EnvironmentId.make("test"),
 };
+const solidWorksElement = "d".repeat(24);
+const stepElement = "e".repeat(24);
+const snapshot = {
+  snapshotId: "00000000-0000-4000-8000-000000000002",
+  microversionId: "f".repeat(24),
+  createdAt: "2026-09-05T00:00:00Z",
+  manifestBytes: 1,
+  assetBytes: 1,
+};
+/** A local project linking a SolidWorks assembly, imported in its default and NPD-16 configurations. */
+const solidWorksProject = {
+  ...Schema.decodeUnknownSync(OrchestrationProjectShell)({
+    id: "cad-ui-local",
+    title: "Pillow",
+    workspaceRoot: "C:/cad-ui-local",
+    defaultModelSelection: null,
+    createdAt: "2026-09-05T00:00:00Z",
+    updatedAt: "2026-09-05T00:00:00Z",
+    localCadSource: { filePath: "cad/pillow_block.sldasm" },
+    cad: {
+      enabled: true,
+      roots: ["default", "NPD-16"].map((configuration, index) => ({
+        rootId: String(index + 1).repeat(64),
+        elementId: solidWorksElement,
+        kind: "assembly",
+        configuration,
+        current: snapshot,
+        rollback: null,
+        lastOutcome: null,
+      })),
+      operation: null,
+      lastOutcome: null,
+      catalog: {
+        refreshedAt: "2026-09-05T00:00:00Z",
+        microversionId: "b".repeat(24),
+        roots: [
+          { elementId: solidWorksElement, name: "cad/pillow_block.sldasm", kind: "assembly" },
+          { elementId: stepElement, name: "cad/frame.step", kind: "assembly" },
+        ],
+        sourceElement: { elementId: solidWorksElement, status: "available" },
+      },
+    },
+  }),
+  environmentId: EnvironmentId.make("test"),
+};
 interface Props {
   children?: ReactNode;
   control?: ReactNode;
   onClick?: () => void;
   onValueChange?: (value: string) => void;
+  onChange?: (event: { target: { value: string } }) => void;
+  placeholder?: string;
   disabled?: boolean;
 }
 const find = (tree: ReactNode, predicate: (props: Props) => boolean): Props[] => {
@@ -164,6 +211,61 @@ describe("manual CAD project controls", () => {
     }
     expect(commands.start).not.toHaveBeenCalled();
     expect(commands.enabled).not.toHaveBeenCalled();
+  });
+  it("offers a configuration for a SolidWorks file only, and imports in it", async () => {
+    const configurationInput = () =>
+      find(render(false, solidWorksProject), (props) => props.placeholder === "default")[0];
+    const choose = (elementId: string) =>
+      find(render(false, solidWorksProject), (props) => props.onValueChange !== undefined)[0]!
+        .onValueChange!(elementId);
+    // Each import waits for the last one's admission, as the settings do.
+    const importNow = async () => {
+      button("Import", false, solidWorksProject).onClick!();
+      await commands.start.mock.results.at(-1)!.value;
+    };
+    const imported = (elementId: string, configuration: string) => ({
+      environmentId: solidWorksProject.environmentId,
+      input: {
+        projectId: solidWorksProject.id,
+        kind: "sync",
+        root: { elementId, kind: "assembly", configuration },
+      },
+    });
+
+    // STEP and IGES files have no configurations.
+    choose(stepElement);
+    expect(configurationInput()).toBeUndefined();
+    await importNow();
+    expect(commands.start).toHaveBeenLastCalledWith(imported(stepElement, "default"));
+
+    choose(solidWorksElement);
+    configurationInput()!.onChange!({ target: { value: "NPD-20" } });
+    await importNow();
+    expect(commands.start).toHaveBeenLastCalledWith(imported(solidWorksElement, "NPD-20"));
+
+    // A configuration typed for a SolidWorks file does not follow the choice to a STEP file.
+    choose(stepElement);
+    await importNow();
+    expect(commands.start).toHaveBeenLastCalledWith(imported(stepElement, "default"));
+  });
+  it("tells a SolidWorks file's configurations apart and syncs each in its own", () => {
+    const tree = render(false, solidWorksProject);
+    const configurationLines = find(
+      tree,
+      (props) => Array.isArray(props.children) && props.children[0] === "Configuration: ",
+    ).flatMap((props) => (Array.isArray(props.children) ? [props.children[1]] : []));
+    expect(configurationLines).toEqual(["default", "NPD-16"]);
+    // Only the linked file's default configuration is the project's default.
+    expect(find(tree, (props) => props.children === "Default")).toHaveLength(1);
+    find(tree, (props) => props.children === "Sync")[1]!.onClick!();
+    expect(commands.start).toHaveBeenCalledExactlyOnceWith({
+      environmentId: solidWorksProject.environmentId,
+      input: {
+        projectId: solidWorksProject.id,
+        kind: "sync",
+        root: { elementId: solidWorksElement, kind: "assembly", configuration: "NPD-16" },
+      },
+    });
   });
   it("turns CAD off without invoking a sync and permits re-enabling retained data", async () => {
     button("Turn off CAD").onClick!();

@@ -1,8 +1,19 @@
 import { scopedProjectKey, scopeProjectRef } from "@cadsense/client-runtime/environment";
 import type { ScopedProjectRef } from "@cadsense/contracts";
-import { FolderPlusIcon } from "lucide-react";
+import {
+  CaretDownIcon,
+  CubeIcon,
+  FolderPlusIcon,
+  ScanIcon,
+  StackIcon,
+  PencilSimpleIcon,
+} from "~/lib/icons";
 import { useCallback, useMemo } from "react";
 
+import { Button } from "../ui/button";
+import { singleCadModelName } from "~/cad/cadModelName";
+import { useModelThumbnail } from "~/cad/modelThumbnails";
+import type { Project } from "~/types";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useProjects } from "~/state/entities";
@@ -17,14 +28,43 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
+/** Prompts the hero offers as one-click starts. The first is the suggested one. */
+const STARTING_TASKS = [
+  {
+    label: "Review the design",
+    icon: ScanIcon,
+    prompt:
+      "Review this design and identify details that need attention. Explain your findings and reference the relevant parts.",
+  },
+  {
+    label: "Explore the assembly",
+    icon: StackIcon,
+    prompt:
+      "Walk me through this assembly and explain how its main components fit and work together.",
+  },
+  {
+    label: "Plan a change",
+    icon: PencilSimpleIcon,
+    prompt:
+      "Help me plan a design change. Start by asking what I want to change and what constraints matter.",
+  },
+] as const;
+
 interface DraftHeroHeadlineProps {
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
+  readonly onChooseTask: (prompt: string) => void;
 }
 
+/**
+ * The draft hero above the composer: a headline whose project name opens a project
+ * switcher, a one-line lede, and the starting tasks. Other projects live in the sidebar
+ * and the switcher, so the hero does not repeat them.
+ */
 export function DraftHeroHeadline({
   activeProjectRef,
   activeProjectTitle,
+  onChooseTask,
 }: DraftHeroHeadlineProps) {
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
@@ -45,6 +85,7 @@ export function DraftHeroHeadline({
     [orderedProjects],
   );
   const canChooseProject = orderedProjects.length > 0;
+  const activeProject = projectByKey.get(activeProjectKey);
 
   const projectSelector = canChooseProject ? (
     <Menu>
@@ -53,11 +94,12 @@ export function DraftHeroHeadline({
           render={
             <MenuTrigger
               aria-label={activeProjectTitle ? "Change project" : "Choose a project"}
-              className="pointer-events-auto inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              className="pointer-events-auto -mx-1.5 inline-flex max-w-80 cursor-pointer items-baseline gap-1 rounded-lg px-1.5 align-baseline text-foreground transition-colors hover:bg-accent data-popup-open:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >
-          {activeProjectTitle ?? "Choose a project"}
+          <span className="min-w-0 truncate">{activeProjectTitle ?? "Choose a project"}</span>
+          <CaretDownIcon className="size-5 shrink-0 self-center text-muted-foreground" />
         </TooltipTrigger>
         {activeProjectTitle ? <TooltipPopup side="top">{activeProjectTitle}</TooltipPopup> : null}
       </Tooltip>
@@ -96,21 +138,79 @@ export function DraftHeroHeadline({
     <button
       type="button"
       onClick={openAddProject}
-      className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className="pointer-events-auto inline cursor-pointer rounded-lg px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
       Add a project
     </button>
   );
 
   return (
-    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+    <div className="mx-auto w-full max-w-3xl text-center">
+      {activeProject?.cad?.enabled ? <ProjectModelPreview project={activeProject} /> : null}
+      <h1 className="font-semibold text-[26px] text-foreground leading-8 tracking-tight">
+        {activeProjectTitle ? (
+          projectSelector
+        ) : canChooseProject ? (
+          <>{projectSelector} to begin</>
+        ) : (
+          <>Start with a project</>
+        )}
+      </h1>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Review the model, inspect parts, or plan a change.
+      </p>
       {activeProjectTitle ? (
-        <>What should we build in {projectSelector}?</>
-      ) : canChooseProject ? (
-        <>{projectSelector} to start</>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
+            <Button
+              key={label}
+              // One 36px size for all three. The first task is the suggested start; the
+              // others sit beside it as bordered secondary actions.
+              variant={index === 0 ? "default" : "outline"}
+              size="lg"
+              onClick={() => onChooseTask(prompt)}
+              className="pointer-events-auto"
+            >
+              <Icon className="size-4" />
+              {label}
+            </Button>
+          ))}
+        </div>
       ) : (
-        <>Add a project to start</>
+        <div className="mt-4">{projectSelector}</div>
       )}
-    </h1>
+    </div>
+  );
+}
+
+/**
+ * The active project's model above the headline: the thumbnail the server saved when the CAD
+ * panel first rendered this snapshot, otherwise a viewport-colored tile with the model's name.
+ * Never loads CAD just to draw it.
+ */
+function ProjectModelPreview({ project }: { readonly project: Project }) {
+  const snapshotId = project.cad?.roots.find((root) => root.current)?.current?.snapshotId;
+  const thumbnail = useModelThumbnail(project.environmentId, snapshotId).url;
+  const modelName = singleCadModelName(project.cad);
+
+  return (
+    <div
+      aria-hidden
+      className="mx-auto mb-6 flex h-33 w-44 flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-(--cad-viewport-background) shadow-sm"
+    >
+      {thumbnail ? (
+        // Thumbnails are square on the viewport color, so `contain` blends into the tile.
+        <img src={thumbnail} alt="" className="size-full object-contain" />
+      ) : (
+        <>
+          <CubeIcon className="size-8 text-tertiary-foreground" weight="thin" />
+          {modelName ? (
+            <span className="max-w-full truncate px-3 text-muted-foreground text-xs">
+              {modelName}
+            </span>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }

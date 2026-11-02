@@ -349,6 +349,9 @@ export function projectEvent(
                         },
                       }
                     : {}),
+                  ...(payload.localCadSource !== undefined
+                    ? { localCadSource: payload.localCadSource }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
@@ -592,6 +595,26 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.message-rating-set": {
+      // A rating is not thread activity, so it leaves both updatedAt stamps alone.
+      const { threadId, messageId, rating } = event.payload;
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) =>
+          thread.id !== threadId
+            ? thread
+            : {
+                ...thread,
+                messages: thread.messages.map((message) => {
+                  if (message.id !== messageId) return message;
+                  const { rating: _previous, ...unrated } = message;
+                  return rating === null ? unrated : { ...unrated, rating };
+                }),
+              },
+        ),
+      });
+    }
 
     case "thread.session-set":
       return Effect.gen(function* () {

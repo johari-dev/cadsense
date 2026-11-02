@@ -9,6 +9,7 @@
 import {
   CadProjectState,
   IsoDateTime,
+  LocalCadProjectSource,
   ModelSelection,
   OnshapeProjectSource,
   ProjectId,
@@ -26,6 +27,8 @@ export const ProjectionProject = Schema.Struct({
   workspaceRoot: Schema.String,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   onshapeSource: Schema.NullOr(OnshapeProjectSource),
+  // Optional so rows written before local CAD projects decode; absent and null both mean none.
+  localCadSource: Schema.optionalKey(Schema.NullOr(LocalCadProjectSource)),
   cad: Schema.optionalKey(Schema.NullOr(CadProjectState)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

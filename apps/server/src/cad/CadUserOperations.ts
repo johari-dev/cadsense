@@ -1,8 +1,10 @@
 import {
   CadSnapshotManifest,
   CadUserOperationError,
+  LocalCadError,
   OnshapeConnectionError,
   CommandId,
+  isSolidWorksFile,
   type CadRootIdentity,
   type CadUserStartInput,
   type ProjectId,
@@ -28,6 +30,10 @@ import { snapshotRootId } from "../onshape/OnshapeSnapshotManifest.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
 import { CadGeometryError } from "./CadGeometry.ts";
+import { localCadElementId, localCadRootIdentity } from "../localCad/LocalCadFiles.ts";
+import { LocalCadImport, LocalCadImportError } from "../localCad/LocalCadImport.ts";
+import type { DailyCounter } from "../telemetry/AnalyticsEvents.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 /** Implementations confirm native process exit while the project's durable reservation is held. */
 export class CadProjectQuiescence extends Context.Service<
@@ -62,9 +68,76 @@ const isCadSnapshotStoreError = Schema.is(CadSnapshotStoreError);
 const isCadUserOperationError = Schema.is(CadUserOperationError);
 const isCadGeometryError = Schema.is(CadGeometryError);
 const isOnshapeExportError = Schema.is(OnshapeExportError);
-const failureReason = (error: unknown): string => {
+const isLocalCadError = Schema.is(LocalCadError);
+const isLocalCadImportError = Schema.is(LocalCadImportError);
+/** `CadOperationOutcome.reason`'s maximum length. */
+const MAX_OUTCOME_REASON_LENGTH = 256;
+const failureReason = (error: unknown, source: "onshape" | "local"): string => {
   let detail = "CAD operation failed.";
-  if (isCadGeometryError(error) && error.reason === "too-large")
+  if (isLocalCadError(error)) {
+    switch (error.reason) {
+      case "file-not-found":
+        detail = "The CAD file is no longer in the project folder.";
+        break;
+      case "folder-not-found":
+        detail = "The project folder is missing.";
+        break;
+      case "outside-folder":
+        detail = "The CAD file now resolves outside the project folder.";
+        break;
+      default:
+        detail = error.message;
+    }
+  } else if (isLocalCadImportError(error)) {
+    switch (error.reason) {
+      case "too-large":
+        detail = "This CAD file is over the 512 MiB import limit.";
+        break;
+      case "unreadable":
+        detail = "Could not read this CAD file. Check that it is a valid STEP or IGES export.";
+        break;
+      case "no-geometry":
+        detail = "This CAD file has no solid geometry to show.";
+        break;
+      case "no-file-list":
+        detail =
+          "Could not read which parts this assembly uses. Save it in SolidWorks 2015 or later.";
+        break;
+      case "missing-files": {
+        const missing = error.missing ?? [];
+        const named = missing.slice(0, 5).join(", ");
+        detail = `This assembly uses files that are not in the project folder: ${named}${
+          missing.length > 5 ? `, and ${missing.length - 5} more` : ""
+        }. Add them, then Sync.`;
+        break;
+      }
+      case "solidworks-unavailable":
+        detail =
+          "Opening SolidWorks files needs SolidWorks installed on this computer. Install it, or save a STEP copy from SolidWorks and pick that.";
+        break;
+      case "solidworks-file-open":
+        detail = `Close ${(error.missing ?? []).slice(0, 5).join(", ")} in SolidWorks, then Sync. SolidWorks cannot open two files with the same name.`;
+        break;
+      case "solidworks-failed":
+        detail = `SolidWorks could not convert this file.${error.detail ? ` ${error.detail}` : ""}`;
+        break;
+      case "solidworks-timeout":
+        detail = "SolidWorks took more than 30 minutes to convert this file.";
+        break;
+      case "solidworks-no-configuration": {
+        const asked = error.configuration;
+        const available = asked?.available ?? [];
+        detail = `${asked?.file ?? "This file"} has no configuration named "${asked?.requested ?? ""}".${
+          available.length > 0
+            ? ` Its configurations are ${available.slice(0, 5).join(", ")}${
+                available.length > 5 ? `, and ${available.length - 5} more` : ""
+              }.`
+            : ""
+        }`;
+        break;
+      }
+    }
+  } else if (isCadGeometryError(error) && error.reason === "too-large")
     detail = "This CAD exceeds the supported scene size. Choose a smaller assembly or part studio.";
   else if (isOnshapeExportError(error)) {
     switch (error.reason) {
@@ -115,7 +188,50 @@ const failureReason = (error: unknown): string => {
     }
   } else if (isCadUserOperationError(error) && error.reason === "busy")
     detail = "Native agent shutdown could not be confirmed. Stop active runs before trying again.";
-  return `${detail} Existing downloaded CAD is unchanged.`;
+  const suffix = ` Existing ${source === "local" ? "imported" : "downloaded"} CAD is unchanged.`;
+  // The outcome schema caps reasons, and a reason that does not fit cannot be recorded at all.
+  const room = MAX_OUTCOME_REASON_LENGTH - suffix.length;
+  return `${detail.length > room ? `${detail.slice(0, room - 1).trimEnd()}…` : detail}${suffix}`;
+};
+
+const ONSHAPE_FAILURE_COUNTER = {
+  OnshapeInvalidCredentialsError: "cad_import_errors_onshape_auth",
+  OnshapeInsufficientPermissionsError: "cad_import_errors_onshape_auth",
+  OnshapeConnectionNotFoundError: "cad_import_errors_onshape_auth",
+  OnshapeInvalidHostError: "cad_import_errors_onshape_auth",
+  OnshapeAnnualQuotaExceededError: "cad_import_errors_onshape_limit",
+  OnshapeRateLimitError: "cad_import_errors_onshape_limit",
+  OnshapeVerificationThrottledError: "cad_import_errors_onshape_limit",
+  OnshapeNetworkError: "cad_import_errors_onshape_network",
+  OnshapeResponseError: "cad_import_errors_onshape_network",
+  OnshapeRedirectError: "cad_import_errors_onshape_network",
+  OnshapeConnectionConflictError: "cad_import_errors_other",
+  OnshapeConnectionPersistenceError: "cad_import_errors_other",
+} as const satisfies Record<OnshapeConnectionError["_tag"], DailyCounter>;
+
+const LOCAL_IMPORT_FAILURE_COUNTER = {
+  "too-large": "cad_import_errors_too_large",
+  unreadable: "cad_import_errors_file",
+  "no-geometry": "cad_import_errors_file",
+  "no-file-list": "cad_import_errors_file",
+  "missing-files": "cad_import_errors_file",
+  "solidworks-unavailable": "cad_import_errors_solidworks",
+  "solidworks-file-open": "cad_import_errors_solidworks",
+  "solidworks-failed": "cad_import_errors_solidworks",
+  "solidworks-timeout": "cad_import_errors_solidworks",
+  "solidworks-no-configuration": "cad_import_errors_solidworks",
+} as const satisfies Record<LocalCadImportError["reason"], DailyCounter>;
+
+/** The `cad_import_errors_*` counter for the error that stopped an import (see `failureReason`). */
+const failureCounter = (error: unknown): DailyCounter => {
+  if (isLocalCadError(error)) return "cad_import_errors_file";
+  if (isLocalCadImportError(error)) return LOCAL_IMPORT_FAILURE_COUNTER[error.reason];
+  if (isCadGeometryError(error) && error.reason === "too-large")
+    return "cad_import_errors_too_large";
+  if (isOnshapeExportError(error)) return "cad_import_errors_onshape_export";
+  if (isCadSnapshotStoreError(error)) return "cad_import_errors_storage";
+  if (isOnshapeConnectionError(error)) return ONSHAPE_FAILURE_COUNTER[error._tag];
+  return "cad_import_errors_other";
 };
 
 /** Only user RPC handlers receive this service. Accepted jobs outlive route and socket changes. */
@@ -125,8 +241,10 @@ export const make = Effect.gen(function* () {
   const store = yield* CadSnapshotStore;
   const roots = yield* OnshapeCadRoots;
   const acquisition = yield* OnshapeSnapshotAcquisition;
+  const local = yield* LocalCadImport;
   const quiescence = yield* CadProjectQuiescence;
   const crypto = yield* Crypto.Crypto;
+  const analytics = yield* AnalyticsService;
   const scope = yield* Scope.Scope;
   const jobs = new Map<string, { projectId: ProjectId; fiber: Fiber.Fiber<void> }>();
   const prune = (projectId?: ProjectId) =>
@@ -139,9 +257,16 @@ export const make = Effect.gen(function* () {
     CommandId.make(`server:cad:${operationId}:${phase}`);
   const getProject = Effect.fn(function* (projectId: ProjectId) {
     const result = yield* query.getProjectShellById(projectId).pipe(Effect.mapError(failed));
-    if (Option.isNone(result) || !result.value.onshapeSource)
-      return yield* new CadUserOperationError({ reason: "not-found" });
-    return { project: result.value, source: result.value.onshapeSource };
+    if (Option.isNone(result)) return yield* new CadUserOperationError({ reason: "not-found" });
+    const project = result.value;
+    if (project.onshapeSource)
+      return { project, source: { kind: "onshape" as const, source: project.onshapeSource } };
+    if (project.localCadSource)
+      return {
+        project,
+        source: { kind: "local" as const, filePath: project.localCadSource.filePath },
+      };
+    return yield* new CadUserOperationError({ reason: "not-found" });
   });
   const start = Effect.fn("CadUserOperations.start")(function* (input: CadUserStartInput) {
     const { project, source } = yield* getProject(input.projectId);
@@ -151,31 +276,54 @@ export const make = Effect.gen(function* () {
     )
       return yield* new CadUserOperationError({ reason: "throttled" });
     let root: CadRootIdentity | null = null;
+    // The file a local sync imports. The catalog names roots by workspace-relative path.
+    let localFilePath: string | null = null;
     if (input.kind === "sync") {
       const selected = input.root;
-      const available =
-        project.cad?.catalog?.roots.some(
-          (entry) => entry.elementId === selected.elementId && entry.kind === selected.kind,
-        ) ||
-        project.cad?.roots.some(
-          (entry) => entry.elementId === selected.elementId && entry.kind === selected.kind,
-        );
-      if (!available) return yield* new CadUserOperationError({ reason: "invalid-root" });
-      const configuration = selected.configuration || "default";
-      root = {
-        ...selected,
-        configuration,
-        rootId: snapshotRootId({
-          host: source.host,
-          documentId: source.documentId,
-          originalRevision: { kind: source.workspaceType, id: source.workspaceId },
-          elementId: selected.elementId,
+      if (source.kind === "local") {
+        localFilePath =
+          selected.elementId === localCadElementId(source.filePath)
+            ? source.filePath
+            : (project.cad?.catalog?.roots.find((entry) => entry.elementId === selected.elementId)
+                ?.name ?? null);
+        // Each SolidWorks configuration is a root of its own. STEP and IGES have only "default".
+        const configuration = selected.configuration || "default";
+        if (
+          localFilePath === null ||
+          selected.kind !== "assembly" ||
+          (configuration !== "default" && !isSolidWorksFile(localFilePath))
+        )
+          return yield* new CadUserOperationError({ reason: "invalid-root" });
+        root = {
+          ...selected,
           configuration,
-        }),
-      };
+          rootId: snapshotRootId(localCadRootIdentity(project.id, localFilePath, configuration)),
+        };
+      } else {
+        const available =
+          project.cad?.catalog?.roots.some(
+            (entry) => entry.elementId === selected.elementId && entry.kind === selected.kind,
+          ) ||
+          project.cad?.roots.some(
+            (entry) => entry.elementId === selected.elementId && entry.kind === selected.kind,
+          );
+        if (!available) return yield* new CadUserOperationError({ reason: "invalid-root" });
+        const configuration = selected.configuration || "default";
+        root = {
+          ...selected,
+          configuration,
+          rootId: snapshotRootId({
+            host: source.source.host,
+            documentId: source.source.documentId,
+            originalRevision: { kind: source.source.workspaceType, id: source.source.workspaceId },
+            elementId: selected.elementId,
+            configuration,
+          }),
+        };
+      }
     }
     const operationId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(failed));
-    return yield* Effect.uninterruptibleMask((restore) =>
+    return yield* Effect.uninterruptible(
       Effect.gen(function* () {
         yield* engine
           .dispatch({
@@ -194,7 +342,13 @@ export const make = Effect.gen(function* () {
           yield* store.checkReserve();
           yield* quiescence.confirm(input.projectId);
           if (input.kind === "discover") {
-            const catalog = yield* roots.discover(source, store.checkReserve());
+            const catalog =
+              source.kind === "local"
+                ? yield* local.catalog({
+                    workspaceRoot: project.workspaceRoot,
+                    defaultFilePath: source.filePath,
+                  })
+                : yield* roots.discover(source.source, store.checkReserve());
             yield* engine.dispatch({
               type: "project.cad.operation.complete",
               commandId: commandId(operationId, "complete"),
@@ -206,11 +360,31 @@ export const make = Effect.gen(function* () {
               },
             });
           } else {
-            const manifest = yield* acquisition.acquire({
-              projectId: input.projectId,
-              source,
-              root: input.root,
-            });
+            const manifest =
+              source.kind === "onshape"
+                ? yield* acquisition.acquire({
+                    projectId: input.projectId,
+                    source: source.source,
+                    root: input.root,
+                  })
+                : yield* local.acquire({
+                    projectId: input.projectId,
+                    workspaceRoot: project.workspaceRoot,
+                    filePath: localFilePath ?? source.filePath,
+                    configuration: root?.configuration ?? "default",
+                  });
+            // A rescan is free, so local syncs keep the file list current. Its failure is not the
+            // sync's failure.
+            const catalog =
+              source.kind === "local"
+                ? yield* local
+                    .catalog({
+                      workspaceRoot: project.workspaceRoot,
+                      defaultFilePath: source.filePath,
+                    })
+                    .pipe(Effect.option)
+                : Option.none();
+            const refreshedAt = DateTime.formatIso(yield* DateTime.now);
             yield* engine.dispatch({
               type: "project.cad.operation.complete",
               commandId: commandId(operationId, "complete"),
@@ -229,22 +403,42 @@ export const make = Effect.gen(function* () {
                     ).values(),
                   ].reduce((total, size) => total + size, 0),
                 },
+                ...(Option.isSome(catalog) ? { catalog: { ...catalog.value, refreshedAt } } : {}),
               },
             });
           }
           completed = true;
         }).pipe(
+          // Only the work is cancellable. The fiber starts uninterruptible, so the outcome handler
+          // below is in place even when a cancel lands before the fiber's first step.
+          Effect.interruptible,
           Effect.onExit((exit) =>
             Effect.gen(function* () {
               jobs.delete(operationId);
-              if (completed) {
-                yield* prune(input.projectId);
-                return;
-              }
               const cancelled = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
               const error = Exit.isFailure(exit)
                 ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
                 : undefined;
+              // Syncs are imports; discovering the file or document list isn't counted.
+              if (input.kind === "sync" && !cancelled) {
+                if (completed)
+                  yield* analytics.count(
+                    source.kind === "onshape" ? "cad_imports_onshape" : "cad_imports_local",
+                  );
+                else {
+                  yield* analytics.count("cad_imports_failed");
+                  yield* analytics.count(failureCounter(error));
+                }
+              }
+              if (completed) {
+                yield* prune(input.projectId);
+                return;
+              }
+              // The outcome's reason is written for people; the log keeps the cause.
+              if (Exit.isFailure(exit) && !cancelled)
+                yield* Effect.logWarning("CAD operation failed", {
+                  cause: Cause.pretty(exit.cause),
+                });
               const retryAfter =
                 isOnshapeConnectionError(error) && "retryAfterSeconds" in error
                   ? error.retryAfterSeconds
@@ -253,6 +447,17 @@ export const make = Effect.gen(function* () {
                 retryAfter === undefined
                   ? undefined
                   : DateTime.formatIso(DateTime.add(yield* DateTime.now, { seconds: retryAfter }));
+              // Keeps a failed first import recoverable: settings and the panel need the file list.
+              const catalog =
+                source.kind === "local" && !cancelled
+                  ? yield* local
+                      .catalog({
+                        workspaceRoot: project.workspaceRoot,
+                        defaultFilePath: source.filePath,
+                      })
+                      .pipe(Effect.option)
+                  : Option.none();
+              const endedAt = DateTime.formatIso(yield* DateTime.now);
               yield* engine
                 .dispatch({
                   type: "project.cad.operation.end",
@@ -261,7 +466,12 @@ export const make = Effect.gen(function* () {
                   operationId,
                   status: cancelled ? "cancelled" : "failed",
                   ...(retryAt ? { retryAt } : {}),
-                  reason: cancelled ? "CAD operation cancelled." : failureReason(error),
+                  ...(Option.isSome(catalog)
+                    ? { catalog: { ...catalog.value, refreshedAt: endedAt } }
+                    : {}),
+                  reason: cancelled
+                    ? "CAD operation cancelled."
+                    : failureReason(error, source.kind),
                 })
                 .pipe(
                   Effect.catch(() =>
@@ -273,7 +483,7 @@ export const make = Effect.gen(function* () {
           ),
           Effect.catchCause(() => Effect.void),
         );
-        const fiber = yield* Effect.forkIn(restore(work), scope);
+        const fiber = yield* Effect.forkIn(work, scope, { uninterruptible: true });
         jobs.set(operationId, { projectId: input.projectId, fiber });
         yield* Deferred.succeed(ready, undefined);
         return { operationId };

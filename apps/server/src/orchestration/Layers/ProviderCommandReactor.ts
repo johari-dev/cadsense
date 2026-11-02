@@ -1,4 +1,5 @@
 import {
+  hasCadSource,
   type ChatAttachment,
   type MessageId,
   CommandId,
@@ -631,7 +632,8 @@ const make = Effect.gen(function* () {
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
       const wantsCadTools =
         (preferredProvider === "codex" || preferredProvider === "claudeAgent") &&
-        !!project?.onshapeSource &&
+        !!project &&
+        hasCadSource(project) &&
         project.cad?.enabled !== false &&
         (project.cad?.roots.some((root) => root.current !== null) ?? false);
       const cadAttachmentChanged = (activeSession?.cadToolsAttached ?? false) !== wantsCadTools;

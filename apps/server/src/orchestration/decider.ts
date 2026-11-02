@@ -1,6 +1,7 @@
 import { decideCadComments } from "./cadComments.ts";
 import {
   EventId,
+  hasCadSource,
   initialCadProjectState,
   isCadThreadRunActive,
   type OrchestrationCommand,
@@ -114,6 +115,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   Crypto.Crypto
 > {
   switch (command.type) {
+    // These names predate local CAD projects and stay because events are persisted. They remove,
+    // clean up, and restore local CAD projects too.
     case "project.onshape.remove":
     case "project.onshape.cleanup.complete":
     case "project.onshape.cleanup.request":
@@ -121,7 +124,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
       const fail = (detail: string) =>
         new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-      if (!project.onshapeSource) return yield* fail("This project has no Onshape source.");
+      if (!hasCadSource(project)) return yield* fail("This project has no CAD source.");
+      // Only a server-managed Onshape workspace can be deleted. A local folder is the user's.
+      if (!project.onshapeSource && "deleteWorkspace" in command && command.deleteWorkspace)
+        return yield* fail("A local CAD project's folder is never deleted.");
       const occurredAt = yield* nowIso;
       let cad = project.cad ?? initialCadProjectState();
       let deletedAt = project.deletedAt;
@@ -174,16 +180,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         } else {
           if (storage.cleanupPending)
             return yield* fail("Finish pending cleanup before restoring this project.");
+          // Another project may have taken the folder while this one was removed.
           yield* requireActiveProjectWorkspaceRootAbsent({
             readModel,
             command,
             workspaceRoot: project.workspaceRoot,
           });
-          yield* requireActiveOnshapeProjectSourceAbsent({
-            readModel,
-            command,
-            source: project.onshapeSource,
-          });
+          if (project.onshapeSource)
+            yield* requireActiveOnshapeProjectSourceAbsent({
+              readModel,
+              command,
+              source: project.onshapeSource,
+            });
           const { storage: _storage, ...retained } = cad;
           cad = retained;
           deletedAt = null;
@@ -528,6 +536,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.local-cad.set": {
+      const project = yield* requireActiveProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.onshapeSource !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is an Onshape project.`,
+        });
+      }
+      yield* requireProjectCadIdle({
+        readModel,
+        command,
+        projectId: command.projectId,
+        includeRuns: true,
+        linksSource: true,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          localCadSource: command.localCadSource,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "project.onshape.workspace.ready": {
       const project = yield* requireActiveProject({
         readModel,
@@ -564,6 +608,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandType: command.type,
           detail:
             "Remove this Onshape project through CAD storage controls to choose which files to retain.",
+        });
+      // Like a ready Onshape project, a local CAD project leaves only through CAD storage removal,
+      // which keeps its threads, asks about its imported CAD, and can be restored.
+      if (target.localCadSource)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Remove this local CAD project through CAD storage controls to choose whether to keep its imported CAD.",
         });
       yield* requireProjectCadIdle({
         readModel,
@@ -857,6 +909,45 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { modelSelection: command.modelSelection }
             : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.message.rating.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Only finished agent responses can be rated. The engine adds messages
+      // that predate its in-memory read model, so a miss here is unknown.
+      const message = thread.messages.find((entry) => entry.id === command.messageId);
+      const rejection =
+        message === undefined
+          ? `Message '${command.messageId}' does not exist in thread '${command.threadId}'.`
+          : message.role !== "assistant"
+            ? `Message '${command.messageId}' is not an assistant response.`
+            : message.streaming
+              ? `Message '${command.messageId}' is still streaming.`
+              : null;
+      if (rejection !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: rejection,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: yield* nowIso,
+          commandId: command.commandId,
+        })),
+        type: "thread.message-rating-set",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          rating: command.rating,
         },
       };
     }

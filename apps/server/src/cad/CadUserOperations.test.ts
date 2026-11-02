@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CadUserOperationError,
+  LocalCadError,
   OnshapeProjectSource,
   OnshapeRateLimitError,
   ProjectId,
@@ -23,6 +24,10 @@ import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { CadProjectQuiescence, make } from "./CadUserOperations.ts";
+import { localCadElementId } from "../localCad/LocalCadFiles.ts";
+import { LocalCadImport, LocalCadImportError } from "../localCad/LocalCadImport.ts";
+import type { DailyCounter } from "../telemetry/AnalyticsEvents.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 
 const unused = () => Effect.die("Unexpected test operation");
 const projectId = ProjectId.make("cad-user-operations");
@@ -43,13 +48,28 @@ const project: OrchestrationProjectShell = {
   updatedAt: "2026-09-05T00:00:00Z",
   defaultModelSelection: null,
 };
+const LOCAL_FILE = "robot.step";
+const { onshapeSource: _onshapeSource, ...projectWithoutSource } = project;
+const localProject: OrchestrationProjectShell = {
+  ...projectWithoutSource,
+  localCadSource: { filePath: LOCAL_FILE },
+};
+const localSync = {
+  projectId,
+  kind: "sync",
+  root: { elementId: localCadElementId(LOCAL_FILE), kind: "assembly", configuration: "" },
+} as const;
 const harness = Effect.fn(function* (options?: {
   busy?: boolean;
   diskFull?: boolean;
   holdQuiescence?: boolean;
   rateLimit?: boolean;
+  /** Use a local CAD project whose import fails with this error. */
+  localImportFails?: LocalCadImportError;
 }) {
   const calls = yield* Ref.make<string[]>([]);
+  const counted = yield* Ref.make<DailyCounter[]>([]);
+  const shownProject = options?.localImportFails ? localProject : project;
   const commands = yield* Ref.make<OrchestrationCommand[]>([]);
   const settled = yield* Deferred.make<OrchestrationCommand>();
   const quiescing = yield* Deferred.make<void>();
@@ -58,6 +78,15 @@ const harness = Effect.fn(function* (options?: {
     if (options?.diskFull) return yield* new CadSnapshotStoreError({ reason: "disk-space" });
   });
   const dependencies = Layer.mergeAll(
+    Layer.succeed(
+      AnalyticsService,
+      AnalyticsService.of({
+        count: (counter) => Ref.update(counted, (values) => [...values, counter]),
+        reach: () => Effect.void,
+        sendFeedback: () => Effect.void,
+        flush: Effect.void,
+      }),
+    ),
     Layer.succeed(OrchestrationEngineService, {
       readEvents: () => Stream.empty,
       subscribeDomainEvents: unused(),
@@ -80,13 +109,13 @@ const harness = Effect.fn(function* (options?: {
         }),
     }),
     Layer.succeed(ProjectionSnapshotQuery, {
-      getProjectShellById: () => Effect.succeed(Option.some(project)),
+      getProjectShellById: () => Effect.succeed(Option.some(shownProject)),
       getCadReviewLearnings: () => Effect.succeed([]),
       getCommandReadModel: () =>
         Effect.succeed({
           snapshotSequence: 0,
           updatedAt: project.updatedAt,
-          projects: [{ ...project, deletedAt: null }],
+          projects: [{ ...shownProject, deletedAt: null }],
           threads: [],
         }),
       getSnapshot: unused,
@@ -99,6 +128,7 @@ const harness = Effect.fn(function* (options?: {
       getActiveProjectByWorkspaceRoot: unused,
       getFirstActiveThreadIdByProjectId: unused,
       getThreadShellById: unused,
+      getThreadMessage: unused,
       getThreadDetailById: unused,
       getThreadDetailSnapshot: unused,
     }),
@@ -106,6 +136,7 @@ const harness = Effect.fn(function* (options?: {
       checkReserve: reserve,
       findGeometry: unused,
       putAsset: unused,
+      putThumbnail: unused,
       publish: unused,
       load: unused,
       readAsset: unused,
@@ -127,6 +158,11 @@ const harness = Effect.fn(function* (options?: {
         ),
     }),
     Layer.succeed(OnshapeSnapshotAcquisition, { acquire: unused }),
+    Layer.succeed(LocalCadImport, {
+      // A failed local sync rescans the folder; a missing folder keeps the outcome catalog-free.
+      catalog: () => Effect.fail(new LocalCadError({ reason: "folder-not-found" })),
+      acquire: () => (options?.localImportFails ? Effect.fail(options.localImportFails) : unused()),
+    }),
     Layer.succeed(CadProjectQuiescence, {
       confirm: () =>
         Ref.update(calls, (values) => [...values, "quiesce"]).pipe(
@@ -136,7 +172,7 @@ const harness = Effect.fn(function* (options?: {
     }),
   );
   const service = yield* make.pipe(Effect.provide(dependencies));
-  return { service, calls, commands, settled, quiescing };
+  return { service, calls, commands, counted, settled, quiescing };
 });
 
 it.layer(NodeServices.layer)("User-only CAD operations", (it) => {
@@ -179,6 +215,39 @@ it.layer(NodeServices.layer)("User-only CAD operations", (it) => {
       assert.deepEqual(yield* Ref.get(h.calls), ["reserve-space"]);
     }),
   );
+  it.effect("a failed import counts once as failed and once under its kind of error", () =>
+    Effect.gen(function* () {
+      const storage = yield* harness({
+        diskFull: true,
+        localImportFails: new LocalCadImportError({ reason: "unreadable" }),
+      });
+      yield* storage.service.start(localSync);
+      yield* Deferred.await(storage.settled);
+      assert.deepEqual(yield* Ref.get(storage.counted), [
+        "cad_imports_failed",
+        "cad_import_errors_storage",
+      ]);
+
+      const solidworks = yield* harness({
+        localImportFails: new LocalCadImportError({ reason: "solidworks-timeout" }),
+      });
+      yield* solidworks.service.start(localSync);
+      const outcome = yield* Deferred.await(solidworks.settled);
+      assert.equal("status" in outcome && outcome.status, "failed");
+      assert.deepEqual(yield* Ref.get(solidworks.counted), [
+        "cad_imports_failed",
+        "cad_import_errors_solidworks",
+      ]);
+    }),
+  );
+  it.effect("discovering the file list isn't counted as an import, even when it fails", () =>
+    Effect.gen(function* () {
+      const h = yield* harness({ diskFull: true });
+      yield* h.service.start({ projectId, kind: "discover" });
+      yield* Deferred.await(h.settled);
+      assert.deepEqual(yield* Ref.get(h.counted), []);
+    }),
+  );
   it.effect("persists a server-provided retry deadline without scheduling another request", () =>
     Effect.gen(function* () {
       const h = yield* harness({ rateLimit: true });
@@ -202,5 +271,24 @@ it.layer(NodeServices.layer)("User-only CAD operations", (it) => {
         assert.equal("status" in result && result.status, "cancelled");
         assert.deepEqual(yield* Ref.get(h.calls), ["reserve-space", "quiesce"]);
       }),
+  );
+  // The work runs on a forked fiber that has not taken a step when start returns. A cancel in that
+  // window must still end the operation, or the project stays busy until the server restarts.
+  it.effect("cancelling before the operation's work starts still ends it as cancelled", () =>
+    Effect.gen(function* () {
+      const h = yield* harness();
+      const started = yield* h.service.start({ projectId, kind: "discover" });
+      yield* h.service.cancel(projectId, started.operationId);
+      // Cancel returns once the work has exited, so its outcome is already recorded.
+      assert.isTrue(yield* Deferred.isDone(h.settled));
+      const result = yield* Deferred.await(h.settled);
+      assert.equal(result.type, "project.cad.operation.end");
+      assert.equal("status" in result && result.status, "cancelled");
+      assert.deepEqual(yield* Ref.get(h.calls), []);
+      assert.deepEqual(
+        yield* h.service.cancel(projectId, started.operationId).pipe(Effect.flip),
+        new CadUserOperationError({ reason: "unavailable" }),
+      );
+    }),
   );
 });

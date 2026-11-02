@@ -79,7 +79,8 @@ describe("sidebar interactive cursors", () => {
     expect(html).toContain("justify-center");
     expect(html).toContain("p-0");
     expect(html).toContain("font-medium");
-    expect(html).toContain("text-sidebar-muted-foreground/80");
+    expect(html).toContain("text-sidebar-muted-foreground");
+    expect(html).not.toContain("text-sidebar-muted-foreground/80");
   });
 
   it("lets project drag handles override the default pointer cursor", () => {

@@ -1,0 +1,52 @@
+---
+// A muted, looping 60 fps product clip with no player chrome. Clips are composed with their own
+// wallpaper, window frame and shadow, so the element only rounds its corners. `src` is the path
+// without an extension: the H.264 `.mp4` comes first, and the VP9 `.webm` is there for Chromium
+// builds without H.264. Clips load and play only while at least 40% of them is on screen. Readers
+// who prefer reduced motion get the browser's own controls instead of autoplay.
+interface Props {
+  src: string;
+  poster: string;
+  width: number;
+  height: number;
+  label: string;
+}
+
+const { src, poster, width, height, label } = Astro.props;
+---
+
+<video data-loop poster={poster} width={width} height={height} aria-label={label} muted loop playsinline disablepictureinpicture preload="none">
+  <source src={`${src}.mp4`} type="video/mp4" />
+  <source src={`${src}.webm`} type="video/webm" />
+</video>
+
+<script>
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const clips = [...document.querySelectorAll<HTMLVideoElement>("video[data-loop]")];
+
+  if (reduceMotion) {
+    for (const video of clips) video.controls = true;
+  } else {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const { target, isIntersecting } of entries) {
+          const video = target as HTMLVideoElement;
+          if (isIntersecting) void video.play().catch(() => {});
+          else video.pause();
+        }
+      },
+      { threshold: 0.4 },
+    );
+    for (const video of clips) observer.observe(video);
+  }
+</script>
+
+<style>
+  video {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    background: #121214;
+  }
+</style>

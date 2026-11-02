@@ -1,0 +1,520 @@
+---
+// "Introducing Cadsense", written for the team's internal Slack. It follows the pitch deck: why design
+// reviews are the bottleneck, the code review precedent, the gap between Onshape's checks and a
+// mentor's, then each feature with a clip. Clips come from local copies of real reviews (an elevator,
+// a telescoping arm, a disc transfer, a full robot), recorded frame by frame and composed with
+// tooling outside the repo. The SolidWorks clip is the demo from PR #159.
+import PostLayout from "../../layouts/PostLayout.astro";
+import LoopVideo from "../../components/blog/LoopVideo.astro";
+import ProviderSwitch from "../../components/blog/ProviderSwitch.astro";
+import Scoreboard from "../../components/blog/Scoreboard.astro";
+import Toc from "../../components/blog/Toc.astro";
+
+const title = "Introducing Cadsense";
+const description =
+  "Automated CAD review for robot CAD, the way CodeRabbit reviews code. Claude or Codex reviews Onshape and SolidWorks models and pins what it finds to the parts.";
+const img = (name: string) => `/blog/introducing-cadsense/${name}`;
+
+
+// What existing CAD tools check, next to what a mentor checks in a design review.
+const gap = {
+  tools: ["Parts that overlap", "Clearances you set up yourself", "Mass and center of gravity"],
+  mentors: [
+    "Can we actually make this part with our tools?",
+    "Is everything accessible?",
+    "Is it durable?",
+    "Does it follow our design standards?",
+  ],
+} as const;
+---
+
+<PostLayout title={title} description={description} image={img("telescope-poster.webp")} draft>
+  <Toc />
+  <article class="post">
+    <header class="post-head">
+      <p class="kicker">October 2026</p>
+      <h1 id="intro">{title}</h1>
+      <p class="dek">
+        Automated CAD review.
+      </p>
+      <p class="byline">Advait Johari</p>
+    </header>
+
+    <p>
+      Cadsense is almost ready for you to use on your own CAD. Here's how it works and what you'll need to try it.
+    </p>
+    <p>
+      Point it at an Onshape document or a SolidWorks file and ask for a review. Claude or Codex works through the
+      model the way a mentor would and pins comments to the parts they're about.
+    </p>
+
+    <figure class="wide">
+      <LoopVideo src={img("telescope")} poster={img("telescope-poster.webp")} width={1920} height={1200} label="Clicking through four review comments on a telescoping arm. Each one moves the camera to the view the agent found it in." />
+      <figcaption>A review of a telescoping arm. Each comment opens in the view the agent found it in.</figcaption>
+    </figure>
+
+    <h2 id="why" data-toc-label="The Bottleneck">Design reviews are the bottleneck</h2>
+    <p>
+      Before final approval, a mechanism usually goes through five major revisions. Each one means sitting down
+      with a mentor to review it by hand, and that has a few problems:
+    </p>
+    <ul>
+      <li>Mentors aren't always available.</li>
+      <li>Each review takes hours of a mentor's time.</li>
+      <li>Small mistakes, like bad clearances or overlapping parts, are easy to miss in a visual review.</li>
+    </ul>
+    <figure class="wide">
+      <LoopVideo src={img("robot")} poster={img("robot-poster.webp")} width={1920} height={1200} label="A full competition robot with 1,362 components turning slowly in the Cadsense viewer." />
+    </figure>
+
+    <h2 id="precedent" data-toc-skip>Code already solved this</h2>
+    <p>
+      Software teams had the same bottleneck. Every change waited on a senior engineer to read it. Since 2023, tools
+      like CodeRabbit and Greptile review every change automatically. They flag real bugs within minutes, and a human
+      only steps in to make the final call.
+    </p>
+    <figure class="wide-sm">
+      <div class="reviews">
+        <img src={img("coderabbit.webp")} alt="A CodeRabbit review comment on a pull request: preserve legacy bare tokens that match the encoding prefix, rated Major" width="1548" height="549" loading="lazy" />
+        <img src={img("greptile.webp")} alt="A Greptile review comment on the same pull request: old tokens skip objects, rated P1" width="1548" height="558" loading="lazy" />
+      </div>
+    </figure>
+    <p>CAD has nothing like it yet.</p>
+
+    <h2 id="gap" data-toc-skip>The gap</h2>
+    <div class="gap">
+      <div>
+        <h3>What Onshape and similar tools check</h3>
+        <ul>{gap.tools.map((item) => <li>{item}</li>)}</ul>
+      </div>
+      <div>
+        <h3>What mentors check</h3>
+        <ul>{gap.mentors.map((item) => <li>{item}</li>)}</ul>
+      </div>
+    </div>
+    <p>
+      CAD tools catch what you tell them to look for. Mentors catch what you didn't think to ask about. Cadsense is
+      built to do both.
+    </p>
+
+    <h2 id="solution" data-toc-label="Reviewing CAD like code">Cadsense reviews CAD like code</h2>
+    <p>
+      Open up a project and Cadsense flags problems before a mentor ever sees them: interference, missing fasteners, bad
+      clearances. Mentors still sign off on the final design. They just stop spending meetings on mistakes a tool
+      could catch, so you and they can focus on what really matters, the design.
+    </p>
+    <p>
+      I ran it on an elevator cascade before its design review. It left 13 comments
+      on the 361-part model. One was a blocker. The 40T gear sticks out about 1.5 mm past the carriage tube and grinds
+      into a newly added cable clamp plate. Nobody had checked the plate against the gear, because the
+      gear hadn't changed.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("comments")} poster={img("comments-poster.webp")} width={1920} height={1200} label="Clicking through comments in the Cadsense viewer on an elevator. Each one moves the camera to the view the agent found it in." />
+      <figcaption>Comments from the cascade review, including two blockers from a second pass.</figcaption>
+    </figure>
+
+    <h2 id="comments" data-toc-skip>Comments land on the part</h2>
+    <p>
+      The reviewer pins each comment to the exact part it's about. Click a comment and the view jumps there, with any
+      parts in the way ghosted out. Each one is rated blocker, concern, question, or nit, so you know what to fix
+      first.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("transfer")} poster={img("transfer-poster.webp")} width={1920} height={1200} label="Clicking through three comments on a disc transfer: belts in the disc's path, a hidden duplicate plate, and a bellypan inside the frame tubes." />
+      <figcaption>A disc transfer. The first comment: the 11 in disc won't fit when between the belts (10.1 in apart).</figcaption>
+    </figure>
+
+    <h2 id="revisions" data-toc-skip>It checks what changed</h2>
+    <p>
+      Each time you sync a new revision, the reviewer compares it to the last one. It checks whether you fixed what it
+      flagged, and it only reviews what changed. Comments on parts that moved, changed shape, or got deleted are marked
+      outdated, and it can propose resolving the ones you fixed.
+    </p>
+    <p>Mentors work the same way. They remember what they asked you to fix, and they check that first.</p>
+
+    <h2 id="learns" data-toc-skip>Push back, and it learns</h2>
+    <p>
+      You resolve, discuss, or dismiss each comment. Discuss starts a chat message about that comment so you can argue
+      with it. A dismiss reason becomes a learning that every later review reads, so the same false alarm
+      doesn't come back.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("triage")} poster={img("triage-poster.webp")} width={1920} height={1200} label="Dismissing a comment with a typed reason, then pressing Discuss on another, which drops a message about it into the chat." />
+    </figure>
+
+    <h2 id="providers" data-toc-skip>Claude or Codex</h2>
+    <p>
+      Reviews run on Claude Code or Codex, on whichever plan you already have, including ChatGPT's free tier. Pick the
+      model per chat.
+    </p>
+    <figure>
+      <ProviderSwitch />
+    </figure>
+
+    <h2 id="platforms" data-toc-skip>Onshape, SolidWorks, or a STEP file</h2>
+    <p>
+      Onshape documents sync through the Onshape API. SolidWorks parts and assemblies open through the SolidWorks
+      installed on your computer.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("solidworks")} poster={img("solidworks-poster.webp")} width={1920} height={1200} label="Adding a project from a SolidWorks assembly on Windows. Cadsense converts it with SolidWorks and opens the model." />
+    </figure>
+
+    <section class="soon-section">
+      <span class="soon-tag">Coming soon</span>
+      <h2 id="rag" data-toc-skip>Grounded in what other teams built</h2>
+      <p>
+        The reviewer will be integrated with FRC RAG, so it can draw on 64 technical binders from 10+ years of FRC. Most
+        mechanisms aren't new. When it flags a problem, it will show you how other teams already solved it. That way the feedback is grounded in what real teams built, not what an AI guesses should
+        work.
+      </p>
+      <figure class="narrow">
+          <img src={img("frc-rag.webp")} alt="An FRC RAG answer about how teams transfer game pieces from an intake to a shooter, citing a team's 2020 design" width="636" height="706" loading="lazy" />
+        <figcaption>FRC RAG on its own today, answering how teams transfer game pieces from an intake to a shooter.</figcaption>
+      </figure>
+
+    </section>
+
+    <h2 id="how">How it works</h2>
+    <p>
+      The agent works the viewer the way you would. It finds parts, ghosts and isolates them, cuts sections, explodes
+      the assembly, and measures gaps. It checks each part against the design standards and your comments from
+      earlier reviews, then reports what it found on the parts themselves.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("tools")} poster={img("tools-poster.webp")} width={1920} height={1200} label="In the viewer, ghosting the whole assembly, highlighting the gearbox block, then exploding the assembly and putting it back." />
+    </figure>
+    <p>While it works, the chat shows short notes and a thumbnail of every view it checked.</p>
+    <figure class="wide">
+      <LoopVideo src={img("timelapse")} poster={img("timelapse-poster.webp")} width={1920} height={1200} label="Timelapse of the agent reviewing the elevator: the chat on the left, the agent's current view on the right." />
+    </figure>
+
+    <h2 id="trust" data-toc-label="Does the model matter?">How much does the model matter?</h2>
+    <p>
+      The test was a disc transfer with eight known problems, like a drive that never reaches the rollers and a plate modeled
+      twice. I ran the same review on it three times with each of seven models.
+    </p>
+    <Scoreboard />
+    <p>
+      The models differ in what they find past the checks and how they explain it. Opus 5.5 wrote the clearest
+      comments and found about four more real problems per run, like roller spacers pushing into their bearings. Luna and Astra
+      found nothing beyond the eight obvious ones.
+    </p>
+
+    <h2 id="next" data-toc-label="Writing CAD">Beyond review: writing CAD</h2>
+    <p>Review reads CAD. Cadsense also writes it.</p>
+
+    <h3>FeatureScript the agent can run</h3>
+    <p>
+      An AI-written FeatureScript normally goes through a slow loop. You paste it into Onshape, wait for it to fail,
+      and copy the error back. Cadsense runs FeatureScript locally on Onshape's own standard library, so the agent can
+      test what it writes and show you the result before anything touches Onshape.
+    </p>
+    <p>
+      As a test, I had Claude merge two scripts which were being stitched together to model wire runs into one
+      feature, then ran it on a test plate with a motor, a Spark MAX, a PDH, and a breaker.
+    </p>
+    <figure class="wide-sm">
+      <LoopVideo src={img("harness")} poster={img("harness-poster.webp")} width={1920} height={1200} label="Three wire runs on a test plate: motor to Spark MAX, Spark MAX to PDH, and breaker to PDH." />
+      <figcaption>Three runs from one feature: motor to Spark MAX, Spark MAX to PDH, and breaker to PDH.</figcaption>
+    </figure>
+    <p>
+      Any <code>.fs</code> file in a project gets a live preview with Onshape-style inputs, and it updates right away. You can build a wire by clicking points on the model.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("fspanel")} poster={img("fspanel-poster.webp")} width={1920} height={1200} label="Building a wire in the FeatureScript preview by clicking two waypoints on the plate, then changing the wire count and gauge." />
+    </figure>
+
+    <h3>Manufacturing part drawings</h3>
+    <p>
+      Pick any part in a synced assembly and Cadsense lays out a drawing sheet with views, dimensions, and hole
+      callouts.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("drawings")} poster={img("drawings-poster.webp")} width={1920} height={1200} label="Part drawings: a shaft as a shop sheet, a formal drawing, and a traveler, then a tube and a plate, then switching to millimeters." />
+    </figure>
+
+    <h3>CAM for plates</h3>
+    <p>
+      Right-click a plate in the parts list and Cadsense plans its router cuts. The cuts show up as an operations table
+      and a timeline you can play, so you can see the order before anything gets cut. Then export the plate as a DXF.
+    </p>
+    <figure class="wide">
+      <LoopVideo src={img("cam")} poster={img("cam-poster.webp")} width={1920} height={1200} label="Right-clicking a plate in the parts list, opening it in CAM, and playing the router cuts: bores first, then the profile with tabs." />
+    </figure>
+
+    <h2 id="ideas">What might come next</h2>
+    <p>None of these are built yet. They're ideas I'd like to try, and I want to hear which ones you'd use.</p>
+    <ul>
+      <li>
+        <b>Gear and belt math with ReCalc.</b> The reviewer could check gear ratios, center distances, and belt
+        lengths against ReCalc instead of working them out itself.
+      </li>
+      <li>
+        <b>Folder cleanup.</b> The agent could sort a messy document into folders by how each part gets made, like
+        router plates, 3D prints, and COTS hardware, so parts are easy to find.
+      </li>
+      <li>
+        <b>Crayola CAD.</b> The agent could sketch a first rough layout of a mechanism from a description, with
+        blocks for the motors, shafts, and game piece, so you can check packaging before you CAD the real thing.
+      </li>
+    </ul>
+
+    <h2 id="try">Try it</h2>
+    <p>
+      Message me and I'll help you get set up when I release the initial beta version in the coming weeks. Before you
+      do, have these ready:
+    </p>
+    <ul>
+      <li>The Claude Code CLI or the Codex CLI, signed in on any plan.</li>
+      <li>For Onshape, an API key that can read documents.</li>
+      <li>For SolidWorks, SolidWorks installed on the same computer.</li>
+    </ul>
+    <figure class="wide">
+      <LoopVideo src={img("link")} poster={img("link-poster.webp")} width={1920} height={1200} label="Adding an Onshape project from a link, then typing a review request in the chat and opening the model picker." />
+    </figure>
+
+  </article>
+</PostLayout>
+
+<style>
+  .post {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 24px 20px 0;
+  }
+
+  .post-head {
+    margin: 32px 0 28px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .kicker {
+    margin: 0 0 14px;
+    font: 12px var(--font-mono);
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+  }
+
+  h1 {
+    margin: 0 0 16px;
+    font-size: clamp(30px, 5vw, 42px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .dek {
+    margin: 0 0 18px;
+    font-size: 19px;
+    line-height: 1.55;
+    color: #c9c9c9;
+  }
+
+  .byline {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .post > p,
+  .post > ul,
+  .post > ol,
+  .soon-section > p {
+    margin: 0 0 18px;
+    font-size: 17px;
+    line-height: 1.72;
+  }
+
+  .post li {
+    margin-bottom: 6px;
+  }
+
+  .post b {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  h2 {
+    margin: 64px 0 16px;
+    font-size: 26px;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    color: var(--text);
+    scroll-margin-top: 72px;
+  }
+
+
+  h3 {
+    margin: 36px 0 8px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  blockquote {
+    margin: 0 0 18px;
+    padding: 2px 0 2px 16px;
+    border-left: 2px solid #4a4a4a;
+    font-size: 17px;
+    line-height: 1.65;
+    color: #d6d6d6;
+  }
+
+  blockquote p {
+    margin: 0;
+  }
+
+  code {
+    font: 15px var(--font-mono);
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  figure {
+    margin: 32px 0;
+  }
+
+  figure img {
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #262626;
+  }
+
+  figcaption {
+    margin-top: 10px;
+    font: 13px/1.55 var(--font-mono);
+    color: var(--text-muted);
+  }
+
+  .wide,
+  .wide-sm {
+    width: min(1080px, calc(100vw - 32px));
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .wide-sm {
+    width: min(860px, calc(100vw - 32px));
+  }
+
+
+  /* The box reaches past the column so its text lines up with the body text around it. */
+  .soon-section {
+    position: relative;
+    margin: 56px -25px 24px;
+    padding: 28px 24px 8px;
+    border: 1px dashed rgba(253, 230, 138, 0.55);
+    border-radius: 8px;
+  }
+
+  .soon-section > h2 {
+    margin-top: 0;
+  }
+
+  .soon-tag {
+    position: absolute;
+    top: -11px;
+    left: 18px;
+    padding: 2px 10px;
+    font: 600 11.5px var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--marker);
+    background: var(--canvas);
+  }
+
+  .narrow {
+    max-width: 480px;
+    margin-inline: auto;
+  }
+
+  @media (max-width: 760px) {
+    .soon-section {
+      margin-inline: -12px;
+      padding-inline: 11px;
+    }
+  }
+
+  /* Screenshots of GitHub review comments, stacked in one card with GitHub's dark background. */
+  .reviews {
+    display: grid;
+    gap: 1px;
+    overflow: hidden;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .reviews img {
+    display: block;
+    border: 0;
+    border-radius: 0;
+    background: #0d1117;
+  }
+
+  .gap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 0 0 18px;
+  }
+
+  .gap > div {
+    padding: 14px 16px;
+    background: var(--chrome);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .gap h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+  }
+
+  .gap ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 15.5px;
+    line-height: 1.6;
+  }
+
+  .gap > div:last-child {
+    border-color: rgba(253, 230, 138, 0.45);
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .post > .status {
+    margin: -2px 0 12px;
+    font: 12.5px var(--font-mono);
+    color: var(--text-dim);
+  }
+
+  .status a {
+    color: var(--text-muted);
+  }
+
+
+  @media (max-width: 760px) {
+
+
+
+    .pair,
+    .gap {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

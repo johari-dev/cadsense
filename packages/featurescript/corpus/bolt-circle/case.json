@@ -1,0 +1,18 @@
+{
+  "description": "Six 5 mm holes on a 50 mm circle, cut through a 100 x 60 x 10 mm plate with std's extrude.",
+  "steps": [
+    { "file": "plate.fs", "feature": "plate" },
+    {
+      "file": "feature.fs",
+      "feature": "boltCircle",
+      "parameters": {
+        "face": "qContainsPoint(qCreatedBy(makeId(\"Feature1\"), EntityType.FACE), vector(50, 30, 10) * millimeter)"
+      }
+    }
+  ],
+  "expect": {
+    "source": "analytic: 100 * 60 * 10 - 6 * PI * 2.5^2 * 10 mm^3; Parasolid-style topology counts",
+    "statuses": ["OK", "OK"],
+    "solids": [{ "volumeMm3": 58821.9028, "faces": 12, "edges": 24, "vertices": 8 }]
+  }
+}

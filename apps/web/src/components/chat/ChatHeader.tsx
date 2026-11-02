@@ -4,7 +4,6 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cadsense/client-runtime/state/runtime";
-import { ChevronDownIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -21,12 +20,7 @@ import { OpenInExplorerButton } from "./OpenInExplorerButton";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { ProjectFavicon } from "../ProjectFavicon";
-import {
-  WorkspaceBreadcrumb,
-  WorkspaceBreadcrumbItem,
-  WorkspaceBreadcrumbSeparator,
-} from "../WorkspaceBreadcrumb";
+import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
@@ -40,6 +34,10 @@ interface ChatHeaderProps {
   activeProjectOnshapeSource?: OnshapeProjectSource | undefined;
   openInCwd: string | null;
   rightPanelOpen: boolean;
+  /** The open CAD panel already names the project in its header, so the chip would repeat it. */
+  projectShownInRightPanel: boolean;
+  /** The draft hero's large heading already names the project. */
+  isDraftHero: boolean;
   onNewThreadInProject: () => void;
 }
 
@@ -75,6 +73,8 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectOnshapeSource,
   openInCwd,
   rightPanelOpen,
+  projectShownInRightPanel,
+  isDraftHero,
   onNewThreadInProject,
 }: ChatHeaderProps) {
   const activeThreadRef = useMemo(
@@ -208,43 +208,22 @@ export const ChatHeader = memo(function ChatHeader({
     [commitRename],
   );
   return (
+    // ps-2.5 lines the title up with the transcript's text edge (list padding plus the
+    // scrollbar gutter) instead of the header's own inset.
     <div
-      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
+      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 ps-2.5 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
     >
       <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">
-        {/* The project always leads the header: knowing which project a
-            thread lives in is priority zero, and the thread title alone
-            doesn't answer it. */}
-        {activeProjectName ? (
-          <>
-            <WorkspaceBreadcrumbItem>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={`New thread in ${activeProjectName}`}
-                      onClick={onNewThreadInProject}
-                      className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  }
-                >
-                  <ProjectFavicon
-                    environmentId={activeThreadEnvironmentId}
-                    cwd={activeProjectCwd ?? ""}
-                    onshapeSource={activeProjectOnshapeSource}
-                    className="size-3.5"
-                  />
-                  <span className="max-w-40 truncate">{activeProjectName}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
-              </Tooltip>
-            </WorkspaceBreadcrumbItem>
-            <WorkspaceBreadcrumbSeparator />
-          </>
-        ) : null}
-        <WorkspaceBreadcrumbItem current className="flex-1">
+        {/* The title is 14px semibold (about #f2f2f2) so it reads as a title, not body text,
+            and capped so a long one leaves room for the project; the tooltip shows it all. */}
+        <WorkspaceBreadcrumbItem
+          current
+          className={cn(
+            "text-[0.9333rem] font-semibold text-foreground/95",
+            renamingTitle !== null ? "flex-1" : "max-w-[min(26rem,70%)]",
+          )}
+        >
           {renamingTitle !== null ? (
             <input
               autoFocus
@@ -270,16 +249,11 @@ export const ChatHeader = memo(function ChatHeader({
                     onClick={openMenuFromTitle}
                     onDoubleClick={handleTitleDoubleClick}
                     onBlur={cancelPendingTitleMenu}
-                    className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex min-w-0 max-w-full cursor-pointer items-center rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 }
               >
                 <h2 className="min-w-0 truncate">{activeThreadTitle}</h2>
-                <ChevronDownIcon
-                  aria-hidden
-                  data-thread-title-chevron
-                  className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100"
-                />
               </TooltipTrigger>
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
@@ -296,6 +270,28 @@ export const ChatHeader = memo(function ChatHeader({
             </Tooltip>
           )}
         </WorkspaceBreadcrumbItem>
+        {/* The project follows the thread title as a quiet 12px chip, set apart by a wider
+            gap, so the two never read as one long title. It hides while the CAD panel is
+            open or the draft hero shows, because their headings already name the project. */}
+        {activeProjectName && !projectShownInRightPanel && !isDraftHero ? (
+          <WorkspaceBreadcrumbItem className="ps-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`New thread in ${activeProjectName}`}
+                    onClick={onNewThreadInProject}
+                    className="min-w-0 max-w-40 cursor-pointer truncate rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-[0.8rem] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                {activeProjectName}
+              </TooltipTrigger>
+              <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+            </Tooltip>
+          </WorkspaceBreadcrumbItem>
+        ) : null}
       </WorkspaceBreadcrumb>
       <div
         data-chat-header-actions

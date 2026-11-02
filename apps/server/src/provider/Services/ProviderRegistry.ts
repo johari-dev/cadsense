@@ -10,14 +10,12 @@ import type {
   ProviderInstanceId,
   ProviderDriverKind,
   ServerProvider,
-  ServerProviderUpdateState,
+  ServerProviderSetupState,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
-import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
-
-export type ProviderMaintenanceActionKind = "update";
+import type { ProviderSetupCommands } from "../providerSetup.ts";
 
 export interface ProviderRegistryShape {
   /**
@@ -49,26 +47,22 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
-   * Resolve the maintenance capabilities owned by one live provider instance.
-   * Falls back to manual-only capabilities when the instance is not live.
+   * Install and sign-in commands for one live provider instance, or
+   * `undefined` when the instance is not running.
    */
-  readonly getProviderMaintenanceCapabilitiesForInstance: (
+  readonly getProviderSetupCommands: (
     instanceId: ProviderInstanceId,
-    provider: ProviderDriverKind,
-  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
+  ) => Effect.Effect<ProviderSetupCommands | undefined>;
 
   /**
-   * Apply volatile maintenance-action state to one configured instance.
-   * This state is never persisted to disk. Today only update actions are
-   * projected onto `ServerProvider.updateState`; install/auth actions can
-   * extend this action map without adding driver-scoped APIs.
+   * Record the setup command running for an instance, or the last one that
+   * failed; `null` clears it. Every snapshot the registry returns or publishes
+   * carries it as `setup`. It is never written to the status cache.
    */
-  readonly setProviderMaintenanceActionState: (input: {
-    readonly instanceId: ProviderInstanceId;
-    readonly action: ProviderMaintenanceActionKind;
-    readonly state: ServerProviderUpdateState | null;
-  }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
-
+  readonly setSetupState: (
+    instanceId: ProviderInstanceId,
+    state: ServerProviderSetupState | null,
+  ) => Effect.Effect<void>;
   /**
    * Stream of provider snapshot updates — one emission per aggregated
    * change. The array contains the full current state.

@@ -8,7 +8,7 @@ import * as NodeURL from "node:url";
 
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 
-// Preserve the original PoC exports byte-for-byte; rendering them again changes their appearance.
+// Copy assets/cadsense exports byte-for-byte; rendering them again changes their appearance.
 export const POC_ICON_COPIES = [
   ["assets/cadsense/logo-1024.png", BRAND_ASSET_PATHS.developmentDesktopIconPng],
   ["assets/cadsense/logo-1024.png", BRAND_ASSET_PATHS.developmentUniversalIconPng],

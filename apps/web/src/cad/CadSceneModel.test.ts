@@ -2,7 +2,13 @@ import { CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { buildCadSceneModel, disposeCadObjects, resolveCadCamera } from "./CadSceneModel";
+import {
+  buildCadSceneModel,
+  CAD_CONTEXT_LAYER,
+  CAD_HIGHLIGHT_LAYER,
+  disposeCadObjects,
+  resolveCadCamera,
+} from "./CadSceneModel";
 
 const id = (n: number) => n.toString(16).padStart(64, "0");
 const transform = (x: number, y = 0) => [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -195,7 +201,17 @@ it("owns inspection materials per occurrence and per renderer, restores and disp
   const copy = first.material as THREE.MeshStandardMaterial;
   const copyDispose = vi.spyOn(copy, "dispose");
   expect(copy).not.toBe(source.material);
-  expect(copy.color.getHex()).toBe(0xffbf36);
+  // Highlights tint toward blue, away from the amber concern pins, and keep a little of the
+  // part's own color.
+  expect(copy.color.getHex()).toBe(
+    source.material.color.clone().lerp(new THREE.Color(0x7dbbff), 0.7).getHex(),
+  );
+  expect(copy.emissive.getHex()).not.toBe(0);
+  // Highlighted meshes also join the rim layer; others stay on the main layer only.
+  expect(first.layers.isEnabled(CAD_HIGHLIGHT_LAYER)).toBe(true);
+  expect(first.layers.isEnabled(0)).toBe(true);
+  expect(sibling.layers.isEnabled(CAD_HIGHLIGHT_LAYER)).toBe(false);
+  expect(model.hasHighlight()).toBe(true);
   expect(copy.opacity).toBe(0.2);
   expect(copy.depthWrite).toBe(false);
   expect(copy.map).toBe(source.material.map);
@@ -222,4 +238,56 @@ it("owns inspection materials per occurrence and per renderer, restores and disp
   expect(sourceDispose).not.toHaveBeenCalled();
   expect(textureDispose).not.toHaveBeenCalled();
   expect(geometryDispose).not.toHaveBeenCalled();
+});
+
+it("moves faded review context onto the context layer without copying its materials", () => {
+  const source = prototype();
+  const model = buildCadSceneModel(manifest, new Map([[id(9), source]]));
+  const isolated = model.objects.get(id(3))!.object.children[0] as THREE.Mesh;
+  const context = model.objects.get(id(4))!.object.children[0] as THREE.Mesh;
+  const review = { ...state, isolatedOccurrenceIds: [id(3)] };
+  const fit = model.apply(review, { fadeIsolatedOut: true });
+  expect(model.isFaded(id(4))).toBe(true);
+  expect(model.hasFaded()).toBe(true);
+  expect(context.layers.isEnabled(CAD_CONTEXT_LAYER)).toBe(true);
+  expect(context.layers.isEnabled(0)).toBe(false);
+  expect(context.material).toBe(source.material);
+  expect(isolated.layers.isEnabled(0)).toBe(true);
+  // Context never widens the fit.
+  expect(fit.equals(new THREE.Box3().setFromObject(model.objects.get(id(3))!.object))).toBe(true);
+  model.apply(review);
+  expect(model.hasFaded()).toBe(false);
+  expect(model.objects.get(id(4))!.object.visible).toBe(false);
+  expect(context.layers.isEnabled(0)).toBe(true);
+  expect(context.layers.isEnabled(CAD_CONTEXT_LAYER)).toBe(false);
+});
+
+it("fits a box into the free area tightly where a sphere fit leaves wide margins", () => {
+  // A long tube seen from the front: its sphere is far larger than its outline.
+  const tube = new THREE.Box3(
+    new THREE.Vector3(-0.38, -0.025, -0.0125),
+    new THREE.Vector3(0.38, 0.025, 0.0125),
+  );
+  const fill = (area?: { width: number; height: number }) => {
+    const pose = resolveCadCamera({ kind: "preset", preset: "front", fit: [] }, tube, 1.5, area);
+    const camera = new THREE.PerspectiveCamera(45, 1.5, 1e-4, 100);
+    camera.position.fromArray(pose.position);
+    camera.up.fromArray(pose.up);
+    camera.lookAt(new THREE.Vector3(...pose.target));
+    camera.updateMatrixWorld();
+    let extent = 0;
+    for (let corner = 0; corner < 8; corner++) {
+      const p = new THREE.Vector3(
+        corner & 1 ? tube.max.x : tube.min.x,
+        corner & 2 ? tube.max.y : tube.min.y,
+        corner & 4 ? tube.max.z : tube.min.z,
+      ).project(camera);
+      extent = Math.max(extent, Math.abs(p.x));
+    }
+    return extent;
+  };
+  expect(fill()).toBeLessThan(0.7);
+  expect(fill({ width: 1, height: 1 })).toBeCloseTo(0.97, 5);
+  // Half the width free: the tube fills 97% of that half.
+  expect(fill({ width: 0.5, height: 1 })).toBeCloseTo(0.485, 5);
 });

@@ -18,7 +18,7 @@ import {
   CadUserOperationError,
 } from "./cadUser.ts";
 import { CadRenderError, CadRenderEvent } from "./cadRender.ts";
-import { CadStorageEntry, CadStorageInput } from "./cadStorage.ts";
+import { CadStorageEntry, CadStorageInput, CadThumbnailSaveInput } from "./cadStorage.ts";
 import { CadViewError, CadViewState } from "./cadView.ts";
 import {
   CadPanelInput,
@@ -28,6 +28,7 @@ import {
   CadPanelSceneTicket,
 } from "./cadPanel.ts";
 
+import { FeatureScriptPanelPreview, FeatureScriptPanelPreviewInput } from "./featurescript.ts";
 import { FileManagerError, OpenInFileManagerInput } from "./fileManager.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
 import {
@@ -76,6 +77,14 @@ import {
   OnshapeProjectSetConnectionInput,
 } from "./onshape.ts";
 import {
+  LocalCadError,
+  LocalCadFilesListInput,
+  LocalCadFilesListResult,
+  LocalCadProjectCreateInput,
+  LocalCadProjectCreateResult,
+  LocalCadProjectSetFileInput,
+} from "./localCad.ts";
+import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -123,8 +132,8 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
-  ServerProviderUpdateError,
-  ServerProviderUpdateInput,
+  ServerProviderSetupError,
+  ServerProviderSetupInput,
   ServerLifecycleStreamEvent,
   ServerRemoveKeybindingInput,
   ServerRemoveKeybindingResult,
@@ -177,6 +186,9 @@ export const WS_METHODS = {
   onshapeConnectionsRemove: "onshape.connections.remove",
   onshapeProjectsCreate: "onshape.projects.create",
   onshapeProjectsSetConnection: "onshape.projects.setConnection",
+  localCadFilesList: "localCad.files.list",
+  localCadProjectsCreate: "localCad.projects.create",
+  localCadProjectsSetFile: "localCad.projects.setFile",
   cadUserStart: "cad.user.start",
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
@@ -190,6 +202,8 @@ export const WS_METHODS = {
   cadPanelScene: "cad.panel.scene",
   cadStorageWatch: "cad.storage.watch",
   cadStorageRun: "cad.storage.run",
+  cadThumbnailSave: "cad.thumbnail.save",
+  featureScriptPreview: "featurescript.preview",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -207,7 +221,7 @@ export const WS_METHODS = {
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
-  serverUpdateProvider: "server.updateProvider",
+  serverRunProviderSetup: "server.runProviderSetup",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
@@ -269,10 +283,10 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   error: EnvironmentAuthorizationError,
 });
 
-export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
-  payload: ServerProviderUpdateInput,
+export const WsServerRunProviderSetupRpc = Rpc.make(WS_METHODS.serverRunProviderSetup, {
+  payload: ServerProviderSetupInput,
   success: ServerProviderUpdatedPayload,
-  error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
+  error: Schema.Union([ServerProviderSetupError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -457,6 +471,27 @@ export const WsOnshapeProjectsSetConnectionRpc = Rpc.make(WS_METHODS.onshapeProj
   error: Schema.Union([OnshapeProjectError, EnvironmentAuthorizationError]),
 });
 
+export const WsLocalCadFilesListRpc = Rpc.make(WS_METHODS.localCadFilesList, {
+  payload: LocalCadFilesListInput,
+  success: LocalCadFilesListResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
+export const WsLocalCadProjectsCreateRpc = Rpc.make(WS_METHODS.localCadProjectsCreate, {
+  payload: Schema.Struct({
+    ...LocalCadProjectCreateInput.fields,
+    defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  }),
+  success: LocalCadProjectCreateResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
+export const WsLocalCadProjectsSetFileRpc = Rpc.make(WS_METHODS.localCadProjectsSetFile, {
+  payload: LocalCadProjectSetFileInput,
+  success: LocalCadProjectCreateResult,
+  error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
+});
+
 export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
   payload: CadUserStartInput,
   success: CadUserStartResult,
@@ -507,6 +542,11 @@ export const WsCadStorageRunRpc = Rpc.make(WS_METHODS.cadStorageRun, {
   success: Schema.Void,
   error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
 });
+export const WsCadThumbnailSaveRpc = Rpc.make(WS_METHODS.cadThumbnailSave, {
+  payload: CadThumbnailSaveInput,
+  success: Schema.Void,
+  error: Schema.Union([CadUserOperationError, EnvironmentAuthorizationError]),
+});
 export const WsCadPanelSceneRpc = Rpc.make(WS_METHODS.cadPanelScene, {
   payload: CadPanelSceneInput,
   success: CadPanelSceneTicket,
@@ -516,6 +556,12 @@ export const WsCadPanelSceneRpc = Rpc.make(WS_METHODS.cadPanelScene, {
 export const WsCadPanelSaveRpc = Rpc.make(WS_METHODS.cadPanelSave, {
   payload: CadPanelSaveInput,
   success: CadViewState,
+  error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+});
+/** Runs a `.fs` file locally for the file panel's preview. */
+export const WsFeatureScriptPreviewRpc = Rpc.make(WS_METHODS.featureScriptPreview, {
+  payload: FeatureScriptPanelPreviewInput,
+  success: FeatureScriptPanelPreview,
   error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
 });
 export const WsCadUserCancelRpc = Rpc.make(WS_METHODS.cadUserCancel, {
@@ -686,7 +732,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
-  WsServerUpdateProviderRpc,
+  WsServerRunProviderSetupRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
@@ -718,6 +764,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeConnectionsRemoveRpc,
   WsOnshapeProjectsCreateRpc,
   WsOnshapeProjectsSetConnectionRpc,
+  WsLocalCadFilesListRpc,
+  WsLocalCadProjectsCreateRpc,
+  WsLocalCadProjectsSetFileRpc,
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
   WsCadPanelWatchRpc,
@@ -727,8 +776,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsCadReviewLearningRemoveRpc,
   WsCadStorageWatchRpc,
   WsCadStorageRunRpc,
+  WsCadThumbnailSaveRpc,
   WsCadPanelSceneRpc,
   WsCadPanelSaveRpc,
+  WsFeatureScriptPreviewRpc,
   WsCadUserCancelRpc,
   WsCadUserSetEnabledRpc,
   WsPreviewOpenRpc,

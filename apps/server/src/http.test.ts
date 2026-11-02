@@ -61,6 +61,20 @@ describe("assetResponseHeaders", () => {
       "X-Content-Type-Options": "nosniff",
     });
   });
+  it("serves glTF models with their declared type, so they can be compressed", () => {
+    expect(
+      assetResponseHeaders("/attachments/fspanel-1-model.bin", { mimeType: "model/gltf-binary" }),
+    ).toEqual({
+      "Cache-Control": "private, max-age=3600",
+      "Content-Type": "model/gltf-binary",
+      "X-Content-Type-Options": "nosniff",
+    });
+    // Only that type: other declared types still fall back to the file's own.
+    expect(
+      assetResponseHeaders("/attachments/page.bin", { mimeType: "text/html" })["Content-Type"],
+    ).toBeUndefined();
+  });
+
   it("declares utf-8 for HTML assets so non-ASCII content renders correctly", () => {
     expect(assetResponseHeaders("/workspace/page.html")).toHaveProperty(
       "Content-Type",

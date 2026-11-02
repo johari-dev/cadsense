@@ -1,0 +1,10 @@
+{
+  "description": "opSphere, radius 10 mm centered at z = 5 mm.",
+  "steps": [{ "file": "feature.fs", "feature": "sphere" }],
+  "expect": {
+    "source": "analytic: 4/3 PI r^3",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 4188.7902, "faces": 1, "edges": 0, "vertices": 0 }],
+    "variables": { "centroidZ": 5 }
+  }
+}

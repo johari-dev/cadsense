@@ -1,12 +1,12 @@
 import {
-  AlertTriangleIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
+  WarningIcon as AlertTriangleIcon,
+  CaretDownIcon as ChevronDownIcon,
+  CaretRightIcon as ChevronRightIcon,
   CopyIcon,
   FolderOpenIcon,
   InfoIcon,
-  RefreshCwIcon,
-} from "lucide-react";
+  ArrowsClockwiseIcon as RefreshCwIcon,
+} from "~/lib/icons";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,

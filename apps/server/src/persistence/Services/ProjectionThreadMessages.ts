@@ -9,6 +9,7 @@
 import {
   ChatAttachment,
   MessageId,
+  MessageRating,
   OrchestrationMessageRole,
   ThreadId,
   TurnId,
@@ -44,6 +45,15 @@ export const GetProjectionThreadMessageInput = Schema.Struct({
 });
 export type GetProjectionThreadMessageInput = typeof GetProjectionThreadMessageInput.Type;
 
+export const SetProjectionThreadMessageRatingInput = Schema.Struct({
+  messageId: MessageId,
+  threadId: ThreadId,
+  // Encoded to the rating_json column; null clears it.
+  rating: Schema.NullOr(Schema.fromJsonString(MessageRating)),
+});
+export type SetProjectionThreadMessageRatingInput =
+  typeof SetProjectionThreadMessageRatingInput.Type;
+
 export const DeleteProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -77,6 +87,14 @@ export interface ProjectionThreadMessageRepositoryShape {
   readonly listByThreadId: (
     input: ListProjectionThreadMessagesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>;
+
+  /**
+   * Set or clear the user's rating on a projected message. `upsert` never
+   * writes the rating, so later message updates keep it.
+   */
+  readonly setRating: (
+    input: SetProjectionThreadMessageRatingInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
    * Delete projected thread messages by thread.

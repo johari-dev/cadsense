@@ -22,6 +22,8 @@ import {
   resolveProjectStatusIndicator,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
+  resolveSidebarThreadTitle,
+  describeProjectSource,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
@@ -1605,5 +1607,137 @@ describe("sortLogicalProjectsForSidebar", () => {
         (project) => project.projectKey,
       ),
     ).toEqual(["logical-newer", "logical-older"]);
+  });
+});
+
+describe("resolveSidebarThreadTitle", () => {
+  it("drops a leading project name and capitalizes what remains", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascade design feedback", "Elevator cascade")).toBe(
+      "Design feedback",
+    );
+  });
+
+  it("matches the project name in any case", () => {
+    expect(resolveSidebarThreadTitle("Review ELEVATOR Cascade", "review elevator")).toBe("Cascade");
+    expect(resolveSidebarThreadTitle("elevator Cascade Design Feedback", "Elevator cascade")).toBe(
+      "Design Feedback",
+    );
+  });
+
+  it("trims separators between the project name and the rest", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascade: motor access", "Elevator cascade")).toBe(
+      "Motor access",
+    );
+    expect(resolveSidebarThreadTitle("Elevator cascade - bearing review", "Elevator cascade")).toBe(
+      "Bearing review",
+    );
+    expect(resolveSidebarThreadTitle("Elevator cascade — wiring", "Elevator cascade")).toBe(
+      "Wiring",
+    );
+  });
+
+  it("keeps titles that do not start with the project name", () => {
+    expect(resolveSidebarThreadTitle("Review Elevator Cascade Design", "Elevator cascade")).toBe(
+      "Review Elevator Cascade Design",
+    );
+    expect(resolveSidebarThreadTitle("Cascade design", "Elevator cascade")).toBe("Cascade design");
+  });
+
+  it("only matches whole words", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascades compared", "Elevator cascade")).toBe(
+      "Elevator cascades compared",
+    );
+    expect(resolveSidebarThreadTitle("Disc transferring notes", "Disc transfer")).toBe(
+      "Disc transferring notes",
+    );
+  });
+
+  it("keeps the original title when nothing would remain", () => {
+    expect(resolveSidebarThreadTitle("Elevator cascade", "Elevator cascade")).toBe(
+      "Elevator cascade",
+    );
+    expect(resolveSidebarThreadTitle("elevator cascade", "Elevator Cascade")).toBe(
+      "elevator cascade",
+    );
+    expect(resolveSidebarThreadTitle("Elevator cascade: ", "Elevator cascade")).toBe(
+      "Elevator cascade: ",
+    );
+  });
+
+  it("keeps the title when the project name is blank", () => {
+    expect(resolveSidebarThreadTitle("Design feedback", "")).toBe("Design feedback");
+    expect(resolveSidebarThreadTitle("Design feedback", "   ")).toBe("Design feedback");
+  });
+
+  it("treats regex characters in project names literally", () => {
+    expect(resolveSidebarThreadTitle("[SUS] Cascade wiring", "[SUS] Cascade")).toBe("Wiring");
+    expect(resolveSidebarThreadTitle("SUSX Cascade wiring", "[SUS] Cascade")).toBe(
+      "SUSX Cascade wiring",
+    );
+  });
+});
+
+describe("describeProjectSource", () => {
+  const root = (kind: "assembly" | "part-studio", current: object | null = {}) => ({
+    kind,
+    current,
+  });
+  const onshape = (label: string) => ({ logo: "onshape", label });
+  const local = (label: string) => ({ logo: null, label });
+
+  it("names an Onshape project by the kind of its synced model, beside the Onshape logo", () => {
+    expect(
+      describeProjectSource({ onshapeSource: {}, cad: { roots: [root("assembly")] } }),
+    ).toEqual(onshape("Assembly"));
+    expect(
+      describeProjectSource({ onshapeSource: {}, cad: { roots: [root("part-studio")] } }),
+    ).toEqual(onshape("Part Studio"));
+  });
+
+  it("counts several synced Onshape models and ignores roots with no current snapshot", () => {
+    expect(
+      describeProjectSource({
+        onshapeSource: {},
+        cad: { roots: [root("assembly"), root("part-studio"), root("assembly", null)] },
+      }),
+    ).toEqual(onshape("2 models"));
+    expect(
+      describeProjectSource({
+        onshapeSource: {},
+        cad: { roots: [root("assembly", null), root("part-studio")] },
+      }),
+    ).toEqual(onshape("Part Studio"));
+  });
+
+  it("says an Onshape project has not synced, rather than repeating the logo's name", () => {
+    expect(describeProjectSource({ onshapeSource: {} })).toEqual(onshape("Not synced yet"));
+    expect(describeProjectSource({ onshapeSource: {}, cad: { roots: [] } })).toEqual(
+      onshape("Not synced yet"),
+    );
+  });
+
+  it("names a local CAD file by its format, in any extension case", () => {
+    expect(describeProjectSource({ localCadSource: { filePath: "models/arm.step" } })).toEqual(
+      local("STEP file"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "ARM.STP" } })).toEqual(
+      local("STEP file"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "bracket.igs" } })).toEqual(
+      local("IGES file"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "Gearbox.SLDASM" } })).toEqual(
+      local("SolidWorks · Assembly"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "plate.sldprt" } })).toEqual(
+      local("SolidWorks · Part"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "notes.cad" } })).toEqual(
+      local("CAD file"),
+    );
+  });
+
+  it("calls a project with no CAD source a local project", () => {
+    expect(describeProjectSource({})).toEqual(local("Local project"));
   });
 });

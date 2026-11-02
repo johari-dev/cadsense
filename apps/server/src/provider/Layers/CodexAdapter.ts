@@ -8,6 +8,7 @@
  * @module CodexAdapterLive
  */
 import {
+  hasCadSource,
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
@@ -1728,7 +1729,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           const project = yield* cadQuery.value.getProjectShellById(thread.value.projectId);
           if (
             Option.isNone(project) ||
-            !project.value.onshapeSource ||
+            !hasCadSource(project.value) ||
             project.value.cad?.enabled === false ||
             !project.value.cad?.roots.some((root) => root.current !== null)
           )

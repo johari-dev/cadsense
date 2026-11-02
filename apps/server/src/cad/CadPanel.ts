@@ -1,4 +1,5 @@
 import {
+  hasCadSource,
   CadViewError,
   type CadPanelState,
   type CadPanelSceneTicket,
@@ -63,7 +64,7 @@ export const make = Effect.gen(function* () {
     const project = yield* query.getProjectShellById(projectId).pipe(Effect.mapError(unavailable));
     if (
       Option.isNone(project) ||
-      !project.value.onshapeSource ||
+      !hasCadSource(project.value) ||
       project.value.cad?.enabled === false
     )
       return yield* unavailable();
@@ -97,7 +98,7 @@ export const make = Effect.gen(function* () {
     const roots = project.cad?.roots.filter((root) => root.current !== null) ?? [];
     const root = saved
       ? roots.find((root) => root.rootId === saved.view.rootId)
-      : defaultCadRoot(project.onshapeSource, roots);
+      : defaultCadRoot(project, roots);
     let view = saved?.view ?? null;
     if (root?.current && view?.snapshotId !== root.current.snapshotId) {
       view = yield* store

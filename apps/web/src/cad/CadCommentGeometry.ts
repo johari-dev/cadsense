@@ -55,6 +55,31 @@ export const cadVisibleIntersections = (model: CadSceneModel, ray: THREE.Raycast
     )
     .filter((hit) => !model.isClipped(hit.point));
 
+/** How far a missed pick may move, in image pixels, and the spacing of the rings searched. */
+export const CAD_COMMENT_SNAP_RADIUS = 64;
+const SNAP_STEP = 2;
+
+/** Image pixels in rings around a pick, nearest ring first, inside the image. */
+function* snapPixels(x: number, y: number, width: number, height: number) {
+  for (let radius = SNAP_STEP; radius <= CAD_COMMENT_SNAP_RADIUS; radius += SNAP_STEP) {
+    const count = Math.max(8, Math.ceil((2 * Math.PI * radius) / SNAP_STEP));
+    for (let index = 0; index < count; index++) {
+      const angle = (2 * Math.PI * index) / count;
+      const px = x + radius * Math.cos(angle);
+      const py = y + radius * Math.sin(angle);
+      if (px >= 0 && px < width && py >= 0 && py < height) yield [px, py] as const;
+    }
+  }
+}
+
+/**
+ * Turns image picks into candidate surface points. The nearest visible surface at the pixel wins;
+ * a nearer part is never searched through. When the pick misses (empty space, a translucent
+ * surface, or another part), nearby pixels are tried, nearest first, up to
+ * CAD_COMMENT_SNAP_RADIUS, and a candidate found that way reports the `pixel` it came from. Each
+ * nearby pixel is tested against the intended part alone first, so only pixels that land on it pay
+ * for a raycast through the whole assembly.
+ */
 export const locateCadCommentPoints = (
   model: CadSceneModel,
   camera: THREE.Camera,
@@ -65,6 +90,47 @@ export const locateCadCommentPoints = (
   model.group.updateMatrixWorld(true);
   camera.updateMatrixWorld(true);
   const visible = [...model.objects].filter(([, entry]) => entry.object.visible);
+  const ray = new THREE.Raycaster();
+  const aim = (x: number, y: number) =>
+    ray.setFromCamera(new THREE.Vector2((x / width) * 2 - 1, 1 - (y / height) * 2), camera);
+  const ownerOf = (hit: THREE.Intersection) =>
+    visible.find(([, entry]) => {
+      let node: THREE.Object3D | null = hit.object;
+      while (node) {
+        if (node === entry.object) return true;
+        node = node.parent;
+      }
+      return false;
+    });
+  /** The first visible surface at a pixel, classified the way a pick reports it. */
+  const surfaceAt = (x: number, y: number) => {
+    aim(x, y);
+    const hit = cadVisibleIntersections(model, ray)[0];
+    if (!hit) return { reason: "no-hit" } as const;
+    if (cadHitIsTransparent(hit)) return { reason: "transparent-hit" } as const;
+    const owner = ownerOf(hit);
+    return owner ? ({ reason: "surface", hit, owner } as const) : ({ reason: "no-hit" } as const);
+  };
+  const candidate = (
+    pickKey: string,
+    hit: THREE.Intersection,
+    owner: NonNullable<ReturnType<typeof ownerOf>>,
+  ): CadCommentRenderHit => {
+    const inverse = owner[1].object.matrixWorld.clone().invert();
+    const point = hit.point.clone().applyMatrix4(inverse);
+    const normal = hit.face?.normal
+      .clone()
+      .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld))
+      .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(inverse))
+      .normalize();
+    return {
+      pickKey,
+      reason: "candidate",
+      occurrenceId: owner[0],
+      point: [point.x, point.y, point.z],
+      normal: normal ? [normal.x, normal.y, normal.z] : null,
+    };
+  };
   return picks.map((pick) => {
     const failure = (reason: string): CadCommentRenderHit => ({
       pickKey: pick.pickKey,
@@ -75,39 +141,26 @@ export const locateCadCommentPoints = (
     });
     if (pick.x < 0 || pick.x >= width || pick.y < 0 || pick.y >= height)
       return failure("invalid-image-point");
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(
-      new THREE.Vector2((pick.x / width) * 2 - 1, 1 - (pick.y / height) * 2),
-      camera,
-    );
-    const hit = cadVisibleIntersections(model, ray)[0];
-    if (!hit) return failure("no-hit");
-    if (cadHitIsTransparent(hit)) return failure("transparent-hit");
-    const owner = visible.find(([, entry]) => {
-      let node: THREE.Object3D | null = hit.object;
-      while (node) {
-        if (node === entry.object) return true;
-        node = node.parent;
-      }
-      return false;
-    });
-    if (!owner) return failure("no-hit");
-    if (owner[0] !== pick.intendedOccurrenceId)
-      return { ...failure("occurrence-mismatch"), occurrenceId: owner[0] };
-    const inverse = owner[1].object.matrixWorld.clone().invert();
-    const point = hit.point.clone().applyMatrix4(inverse);
-    const normal = hit.face?.normal
-      .clone()
-      .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld))
-      .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(inverse))
-      .normalize();
-    return {
-      pickKey: pick.pickKey,
-      reason: "candidate",
-      occurrenceId: owner[0],
-      point: [point.x, point.y, point.z],
-      normal: normal ? [normal.x, normal.y, normal.z] : null,
-    };
+    const exact = surfaceAt(pick.x, pick.y);
+    if (exact.reason === "surface" && exact.owner[0] === pick.intendedOccurrenceId)
+      return candidate(pick.pickKey, exact.hit, exact.owner);
+    const missed =
+      exact.reason === "surface"
+        ? { ...failure("occurrence-mismatch"), occurrenceId: exact.owner[0] }
+        : failure(exact.reason);
+    const intended = model.objects.get(pick.intendedOccurrenceId);
+    if (!intended?.object.visible) return missed;
+    for (const [x, y] of snapPixels(pick.x, pick.y, width, height)) {
+      aim(x, y);
+      const onIntended = ray
+        .intersectObject(intended.object, true)
+        .some((hit) => !model.isClipped(hit.point));
+      if (!onIntended) continue;
+      const nearby = surfaceAt(x, y);
+      if (nearby.reason === "surface" && nearby.owner[0] === pick.intendedOccurrenceId)
+        return { ...candidate(pick.pickKey, nearby.hit, nearby.owner), pixel: [x, y] };
+    }
+    return missed;
   });
 };
 
@@ -144,4 +197,80 @@ export const cadCommentVisible = (
   return !cadVisibleIntersections(model, ray).some(
     (hit) => hit.distance <= Math.max(0, distance - epsilon) || cadHitIsTransparent(hit),
   );
+};
+
+/** Height of a comment pin in CSS px; one- and two-character pins are round, so also their width. */
+export const CAD_COMMENT_PIN_SIZE = 22;
+/** Height of a group's count marker in CSS px. */
+export const CAD_COMMENT_CLUSTER_SIZE = 24;
+/** A comment pin projected onto the viewport. Pinned pins (the focused comment's) never group. */
+export interface CadCommentScreenPin {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly pinned: boolean;
+}
+
+/**
+ * Groups pins so no two visible markers overlap: any two markers whose shapes come within
+ * `gap` px (pins as circles or pills, count markers as boxes) merge into one count marker at
+ * their members' centre, and that marker (usually wider than
+ * a pin) is checked again against its neighbours until nothing overlaps. Pinned pins stay on
+ * their own and never bridge a merge. Returns indices into `pins`, each group and the list
+ * ordered by first appearance. Runs on every orbit frame; a review has a few dozen pins, and
+ * every merge removes a marker, so the repeated pairwise pass stays cheap.
+ */
+export const groupOverlappingCommentPins = (
+  pins: readonly CadCommentScreenPin[],
+  {
+    gap = 4,
+    clusterWidth,
+  }: {
+    gap?: number;
+    /** Width of the count marker for a group of `count` pins. */
+    clusterWidth: (count: number) => number;
+  },
+): number[][] => {
+  const markers = pins.map((pin, i) => ({
+    members: [i],
+    x: pin.x,
+    y: pin.y,
+    width: pin.width,
+    height: CAD_COMMENT_PIN_SIZE,
+    pinned: pin.pinned,
+  }));
+  type Marker = (typeof markers)[number];
+  const overlaps = (a: Marker, b: Marker) => {
+    if (a.pinned || b.pinned) return false;
+    const dx = Math.abs(a.x - b.x);
+    const dy = Math.abs(a.y - b.y);
+    // Two pins are horizontal capsules (circles when round): compare the distance between
+    // their flat segments with their radii, so diagonal neighbours that don't touch stay apart.
+    if (a.members.length === 1 && b.members.length === 1) {
+      const flat = Math.max(0, dx - (a.width - a.height) / 2 - (b.width - b.height) / 2);
+      return Math.hypot(flat, dy) < (a.height + b.height) / 2 + gap;
+    }
+    // A count marker is a rounded square: compare boxes.
+    return dx < (a.width + b.width) / 2 + gap && dy < (a.height + b.height) / 2 + gap;
+  };
+  const findOverlap = (): [number, number] | null => {
+    for (let i = 0; i < markers.length; i++)
+      for (let j = i + 1; j < markers.length; j++)
+        if (overlaps(markers[i]!, markers[j]!)) return [i, j];
+    return null;
+  };
+  for (let pair = findOverlap(); pair; pair = findOverlap()) {
+    const [i, j] = pair;
+    const members = [...markers[i]!.members, ...markers[j]!.members].sort((a, b) => a - b);
+    markers[i] = {
+      members,
+      x: members.reduce((sum, m) => sum + pins[m]!.x, 0) / members.length,
+      y: members.reduce((sum, m) => sum + pins[m]!.y, 0) / members.length,
+      width: clusterWidth(members.length),
+      height: CAD_COMMENT_CLUSTER_SIZE,
+      pinned: false,
+    };
+    markers.splice(j, 1);
+  }
+  return markers.map((marker) => marker.members).sort((a, b) => a[0]! - b[0]!);
 };

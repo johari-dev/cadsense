@@ -10,18 +10,33 @@ export const pruneCadSnapshots = Effect.fn("pruneCadSnapshots")(function* (proje
   // Enumerate first: a concurrently published snapshot cannot become a deletion candidate.
   const stored = yield* store.list();
   const model = yield* query.getCommandReadModel();
-  const protectedIds = model.projects.flatMap(
-    (project) =>
-      project.cad?.roots.flatMap((root) =>
-        [root.current?.snapshotId, root.rollback?.snapshotId].filter(
-          (id): id is string => id !== undefined,
-        ),
-      ) ?? [],
+  const protectedIds = model.projects
+    // Removal records the user's keep-or-delete choice in `cad.storage`, and a removed project keeps
+    // what it chose. A deleted local CAD project without that record was deleted outright, which
+    // only older event logs hold (`project.delete` now refuses one), so its snapshots are garbage.
+    .filter((project) => !(project.localCadSource && project.deletedAt && !project.cad?.storage))
+    .flatMap(
+      (project) =>
+        project.cad?.roots.flatMap((root) =>
+          [root.current?.snapshotId, root.rollback?.snapshotId].filter(
+            (id): id is string => id !== undefined,
+          ),
+        ) ?? [],
+    );
+  // A comment keeps the snapshot it was made on while its thread stays and its project's CAD does:
+  // an active project, or a removed one whose removal kept its CAD. Deleting the CAD takes them.
+  const keepsCad = new Set(
+    model.projects
+      .filter(
+        (project) =>
+          project.deletedAt === null ||
+          (project.cad?.storage !== undefined && !project.cad.storage.deleteCad),
+      )
+      .map((project) => project.id),
   );
   for (const comment of model.cadComments ?? []) {
     const thread = model.threads.find((t) => t.id === comment.threadId && t.deletedAt === null);
-    if (thread && model.projects.some((p) => p.id === thread.projectId && p.deletedAt === null))
-      protectedIds.push(comment.snapshotId);
+    if (thread && keepsCad.has(thread.projectId)) protectedIds.push(comment.snapshotId);
   }
   const protectedSet = new Set(protectedIds);
   const operatingProjects = new Set(

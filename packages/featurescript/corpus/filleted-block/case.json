@@ -1,0 +1,9 @@
+{
+  "description": "A 40 x 30 x 20 mm block with its vertical edges filleted at 5 mm with std's fillet.",
+  "steps": [{ "file": "feature.fs", "feature": "filletedBlock" }],
+  "expect": {
+    "source": "analytic: 40 * 30 * 20 - 4 * (25 - 25 * PI / 4) * 20 mm^3",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 23570.7963, "faces": 10, "edges": 24, "vertices": 16 }]
+  }
+}

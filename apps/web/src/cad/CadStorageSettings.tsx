@@ -6,7 +6,7 @@ import {
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useState } from "react";
-import { DatabaseIcon } from "lucide-react";
+import { DatabaseIcon } from "~/lib/icons";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { cadStorageEnvironment } from "../state/cadStorage";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -27,7 +27,7 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
       const result = await run({ environmentId, input });
       if (result._tag === "Failure")
         setError(
-          "The operation could not finish. Existing project records are preserved. Retry pending cleanup, or check that this project has not already been restored.",
+          "The operation could not finish. Existing project records are preserved. Retry pending cleanup, or check that this project has not already been restored and that no other project uses its folder or Onshape document.",
         );
     } finally {
       setPending(false);
@@ -37,6 +37,7 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
     const choices = await requestCadRemoval({
       title: entry.title,
       workspaceRoot: entry.workspaceRoot,
+      source: entry.source,
       cleanup: true,
     });
     if (choices && (choices.deleteCad || choices.deleteWorkspace))
@@ -64,8 +65,8 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
       )}
       {state.value.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No removed Onshape projects. Removing a project can retain its downloaded CAD and
-          workspace files here.
+          No removed CAD projects. Removing an Onshape or local CAD project can keep its threads and
+          CAD data here.
         </p>
       )}
       {state.value.map((entry) => (
@@ -75,7 +76,7 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
             <p className="text-xs text-muted-foreground">
               {entry.cleanupPending ? "Cleanup pending" : "Retained project"} ·{" "}
               {entry.deleteCad && !entry.cleanupPending
-                ? "Downloaded CAD deleted"
+                ? `${entry.source === "local" ? "Imported" : "Downloaded"} CAD deleted`
                 : `Snapshot data: ${(entry.byteLength / 1024 ** 2).toFixed(1)} MiB (before shared-geometry savings)`}
             </p>
           </div>
@@ -137,8 +138,9 @@ export function CadStorageSettings() {
       <SettingsSection title="CAD storage" icon={<DatabaseIcon className="size-4" />}>
         <div className="space-y-5 p-4">
           <p className="text-sm text-muted-foreground">
-            Restore removed Onshape projects or delete retained files. These actions use local data
-            and do not contact Onshape. Threads and captured images are preserved.
+            Restore removed Onshape and local CAD projects, or delete their retained data. These
+            actions use local data, do not contact Onshape, and never change a local project's
+            folder. Threads and captured images are preserved.
           </p>
           {environmentId ? (
             <RetainedProjects key={environmentId} environmentId={environmentId} />

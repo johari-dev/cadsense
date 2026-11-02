@@ -1,25 +1,31 @@
 import type {
   AssetResource,
   CadCaptureCard,
+  CadCommentSeverity,
   CadCommentsPublishedCard,
   ScopedThreadRef,
 } from "@cadsense/contracts";
-import { CircleAlertIcon, MessageSquareIcon } from "lucide-react";
-import { useMemo } from "react";
+import {
+  ArrowRightIcon,
+  WarningCircleIcon as CircleAlertIcon,
+  ChatIcon as MessageSquareIcon,
+} from "~/lib/icons";
+import { useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
+import { Button } from "../components/ui/button";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
-import { CadSeverityLabel, CommentBadge } from "./CadCommentsCard";
+import { CommentBadge } from "./CadCommentsCard";
 
 const MAX_THUMBNAILS = 6;
-const MAX_LISTED_COMMENTS = 8;
+const MAX_LISTED_COMMENTS = 4;
 
-/** Opens the CAD panel's comments, optionally focused on one comment's first location. */
+/** Opens the CAD panel's comments, optionally focused on one comment with all its locations. */
 function openCadComments(threadRef: ScopedThreadRef, commentId?: string) {
   useCadCommentReviewStore
     .getState()
-    .request(threadRef, commentId ? { id: commentId, target: 0 } : undefined);
+    .request(threadRef, commentId ? { id: commentId, target: "all" } : undefined);
   useRightPanelStore.getState().open(threadRef, "cad");
 }
 
@@ -135,6 +141,17 @@ export function describeCadCommentsPublished(card: CadCommentsPublishedCard): st
   return summary ? summary.charAt(0).toUpperCase() + summary.slice(1) : "No comments published";
 }
 
+/**
+ * The card's heading: "11 review comments" when the turn only wrote comments, otherwise the
+ * full summary so resolution proposals stay named.
+ */
+export function describeCadCommentsHeading(card: CadCommentsPublishedCard): string {
+  const count = card.published.length;
+  return count > 0 && card.proposed.length === 0
+    ? `${count} review comment${count === 1 ? "" : "s"}`
+    : describeCadCommentsPublished(card);
+}
+
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
   card,
@@ -146,74 +163,113 @@ export function CadPublishedComments({
   const count = card.published.length;
   const listed = card.published.slice(0, MAX_LISTED_COMMENTS);
   const unlisted = count - listed.length;
+  const heading = describeCadCommentsHeading(card);
+  // A card of its own, so the review's result reads as the main outcome of the turn rather
+  // than more narration. Its action is outlined: the composer's send keeps the only fill.
   return (
-    <div className="text-sm leading-relaxed">
-      <div className="flex min-h-6 items-center gap-1.5 px-0.5">
-        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-          <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+    <section
+      aria-label={heading}
+      className="rounded-xl border border-border bg-muted p-3 pt-2 text-[0.9333rem]"
+    >
+      <div className="flex min-h-8 items-center gap-1.5 px-1">
+        <span className="flex size-6 shrink-0 items-center justify-center text-foreground/70">
+          <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8]" aria-hidden />
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-          {describeCadCommentsPublished(card)}
-        </span>
-        {count > 0 || card.proposed.length > 0 ? (
-          <button
-            type="button"
-            className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
-            onClick={() => openCadComments(threadRef)}
-          >
-            Open in CAD
-          </button>
-        ) : null}
+        <h3 className="min-w-0 flex-1 truncate text-[1.0667rem] font-semibold text-foreground">
+          {heading}
+        </h3>
       </div>
-      {listed.map((comment) => (
-        <button
-          key={comment.commentId}
-          type="button"
-          className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
-          onClick={() => openCadComments(threadRef, comment.commentId)}
-        >
-          <CommentBadge number={comment.number} />
-          <span className="min-w-0 flex-1 truncate text-foreground">
-            <CadSeverityLabel severity={comment.severity} />
-            {comment.title}
-          </span>
-          {comment.location ? (
-            <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
-              {comment.location}
-            </span>
-          ) : null}
-        </button>
-      ))}
-      {unlisted > 0 ? (
-        <button
-          type="button"
-          className="py-0.5 pl-[30px] text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
+      <div className="mt-0.5 flex flex-col gap-0.5">
+        {listed.map((comment) =>
+          commentRow({
+            key: comment.commentId,
+            number: comment.number,
+            title: comment.title,
+            severity: comment.severity,
+            onOpen: () => openCadComments(threadRef, comment.commentId),
+            detail: comment.location ? (
+              <span className="min-w-0 truncate">{comment.location}</span>
+            ) : null,
+          }),
+        )}
+        {unlisted > 0 ? (
+          // Lines up with the titles: row inset, badge column, and gap.
+          <p className="ps-8.5 pt-0.5 text-[0.8rem] text-muted-foreground">+{unlisted} more</p>
+        ) : null}
+        {card.proposed.map((proposal) =>
+          commentRow({
+            key: proposal.commentId,
+            number: proposal.number,
+            title: proposal.title,
+            severity: null,
+            onOpen: () => openCadComments(threadRef, proposal.commentId),
+            detail: "Resolution proposed",
+          }),
+        )}
+      </div>
+      {count > 0 || card.proposed.length > 0 ? (
+        <Button
+          variant="outline"
+          className="mt-3 h-8.5 w-full bg-transparent text-[0.8667rem] dark:bg-transparent sm:h-8.5 sm:text-[0.8667rem]"
           onClick={() => openCadComments(threadRef)}
         >
-          {unlisted} more in CAD
-        </button>
+          {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}
+          <ArrowRightIcon aria-hidden />
+        </Button>
       ) : null}
-      {card.proposed.map((proposal) => (
-        <button
-          key={proposal.commentId}
-          type="button"
-          className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
-          onClick={() => openCadComments(threadRef, proposal.commentId)}
-        >
-          <CommentBadge number={proposal.number} />
-          <span className="min-w-0 flex-1 truncate text-foreground">{proposal.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">resolution proposed</span>
-        </button>
-      ))}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}
-          className="flex items-baseline gap-2 py-0.5 pl-[30px] text-destructive"
+          className="flex items-baseline gap-2 px-1 pt-1.5 pb-0.5 text-destructive"
         >
           <CircleAlertIcon className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
           <span className="min-w-0 flex-1">{describeCadCommentRejection(rejection)}</span>
         </p>
       ))}
-    </div>
+    </section>
+  );
+}
+
+/**
+ * One comment in the chat list: its severity-colored number and full title on the first line,
+ * then the secondary detail (the part, or the proposal state) on a second, quieter line.
+ * The badge sits in the header icon's column so titles line up with the header text.
+ * A plain function, not a component, so each row stays a `<button>` in the element tree.
+ */
+function commentRow({
+  key,
+  number,
+  title,
+  severity,
+  onOpen,
+  detail,
+}: {
+  key: string;
+  number: number;
+  title: string;
+  severity: CadCommentSeverity | null;
+  onOpen: () => void;
+  detail: ReactNode;
+}) {
+  return (
+    <button
+      key={key}
+      type="button"
+      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+      onClick={onOpen}
+    >
+      <span className="flex h-5 items-center justify-center">
+        <CommentBadge number={number} severity={severity} />
+      </span>
+      <span className="line-clamp-2 leading-5 text-foreground">
+        {severity ? <span className="sr-only">{`${severity}: `}</span> : null}
+        {title}
+      </span>
+      {detail ? (
+        <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-[0.8rem] leading-5 text-muted-foreground">
+          {detail}
+        </span>
+      ) : null}
+    </button>
   );
 }

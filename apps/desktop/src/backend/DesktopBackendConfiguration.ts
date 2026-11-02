@@ -58,6 +58,9 @@ export class DesktopBackendConfiguration extends Context.Service<
     // fall-back to Windows), so the env switcher can't show "WSL" for a
     // backend that actually resolved to Windows.
     readonly resolvePrimaryLabel: Effect.Effect<string>;
+    // Whether the primary backend runs in WSL, from the same decision. Native pickers use it
+    // to return paths in that backend's filesystem.
+    readonly primaryRunsInWsl: Effect.Effect<boolean>;
   }
 >()("@cadsense/desktop/backend/DesktopBackendConfiguration") {}
 
@@ -823,6 +826,10 @@ export const make = Effect.gen(function* () {
       }
       return distro ? `WSL (${distro})` : "WSL";
     }).pipe(Effect.withSpan("desktop.backendConfiguration.resolvePrimaryLabel")),
+    primaryRunsInWsl: describePrimary.pipe(
+      Effect.map(({ useWsl }) => useWsl),
+      Effect.withSpan("desktop.backendConfiguration.primaryRunsInWsl"),
+    ),
     resolveWsl: (input) =>
       Effect.gen(function* () {
         const shared = yield* sharedInputs;

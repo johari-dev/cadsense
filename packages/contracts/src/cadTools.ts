@@ -1,12 +1,16 @@
 import { CadFindPartsInput } from "./cadFindParts.ts";
 import {
+  CadCommentCategory,
+  CadCommentSeverity,
   CadCommentsListInput,
   CadCommentLocateInput,
   CadCommentInspectInput,
   CadCommentsPublishToolInput,
 } from "./cadComments.ts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadMeasureInput } from "./cadMeasure.ts";
+import { CadDriveOptionsInput } from "./cadDriveOptions.ts";
 import { CadHash, CadSnapshotId, CadSnapshotNode } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
@@ -38,6 +42,7 @@ export const CadHierarchyResult = Schema.Struct({
 });
 export type CadHierarchyResult = typeof CadHierarchyResult.Type;
 export const CAD_CHECK_NAMES = [
+  "drivetrain",
   "mesh-interference",
   "overlapping-bounds",
   "coincident-instances",
@@ -65,6 +70,26 @@ export const CadCheckFinding = Schema.Union([
     intersectionFraction: Schema.Number,
     // Both parts sit in one subassembly below the root, such as a vendor kit's own screw and nut.
     withinSubassembly: Schema.Boolean,
+    // The overlap in plain words: a likely duplicate, a collision, or a usually intended overlap.
+    reading: Schema.String,
+  }),
+  Schema.Struct({
+    check: Schema.Literal("drivetrain"),
+    kind: Schema.Literals([
+      "power-path",
+      "unpowered",
+      "gear-mesh",
+      "loop",
+      "loop-length",
+      "shaft-support",
+      "stacked-shafts",
+      "motor-mount",
+      "collision",
+    ]),
+    // True when the drive will not work as modeled; false for traced facts such as ratios.
+    problem: Schema.Boolean,
+    summary: Schema.String,
+    occurrences: Schema.Array(CadCheckOccurrence),
   }),
   Schema.Struct({
     check: Schema.Literal("overlapping-bounds"),
@@ -87,6 +112,54 @@ export const CadCheckFinding = Schema.Union([
   }),
 ]);
 export type CadCheckFinding = typeof CadCheckFinding.Type;
+const Point3 = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
+/**
+ * A ready cad_comments_publish item for one defect the checks proved. The agent may reword or drop
+ * it. `placements` is server-internal: where the checks proved the defect is, one per affected
+ * part, which the provider turns into inspected point targets before the agent sees the draft. The
+ * agent sees point targets (with inspection images) or the whole-part targets.
+ */
+export const CadCheckDraft = Schema.Struct({
+  kind: Schema.Literal("new"),
+  publicationKey: Schema.String,
+  inspectedSnapshotId: CadSnapshotId,
+  title: Schema.String,
+  body: Schema.String,
+  severity: CadCommentSeverity,
+  category: CadCommentCategory,
+  targets: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("part"),
+        label: Schema.String,
+        occurrenceId: CadHash,
+        preciseLocationLimitation: Schema.String,
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("point"),
+        label: Schema.String,
+        candidateId: Schema.String,
+        inspectionId: Schema.String,
+        confirmationReason: Schema.String,
+      }),
+    ]),
+  ),
+  placements: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        // A surface point in the occurrence's own coordinates and the world direction to view it from.
+        occurrenceId: CadHash,
+        point: Point3,
+        normal: Point3,
+        // Parts the inspection view shows; everything else is hidden.
+        isolate: Schema.Array(CadHash),
+        // Where the marker sits, in words, for the agent to confirm against the image.
+        expected: Schema.String,
+      }),
+    ),
+  ),
+});
+export type CadCheckDraft = typeof CadCheckDraft.Type;
 export const CadChecksResult = Schema.Struct({
   revision: Schema.Int,
   snapshotId: CadSnapshotId,
@@ -94,6 +167,12 @@ export const CadChecksResult = Schema.Struct({
   // What each selected check does and does not prove, stated once per page rather than per finding.
   explanations: Schema.Record(Schema.String, Schema.String),
   findings: Schema.Array(CadCheckFinding),
+  // First page only, when the checks proved defects: one publishable item per defect.
+  drafts: Schema.optionalKey(Schema.Array(CadCheckDraft)),
+  // Which inspection image attached to this result shows each point-target draft's marker.
+  draftImages: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ publicationKey: Schema.String, image: Schema.Int })),
+  ),
   nextCursor: Schema.NullOr(Schema.String),
   summary: Schema.Struct({
     totalFindings: Schema.Int,
@@ -209,6 +288,114 @@ export const CadDiffResult = Schema.Struct({
 });
 export type CadDiffResult = typeof CadDiffResult.Type;
 
+const WorkspaceFile = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
+/** One feature to run: a workspace `.fs` file, which feature in it, and inputs as FeatureScript expressions. */
+export const CadFeatureScriptPreviewStep = Schema.Struct({
+  path: WorkspaceFile,
+  feature: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
+  parameters: Schema.optionalKey(
+    Schema.Record(
+      Schema.String.check(Schema.isMaxLength(256)),
+      // A list input is one expression; a hundred picked waypoints are about 12 KB.
+      Schema.String.check(Schema.isMaxLength(64 * 1024)),
+    ),
+  ),
+});
+export type CadFeatureScriptPreviewStep = typeof CadFeatureScriptPreviewStep.Type;
+export const FEATURESCRIPT_PREVIEW_VIEWS = ["iso", "top", "front", "right"] as const;
+/** Runs `before` features, then this one, locally on top of an optional workspace STEP `base`. */
+export const CadFeatureScriptPreviewInput = Schema.Struct({
+  ...CadFeatureScriptPreviewStep.fields,
+  before: Schema.optionalKey(
+    Schema.Array(CadFeatureScriptPreviewStep).check(Schema.isMaxLength(16)),
+  ),
+  base: Schema.optionalKey(WorkspaceFile),
+  view: Schema.optionalKey(Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS)),
+});
+export type CadFeatureScriptPreviewInput = typeof CadFeatureScriptPreviewInput.Type;
+export const FEATURESCRIPT_PREVIEW_STATUSES = [
+  "OK",
+  "INFO",
+  "WARNING",
+  "ERROR",
+  "INVALID",
+  "STOPPED",
+] as const;
+export type FeatureScriptPreviewStatus = (typeof FEATURESCRIPT_PREVIEW_STATUSES)[number];
+/** A line in a workspace script; line and column start at 1. */
+export const FeatureScriptLocation = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Int,
+  column: Schema.Int,
+});
+export type FeatureScriptLocation = typeof FeatureScriptLocation.Type;
+/**
+ * The first thing that went wrong: a syntax error, the cause of the first failed feature, or why the
+ * preview stopped. A failure inside std is located at the user's line that called into it.
+ */
+export const FeatureScriptFailure = Schema.Struct({
+  message: Schema.String,
+  location: Schema.NullOr(FeatureScriptLocation),
+  /** The local runtime can't run something the script calls, such as `opImportForeign`. */
+  unsupported: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type FeatureScriptFailure = typeof FeatureScriptFailure.Type;
+/** What the previewed (last) feature did to the model. */
+export const FeatureScriptChanges = Schema.Struct({
+  /** Solid volume after the feature minus before it. */
+  volumeMm3: Schema.Number,
+  /** Faces the feature created, the ones drawn in amber. */
+  createdFaces: Schema.Int,
+});
+export type FeatureScriptChanges = typeof FeatureScriptChanges.Type;
+export const CadFeatureScriptPreviewResult = Schema.Struct({
+  /**
+   * The worst feature status. INVALID: the script didn't load (syntax errors, a missing feature, a
+   * bad parameter or base file). STOPPED: the preview timed out or its worker crashed.
+   */
+  status: Schema.Literals(FEATURESCRIPT_PREVIEW_STATUSES),
+  /** Inputs, outcome and cause per feature, and the resulting solids, as plain text. */
+  summary: Schema.String,
+  failure: Schema.NullOr(FeatureScriptFailure),
+  changes: Schema.NullOr(FeatureScriptChanges),
+  features: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      feature: Schema.String,
+      typeName: Schema.String,
+      status: Schema.Literals(["OK", "INFO", "WARNING", "ERROR", "NOT_RUN"]),
+      message: Schema.NullOr(Schema.String),
+      cause: Schema.NullOr(Schema.String),
+    }),
+  ),
+  solids: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      createdBy: Schema.String,
+      /** The name the script gave it with setProperty. */
+      name: Schema.NullOr(Schema.String),
+      volumeMm3: Schema.Number,
+      /** Axis-aligned bounding box. */
+      boundsMm: Schema.Struct({
+        min: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+        max: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+      }),
+      faces: Schema.Int,
+      edges: Schema.Int,
+      vertices: Schema.Int,
+    }),
+  ),
+  /** PNGs of every view, result.glb and report.json, when the features ran. */
+  artifacts: Schema.NullOr(
+    Schema.Struct({
+      directory: Schema.String,
+      image: Schema.String,
+      view: Schema.Literals(FEATURESCRIPT_PREVIEW_VIEWS),
+    }),
+  ),
+});
+export type CadFeatureScriptPreviewResult = typeof CadFeatureScriptPreviewResult.Type;
+
 /** Live tool feedback includes the rendered pose; historical capture records keep their own pose. */
 export const CadCaptureToolResult = Schema.Struct({
   ...CadCaptureResult.fields,
@@ -227,6 +414,8 @@ export const CAD_TOOL_INPUTS = {
   cad_diff: CadDiffInput,
   cad_measure: CadMeasureInput,
   cad_find_parts: CadFindPartsInput,
+  cad_drive_options: CadDriveOptionsInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
+  cad_featurescript_preview: CadFeatureScriptPreviewInput,
 } as const;
