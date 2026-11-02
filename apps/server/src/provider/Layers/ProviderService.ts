@@ -350,7 +350,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         increment(providerRuntimeEventsTotal, {
           provider: canonicalEvent.provider,
           eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
+        }).pipe(
+          Effect.andThen(
+            // Some adapters' legacy events arrive without a payload; counting must not drop them.
+            canonicalEvent.type === "turn.completed" && canonicalEvent.payload?.state === "failed"
+              ? analytics.count("agent_turns_failed")
+              : Effect.void,
+          ),
+          Effect.andThen(publishRuntimeEvent(canonicalEvent)),
+        ),
       ),
     );
 
@@ -763,7 +771,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // rather than issuing a new one: sessions that go a long time between
       // browser tool calls used to lose the toolkit outright.
       yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
-      const turn = yield* routed.adapter.sendTurn(input);
+      const turn = yield* routed.adapter
+        .sendTurn(input)
+        .pipe(Effect.tapError(() => analytics.count("agent_turns_send_failed")));
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,

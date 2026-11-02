@@ -144,10 +144,11 @@ const rollOver = (state: AnalyticsState, today: string): AnalyticsState => {
 /**
  * The events the state now calls for, and the state with them marked as queued: a `usage.daily`
  * per finished day, `app.active` once a day has counted something, and each newly reached
- * milestone (`first_launch` on the first tick ever).
+ * milestone (`first_launch` on the first tick ever, then those counters or `reach` reached).
  */
 const dueEvents = (
   state: AnalyticsState,
+  reachedDirectly: ReadonlySet<Milestone>,
 ): readonly [ReadonlyArray<AnalyticsEvent>, AnalyticsState] => {
   const events: AnalyticsEvent[] = state.finished.map(({ day, counts }) => ({
     event: "usage.daily",
@@ -159,16 +160,19 @@ const dueEvents = (
   }
   const reached = new Set<Milestone>(state.milestones);
   const newMilestones: Milestone[] = [];
-  const reach = (milestone: Milestone) => {
+  const markReached = (milestone: Milestone) => {
     if (reached.has(milestone)) return;
     reached.add(milestone);
     newMilestones.push(milestone);
     events.push({ event: "milestone.reached", properties: { milestone } });
   };
-  reach("first_launch");
+  markReached("first_launch");
+  for (const milestone of Milestone.literals) {
+    if (reachedDirectly.has(milestone)) markReached(milestone);
+  }
   for (const counter of DAILY_COUNTERS) {
     const milestone = MILESTONE_BY_COUNTER[counter];
-    if (milestone !== undefined && (state.counts[counter] ?? 0) > 0) reach(milestone);
+    if (milestone !== undefined && (state.counts[counter] ?? 0) > 0) markReached(milestone);
   }
   return [
     events,
@@ -191,6 +195,13 @@ export class AnalyticsService extends Context.Service<
      */
     readonly count: (counter: DailyCounter, by?: number) => Effect.Effect<void>;
 
+    /**
+     * Reaches `milestone` if it wasn't already, without counting anything, so the day isn't
+     * marked active. For onboarding states no user action counts toward, such as a provider
+     * that was already signed in. Cheap (memory only) and idempotent.
+     */
+    readonly reach: (milestone: Milestone) => Effect.Effect<void>;
+
     /** Sends everything due now. Runs every second on its own, and at shutdown. */
     readonly flush: Effect.Effect<void>;
   }
@@ -200,6 +211,7 @@ export class AnalyticsService extends Context.Service<
     AnalyticsService,
     AnalyticsService.of({
       count: () => Effect.void,
+      reach: () => Effect.void,
       flush: Effect.void,
     }),
   );
@@ -222,7 +234,11 @@ export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
   const posthogKey = Option.getOrUndefined(telemetryConfig.posthogKey) ?? BUNDLED_POSTHOG_KEY;
   if (!telemetryConfig.enabled || posthogKey === undefined || posthogKey === "") {
-    return AnalyticsService.of({ count: () => Effect.void, flush: Effect.void });
+    return AnalyticsService.of({
+      count: () => Effect.void,
+      reach: () => Effect.void,
+      flush: Effect.void,
+    });
   }
 
   const httpClient = yield* HttpClient.HttpClient;
@@ -271,6 +287,9 @@ export const make = Effect.gen(function* () {
   const lastPersistRef = yield* Ref.make(0);
   // The hashed installation id once loaded; null until the first send and after forgetting it.
   const identifierRef = yield* Ref.make<string | null>(null);
+  // Milestones passed to `reach`. Kept in memory only: a run that ends before the next tick
+  // reaches them again on the next launch.
+  const reachedRef = yield* Ref.make<ReadonlySet<Milestone>>(new Set());
   // Whether the id and state file were deleted since analytics last ran, so an opted-out
   // install deletes them once instead of on every tick.
   const forgottenRef = yield* Ref.make(false);
@@ -304,11 +323,22 @@ export const make = Effect.gen(function* () {
       yield* Ref.set(dirtyRef, true);
     });
 
+  const reach: AnalyticsService["Service"]["reach"] = (milestone) =>
+    Effect.gen(function* () {
+      if (!(yield* Ref.get(allowedRef))) return;
+      yield* Ref.update(reachedRef, (reached) =>
+        reached.has(milestone) ? reached : new Set([...reached, milestone]),
+      );
+    });
+
   /** Queues whatever the state calls for (see `dueEvents`), giving each event its uuid. */
   const queueDueEvents = (nowMillis: number) =>
     Effect.gen(function* () {
       const today = utcDay(nowMillis);
-      const due = yield* Ref.modify(stateRef, (current) => dueEvents(rollOver(current, today)));
+      const reachedDirectly = yield* Ref.get(reachedRef);
+      const due = yield* Ref.modify(stateRef, (current) =>
+        dueEvents(rollOver(current, today), reachedDirectly),
+      );
       if (due.length === 0) return;
       const now = DateTime.formatIso(DateTime.makeUnsafe(nowMillis));
       const queued = yield* Effect.forEach(due, (payload) =>
@@ -357,6 +387,7 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(stateRef, EMPTY_STATE);
     yield* Ref.set(dirtyRef, false);
     yield* Ref.set(identifierRef, null);
+    yield* Ref.set(reachedRef, new Set());
     if (yield* Ref.get(forgottenRef)) return;
     yield* forgetTelemetryIdentity.pipe(Effect.provideContext(identityServices));
     yield* fileSystem
@@ -463,7 +494,7 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.forkScoped);
   yield* Effect.addFinalizer(() => tick(true));
 
-  return AnalyticsService.of({ count, flush: tick(false) });
+  return AnalyticsService.of({ count, reach, flush: tick(false) });
 });
 
 export const layer = Layer.effect(AnalyticsService, make);

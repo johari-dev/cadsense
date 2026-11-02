@@ -53,6 +53,7 @@ import {
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
+import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
@@ -260,6 +261,7 @@ export const ProviderRegistryLive = Layer.effect(
       ),
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
+    const analytics = yield* AnalyticsService;
     // Setup commands running per instance, or the last one that failed. Kept
     // apart from the probed snapshots so a re-probe or an instance rebuild
     // cannot drop it, and so it never reaches the status cache.
@@ -352,6 +354,17 @@ export const ProviderRegistryLive = Layer.effect(
           return [[previousProviders, providers, providersToPersist] as const, providers];
         },
       );
+
+      // Onboarding's provider step. Only live probes reach it (they come through here); the
+      // status cache read at boot may describe an older sign-in.
+      if (
+        providers.some(
+          (provider) =>
+            provider.enabled && provider.installed && provider.auth.status === "authenticated",
+        )
+      ) {
+        yield* analytics.reach("first_provider_ready");
+      }
 
       if (haveProvidersChanged(previousProviders, providers)) {
         if (options?.persist !== false) {

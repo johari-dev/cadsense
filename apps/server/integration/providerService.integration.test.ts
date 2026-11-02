@@ -71,6 +71,7 @@ const makeRecordingAnalytics = Effect.gen(function* () {
           ...current,
           ...Array.from({ length: by }, () => counter),
         ]),
+      reach: () => Effect.void,
       flush: Effect.void,
     }),
   );
@@ -320,6 +321,51 @@ it.live("counts each session start and each turn under its provider", () =>
           "agent_turns_codex",
         ],
       );
+    }).pipe(Effect.provide(fixture.layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("counts a turn the provider ends as failed and a turn it refuses to start", () =>
+  Effect.gen(function* () {
+    const analytics = yield* makeRecordingAnalytics;
+    const fixture = yield* makeIntegrationFixture({ analytics: analytics.layer });
+    const threadId = ThreadId.make("thread-integration-failed-turn");
+
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      yield* provider.startSession(threadId, {
+        threadId,
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        cwd: fixture.cwd,
+        runtimeMode: "full-access",
+      });
+      const failedTurn = codexTurnTextFixture.map((event) =>
+        event.type === "turn.completed"
+          ? { ...event, payload: { state: "failed", errorMessage: "Sandbox command failed." } }
+          : event,
+      );
+      yield* runTurn({
+        provider,
+        harness: fixture.harness,
+        threadId,
+        userText: "this turn fails",
+        response: { events: failedTurn },
+      });
+      // Nothing is queued for this turn, so the test adapter rejects it.
+      const refused = yield* provider
+        .sendTurn({ threadId, input: "this turn is refused", attachments: [] })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "ProviderAdapterValidationError");
+
+      const recorded = yield* analytics.get;
+      // Runtime events are counted on their own fiber, so only the totals are fixed.
+      assert.deepEqual(recorded.filter((counter) => counter.startsWith("agent_")).toSorted(), [
+        "agent_sessions_started",
+        "agent_turns_codex",
+        "agent_turns_failed",
+        "agent_turns_send_failed",
+      ]);
     }).pipe(Effect.provide(fixture.layer));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
