@@ -344,10 +344,18 @@ const makeWsRpcLayer = (
             const reason = rating.reason;
             const reasonIsNew =
               reason !== undefined && reason !== (wasDown ? previousRating.reason : undefined);
+            // A note is sent only when the user ticked "send this note", once per note.
+            const note = rating.shareNote ? rating.note : undefined;
+            const noteIsNew =
+              note !== undefined &&
+              !(wasDown && previousRating.shareNote && previousRating.note === note);
             return Effect.all(
               [
                 wasDown ? Effect.void : analytics.count("ratings_down"),
                 reasonIsNew ? analytics.count(RATING_REASON_COUNTER[reason]) : Effect.void,
+                noteIsNew
+                  ? analytics.sendFeedback({ ...(reason === undefined ? {} : { reason }), note })
+                  : Effect.void,
               ],
               { discard: true },
             );

@@ -12,7 +12,7 @@
  *
  * @module AnalyticsEvents
  */
-import type { MessageRatingReason } from "@cadsense/contracts";
+import { MessageRatingReason } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 
 /** Every number in `usage.daily`, one per thing worth counting. */
@@ -157,6 +157,13 @@ export const ErrorReport = Schema.Struct({
 });
 export type ErrorReport = typeof ErrorReport.Type;
 
+/** A thumbs-down note the user chose to send to the Cadsense team, with its reason if any. */
+export const FeedbackNote = Schema.Struct({
+  reason: Schema.optionalKey(MessageRatingReason),
+  note: Schema.String,
+});
+export type FeedbackNote = typeof FeedbackNote.Type;
+
 /**
  * The events the service sends:
  * - `app.active`: the first counted action of a UTC day, sent right away, so active-install
@@ -166,6 +173,8 @@ export type ErrorReport = typeof ErrorReport.Type;
  * - `milestone.reached`: an onboarding step, once per installation.
  * - `$exception`: a server error for PostHog error tracking, at most a few per install per day.
  *   PostHog bills these separately from the events above.
+ * - `feedback.sent`: a thumbs-down note, only when the user ticked "send this note" for it. The
+ *   one event that carries text a user wrote.
  */
 export const AnalyticsEvent = Schema.Union([
   Schema.Struct({
@@ -187,5 +196,6 @@ export const AnalyticsEvent = Schema.Union([
     event: Schema.Literal("$exception"),
     properties: Schema.Struct({ $exception_list: Schema.Array(ErrorReport) }),
   }),
+  Schema.Struct({ event: Schema.Literal("feedback.sent"), properties: FeedbackNote }),
 ]);
 export type AnalyticsEvent = typeof AnalyticsEvent.Type;

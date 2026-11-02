@@ -72,6 +72,7 @@ const makeRecordingAnalytics = Effect.gen(function* () {
           ...Array.from({ length: by }, () => counter),
         ]),
       reach: () => Effect.void,
+      sendFeedback: () => Effect.void,
       flush: Effect.void,
     }),
   );

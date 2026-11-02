@@ -2,8 +2,8 @@
 /**
  * End-to-end check of how a user's feedback reaches usage analytics, through the real app. Starts
  * the dev server and web app on a fresh data directory with a PostHog key pointed at a fake ingest,
- * drives headless Chromium through one real agent turn and a thumbs down with a reason, and keeps
- * the evidence under --out:
+ * drives headless Chromium through one real agent turn and a thumbs down with a reason and a note
+ * the user chooses to send, and keeps the evidence under --out:
  *
  *   NN-*.png            a screenshot after each step
  *   dev.log             dev runner, server, and web output
@@ -21,6 +21,8 @@
  *   - the thumbs down counts once in `ratings_down`, although the popover saves the rating twice
  *     (once on click, again with its reason)
  *   - the reason counts once in `ratings_down_too_long`
+ *   - the note, with "Send this note to the Cadsense team" ticked, arrives once as `feedback.sent`
+ *   - a later note without the box ticked never reaches the ingest
  *
  * Chromium comes from CADSENSE_CHROMIUM_PATH or Playwright's browser cache.
  */
@@ -42,6 +44,8 @@ NodeFS.mkdirSync(out, { recursive: true });
 const repo = NodePath.resolve(import.meta.dirname, "../../..");
 const home = NodePath.join(out, "home");
 const statePath = NodePath.join(home, "userdata/analytics-state.json");
+const NOTE = "Cut the preamble and lead with the answer.";
+const PRIVATE_NOTE = "This one stays on my machine.";
 
 // A project folder with one small STEP file, so the project needs no Onshape account.
 const folder = NodePath.join(out, "bracket-rig");
@@ -237,6 +241,9 @@ try {
     await thumbsDown.hover({ force: true });
     await thumbsDown.click({ force: true });
     await page.getByRole("button", { name: "Too long" }).click();
+    await page.getByRole("textbox", { name: "Note" }).fill(NOTE);
+    await page.getByText("Send this note to the Cadsense team").click();
+    await page.screenshot({ path: NodePath.join(out, "thumbs-down-popover.png") });
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await page.getByText("What went wrong?").waitFor({ state: "detached" });
   });
@@ -276,6 +283,32 @@ try {
           event.properties.milestone === "first_provider_ready",
       ),
     { milestones: settled.milestones },
+  );
+  const notes = events.filter((event) => event.event === "feedback.sent");
+  check(
+    "the ticked note arrives once as feedback.sent, with its reason",
+    notes.length === 1 &&
+      notes[0]?.properties.note === NOTE &&
+      notes[0]?.properties.reason === "too-long",
+    { notes: notes.map((event) => event.properties) },
+  );
+
+  // Clear the rating, then rate again with a note the box isn't ticked for.
+  await run("thumbs-down-private-note", async (page) => {
+    const thumbsDown = page.getByRole("button", { name: "Bad response" }).last();
+    await thumbsDown.click({ force: true });
+    await page.locator('button[aria-label="Bad response"][aria-pressed="false"]').last().waitFor();
+    await thumbsDown.click({ force: true });
+    await page.getByRole("textbox", { name: "Note" }).fill(PRIVATE_NOTE);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.getByText("What went wrong?").waitFor({ state: "detached" });
+  });
+  // Notes go out on the server's next one-second tick; give it several.
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
+  check(
+    "a note without the box ticked is never sent",
+    events.filter((event) => event.event === "feedback.sent").length === 1 &&
+      !NodeFS.readFileSync(NodePath.join(out, "requests.jsonl"), "utf8").includes(PRIVATE_NOTE),
   );
   check("the page had no errors", pageErrors.length === 0, { pageErrors });
   summary.ok = summary.checks.every((entry) => entry.pass);
