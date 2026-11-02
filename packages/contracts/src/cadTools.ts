@@ -1,4 +1,5 @@
 import { CadFindPartsInput } from "./cadFindParts.ts";
+import { CadPartDrawingInput } from "./cadDrawing.ts";
 import {
   CadCommentCategory,
   CadCommentSeverity,
@@ -419,5 +420,6 @@ export const CAD_TOOL_INPUTS = {
   cad_drive_options: CadDriveOptionsInput,
   cad_update_view: CadUpdateViewInput,
   cad_capture: CadCaptureInput,
+  cad_part_drawing: CadPartDrawingInput,
   cad_featurescript_preview: CadFeatureScriptPreviewInput,
 } as const;

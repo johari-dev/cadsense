@@ -46,6 +46,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CAD_REVIEW_INSTRUCTIONS } from "../provider/CadReviewInstructions.ts";
 import {
+  CAD_PANEL_TOOLS,
   makeCadProviderTools,
   mcpCadToolError,
   mcpCadToolResult,
@@ -693,7 +694,7 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
               ),
             ),
           )
-      : Object.hasOwn(CAD_TOOL_INPUTS, name)
+      : Object.hasOwn(CAD_TOOL_INPUTS, name) && !CAD_PANEL_TOOLS.has(name)
         ? callCadTool(name, input)
         : Effect.succeed(textResult({ reason: "unknown-tool", details: name }, true));
 

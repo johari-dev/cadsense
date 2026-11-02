@@ -154,6 +154,10 @@
     "./claudeCompaction": {
       "types": "./src/claudeCompaction.ts",
       "import": "./src/claudeCompaction.ts"
+    },
+    "./cadDrawing": {
+      "types": "./src/cadDrawing.ts",
+      "import": "./src/cadDrawing.ts"
     }
   },
   "scripts": {

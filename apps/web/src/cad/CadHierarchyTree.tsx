@@ -11,9 +11,10 @@ import {
   HighlighterIcon as Highlighter,
   IntersectIcon as Blend,
   MagnifyingGlassIcon,
+  PartDrawingIcon,
 } from "~/lib/icons";
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -24,6 +25,8 @@ import {
   CAD_HIERARCHY_ROW_HEIGHT,
   cadHierarchyWindow,
 } from "./CadHierarchyWindow";
+import { partName } from "./drawing/drawingModel";
+import { isBoughtPart } from "./drawing/shopKnowledge";
 
 /**
  * Splits a part name for display. Onshape's instance suffix ("top support <2>") becomes a
@@ -58,12 +61,15 @@ export function CadHierarchyTree({
   disabled,
   onChange,
   fullHeight = false,
+  onOpenDrawing,
 }: {
   manifest: CadSnapshotManifest;
   view: CadViewState;
   disabled: boolean;
   onChange: (view: CadViewState) => void;
   fullHeight?: boolean;
+  /** Right-clicking a row offers a part drawing, or a packet of drawings for an assembly. */
+  onOpenDrawing?: (occurrenceIds: string[], title: string) => void;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
   const highlighted = useMemo(
@@ -74,6 +80,33 @@ export function CadHierarchyTree({
     () => index.subtree(view.ghost?.occurrenceIds ?? []),
     [index, view.ghost?.occurrenceIds],
   );
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+  // Distinct parts under an assembly row that are not bought; the drawing panel then keeps the
+  // ones the shop draws, so the menu only knows whether there is anything to sort.
+  const madePartCount = (id: string) =>
+    new Set(
+      [...index.subtree([id])]
+        .map((member) => index.nodes.get(member))
+        .filter(
+          (node) =>
+            node?.kind === "part" &&
+            !node.suppressed &&
+            node.sourcePartKey &&
+            !isBoughtPart(partName(node)),
+        )
+        .map((node) => node!.sourcePartKey),
+    ).size;
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [scrollTop, setScrollTop] = useState(0);
@@ -217,12 +250,20 @@ export function CadHierarchyTree({
                     "group absolute inset-x-1 flex items-center gap-1 rounded-md pe-1 text-[13px] [--row:var(--popover)]",
                     !disabled &&
                       "hover:[--row:color-mix(in_srgb,var(--popover),var(--foreground)_5%)] focus-within:[--row:color-mix(in_srgb,var(--popover),var(--foreground)_5%)]",
+                    menu?.id === row.id &&
+                      "[--row:color-mix(in_srgb,var(--popover),var(--foreground)_8%)]",
                     "bg-(--row)",
                   )}
                   style={{
                     top,
                     height: offsets[start + offset + 1]! - top,
                     paddingLeft: 4 + row.depth * INDENT,
+                  }}
+                  onContextMenu={(event) => {
+                    if (!onOpenDrawing || node.suppressed || (node.kind !== "part" && !branch))
+                      return;
+                    event.preventDefault();
+                    setMenu({ id: row.id, x: event.clientX, y: event.clientY });
                   }}
                 >
                   {/* Indent guides: one line per ancestor, under that ancestor's chevron. */}
@@ -399,6 +440,57 @@ export function CadHierarchyTree({
         {/* Always shown, so the list reads as scrollable before anyone scrolls it. */}
         <ScrollBar className="opacity-100" />
       </ScrollAreaPrimitive.Root>
+      {menu &&
+        onOpenDrawing &&
+        (() => {
+          const node = index.nodes.get(menu.id)!;
+          const single = node.kind === "part";
+          const count = single ? 1 : madePartCount(menu.id);
+          return (
+            <div
+              role="menu"
+              aria-label={`${partName(node)} actions`}
+              className="fixed z-50 min-w-52 rounded-lg border border-border bg-popover p-1 text-[13px] text-popover-foreground shadow-lg"
+              style={{ left: menu.x, top: menu.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                disabled={count === 0}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent disabled:opacity-50"
+                onClick={() => {
+                  setMenu(null);
+                  onOpenDrawing([menu.id], partName(node));
+                }}
+              >
+                <PartDrawingIcon size={14} />
+                {single
+                  ? "Make part drawing"
+                  : count === 0
+                    ? "No made parts to draw"
+                    : "Make drawings for this group"}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
+                onClick={() => {
+                  setMenu(null);
+                  onChange({
+                    ...view,
+                    visibility: revealCadOccurrences(index, view, [menu.id]),
+                    isolatedOccurrenceIds: [menu.id],
+                    camera: { kind: "preset", preset: "isometric", fit: [menu.id] },
+                  });
+                }}
+              >
+                <Focus size={14} />
+                Isolate
+              </button>
+            </div>
+          );
+        })()}
       {/* The chip and the tab carry the part count; the footer only offers to bring hidden
           parts back, the same reveal the row eye does. */}
       {hiddenParts.length > 0 && (

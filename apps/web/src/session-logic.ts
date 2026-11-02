@@ -4,6 +4,8 @@ import * as Schema from "effect/Schema";
 import { isBackgroundTaskActivity } from "@cadsense/client-runtime/state/subagentRuntime";
 import {
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
+  CAD_PART_DRAWING_ACTIVITY,
+  CadPartDrawingCard,
   CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
   CadCaptureCard,
   CadCommentsPublishedCard,
@@ -29,6 +31,7 @@ export type ProviderPickerKind = ProviderDriverKind;
 const decodeCadCaptureCard = Schema.decodeUnknownOption(CadCaptureCard);
 const decodeToolCallFacts = Schema.decodeUnknownOption(ToolCallFacts);
 const decodeCadCommentsPublished = Schema.decodeUnknownOption(CadCommentsPublishedCard);
+const decodeCadPartDrawing = Schema.decodeUnknownOption(CadPartDrawingCard);
 const decodeFeatureScriptPreview = Schema.decodeUnknownOption(CadFeatureScriptPreviewCard);
 
 export const PROVIDER_OPTIONS: Array<{
@@ -53,6 +56,8 @@ export interface WorkLogEntry {
   cadCapture?: CadCaptureCard;
   /** One `cad_comments_publish` call's outcome; the timeline merges these per turn. */
   cadComments?: CadCommentsPublishedCard;
+  /** Part drawings the agent opened with cad_part_drawing. */
+  cadDrawing?: CadPartDrawingCard;
   /** One `cad_featurescript_preview` call's result, shown as a card. */
   featureScriptPreview?: CadFeatureScriptPreviewCard;
   id: string;
@@ -985,6 +990,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (activity.kind === "cad.captured") {
     const capture = decodeCadCaptureCard(activity.payload);
     if (Option.isSome(capture)) entry.cadCapture = capture.value;
+  }
+  if (activity.kind === CAD_PART_DRAWING_ACTIVITY) {
+    const drawing = decodeCadPartDrawing(activity.payload);
+    if (Option.isSome(drawing)) entry.cadDrawing = drawing.value;
   }
   if (activity.kind === CAD_COMMENTS_PUBLISHED_ACTIVITY) {
     const comments = decodeCadCommentsPublished(activity.payload);

@@ -8,10 +8,10 @@ import { resolveStorage } from "./lib/storage";
 /**
  * The right panel's sections, in fallback order. The first available one of CAD
  * and Files is the panel's home: CAD on CAD projects, Files elsewhere. The others
- * take over the panel when something opens them, and Agents and Browser only show
- * while they have something to show (see `resolveRightPanelSection`).
+ * take over the panel when something opens them, and Drawing, Agents, and Browser only
+ * show while they have something to show (see `resolveRightPanelSection`).
  */
-export const RIGHT_PANEL_SECTIONS = ["cad", "files", "agents", "browser"] as const;
+export const RIGHT_PANEL_SECTIONS = ["cad", "files", "drawing", "agents", "browser"] as const;
 export type RightPanelSection = (typeof RIGHT_PANEL_SECTIONS)[number];
 
 /** The file shown inside the Files section. */
@@ -22,6 +22,16 @@ export interface RightPanelFile {
   revealRequestId: number;
 }
 
+/** The parts a part drawing shows, from one CAD snapshot. */
+export interface RightPanelDrawing {
+  snapshotId: string;
+  /** Part occurrences, or one assembly occurrence for a packet of its parts. */
+  occurrenceIds: string[];
+  title: string;
+  /** Bumped on every open so re-opening the same drawing starts at its first sheet. */
+  requestId: number;
+}
+
 export interface ThreadRightPanelState {
   isOpen: boolean;
   /** Section the user last picked, or null to fall back to the first available one. */
@@ -30,11 +40,14 @@ export interface ThreadRightPanelState {
   file: RightPanelFile | null;
   /** Browser session to show in Browser; null shows the thread's active session. */
   browserTabId: string | null;
+  /** Drawing shown in Drawing; missing in state saved before drawings existed. */
+  drawing?: RightPanelDrawing | null;
 }
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   open: (ref: ScopedThreadRef, section: Exclude<RightPanelSection, "browser">) => void;
+  openDrawing: (ref: ScopedThreadRef, drawing: Omit<RightPanelDrawing, "requestId">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   closeFile: (ref: ScopedThreadRef) => void;
@@ -58,7 +71,13 @@ const normalizeRevealLine = (line: number | undefined): number | null =>
   line === undefined || !Number.isFinite(line) ? null : Math.max(1, Math.trunc(line));
 
 function isEmpty(state: ThreadRightPanelState): boolean {
-  return !state.isOpen && state.section === null && state.file === null && !state.browserTabId;
+  return (
+    !state.isOpen &&
+    state.section === null &&
+    state.file === null &&
+    !state.browserTabId &&
+    !state.drawing
+  );
 }
 
 function updateThread(
@@ -88,6 +107,13 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       return {
         byThreadKey: {},
         open: (ref, section) => update(ref, (current) => ({ ...current, isOpen: true, section })),
+        openDrawing: (ref, drawing) =>
+          update(ref, (current) => ({
+            ...current,
+            isOpen: true,
+            section: "drawing",
+            drawing: { ...drawing, requestId: (current.drawing?.requestId ?? 0) + 1 },
+          })),
         openBrowser: (ref, tabId) =>
           update(ref, (current) => ({
             ...current,

@@ -14,6 +14,7 @@ import { type ChatMessage, type ProposedPlan } from "../../types";
 import {
   type CadCaptureCard,
   type CadCommentsPublishedCard,
+  type CadPartDrawingCard,
   type CadFeatureScriptPreviewCard,
   type MessageId,
   type OrchestrationLatestTurn,
@@ -200,6 +201,13 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       card: CadCommentsPublishedCard;
+    }
+  | {
+      /** A part drawing the agent opened; stays visible when the turn folds. */
+      kind: "cad-drawing";
+      id: string;
+      createdAt: string;
+      card: CadPartDrawingCard;
     }
   | {
       /** One agent FeatureScript preview. A turn's last one stays visible when the turn folds. */
@@ -678,6 +686,9 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.cadComments !== undefined) {
         continue;
       }
+      if (entry.kind === "work" && entry.entry.cadDrawing !== undefined) {
+        continue;
+      }
       // The turn's final preview is where the agent's script ended up.
       if (entry.id === lastPreviewEntryId) {
         continue;
@@ -990,6 +1001,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "work" && timelineEntry.entry.cadDrawing !== undefined) {
+      nextRows.push({
+        kind: "cad-drawing",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        card: timelineEntry.entry.cadDrawing,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "work" && timelineEntry.entry.cadComments !== undefined) {
       const card = cadCommentRows.get(timelineEntry.id);
       if (card)
@@ -1022,6 +1043,7 @@ export function deriveMessagesTimelineRows(input: {
           !nextEntry ||
           nextEntry.kind !== "work" ||
           nextEntry.entry.cadComments !== undefined ||
+          nextEntry.entry.cadDrawing !== undefined ||
           nextEntry.entry.featureScriptPreview !== undefined ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
@@ -1143,6 +1165,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "cad-comments":
       return Equal.equals(a.card, (b as typeof a).card);
 
+    case "cad-drawing":
     case "featurescript-preview":
       return a.id === (b as typeof a).id;
 

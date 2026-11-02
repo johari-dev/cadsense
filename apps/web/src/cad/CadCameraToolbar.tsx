@@ -1,6 +1,12 @@
 import type { CadViewState } from "@cadsense/contracts";
 import { type RefObject, useState } from "react";
-import { ArrowUUpLeftIcon, ComponentsIcon, SquareHalfIcon, ZoomScanIcon } from "~/lib/icons";
+import {
+  ArrowUUpLeftIcon,
+  ComponentsIcon,
+  CursorClickIcon,
+  SquareHalfIcon,
+  ZoomScanIcon,
+} from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
@@ -20,18 +26,23 @@ function ToolbarDivider() {
   return <div aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border" />;
 }
 
-/** The viewport's bottom toolbar (fit, section, explode) and its bottom-right view cube. */
+/** The viewport's bottom toolbar (fit, section, explode, click to draw) and its bottom-right view cube. */
 export function CadCameraToolbar({
   renderer,
   view,
   disabled,
   onChange,
+  picking = false,
+  onTogglePicking,
 }: {
   /** The live renderer the view cube turns with. Without it the cube shows the saved camera. */
   renderer?: RefObject<CadSceneRenderer | null>;
   view: CadViewState;
   disabled: boolean;
   onChange: (view: CadViewState) => void;
+  /** The viewer is waiting for a part click to open its drawing. */
+  picking?: boolean;
+  onTogglePicking?: () => void;
 }) {
   const [sectionOpen, setSectionOpen] = useState(false);
   const sectionKey = JSON.stringify(view.sectionPlanes ?? []);
@@ -186,6 +197,26 @@ export function CadCameraToolbar({
               {view.explosion > 0 ? "Put the parts back together" : "Spread the parts apart"}
             </TooltipPopup>
           </Tooltip>
+          {onTogglePicking && (
+            <>
+              <ToolbarDivider />
+              <Tooltip>
+                <TooltipTrigger
+                  aria-label="Click to draw"
+                  aria-pressed={picking}
+                  disabled={disabled}
+                  className={toolbarControl}
+                  onClick={onTogglePicking}
+                >
+                  <CursorClickIcon aria-hidden="true" />
+                  <span className="@max-[592px]:sr-only">Click to draw</span>
+                </TooltipTrigger>
+                <TooltipPopup>
+                  {picking ? "Stop picking parts" : "Click a part in the model to make its drawing"}
+                </TooltipPopup>
+              </Tooltip>
+            </>
+          )}
           {inspecting && (
             <>
               <ToolbarDivider />

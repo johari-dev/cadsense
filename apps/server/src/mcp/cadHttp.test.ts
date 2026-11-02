@@ -120,6 +120,7 @@ it.effect("serves native images only for the authenticated session's one-use CAD
       "cad_drive_options",
       "cad_update_view",
       "cad_capture",
+      "cad_part_drawing",
       "cad_featurescript_preview",
     ]);
     expect(

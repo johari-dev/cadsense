@@ -3,14 +3,16 @@ import type {
   CadCaptureCard,
   CadCommentSeverity,
   CadCommentsPublishedCard,
+  CadPartDrawingCard,
   ScopedThreadRef,
 } from "@cadsense/contracts";
 import {
   ArrowRightIcon,
   WarningCircleIcon as CircleAlertIcon,
   ChatIcon as MessageSquareIcon,
+  PartDrawingIcon,
 } from "~/lib/icons";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
 import { Button } from "../components/ui/button";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
@@ -271,5 +273,95 @@ function commentRow({
         </span>
       ) : null}
     </button>
+  );
+}
+
+// Cards already opened on arrival, so remounting a row never reopens the panel.
+const autoOpenedDrawings = new Set<string>();
+const AUTO_OPEN_WINDOW_MS = 20_000;
+
+/**
+ * The part drawings an agent opened. Each sheet opens the Part drawing panel, and a
+ * card that just arrived opens it once by itself.
+ */
+export function CadPartDrawings({
+  id,
+  createdAt,
+  card,
+  threadRef,
+}: {
+  id: string;
+  createdAt: string;
+  card: CadPartDrawingCard;
+  threadRef: ScopedThreadRef;
+}) {
+  const open = () =>
+    useRightPanelStore.getState().openDrawing(threadRef, {
+      snapshotId: card.snapshotId,
+      occurrenceIds: [...card.occurrenceIds],
+      title: card.title,
+    });
+  useEffect(() => {
+    if (autoOpenedDrawings.has(id)) return;
+    autoOpenedDrawings.add(id);
+    if (Date.now() - Date.parse(createdAt) < AUTO_OPEN_WINDOW_MS) open();
+    // Opens once per card on arrival; later renders must not reopen a closed panel.
+  }, [id]);
+  const listed = card.sheets.slice(0, MAX_LISTED_COMMENTS);
+  return (
+    <div className="text-sm leading-relaxed" data-testid="cad-part-drawing-card">
+      <div className="flex min-h-6 items-center gap-1.5 px-0.5">
+        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
+          <PartDrawingIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+          {card.sheets.length === 1
+            ? `Part drawing: ${card.title}`
+            : `${card.sheets.length} part drawings: ${card.title}`}
+        </span>
+        <button
+          type="button"
+          className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
+          onClick={open}
+        >
+          Open drawing
+        </button>
+      </div>
+      {/* Mirrored or reworked parts can share a name, so a row's place is its key. */}
+      {listed.map((sheet, index) => (
+        <button
+          key={index}
+          type="button"
+          className="flex w-full items-baseline gap-2 rounded-md py-0.5 pr-0.5 pl-[30px] text-left hover:bg-accent/20"
+          onClick={open}
+        >
+          <span className="shrink-0 tabular-nums text-secondary-label">{sheet.qty}×</span>
+          <span className="min-w-0 flex-1 truncate text-foreground">{sheet.name}</span>
+          {sheet.material && (
+            <span className="shrink-0 text-xs text-secondary-label">{sheet.material}</span>
+          )}
+        </button>
+      ))}
+      {card.sheets.length > listed.length && (
+        <p className="pl-[30px] text-xs text-secondary-label">
+          +{card.sheets.length - listed.length} more
+        </p>
+      )}
+      {card.skipped && (
+        <p className="pl-[30px] text-xs text-secondary-label">
+          Not drawn:{" "}
+          {[
+            card.skipped.cnc
+              ? `${card.skipped.cnc} plate${card.skipped.cnc === 1 ? "" : "s"} for the router`
+              : null,
+            card.skipped.print
+              ? `${card.skipped.print} printed part${card.skipped.print === 1 ? "" : "s"}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(", ")}
+        </p>
+      )}
+    </div>
   );
 }
