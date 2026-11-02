@@ -1,5 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { CheckIcon, ChevronRightIcon, CopyIcon, GlobeIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CaretRightIcon as ChevronRightIcon,
+  CopyIcon,
+  GlobeIcon,
+  WarningIcon as TriangleAlertIcon,
+} from "~/lib/icons";
 import type { EnvironmentId, ScopedThreadRef, ServerProviderSkill } from "@cadsense/contracts";
 import {
   isAtomCommandInterrupted,
@@ -28,7 +34,7 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
+import type { Components, ExtraProps, Options as ReactMarkdownOptions } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -187,6 +193,18 @@ export function orderedListGutterStyle(
   const markerWidth = Math.max(String(firstNumber).length, String(lastNumber).length);
   if (markerWidth <= 2) return undefined;
   return { "--list-gutter": `${markerWidth + 1}ch` };
+}
+
+/**
+ * A paragraph that is only bold text, like "**Quick cleanup:**" before a list. It reads
+ * as a small heading, so it is tagged `data-markdown-lead` for heading-like spacing.
+ */
+function isRunInHeading(node: ExtraProps["node"]): boolean {
+  const children = (node?.children ?? []).filter(
+    (child) => !(child.type === "text" && child.value.trim() === ""),
+  );
+  const only = children[0];
+  return children.length === 1 && only?.type === "element" && only.tagName === "strong";
 }
 
 type MarkdownImageHastNode = {
@@ -398,16 +416,15 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
 
   const handleCopy = useCallback((format: "markdown" | "csv") => {
     const table = containerRef.current?.querySelector("table");
-    if (!table || typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
+    if (!table) return;
     const text =
       format === "markdown"
         ? serializeTableElementToMarkdown(table)
         : serializeTableElementToCsv(table);
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => {
+    void writeTextToClipboard(text, "table")
+      .then((didCopy) => {
+        // An empty table or code block copies nothing, so it shouldn't show "Copied".
+        if (!didCopy) return;
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
         }
@@ -574,12 +591,10 @@ function MarkdownCodeBlock({
   const copyLabel = copied ? "Copied" : "Copy code";
 
   const handleCopy = useCallback(() => {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
+    void writeTextToClipboard(code, "code")
+      .then((didCopy) => {
+        // An empty table or code block copies nothing, so it shouldn't show "Copied".
+        if (!didCopy) return;
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
         }
@@ -1186,18 +1201,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
 
   const handleCopy = useCallback(
     (value: string, title: string) => {
-      if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: `Failed to copy ${title.toLowerCase()}`,
-            description: "Clipboard API unavailable.",
-          }),
-        );
-        return;
-      }
-
-      void navigator.clipboard.writeText(value).then(
+      void writeTextToClipboard(value, title.toLowerCase()).then(
         () => {
           toastManager.add({
             type: "success",
@@ -1632,8 +1636,12 @@ function ChatMarkdown({
     };
 
     return {
-      p({ node: _node, children, ...props }) {
-        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+      p({ node, children, ...props }) {
+        return (
+          <p {...props} data-markdown-lead={isRunInHeading(node) ? "" : undefined}>
+            {renderSkillInlineMarkdownChildren(children, skills)}
+          </p>
+        );
       },
       ol({ node, start, style, ...props }) {
         const itemCount =
@@ -1878,7 +1886,10 @@ function ChatMarkdown({
   return (
     <div
       className={cn(
-        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]",
+        // Tuned for long reviews in the chat column: 14px on a 21px line, and semibold
+        // (not bold) emphasis so run-in headings like "**Quick cleanup:**" lead their
+        // section without outshining the body text. Block spacing lives in index.css.
+        "chat-markdown w-full min-w-0 text-[0.9333rem] leading-[1.5] text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word] [&_strong]:font-semibold",
         className,
       )}
       onCopy={handleCopy}

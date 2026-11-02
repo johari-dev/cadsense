@@ -26,6 +26,18 @@ import { verifyCadAssets } from "./CadAssetVerification.ts";
 export const CAD_DISK_RESERVE_BYTES = 2 * 1024 ** 3;
 const MAX_MANIFEST_BYTES = 128 * 1024 ** 2;
 const MAX_ASSET_BYTES = 512 * 1024 ** 2;
+/** Thumbnail formats the CAD panel encodes, by stored extension. See `CadThumbnails.ts`. */
+export const CAD_THUMBNAIL_EXTENSIONS = ["webp", "jpg"] as const;
+/** Largest thumbnail kept, in bytes. Uploads are capped at about 60 KB by their data URL length. */
+export const CAD_THUMBNAIL_MAX_BYTES = 64 * 1024;
+const ascii = (bytes: Uint8Array, start: number, text: string) =>
+  [...text].every((character, index) => bytes[start + index] === character.charCodeAt(0));
+/** The extension a thumbnail is stored under, from its signature; null for anything else. */
+const cadThumbnailExtension = (bytes: Uint8Array) => {
+  if (bytes.length >= 12 && ascii(bytes, 0, "RIFF") && ascii(bytes, 8, "WEBP")) return "webp";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpg";
+  return null;
+};
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 const decodeManifestJson = Schema.decodeUnknownSync(Schema.fromJsonString(CadSnapshotManifest));
 const encodeManifestJson = Schema.encodeSync(Schema.fromJsonString(CadSnapshotManifest));
@@ -77,6 +89,14 @@ export interface CadSnapshotStoreShape {
     snapshotIds: readonly string[],
     protectedIds: readonly string[],
   ) => Effect.Effect<void, CadSnapshotStoreError>;
+  /**
+   * Saves a published snapshot's WebP or JPEG thumbnail, once: a snapshot that already has one
+   * keeps it. Removing the snapshot removes its thumbnail.
+   */
+  readonly putThumbnail: (
+    snapshotId: string,
+    bytes: Uint8Array,
+  ) => Effect.Effect<void, CadSnapshotStoreError>;
   readonly withPinned: <A, E, R>(
     snapshotId: string,
     use: (
@@ -111,6 +131,7 @@ export const make = Effect.gen(function* () {
   const manifests = NodePath.join(root, "manifests");
   const staging = NodePath.join(root, "staging");
   const retired = NodePath.join(root, "retired");
+  const thumbnails = NodePath.join(root, "thumbnails");
   const pins = new Map<string, number>();
   let acquisitions = 0;
   const pendingOrphans = new Set<string>();
@@ -120,12 +141,20 @@ export const make = Effect.gen(function* () {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw failure("unavailable");
   };
   const assertDirectories = async () => {
-    for (const directory of [config.stateDir, root, assets, manifests, staging, retired])
+    for (const directory of [
+      config.stateDir,
+      root,
+      assets,
+      manifests,
+      staging,
+      retired,
+      thumbnails,
+    ])
       await assertDirectory(directory);
   };
   yield* io(async () => {
     await assertDirectory(config.stateDir);
-    for (const directory of [root, assets, manifests, staging, retired]) {
+    for (const directory of [root, assets, manifests, staging, retired, thumbnails]) {
       await NodeFSP.mkdir(directory, { recursive: false }).catch((error: unknown) => {
         if (!(Predicate.isObject(error) && "code" in error && error.code === "EEXIST")) throw error;
       });
@@ -168,6 +197,28 @@ export const make = Effect.gen(function* () {
     }
   };
   const manifestPath = (id: string) => NodePath.join(manifests, `${decodeSnapshotId(id)}.json`);
+  const thumbnailPaths = (id: string) =>
+    CAD_THUMBNAIL_EXTENSIONS.map((extension) =>
+      NodePath.join(thumbnails, `${decodeSnapshotId(id)}.${extension}`),
+    );
+  const exists = async (path: string) => {
+    try {
+      await NodeFSP.lstat(path);
+      return true;
+    } catch (error) {
+      if (missing(error)) return false;
+      throw error;
+    }
+  };
+  const unlinkFile = async (path: string) => {
+    try {
+      const stat = await NodeFSP.lstat(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw failure("corrupt");
+      await NodeFSP.unlink(path);
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+  };
   const readManifest = async (id: string, directory = manifests) => {
     const bytes = await readFile(
       NodePath.join(directory, `${decodeSnapshotId(id)}.json`),
@@ -220,6 +271,16 @@ export const make = Effect.gen(function* () {
         } catch (error) {
           if (missing(error)) pendingOrphans.delete(name);
         }
+      }
+    });
+    // Thumbnails are written only for a published manifest, under the mutex, and removed with
+    // it. One without its manifest was left by an interrupted removal.
+    yield* io(async () => {
+      const published = new Set(await NodeFSP.readdir(manifests));
+      for (const name of await NodeFSP.readdir(thumbnails)) {
+        const match = /^([a-f0-9-]{36})\.(webp|jpg)$/.exec(name);
+        if (match && !published.has(`${match[1]}.json`))
+          await unlinkFile(NodePath.join(thumbnails, name));
       }
     });
     if (pendingOrphans.size > 0)
@@ -385,8 +446,9 @@ export const make = Effect.gen(function* () {
           catch: () => failure("corrupt"),
         });
         if (Option.isSome(database)) {
+          // Comment snapshots of kept threads in projects whose CAD is kept, as in retention.
           const durable =
-            yield* database.value`SELECT c.snapshot_id FROM projection_cad_comments c JOIN projection_threads t ON t.thread_id=c.thread_id JOIN projection_projects p ON p.project_id=t.project_id WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL`.pipe(
+            yield* database.value`SELECT c.snapshot_id FROM projection_cad_comments c JOIN projection_threads t ON t.thread_id=c.thread_id JOIN projection_projects p ON p.project_id=t.project_id WHERE t.deleted_at IS NULL AND (p.deleted_at IS NULL OR json_extract(p.cad_json, '$.storage.deleteCad') = 0)`.pipe(
               Effect.mapError(() => failure("unavailable")),
             );
           for (const row of durable)
@@ -441,6 +503,7 @@ export const make = Effect.gen(function* () {
             } catch (error) {
               if (!missing(error)) throw error;
             }
+            for (const thumbnail of thumbnailPaths(id)) await unlinkFile(thumbnail);
           }
           if (!canCollect) throw failure("corrupt");
           if (canCollect)
@@ -463,6 +526,27 @@ export const make = Effect.gen(function* () {
             }
           }
         });
+      }),
+    );
+  const putThumbnail = (snapshotId: string, input: Uint8Array) =>
+    lock.withPermits(1)(
+      Effect.gen(function* () {
+        const bytes = Uint8Array.from(input);
+        const extension = cadThumbnailExtension(bytes);
+        if (!extension || bytes.length > CAD_THUMBNAIL_MAX_BYTES) return yield* failure("corrupt");
+        const paths = yield* Effect.try({
+          try: () => thumbnailPaths(snapshotId),
+          catch: () => failure("corrupt"),
+        });
+        yield* io(assertDirectories);
+        // Removal holds this mutex too, so a retired snapshot cannot gain a thumbnail.
+        if (!(yield* io(() => exists(manifestPath(snapshotId)))))
+          return yield* failure("unavailable");
+        for (const path of paths) if (yield* io(() => exists(path))) return;
+        yield* checkReserve(bytes.length);
+        yield* io(() =>
+          atomicWrite(NodePath.join(thumbnails, `${snapshotId}.${extension}`), bytes),
+        );
       }),
     );
   const withPinned: CadSnapshotStoreShape["withPinned"] = (snapshotId, use) =>
@@ -541,6 +625,7 @@ export const make = Effect.gen(function* () {
       ),
     list,
     remove,
+    putThumbnail,
     withPinned,
     withAcquisition,
   });

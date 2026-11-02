@@ -15,7 +15,6 @@ import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { AddProjectDialog } from "../components/AddProjectDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { Button } from "../components/ui/button";
 import {
@@ -70,24 +69,14 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <DocumentTitleSync />
         <FontAppearanceSync />
-        <GlassAppearanceSync />
         <AuthenticatedTracingBootstrap />
         <ConfirmDialogHost />
         <SlowRpcRequestToastCoordinator />
         <EventRouter />
-        <ProviderUpdateLaunchNotification />
         {appShell}
       </AnchoredToastProvider>
     </ToastProvider>
   );
-}
-
-function GlassAppearanceSync() {
-  const opacity = useClientSettings((settings) => settings.glassOpacity);
-  useEffect(() => {
-    document.documentElement.style.setProperty("--glass-opacity", `${opacity}%`);
-  }, [opacity]);
-  return null;
 }
 
 function FontAppearanceSync() {

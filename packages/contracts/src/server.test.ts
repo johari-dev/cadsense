@@ -42,11 +42,9 @@ describe("ServerProvider", () => {
 
     expect(parsed.slashCommands).toEqual([]);
     expect(parsed.skills).toEqual([]);
-    expect(parsed.versionAdvisory).toBeUndefined();
-    expect(parsed.updateState).toBeUndefined();
   });
 
-  it("defaults one-click update support when decoding older advisory snapshots", () => {
+  it("drops update fields from snapshots cached by older servers", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",
       driver: "codex",
@@ -69,7 +67,7 @@ describe("ServerProvider", () => {
       },
     });
 
-    expect(parsed.versionAdvisory?.canUpdate).toBe(false);
+    expect(parsed).not.toHaveProperty("versionAdvisory");
   });
 
   it("decodes continuation group metadata", () => {

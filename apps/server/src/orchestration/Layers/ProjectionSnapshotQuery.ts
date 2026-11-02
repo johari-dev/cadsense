@@ -4,6 +4,7 @@ import {
   ChatAttachment,
   IsoDateTime,
   MessageId,
+  MessageRating,
   NonNegativeInt,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
@@ -21,6 +22,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
   ModelSelection,
+  LocalCadProjectSource,
   OnshapeProjectSource,
   ProjectId,
   ThreadId,
@@ -74,6 +76,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     onshapeSource: Schema.NullOr(Schema.fromJsonString(OnshapeProjectSource)),
+    localCadSource: Schema.optionalKey(Schema.NullOr(Schema.fromJsonString(LocalCadProjectSource))),
     cad: Schema.optionalKey(Schema.NullOr(Schema.fromJsonString(CadProjectState))),
   }),
 );
@@ -81,6 +84,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+    rating: Schema.NullOr(Schema.fromJsonString(MessageRating)),
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
@@ -300,10 +304,27 @@ function mapProjectRow(
     workspaceRoot: row.workspaceRoot,
     defaultModelSelection: row.defaultModelSelection,
     ...(row.onshapeSource !== null ? { onshapeSource: row.onshapeSource } : {}),
+    ...(row.localCadSource ? { localCadSource: row.localCadSource } : {}),
     ...(row.cad ? { cad: row.cad } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
+  };
+}
+
+function mapMessageRow(
+  row: Schema.Schema.Type<typeof ProjectionThreadMessageDbRowSchema>,
+): OrchestrationMessage {
+  return {
+    id: row.messageId,
+    role: row.role,
+    text: row.text,
+    ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+    turnId: row.turnId,
+    streaming: row.isStreaming === 1,
+    ...(row.rating !== null ? { rating: row.rating } : {}),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -343,6 +364,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           onshape_source_json AS "onshapeSource",
+          local_cad_source_json AS "localCadSource",
           cad_json AS "cad",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -363,6 +385,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           onshape_source_json AS "onshapeSource",
+          local_cad_source_json AS "localCadSource",
           cad_json AS "cad",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -483,6 +506,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          rating_json AS "rating",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -784,6 +808,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           onshape_source_json AS "onshapeSource",
+          local_cad_source_json AS "localCadSource",
           cad_json AS "cad",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -807,6 +832,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           onshape_source_json AS "onshapeSource",
+          local_cad_source_json AS "localCadSource",
           cad_json AS "cad",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -880,12 +906,35 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          rating_json AS "rating",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
         WHERE thread_id = ${threadId}
         ORDER BY created_at ASC, message_id ASC
+      `,
+  });
+
+  const getThreadMessageRow = SqlSchema.findOneOption({
+    Request: Schema.Struct({ threadId: ThreadId, messageId: MessageId }),
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: ({ threadId, messageId }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          role,
+          text,
+          attachments_json AS "attachments",
+          rating_json AS "rating",
+          is_streaming AS "isStreaming",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_messages
+        WHERE message_id = ${messageId}
+          AND thread_id = ${threadId}
       `,
   });
 
@@ -1030,6 +1079,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           AND sequence <= ${maxSequence}
           AND event_type IN (
             'thread.message-sent',
+            'thread.message-rating-set',
             'thread.proposed-plan-upserted',
             'thread.activity-appended',
             'thread.session-set'
@@ -1100,6 +1150,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          rating_json AS "rating",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1395,16 +1446,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               for (const row of messageRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
                 const threadMessages = messagesByThread.get(row.threadId) ?? [];
-                threadMessages.push({
-                  id: row.messageId,
-                  role: row.role,
-                  text: row.text,
-                  ...(row.attachments !== null ? { attachments: row.attachments } : {}),
-                  turnId: row.turnId,
-                  streaming: row.isStreaming === 1,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                });
+                threadMessages.push(mapMessageRow(row));
                 messagesByThread.set(row.threadId, threadMessages);
               }
 
@@ -2296,21 +2338,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         ...(threadRow.value.turnAdmission ? { turnAdmission: threadRow.value.turnAdmission } : {}),
         deletedAt: null,
-        messages: messageRows.map((row) => {
-          const message = {
-            id: row.messageId,
-            role: row.role,
-            text: row.text,
-            turnId: row.turnId,
-            streaming: row.isStreaming === 1,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-          };
-          if (row.attachments !== null) {
-            return Object.assign(message, { attachments: row.attachments });
-          }
-          return message;
-        }),
+        messages: messageRows.map(mapMessageRow),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
         activities: selectedActivityRows.map((row) => {
           const activity = {
@@ -2341,6 +2369,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const getThreadDetailById: ProjectionSnapshotQueryShape["getThreadDetailById"] = (threadId) =>
     getThreadDetailByIdBounded(threadId, undefined);
+
+  const getThreadMessage: ProjectionSnapshotQueryShape["getThreadMessage"] = (
+    threadId,
+    messageId,
+  ) =>
+    getThreadMessageRow({ threadId, messageId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadMessage:query",
+          "ProjectionSnapshotQuery.getThreadMessage:decodeRow",
+        ),
+      ),
+      Effect.map(Option.map(mapMessageRow)),
+    );
 
   // Bounds pathological fan-out: one user turn that spawned hundreds of
   // subagent turns still pages in bounded chunks, at the cost of splitting the
@@ -2498,6 +2540,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     listPendingOnshapeProjects,
     getFirstActiveThreadIdByProjectId,
     getThreadShellById,
+    getThreadMessage,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape;

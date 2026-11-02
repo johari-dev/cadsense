@@ -83,6 +83,7 @@ const run = (input: { operating?: boolean; pinned?: boolean; targetOnly?: boolea
     getActiveProjectByWorkspaceRoot: unused,
     getFirstActiveThreadIdByProjectId: unused,
     getThreadShellById: unused,
+    getThreadMessage: unused,
     getThreadDetailById: unused,
     getThreadDetailSnapshot: unused,
   });
@@ -90,6 +91,7 @@ const run = (input: { operating?: boolean; pinned?: boolean; targetOnly?: boolea
     checkReserve: unused,
     findGeometry: unused,
     putAsset: unused,
+    putThumbnail: unused,
     publish: unused,
     load: unused,
     readAsset: unused,

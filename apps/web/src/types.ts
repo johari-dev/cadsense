@@ -16,7 +16,7 @@ import type {
 } from "@cadsense/client-runtime/state/shell";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
-export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto-accept-edits";
+export { DEFAULT_RUNTIME_MODE } from "@cadsense/contracts";
 
 export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
 export interface ChatImageAttachment extends ContractChatImageAttachment {

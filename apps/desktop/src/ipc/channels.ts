@@ -1,4 +1,5 @@
 export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
+export const PICK_FILE_CHANNEL = "desktop:pick-file";
 export const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const OPEN_IN_FILE_MANAGER_CHANNEL = "desktop:open-in-file-manager";

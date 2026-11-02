@@ -1,6 +1,6 @@
 {
   "name": "@cadsense/server",
-  "version": "0.0.36",
+  "version": "0.0.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -22,12 +22,15 @@
     "manifold-3d": "3.0.1",
     "meshoptimizer": "1.1.1",
     "msgpackr-extract": "3.0.4",
+    "occt-import-js": "0.0.23",
     "playwright-core": "1.60.0",
+    "replicad-opencascadejs": "1.1.0",
     "saxes": "^6.0.0",
     "yaml": "catalog:"
   },
   "devDependencies": {
     "@cadsense/contracts": "workspace:*",
+    "@cadsense/featurescript": "workspace:*",
     "@cadsense/shared": "workspace:*",
     "@cadsense/web": "workspace:*",
     "@effect/vitest": "catalog:",

@@ -49,7 +49,9 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { OnshapeConnectionId, OnshapeProjectSource } from "./onshape.ts";
+import { LocalCadProjectSource } from "./localCad.ts";
 import {
+  CadCatalog,
   CadProjectState,
   CadOperationId,
   CadOperationKind,
@@ -155,7 +157,10 @@ export const RuntimeMode = Schema.Literals([
   "full-access",
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
-export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto-accept-edits";
+// Edits inside the thread's workspace run unprompted. Actions that need more access go to the
+// provider's automatic reviewer instead of the user: Claude's auto mode classifier, or Codex's
+// auto_review for sandbox escalations. Claude models without auto mode fall back to acceptEdits.
+export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
@@ -284,6 +289,8 @@ export const OrchestrationProject = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   // Optional for wire compatibility. Absence means a regular filesystem project.
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  // A folder project that reviews a CAD file in its workspace. Never set with onshapeSource.
+  localCadSource: Schema.optionalKey(LocalCadProjectSource),
   cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -294,6 +301,32 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+/** Why a user rated an agent response down. Clients choose the label for each value. */
+export const MessageRatingReason = Schema.Literals([
+  "incorrect",
+  "ignored-instructions",
+  "too-long",
+  "other",
+]);
+export type MessageRatingReason = typeof MessageRatingReason.Type;
+
+/**
+ * A user's thumbs up or down on a completed assistant response. Only a thumbs
+ * down carries the optional reason and short note. `shareNote` records that the
+ * user chose to send the note to the Cadsense team (see the server's usage
+ * analytics); without it the note stays on this machine.
+ */
+export const MessageRating = Schema.Union([
+  Schema.Struct({ value: Schema.Literal("up") }),
+  Schema.Struct({
+    value: Schema.Literal("down"),
+    reason: Schema.optionalKey(MessageRatingReason),
+    note: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+    shareNote: Schema.optionalKey(Schema.Literal(true)),
+  }),
+]);
+export type MessageRating = typeof MessageRating.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
@@ -301,6 +334,8 @@ export const OrchestrationMessage = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
+  // Absent until the user rates the response; clearing a rating removes it.
+  rating: Schema.optionalKey(MessageRating),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -461,6 +496,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  localCadSource: Schema.optionalKey(LocalCadProjectSource),
   cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -853,6 +889,15 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Sets the user's rating on an assistant response, or clears it with null. */
+const ThreadMessageRatingSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.rating.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  rating: Schema.NullOr(MessageRating),
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -872,6 +917,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadSessionStopCommand,
+  ThreadMessageRatingSetCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -895,6 +941,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadSessionStopCommand,
+  ThreadMessageRatingSetCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -969,6 +1016,14 @@ export const OnshapeProjectSetConnectionCommand = Schema.Struct({
   connectionId: OnshapeConnectionId,
 });
 
+/** Server-only command produced after resolving a CAD file inside a folder project's workspace. */
+export const LocalCadProjectSetCommand = Schema.Struct({
+  type: Schema.Literal("project.local-cad.set"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  localCadSource: LocalCadProjectSource,
+});
+
 /** Server-only command emitted after the managed workspace reactor succeeds. */
 export const OnshapeProjectWorkspaceReadyCommand = Schema.Struct({
   type: Schema.Literal("project.onshape.workspace.ready"),
@@ -1005,6 +1060,8 @@ const CadOperationEndCommand = Schema.Struct({
   status: Schema.Literals(["failed", "cancelled", "interrupted"]),
   reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
   retryAt: Schema.optionalKey(IsoDateTime),
+  // A failed local CAD sync still rescans the folder, so the user can choose another file.
+  catalog: Schema.optionalKey(CadCatalog),
 });
 const ThreadTurnStartSettleCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start.settle"),
@@ -1025,6 +1082,8 @@ const InternalOrchestrationCommand = Schema.Union([
   CadCommentReviewCommand,
   CadCommentsOutdateCommand,
   CadReviewLearningRemoveCommand,
+  // The `project.onshape.*` storage commands and their `project.onshape.storage-set` event keep
+  // their names because events are persisted. They remove and restore local CAD projects too.
   Schema.Struct({
     type: Schema.Literal("project.onshape.remove"),
     commandId: CommandId,
@@ -1067,6 +1126,7 @@ const InternalOrchestrationCommand = Schema.Union([
   OnshapeProjectCreateCommand,
   OnshapeProjectSetConnectionCommand,
   OnshapeProjectWorkspaceReadyCommand,
+  LocalCadProjectSetCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1111,6 +1171,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
+  "thread.message-rating-set",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -1131,6 +1192,7 @@ export const ProjectCadStateSetPayload = Schema.Struct({
   cad: CadProjectState,
   updatedAt: IsoDateTime,
 });
+/** Removal state of an Onshape or local CAD project. The name predates local CAD projects. */
 export const ProjectOnshapeStorageSetPayload = Schema.Struct({
   ...ProjectCadStateSetPayload.fields,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -1164,6 +1226,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   onshapeConnectionId: Schema.optional(OnshapeConnectionId),
   onshapeManagedWorkspaceReady: Schema.optional(Schema.Boolean),
+  localCadSource: Schema.optional(LocalCadProjectSource),
   updatedAt: IsoDateTime,
 });
 
@@ -1259,6 +1322,12 @@ export const ThreadMessageSentPayload = Schema.Struct({
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+});
+
+export const ThreadMessageRatingSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  rating: Schema.NullOr(MessageRating),
 });
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
@@ -1490,6 +1559,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.message-sent"),
     payload: ThreadMessageSentPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.message-rating-set"),
+    payload: ThreadMessageRatingSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

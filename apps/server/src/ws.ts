@@ -12,15 +12,15 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
+  CadViewError,
   type AuthEnvironmentScope,
-  ClientDeviceType,
-  ClientOs,
   ClientSurface,
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
   type FileManagerRevealKind,
   type OrchestrationClientOrigin,
+  type MessageRating,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
@@ -74,7 +74,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
-import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
+import * as ProviderSetup from "./provider/providerSetup.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -94,14 +94,18 @@ import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import { RATING_REASON_COUNTER } from "./telemetry/AnalyticsEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
+import { LocalCadProjects } from "./localCad/LocalCadProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
 import { CadStorage } from "./cad/CadStorage.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
+import { saveCadThumbnail } from "./cad/CadThumbnails.ts";
 import { CadPanel } from "./cad/CadPanel.ts";
 import { CadViewing } from "./cad/CadViewing.ts";
+import { FeatureScriptPreviews } from "./featurescript/FeatureScriptPreviews.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -235,6 +239,7 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   {
     type:
       | "thread.message-sent"
+      | "thread.message-rating-set"
       | "thread.proposed-plan-upserted"
       | "thread.activity-appended"
       | "thread.session-set";
@@ -242,6 +247,7 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
 > {
   return (
     event.type === "thread.message-sent" ||
+    event.type === "thread.message-rating-set" ||
     event.type === "thread.proposed-plan-upserted" ||
     event.type === "thread.activity-appended" ||
     event.type === "thread.session-set"
@@ -265,8 +271,6 @@ const SHELL_RESUME_MAX_GAP = 1_000;
 const THREAD_RESUME_MAX_GAP = 1_000;
 
 const isClientSurface = Schema.is(ClientSurface);
-const isClientDeviceType = Schema.is(ClientDeviceType);
-const isClientOs = Schema.is(ClientOs);
 const MAX_CLIENT_APP_VERSION_LENGTH = 64;
 
 // Optional client identity announced on the /ws upgrade URL next to wsTicket.
@@ -289,33 +293,9 @@ function readClientConnectionOrigin(
   };
 }
 
-// Client telemetry stays in this socket's RPC layer. It must not become a
-// server-global "current client" because several client types can connect at once.
-function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) {
-  const url = HttpServerRequest.toURL(request);
-  if (Option.isNone(url)) {
-    return {};
-  }
-
-  const surface = url.value.searchParams.get("clientSurface");
-  const appVersion = url.value.searchParams.get("clientAppVersion")?.trim() ?? "";
-  const deviceType = url.value.searchParams.get("clientDeviceType");
-  const os = url.value.searchParams.get("clientOs");
-
-  return {
-    ...(isClientSurface(surface) ? { surface } : {}),
-    ...(appVersion !== "" && appVersion.length <= MAX_CLIENT_APP_VERSION_LENGTH
-      ? { appVersion, clientAppVersion: appVersion }
-      : {}),
-    ...(isClientOs(os) ? { clientOs: os } : {}),
-    ...(isClientDeviceType(deviceType) ? { clientDeviceType: deviceType } : {}),
-  };
-}
-
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
-  clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
 ) =>
   WsRpcGroup.toLayer(
@@ -338,28 +318,67 @@ const makeWsRpcLayer = (
           command,
           hasClientOrigin ? { origin: clientOrigin } : undefined,
         );
-      const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
+      // Counts what the user did in this command. Turns are counted where they reach a provider
+      // (ProviderService), not here. `previousRating` is the rated message's rating before this
+      // command: the thumbs-down popover saves the rating again with its reason, and that save
+      // shouldn't count a second thumbs down.
+      const recordClientCommandAnalytics = (
+        command: OrchestrationCommand,
+        previousRating: MessageRating | undefined,
+      ) => {
         switch (command.type) {
+          case "project.create":
+            return analytics.count("projects_created");
           case "thread.create":
-            return analytics.record("client.thread.started", clientAnalyticsProps);
+            return analytics.count("threads_started");
           case "thread.turn.start":
             return command.bootstrap?.createThread
-              ? Effect.andThen(
-                  analytics.record("client.thread.started", clientAnalyticsProps),
-                  analytics.record("client.turn.requested", clientAnalyticsProps),
-                )
-              : analytics.record("client.turn.requested", clientAnalyticsProps);
+              ? analytics.count("threads_started")
+              : Effect.void;
+          case "thread.message.rating.set": {
+            const rating = command.rating;
+            if (rating === null) return Effect.void;
+            if (rating.value === "up")
+              return previousRating?.value === "up" ? Effect.void : analytics.count("ratings_up");
+            const wasDown = previousRating?.value === "down";
+            const reason = rating.reason;
+            const reasonIsNew =
+              reason !== undefined && reason !== (wasDown ? previousRating.reason : undefined);
+            // A note is sent only when the user ticked "send this note", once per note.
+            const note = rating.shareNote ? rating.note : undefined;
+            const noteIsNew =
+              note !== undefined &&
+              !(wasDown && previousRating.shareNote && previousRating.note === note);
+            return Effect.all(
+              [
+                wasDown ? Effect.void : analytics.count("ratings_down"),
+                reasonIsNew ? analytics.count(RATING_REASON_COUNTER[reason]) : Effect.void,
+                noteIsNew
+                  ? analytics.sendFeedback({ ...(reason === undefined ? {} : { reason }), note })
+                  : Effect.void,
+              ],
+              { discard: true },
+            );
+          }
           default:
             return Effect.void;
         }
       };
+      /** The rating a rating command replaces; undefined for other commands or if unreadable. */
+      const readPreviousRating = (command: OrchestrationCommand) =>
+        command.type !== "thread.message.rating.set"
+          ? Effect.succeed(undefined)
+          : projectionSnapshotQuery.getThreadMessage(command.threadId, command.messageId).pipe(
+              Effect.map((message) => (Option.isSome(message) ? message.value.rating : undefined)),
+              Effect.orElseSucceed(() => undefined),
+            );
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const providerService = yield* ProviderService.ProviderService;
-      const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
+      const providerSetupRunner = yield* ProviderSetup.ProviderSetupRunner;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -389,12 +408,14 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const onshapeConnections = yield* OnshapeConnections.OnshapeConnections;
       const onshapeProjects = yield* OnshapeProjects.OnshapeProjects;
+      const localCadProjects = yield* LocalCadProjects;
       const cadUserOperations = yield* CadUserOperations;
       const cadStorage = yield* CadStorage;
       const cadRenderBroker = yield* CadRenderBroker;
       const cadPanel = yield* CadPanel;
       const cadComments = yield* CadComments;
       const cadViewing = yield* CadViewing;
+      const featureScriptPreviews = yield* Effect.serviceOption(FeatureScriptPreviews);
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -485,6 +506,7 @@ const makeWsRpcLayer = (
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":
+          case "thread.message-rating-set":
             return Effect.succeed(Option.none());
           case "thread.cad-capture-recorded":
           case "thread.cad-presentation-settled":
@@ -885,6 +907,18 @@ const makeWsRpcLayer = (
             onshapeProjects.setConnection(input),
             { "rpc.aggregate": "onshape-projects" },
           ),
+        [WS_METHODS.localCadFilesList]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadFilesList, localCadProjects.listFiles(input), {
+            "rpc.aggregate": "local-cad",
+          }),
+        [WS_METHODS.localCadProjectsCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadProjectsCreate, localCadProjects.create(input), {
+            "rpc.aggregate": "local-cad",
+          }),
+        [WS_METHODS.localCadProjectsSetFile]: (input) =>
+          observeRpcEffect(WS_METHODS.localCadProjectsSetFile, localCadProjects.setFile(input), {
+            "rpc.aggregate": "local-cad",
+          }),
         [WS_METHODS.cadUserStart]: (input) =>
           observeRpcEffect(WS_METHODS.cadUserStart, cadUserOperations.start(input), {
             "rpc.aggregate": "cad-user",
@@ -908,10 +942,20 @@ const makeWsRpcLayer = (
           observeRpcStream(WS_METHODS.cadStorageWatch, cadStorage.watch),
         [WS_METHODS.cadStorageRun]: (input) =>
           observeRpcEffect(WS_METHODS.cadStorageRun, cadStorage.run(input)),
+        [WS_METHODS.cadThumbnailSave]: (input) =>
+          observeRpcEffect(WS_METHODS.cadThumbnailSave, saveCadThumbnail(input)),
         [WS_METHODS.cadPanelScene]: (input) =>
           observeRpcStream(
             WS_METHODS.cadPanelScene,
             cadPanel.scene(input.threadId, input.snapshotId),
+          ),
+        [WS_METHODS.featureScriptPreview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.featureScriptPreview,
+            Option.isSome(featureScriptPreviews)
+              ? featureScriptPreviews.value.panel(input)
+              : Effect.fail(new CadViewError({ reason: "capability-unavailable" })),
+            { "rpc.aggregate": "featurescript" },
           ),
         [WS_METHODS.cadPanelSave]: (input) =>
           observeRpcEffect(
@@ -954,10 +998,11 @@ const makeWsRpcLayer = (
                     ),
                   )
                 : false;
+              const previousRating = yield* readPreviousRating(normalizedCommand);
               const result = yield* dispatchNormalizedCommand(normalizedCommand).pipe(
                 Effect.tapError(() => cleanupFailedUploadedAttachments(command, normalizedCommand)),
               );
-              yield* recordClientCommandAnalytics(normalizedCommand);
+              yield* recordClientCommandAnalytics(normalizedCommand, previousRating);
               if (archiveCommand) {
                 if (shouldStopSessionAfterCommand) {
                   yield* Effect.gen(function* () {
@@ -1297,14 +1342,10 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "provider" },
           ),
-        [WS_METHODS.serverUpdateProvider]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.serverUpdateProvider,
-            providerMaintenanceRunner.updateProvider(input),
-            {
-              "rpc.aggregate": "server",
-            },
-          ),
+        [WS_METHODS.serverRunProviderSetup]: (input) =>
+          observeRpcEffect(WS_METHODS.serverRunProviderSetup, providerSetupRunner.run(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverUpsertKeybinding,
@@ -1525,7 +1566,7 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
-              if (input.resource._tag === "attachment") {
+              if (input.resource._tag === "attachment" || input.resource._tag === "cad-thumbnail") {
                 return yield* issueAssetUrl({ resource: input.resource });
               }
               if (input.resource._tag === "project-favicon") {
@@ -1765,7 +1806,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-        const analytics = yield* AnalyticsService.AnalyticsService;
         const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
@@ -1775,20 +1815,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           ),
         );
         const clientOrigin = readClientConnectionOrigin(request);
-        const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* analytics.record("client.connected", clientAnalyticsProps);
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(
-              session,
-              clientOrigin,
-              clientAnalyticsProps,
-              previewAutomationBroker,
-            ).pipe(
+            makeWsRpcLayer(session, clientOrigin, previewAutomationBroker).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(ProviderMaintenanceRunner.layer),
             ),
           ),
         );

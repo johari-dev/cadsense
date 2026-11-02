@@ -1,4 +1,5 @@
 import { WS_METHODS } from "@cadsense/contracts";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -99,6 +100,11 @@ export const observeRpcEffect = <A, E, R>(
         method,
       },
     }),
+    // A defect is a bug, not an expected failure; logging it as an error reports it (see
+    // telemetry/ErrorReports.ts).
+    Effect.tapCause((cause) =>
+      Cause.hasDies(cause) ? Effect.logError(`RPC ${method} died`, cause) : Effect.void,
+    ),
   );
 
   return withRpcEffectTracing(method, instrumented, traceAttributes);

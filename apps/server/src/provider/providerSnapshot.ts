@@ -1,5 +1,4 @@
 import type {
-  ProviderDriverKind,
   ModelCapabilities,
   ServerProvider,
   ServerProviderAuth,
@@ -15,7 +14,6 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { normalizeCustomModelSlug } from "@cadsense/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner.ts";
-import { createProviderVersionAdvisory } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
 export const DEFAULT_TIMEOUT_MS = 4_000;
@@ -213,7 +211,6 @@ export function buildBooleanOptionDescriptor(input: {
 }
 
 export function buildServerProvider(input: {
-  driver?: ProviderDriverKind;
   presentation: ServerProviderPresentation;
   enabled: boolean;
   checkedAt: string;
@@ -222,13 +219,6 @@ export function buildServerProvider(input: {
   skills?: ReadonlyArray<ServerProviderSkill>;
   probe: ProviderProbeResult;
 }): ServerProviderDraft {
-  const versionAdvisory = input.driver
-    ? createProviderVersionAdvisory({
-        driver: input.driver,
-        currentVersion: input.probe.version,
-        checkedAt: input.checkedAt,
-      })
-    : undefined;
   return {
     displayName: input.presentation.displayName,
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
@@ -245,7 +235,6 @@ export function buildServerProvider(input: {
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
-    ...(versionAdvisory ? { versionAdvisory } : {}),
   };
 }
 

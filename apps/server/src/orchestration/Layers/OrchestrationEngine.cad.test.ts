@@ -276,6 +276,61 @@ it.effect("working descendants block admission but monitoring-only work does not
   }).pipe(Effect.provide(testLayer)),
 );
 
+// A parent turn can finish while its child agent keeps working. Linking a plain folder's first CAD
+// file must still see that child, or the file changes under the running work.
+it.effect("a working descendant blocks linking a plain folder's first CAD file", () =>
+  Effect.gen(function* () {
+    const engine = yield* OrchestrationEngineService;
+    const folderId = ProjectId.make("folder-project");
+    const folderThreadId = ThreadId.make("folder-thread");
+    yield* engine.dispatch({
+      type: "project.create",
+      commandId: CommandId.make("create-folder"),
+      projectId: folderId,
+      title: "Folder",
+      workspaceRoot: "/work/folder",
+      createdAt: now,
+    });
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("folder-thread"),
+      threadId: folderThreadId,
+      projectId: folderId,
+      title: "Folder thread",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: now,
+    });
+    const link = (id: string) => ({
+      type: "project.local-cad.set" as const,
+      commandId: CommandId.make(id),
+      projectId: folderId,
+      localCadSource: { filePath: "part.step" },
+    });
+    const liveness = yield* ThreadBackgroundLiveness.ThreadBackgroundLivenessService;
+    liveness.recordTaskLiveness({
+      threadId: folderThreadId,
+      taskId: "child",
+      taskType: undefined,
+      status: "running",
+      kind: "started",
+    });
+    assert.strictEqual(
+      (yield* Effect.flip(engine.dispatch(link("link-while-working"))))._tag,
+      "OrchestrationCommandInvariantError",
+    );
+    liveness.recordTaskLiveness({
+      threadId: folderThreadId,
+      taskId: "child",
+      taskType: undefined,
+      status: "completed",
+      kind: "completed",
+    });
+    yield* engine.dispatch(link("link-when-idle"));
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("disabled CAD retains snapshots and rejects new remote reservations", () =>
   Effect.gen(function* () {
     const engine = yield* seed;

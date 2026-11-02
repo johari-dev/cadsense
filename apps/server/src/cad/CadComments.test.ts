@@ -47,6 +47,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { make as makeComments } from "./CadComments.ts";
 import { make as makeStore, CadDiskSpace, CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadRenderBroker } from "./CadRenderBroker.ts";
+import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 const now = "2026-09-05T00:00:00Z";
 const decodeSnapshot = Schema.decodeUnknownEffect(CadSnapshotManifest);
 const decodeReasons = Schema.decodeUnknownEffect(
@@ -135,6 +136,7 @@ const dependencies = Layer.mergeAll(
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provideMerge(SqlitePersistenceMemory),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "cadsense-cad-viewing-" })),
+  Layer.provideMerge(AnalyticsService.layerTest),
   Layer.provideMerge(NodeServices.layer),
 );
 const unused = () => Effect.die("Unexpected store operation");

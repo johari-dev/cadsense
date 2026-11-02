@@ -28,11 +28,13 @@ interface PendingRpcAckRequest {
 }
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
-const untrackedRpcAckMethods = new Set<string>([WS_METHODS.previewAutomationConnect]);
-const longRunningRpcAckMethods = new Set<string>([
-  WS_METHODS.serverUpdateProvider,
-  WS_METHODS.serverRefreshProviders,
+// Provider sign-in waits for the user to finish in the browser, so its
+// duration says nothing about connection health.
+const untrackedRpcAckMethods = new Set<string>([
+  WS_METHODS.previewAutomationConnect,
+  WS_METHODS.serverRunProviderSetup,
 ]);
+const longRunningRpcAckMethods = new Set<string>([WS_METHODS.serverRefreshProviders]);
 
 const slowRpcAckRequestsAtom = Atom.make<ReadonlyArray<SlowRpcAckRequest>>([]).pipe(
   Atom.keepAlive,

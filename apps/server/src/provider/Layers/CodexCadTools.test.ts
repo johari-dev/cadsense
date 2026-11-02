@@ -36,6 +36,7 @@ const decodeStart = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
       params: Schema.Struct({
+        developerInstructions: Schema.String,
         dynamicTools: Schema.Array(
           Schema.Struct({
             name: Schema.String,
@@ -82,6 +83,7 @@ it.effect.each([
             cad: {
               close: Effect.void,
               invoke: () => Effect.succeed({ result: {} }),
+              followUp: () => Effect.succeed(null),
               end: () => Effect.void,
             },
             cadReviewLearnings: Effect.succeed([{ text: "Vent holes are intentional." }]),
@@ -123,6 +125,11 @@ it.effect.each([
     const requests = yield* fs.readFileString(`${scriptPath}.requests`);
     assert.include(requests, '"method":"thread/resume"');
     assert.notInclude(requests, '"method":"thread/start"');
+    // Codex replaces turn/start's collaborationMode developer_instructions with its own mode text,
+    // so the guidance has to travel with the thread itself.
+    const resume = requests.split("\n").find((line) => line.includes('"method":"thread/resume"'))!;
+    assert.strictEqual(resume.includes("## Local CAD tools"), attached && registered);
+    assert.strictEqual(resume.includes("- Vent holes are intentional."), attached && registered);
     assert.strictEqual(requests.includes("## Local CAD tools"), attached && registered);
     assert.strictEqual(
       requests.includes(encodeJson(CAD_REVIEW_INSTRUCTIONS).slice(1, -1)),
@@ -186,6 +193,7 @@ it.effect(
             calls.push({ childKey, turnId });
             return { result: { revision: 0 }, png: new Uint8Array([1, 2, 3]) };
           }),
+        followUp: () => Effect.succeed(null),
         end: () => Effect.void,
       };
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -240,6 +248,7 @@ it.effect(
       const start = decodeStart(
         (yield* fs.readFileString(`${scriptPath}.requests`)).split("\n")[0]!,
       );
+      assert.include(start.params.developerInstructions, "## Local CAD tools");
       for (const tool of start.params.dynamicTools) {
         const definition = cadToolDefinitions.find((item) => item.name === tool.name)!;
         assert.deepEqual(tool.inputSchema, definition.inputSchema);
@@ -258,8 +267,10 @@ it.effect(
           "cad_diff",
           "cad_measure",
           "cad_find_parts",
+          "cad_drive_options",
           "cad_update_view",
           "cad_capture",
+          "cad_featurescript_preview",
         ],
       );
       yield* runtime.close;

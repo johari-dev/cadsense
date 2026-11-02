@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { CadSnapshotId } from "./cad.ts";
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -25,6 +26,11 @@ export const AssetResource = Schema.Union([
   }),
   Schema.TaggedStruct("project-favicon", {
     cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  }),
+  /** The thumbnail the CAD panel saved for a snapshot. Fails with
+      `AssetCadThumbnailNotFoundError` until one is saved. */
+  Schema.TaggedStruct("cad-thumbnail", {
+    snapshotId: CadSnapshotId,
   }),
 ]);
 export type AssetResource = typeof AssetResource.Type;
@@ -233,6 +239,17 @@ export class AssetProjectFaviconNotFoundError extends Schema.TaggedErrorClass<As
   }
 }
 
+export class AssetCadThumbnailNotFoundError extends Schema.TaggedErrorClass<AssetCadThumbnailNotFoundError>()(
+  "AssetCadThumbnailNotFoundError",
+  {
+    resource: AssetResource,
+  },
+) {
+  override get message(): string {
+    return "CAD thumbnail was not found.";
+  }
+}
+
 export class AssetSigningKeyLoadError extends Schema.TaggedErrorClass<AssetSigningKeyLoadError>()(
   "AssetSigningKeyLoadError",
   {
@@ -258,6 +275,7 @@ export const AssetAccessError = Schema.Union([
   AssetProjectFaviconResolutionError,
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
+  AssetCadThumbnailNotFoundError,
   AssetSigningKeyLoadError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;

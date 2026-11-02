@@ -10,6 +10,7 @@ import { cadReviewInstructions } from "../CadReviewInstructions.ts";
 import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import {
   type CanUseTool,
+  type HookCallback,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -24,6 +25,7 @@ import {
 import { parseCliArgs } from "@cadsense/shared/cliArgs";
 import { makeClaudeProcessExit } from "./ClaudeProcessExit.ts";
 import {
+  hasCadSource,
   ApprovalRequestId,
   MONITOR_TASK_TYPES,
   INERT_TASK_TYPES,
@@ -362,6 +364,32 @@ export interface ClaudeAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
+}
+
+/** Live tasks doing real work: not monitors or inert plan-mode tasks. */
+function workingTaskIds(context: {
+  readonly liveTaskIds: ReadonlySet<string>;
+  readonly taskAgents: ReadonlyMap<string, { readonly taskType: string | undefined }>;
+}): string[] {
+  return [...context.liveTaskIds].filter((id) => {
+    const type = context.taskAgents.get(id)?.taskType;
+    return type === undefined || (!MONITOR_TASK_TYPES.has(type) && !INERT_TASK_TYPES.has(type));
+  });
+}
+
+/**
+ * Whether background agents are still working on a CAD review: working tasks other than
+ * housekeeping hidden from the transcript. While they work, the main agent gets no CAD follow-up
+ * and its turn's leftover drafts are not published, since their work may cover them.
+ */
+function reviewWorkRunning(context: {
+  readonly liveTaskIds: ReadonlySet<string>;
+  readonly taskAgents: ReadonlyMap<
+    string,
+    { readonly taskType: string | undefined; readonly skipTranscript: boolean }
+  >;
+}): boolean {
+  return workingTaskIds(context).some((id) => context.taskAgents.get(id)?.skipTranscript !== true);
 }
 
 function isUuid(value: string): boolean {
@@ -2263,7 +2291,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     result?: SDKResultMessage,
   ) {
     if (context.cad && context.turnState)
-      yield* context.cad.tools.end(null, asCanonicalTurnId(context.turnState.turnId));
+      yield* context.cad.tools.end(
+        null,
+        asCanonicalTurnId(context.turnState.turnId),
+        // A turn that ends while background agents still work is not finished.
+        reviewWorkRunning(context)
+          ? "stopped"
+          : status === "completed" || status === "failed"
+            ? status
+            : "stopped",
+      );
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
     if (resultContextWindow !== undefined) {
       context.lastKnownContextWindow = resultContextWindow;
@@ -3382,7 +3419,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             const turnId = context.cad.turnIds.get(message.task_id);
             context.cad.ended.add(message.task_id);
             context.cad.turnIds.delete(message.task_id);
-            if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId);
+            if (turnId)
+              yield* context.cad.tools.end(`claude:${message.task_id}`, turnId, "stopped");
           }
         }
         const endedAt =
@@ -3412,7 +3450,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           const turnId = context.cad.turnIds.get(message.task_id);
           context.cad.ended.add(message.task_id);
           context.cad.turnIds.delete(message.task_id);
-          if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId);
+          if (turnId) yield* context.cad.tools.end(`claude:${message.task_id}`, turnId, "stopped");
         }
         yield* emitThreadTokenUsage(
           context,
@@ -4069,9 +4107,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           return { behavior: "cancelled" as const };
         }
 
-        // The question copy lives in @cadsense/shared/claudeCompaction because
-        // the web client recognizes this exact text (and the "never" answer)
-        // to mirror a permanent dismissal.
         const question = formatClaudeResumeCompactionQuestion({
           ageMinutes: finiteNonNegativeInteger(request.payload.sessionAgeMinutes) ?? 0,
           estimatedTokens: finiteNonNegativeInteger(request.payload.estimatedTokens) ?? 0,
@@ -4403,7 +4438,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const project = yield* cadQuery.value.getProjectShellById(thread.value.projectId);
         if (
           Option.isNone(project) ||
-          !project.value.onshapeSource ||
+          !hasCadSource(project.value) ||
           project.value.cad?.enabled === false ||
           !project.value.cad?.roots.some((root) => root.current !== null)
         )
@@ -4469,6 +4504,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           updatedAt: startedAt,
         } satisfies ProviderSession,
       };
+      /**
+       * When the main agent tries to end a turn with cad_checks drafts that no comment covers, blocks
+       * the stop once with a message naming them, so the same turn continues. Background agents
+       * still working may publish them, so it waits for a stop with none (reviewWorkRunning). See
+       * "The follow-up" in cad/CadChecks.md.
+       */
+      const cadStopHook: HookCallback = () =>
+        runPromise(
+          Effect.gen(function* () {
+            const turnId = cadContext?.turnState?.turnId;
+            if (!cad || !turnId) return {};
+            if (cadContext && reviewWorkRunning(cadContext)) return {};
+            const reason = yield* cad.tools.followUp(null, asCanonicalTurnId(turnId));
+            return reason === null ? {} : { decision: "block" as const, reason };
+          }).pipe(Effect.catchCause(() => Effect.succeed({}))),
+        );
       const queryOptions: ClaudeQueryOptions = {
         spawnClaudeCodeProcess: processExit.spawn,
         ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -4503,6 +4554,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        ...(cad ? { hooks: { Stop: [{ hooks: [cadStopHook] }] } } : {}),
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
         env: claudeEnvironment,
@@ -4757,10 +4809,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
     } else if (input.interactionMode === "default") {
-      yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode(context.basePermissionMode ?? "default"),
-        catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
-      });
+      const setPermissionMode = (mode: PermissionMode) =>
+        Effect.tryPromise({
+          try: () => context.query.setPermissionMode(mode),
+          catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
+        });
+      const baseMode = context.basePermissionMode ?? "default";
+      // Auto mode depends on the model and account, and the CLI rejects it for models such as
+      // Haiku 4.5. Those turns run with edits auto-approved instead of failing to start.
+      yield* baseMode === "auto"
+        ? setPermissionMode("auto").pipe(Effect.catch(() => setPermissionMode("acceptEdits")))
+        : setPermissionMode(baseMode);
     }
 
     const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);
@@ -4937,10 +4996,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       stoppingSessions.delete(stopped);
     }
     if (!context) return;
-    const working = [...context.liveTaskIds].some((id) => {
-      const type = context.taskAgents.get(id)?.taskType;
-      return type === undefined || (!MONITOR_TASK_TYPES.has(type) && !INERT_TASK_TYPES.has(type));
-    });
+    const working = workingTaskIds(context).length > 0;
     if (
       !context.processExit.hasSpawned() ||
       context.stopped ||

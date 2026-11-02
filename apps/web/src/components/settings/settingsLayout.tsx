@@ -1,4 +1,4 @@
-import { InfoIcon, Undo2Icon } from "lucide-react";
+import { InfoIcon, ArrowUUpLeftIcon as Undo2Icon } from "~/lib/icons";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   createContext,
@@ -113,6 +113,14 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
   return nowMs;
 }
 
+/**
+ * Settings row controls share one 32px height and the control radius: buttons and selects
+ * use their `default` size, inputs are 32px, and switches have one size. Composer pickers
+ * are compact pills, so settings rows pass this as their `triggerClassName` to match.
+ */
+export const SETTINGS_PICKER_TRIGGER_CLASS =
+  "h-8 min-h-8 min-w-0 max-w-none shrink-0 rounded-[var(--control-radius)] px-2.5 text-sm text-foreground/90 hover:text-foreground sm:h-8 sm:min-h-8 sm:text-sm";
+
 export function SettingsSection({
   title,
   icon,
@@ -136,7 +144,9 @@ export function SettingsSection({
       className={cn("space-y-3", className)}
     >
       <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
-        <h2 className="flex items-center gap-2 text-lg font-semibold tracking-[-0.025em] text-foreground">
+        {/* The page's first section title is the page title; later sections are groups
+            within it and take a smaller heading. */}
+        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.025em] text-foreground [section+section_&]:text-base [section+section_&]:tracking-normal">
           {icon}
           {title}
         </h2>
@@ -171,9 +181,16 @@ export function SettingsRow({
       {...rowProps}
       ref={targetRef}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
-      className={cn("rounded-xl px-3 sm:px-4", children ? "pt-3 pb-1" : "py-3", className)}
+      data-settings-row=""
+      className={cn(
+        // A hairline sits between consecutive rows, inset to the text edge and centered in
+        // the section's row gap. Other section content (cards, lists) never gets one.
+        "relative rounded-xl px-3 sm:px-4 [[data-settings-row]+&]:before:pointer-events-none [[data-settings-row]+&]:before:absolute [[data-settings-row]+&]:before:inset-x-3 [[data-settings-row]+&]:before:-top-0.5 [[data-settings-row]+&]:before:h-px [[data-settings-row]+&]:before:bg-border sm:[[data-settings-row]+&]:before:inset-x-4",
+        children ? "pt-3.5 pb-1.5" : "py-3.5",
+        className,
+      )}
     >
-      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-8">
+      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="text-sm font-medium tracking-[-0.005em] text-foreground">{title}</h3>
@@ -182,7 +199,7 @@ export function SettingsRow({
             </span>
           </div>
           {description ? (
-            <p className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground/80">
+            <p className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground">
               {description}
             </p>
           ) : null}
@@ -253,7 +270,13 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        <WorkspacePageContainer width={width} className={cn("gap-12", className)}>
+        {/* Pages center in the area right of the settings nav. Readable pages cap the form
+            at 720px so each label stays close to its control; wider pages (diagnostics,
+            tables) opt out through `width`. */}
+        <WorkspacePageContainer
+          width={width}
+          className={cn("gap-8", width === "readable" && "max-w-[calc(45rem+3rem)]", className)}
+        >
           {children}
         </WorkspacePageContainer>
       </div>

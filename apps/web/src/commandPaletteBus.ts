@@ -4,6 +4,8 @@ const COMMAND_PALETTE_OPEN_EVENT = "cadsense:open-command-palette";
 
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
+  /** For "add-project": skip the type list and open this kind's form. */
+  readonly kind?: "onshape" | "local-cad";
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

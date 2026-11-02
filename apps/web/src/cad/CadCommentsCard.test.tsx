@@ -43,7 +43,13 @@ vi.mock("../composerHandleContext", () => ({
   useComposerHandleContext: () => ({ current: chat.composer }),
 }));
 
-import { CadCommentsCard, CadSeverityLabel } from "./CadCommentsCard";
+import {
+  CadCommentsCard,
+  CadSeverityIcon,
+  CadSeverityLabel,
+  CommentBadge,
+  SeverityBadge,
+} from "./CadCommentsCard";
 
 afterEach(() => {
   hooks.reset();
@@ -104,15 +110,13 @@ it.each(["Success", "Failure"] as const)(
       hooks.beginRender();
       return CadCommentsCard(props);
     };
+    // Resolve and Dismiss are icon actions, found by their accessible label.
     const actions = (tree: ReactNode) =>
-      elements(tree).filter((element) => {
-        return (
+      elements(tree).filter(
+        (element) =>
           typeof element.props.onClick === "function" &&
-          (element.props.children === "Dismiss" ||
-            (Array.isArray(element.props.children) &&
-              element.props.children.includes("Resolve · ")))
-        );
-      });
+          (element.props.label === "Resolve" || element.props.label === "Dismiss"),
+      );
     const buttons = actions(render());
     expect(buttons).toHaveLength(2);
     (buttons[0]!.props.onClick as () => void)();
@@ -162,12 +166,12 @@ it("asks for a dismiss reason, sends it trimmed once, and cancels on Escape", as
     hooks.beginRender();
     return CadCommentsCard(current);
   };
-  const byText = (tree: ReactNode, text: string) =>
-    elements(tree).find((element) => element.props.children === text);
+  const byLabel = (tree: ReactNode, label: string) =>
+    elements(tree).find((element) => element.props.label === label);
   const reasonInput = (tree: ReactNode) =>
     elements(tree).find((element) => element.props.placeholder === REASON_PLACEHOLDER);
   expect(reasonInput(render())).toBeUndefined();
-  (byText(render(), "Dismiss")!.props.onClick as () => void)();
+  (byLabel(render(), "Dismiss")!.props.onClick as () => void)();
   expect(commands.review).not.toHaveBeenCalled();
   const input = reasonInput(render())!;
   (input.props.onChange as (event: { target: { value: string } }) => void)({
@@ -187,7 +191,7 @@ it("asks for a dismiss reason, sends it trimmed once, and cancels on Escape", as
   expect(props.clearSelection).toHaveBeenCalledWith(comment.id);
   expect(reasonInput(render())).toBeUndefined();
   // Escape closes the input without reviewing; an empty reason is simply omitted.
-  (byText(render(), "Dismiss")!.props.onClick as () => void)();
+  (byLabel(render(), "Dismiss")!.props.onClick as () => void)();
   (reasonInput(render())!.props.onKeyDown as (event: unknown) => void)({
     key: "Escape",
     preventDefault: vi.fn(),
@@ -209,7 +213,7 @@ it("asks for a dismiss reason, sends it trimmed once, and cancels on Escape", as
   ).toBe(true);
 });
 
-it("updates comment markers after scene changes without repeating idle projections", () => {
+it("updates comment markers after scene changes without repeating idle projections", async () => {
   const manifest = {
     rootId: "root",
     root: {},
@@ -231,7 +235,7 @@ it("updates comment markers after scene changes without repeating idle projectio
     pending.forEach((callback) => callback(0));
   };
   const listeners = new Set<() => void>();
-  const project = vi.fn(() => ({ x: 10, y: 20, visible: true, occluded: false }));
+  const project = vi.fn(() => ({ x: 10, y: 20, visible: true }));
   const graphics = {
     commentProjection: project,
     endCommentReview() {},
@@ -284,8 +288,12 @@ it("updates comment markers after scene changes without repeating idle projectio
   attach(tree);
   for (let i = 0; i < 60; i++) tick();
   expect(project).toHaveBeenCalledTimes(1);
-  // Multiple renders in one browser frame should coalesce into one marker update.
+  // Multiple renders in one browser frame coalesce into one marker update, applied before the
+  // frame paints (a microtask, not the next animation frame).
   for (let i = 0; i < 3; i++) for (const listener of listeners) listener();
+  expect(project).toHaveBeenCalledTimes(1);
+  await Promise.resolve();
+  expect(project).toHaveBeenCalledTimes(2);
   tick();
   expect(project).toHaveBeenCalledTimes(2);
   hooks.beginRender();
@@ -343,7 +351,7 @@ it("seeds the active thread's composer at its cursor for a point finding", () =>
     historical: true,
     back() {},
   });
-  const discuss = elements(tree).find((element) => element.props.children === "Discuss");
+  const discuss = elements(tree).find((element) => element.props.label === "Discuss");
   (discuss!.props.onClick as () => void)();
   expect(chat.seedPrompt).toHaveBeenCalledWith(
     { environmentId: "test", threadId: "thread" },
@@ -392,7 +400,7 @@ it("opens the finding's thread from the floating card for a whole-part finding",
     back() {},
     floating: true,
   });
-  const discuss = elements(tree).find((element) => element.props.children === "Discuss");
+  const discuss = elements(tree).find((element) => element.props.label === "Discuss");
   (discuss!.props.onClick as () => void)();
   expect(chat.composer.readSnapshot).not.toHaveBeenCalled();
   expect(chat.seedPrompt).toHaveBeenCalledWith(
@@ -408,7 +416,7 @@ it("opens the finding's thread from the floating card for a whole-part finding",
   expect(chat.composer.focusAt).not.toHaveBeenCalled();
 });
 
-it("orders open findings by severity then number and labels each one", () => {
+it("lists open findings by number and carries severity in each badge", () => {
   vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
@@ -451,17 +459,36 @@ it("orders open findings by severity then number and labels each one", () => {
   hooks.beginRender();
   const tree = CadCommentsCard(props);
   const listed = elements(tree).filter((element) => element.type === "article");
-  expect(listed.map((element) => element.key)).toEqual(["c2", "c5", "c4", "c1", "c3"]);
-  const labels = elements(tree).filter((element) => element.type === CadSeverityLabel);
-  // Each listed finding shows its label once, and the expanded finding repeats it above the body.
-  expect(labels.map((element) => element.props.severity)).toEqual([
-    "blocker",
-    "blocker",
-    "blocker",
-    "concern",
-    "nit",
-    null,
+  // Numbers are the IDs the agent cites in chat, so the list keeps them in order.
+  expect(listed.map((element) => element.key)).toEqual(["c1", "c2", "c3", "c4", "c5"]);
+  // Each listed finding's badge is filled with its severity color and names it for tooltips
+  // and screen readers; one without a severity shows a plain badge.
+  const badges = elements(tree)
+    .filter((element) => element.type === SeverityBadge)
+    .map((element) => SeverityBadge({ comment: element.props.comment as CadComment }));
+  const badgeParts = badges.flatMap((badge) => [
+    ...elements(badge),
+    ...elements(badge).flatMap((element) => elements(element.props.render as ReactNode)),
   ]);
+  const fills = badgeParts
+    .filter((element) => element.type === CommentBadge)
+    .map(
+      (element) =>
+        elements(CommentBadge(element.props as Parameters<typeof CommentBadge>[0]))[0]!.props
+          .className,
+    );
+  expect(fills).toEqual([
+    expect.stringContaining("bg-[#262626]"),
+    expect.stringContaining("bg-red-300"),
+    expect.stringContaining("bg-amber-200"),
+    expect.stringContaining("bg-amber-200"),
+    expect.stringContaining("bg-red-300"),
+  ]);
+  const severities = badgeParts
+    .map((element) => element.props["data-severity"])
+    .filter((severity) => severity !== undefined);
+  expect(severities).toEqual(["nit", "blocker", "concern", "blocker"]);
+  expect(CadSeverityIcon({ severity: null, category: null })).toBeNull();
   expect(CadSeverityLabel({ severity: "blocker" })?.props.className).toContain("text-foreground");
   expect(CadSeverityLabel({ severity: "nit" })?.props.className).toContain(
     "text-muted-foreground/60",
@@ -470,9 +497,15 @@ it("orders open findings by severity then number and labels each one", () => {
   hooks.reset();
   hooks.beginRender();
   const closed = elements(CadCommentsCard({ ...props, open: false, selection: null }));
-  const toggle = closed.find((element) => element.props["aria-expanded"] === false);
-  expect(toggle?.props["aria-label"]).toBe("Comments (5 unresolved, 2 blocking)");
-  expect(toggle?.props.title).toBe("2 blocking");
+  // The collapsed toggle is the tooltip trigger's rendered button.
+  const toggle = closed
+    .flatMap((element) => elements(element.props.render as ReactNode))
+    .find((element) => element.props["aria-expanded"] === false);
+  // Its accessible name is its visible label; the tooltip adds what the count means.
+  expect(toggle?.props["aria-label"]).toBe("5 comments");
+  expect(
+    closed.some((element) => element.props.children === "Comments (5 unresolved, 2 blocking)"),
+  ).toBe(true);
 });
 
 it("shows why a comment is outdated and the proposed resolution beside the Resolve control", () => {
@@ -517,5 +550,5 @@ it("shows why a comment is outdated and the proposed resolution beside the Resol
           : "";
   expect(text(tree)).toContain("Outdated: geometry changed in a newer revision");
   expect(text(tree)).toContain("Proposed resolution: The new revision adds the bracket.");
-  expect(text(tree)).toContain("Resolve · 1");
+  expect(elements(tree).some((element) => element.props.label === "Resolve")).toBe(true);
 });

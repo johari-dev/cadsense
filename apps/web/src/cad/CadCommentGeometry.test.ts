@@ -63,6 +63,7 @@ import {
   cadCommentVisible,
   cadCommentCameraUp,
   cadCommentInspectionDirections,
+  groupOverlappingCommentPins,
 } from "./CadCommentGeometry";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
 const setup = (explosion = 0) => {
@@ -181,6 +182,69 @@ describe("CAD comment anchors", () => {
         960,
       )[0]?.reason,
     ).toBe("invalid-image-point");
+  });
+  // Nearby snapping; cases from "Helping smaller models place points" in server CadComments.md.
+  const pickAt = (
+    model: ReturnType<typeof setup>["model"],
+    camera: THREE.Camera,
+    x: number,
+    y: number,
+    intended = id(3),
+  ) =>
+    locateCadCommentPoints(
+      model,
+      camera,
+      [{ pickKey: "p", intendedOccurrenceId: intended, x, y }],
+      1280,
+      960,
+    )[0]!;
+  const pixelOf = (camera: THREE.Camera, point: THREE.Vector3) => {
+    const projected = point.clone().project(camera);
+    return { x: (projected.x + 1) * 640, y: (1 - projected.y) * 480 };
+  };
+  it("snaps a near miss to the closest pixel where the intended part is visible", () => {
+    const { model, camera, point } = setup();
+    const { x, y } = pixelOf(camera, point);
+    // Just outside the torus's outer edge, in empty space.
+    const hit = pickAt(model, camera, x + 40, y);
+    expect(hit.reason).toBe("candidate");
+    expect(hit.occurrenceId).toBe(id(3));
+    expect(hit.pixel).toBeDefined();
+    const [px, py] = hit.pixel!;
+    expect(Math.hypot(px - (x + 40), py - y)).toBeLessThanOrEqual(64);
+    expect(px).toBeLessThan(x + 40);
+  });
+  it("leaves an exact hit where it was and reports no moved pixel", () => {
+    const { model, camera, point } = setup();
+    const { x, y } = pixelOf(camera, point);
+    const hit = pickAt(model, camera, x, y);
+    expect(hit.reason).toBe("candidate");
+    expect(hit.pixel).toBeUndefined();
+    expect(hit.point?.[0]).toBeCloseTo(0.3, 5);
+  });
+  it("does not snap past the search radius or onto another part", () => {
+    const { model, camera } = setup();
+    const center = pixelOf(camera, cadCommentWorldPoint(model, id(3), [0, 0, 0.1])!);
+    // The torus ring is about 90 pixels from the center of its opening.
+    expect(pickAt(model, camera, center.x, center.y).reason).toBe("no-hit");
+    expect(pickAt(model, camera, center.x + 40, center.y, id(4)).reason).not.toBe("candidate");
+  });
+  it("does not snap to a spot hidden behind another part or a translucent surface", () => {
+    const { model, camera, point } = setup();
+    const { x, y } = pixelOf(camera, point);
+    // A large opaque sheet in front of the torus: the torus is hidden everywhere.
+    const sheet = model.objects.get(id(4))!.object;
+    sheet.clear();
+    sheet.add(new THREE.Mesh(new THREE.BoxGeometry(6, 6, 0.01), new THREE.MeshBasicMaterial()));
+    sheet.matrixAutoUpdate = true;
+    sheet.position.set(2, 0, 1);
+    sheet.updateMatrixWorld(true);
+    expect(pickAt(model, camera, x + 40, y).reason).not.toBe("candidate");
+    sheet.traverse((child) => {
+      if (child instanceof THREE.Mesh)
+        child.material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.3 });
+    });
+    expect(pickAt(model, camera, x + 40, y).reason).not.toBe("candidate");
   });
   it("uses parallel occlusion rays in orthographic views", () => {
     const { model, point } = setup();
@@ -339,4 +403,55 @@ it.each([
     model.dispose();
     material.dispose();
   }
+});
+
+describe("groupOverlappingCommentPins", () => {
+  const pin = (x: number, y: number, width = 22, pinned = false) => ({ x, y, width, pinned });
+  // A fixed cluster width keeps the expectations readable.
+  const options = { clusterWidth: () => 40 };
+  it("groups markers whose boxes come within 4px, in input order", () => {
+    // 22px pins 25px apart leave a 3px gap, under the 4px minimum.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(25, 0)], options)).toEqual([[0, 1]]);
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(27, 0)], options)).toEqual([[0], [1]]);
+    // 0 and 2 merge; their marker (40px at x 12) then reaches 3 at x 40.
+    expect(
+      groupOverlappingCommentPins(
+        [pin(0, 0), pin(300, 0), pin(24, 0), pin(40, 0), pin(300, 80)],
+        options,
+      ),
+    ).toEqual([[0, 2, 3], [1], [4]]);
+    // A pin that only touched a member's old spot stays out once the marker clears it.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(24, 0), pin(48, 0)], options)).toEqual([
+      [0, 1],
+      [2],
+    ]);
+  });
+  it("uses each marker's real width, so a lettered pill next to a round pin groups", () => {
+    // A 33px "15a" and a 22px "6" 30px apart overlap by 1.5px plus the gap.
+    expect(groupOverlappingCommentPins([pin(0, 0, 33), pin(30, 0)], options)).toEqual([[0, 1]]);
+    expect(groupOverlappingCommentPins([pin(0, 0, 33), pin(32, 0)], options)).toEqual([[0], [1]]);
+    // Round pins are circles: diagonal neighbours whose boxes nearly touch stay apart.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(24, 25)], options)).toEqual([[0], [1]]);
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(18, 18)], options)).toEqual([[0, 1]]);
+  });
+  it("treats a count marker as its square box", () => {
+    // 0 and 1 merge into a 40px marker at (12, 0); 2 sits just off its corner, inside the gap.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(24, 0), pin(44, 24)], options)).toEqual([
+      [0, 1, 2],
+    ]);
+  });
+  it("re-checks a group's wider marker against its neighbours until nothing overlaps", () => {
+    // 0 and 1 group into a 40px marker centred at x 12; it reaches 2, which neither pin did.
+    expect(groupOverlappingCommentPins([pin(0, 0), pin(24, 0), pin(12, 26)], options)).toEqual([
+      [0, 1, 2],
+    ]);
+  });
+  it("never folds a pinned pin into a group or bridges others through it", () => {
+    expect(
+      groupOverlappingCommentPins(
+        [pin(0, 0), pin(24, 0, 22, true), pin(48, 0), pin(70, 0)],
+        options,
+      ),
+    ).toEqual([[0], [1], [2, 3]]);
+  });
 });

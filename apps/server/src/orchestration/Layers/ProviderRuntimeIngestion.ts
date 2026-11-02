@@ -364,6 +364,9 @@ export function runtimeEventToActivities(
         return [];
       }
       const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+      // Lets chat show the approval on the tool call it gates. Claude reports the
+      // tool use only as a provider ref; Codex sets the item id.
+      const toolCallId = event.itemId ?? event.providerRefs?.providerItemId;
       return [
         {
           id: event.eventId,
@@ -384,6 +387,7 @@ export function runtimeEventToActivities(
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
             requestType: event.payload.requestType,
+            ...(toolCallId !== undefined ? { toolCallId } : {}),
             ...(event.payload.detail ? { detail: event.payload.detail } : {}),
             ...(event.payload.appName ? { appName: event.payload.appName } : {}),
             ...(event.payload.options ? { options: event.payload.options } : {}),

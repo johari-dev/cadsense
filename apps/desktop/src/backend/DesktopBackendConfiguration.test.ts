@@ -1118,6 +1118,45 @@ describe("DesktopBackendConfiguration", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("primaryRunsInWsl follows the decision that starts the primary backend", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "cadsense-desktop-backend-config-test-",
+      });
+      const cases = [
+        { wslOnly: true, wslAvailable: true, expected: true },
+        // WSL-only was chosen, but WSL went away, so the primary backend runs on Windows.
+        { wslOnly: true, wslAvailable: false, expected: false },
+        // WSL runs beside a Windows primary backend.
+        { wslOnly: false, wslAvailable: true, expected: false },
+      ];
+      for (const { wslOnly, wslAvailable, expected } of cases) {
+        const runsInWsl = yield* Effect.gen(function* () {
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+          return yield* configuration.primaryRunsInWsl;
+        }).pipe(
+          Effect.provide(
+            DesktopBackendConfiguration.layer.pipe(
+              Layer.provideMerge(
+                DesktopAppSettings.layerTest({
+                  ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+                  wslBackendEnabled: true,
+                  wslOnly,
+                  wslDistro: "Ubuntu",
+                }),
+              ),
+              Layer.provideMerge(DesktopWslServerTree.layerTest()),
+              Layer.provideMerge(DesktopWslEnvironment.layerTest({ isAvailable: wslAvailable })),
+              Layer.provideMerge(makeEnvironmentLayer(baseDir, { platform: "win32" })),
+            ),
+          ),
+        );
+        assert.equal(runsInWsl, expected, `wslOnly=${wslOnly} wslAvailable=${wslAvailable}`);
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("resolvePrimaryLabel reports the WSL distro when wsl-only and WSL is available", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

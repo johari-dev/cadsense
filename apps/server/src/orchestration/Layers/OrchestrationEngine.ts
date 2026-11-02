@@ -74,6 +74,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.onshape.cleanup.complete":
     case "project.onshape.cleanup.request":
     case "project.onshape.restore":
+    case "project.local-cad.set":
     case "project.cad.enabled.set":
     case "project.cad.operation.reserve":
     case "project.cad.operation.complete":
@@ -118,6 +119,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         nextReadModel = yield* projectEvent(nextReadModel, event);
       }
       return nextReadModel;
+    });
+
+  /**
+   * The command read model boots without message history, so a rating for a
+   * message from before this process started reads that message from the
+   * projection. The decider then validates it like any in-memory message.
+   * Other commands get the read model unchanged.
+   */
+  const withRatedMessage = (readModel: OrchestrationReadModel, command: OrchestrationCommand) =>
+    Effect.gen(function* () {
+      if (command.type !== "thread.message.rating.set") {
+        return readModel;
+      }
+      const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+      if (!thread || thread.messages.some((message) => message.id === command.messageId)) {
+        return readModel;
+      }
+      const message = yield* projectionSnapshotQuery.getThreadMessage(
+        command.threadId,
+        command.messageId,
+      );
+      if (Option.isNone(message)) {
+        return readModel;
+      }
+      return {
+        ...readModel,
+        threads: readModel.threads.map((entry) =>
+          entry.id === thread.id
+            ? { ...entry, messages: [...entry.messages, message.value] }
+            : entry,
+        ),
+      };
     });
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
@@ -215,6 +248,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               envelope.command.type === "thread.cad.user-view.set" ||
               envelope.command.type === "thread.cad.presentation.settle" ||
               envelope.command.type === "project.cad.enabled.set" ||
+              envelope.command.type === "project.local-cad.set" ||
               envelope.command.type === "project.delete")
               ? {
                   ...commandReadModel,
@@ -225,7 +259,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                     ),
                   })),
                 }
-              : commandReadModel,
+              : yield* withRatedMessage(commandReadModel, envelope.command),
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>

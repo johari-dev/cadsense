@@ -47,13 +47,13 @@ export const prepareCadMaterials = (
       linearEvidence ||= near(material.color, linear);
     }
   }
-  if (!encodedEvidence || linearEvidence) return;
-  for (const material of materials) {
-    if (material.map || material.vertexColors) continue;
-    material.color.convertSRGBToLinear();
-    // This synchronous export omits surface finish. A restrained highlight restores
-    // shape cues without inventing metallic properties or changing explicit textures.
-    if (defaultFinish.has(material) && material.metalness === 0 && !material.roughnessMap)
-      material.roughness = 0.4;
-  }
+  if (encodedEvidence && !linearEvidence)
+    for (const material of materials) {
+      if (material.map || material.vertexColors) continue;
+      material.color.convertSRGBToLinear();
+      // This synchronous export omits surface finish. A restrained highlight restores
+      // shape cues without inventing metallic properties or changing explicit textures.
+      if (defaultFinish.has(material) && material.metalness === 0 && !material.roughnessMap)
+        material.roughness = 0.4;
+    }
 };

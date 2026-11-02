@@ -15,6 +15,24 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 });
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
+/**
+ * Provider options the app never offers or sends. Claude's fast mode is hidden: removing it
+ * from both the trait controls and dispatch means a thread that had it on stops sending it,
+ * instead of keeping a setting nobody can see or turn off.
+ */
+const HIDDEN_PROVIDER_OPTION_IDS: Partial<Record<ProviderDriverKind, ReadonlySet<string>>> = {
+  [ProviderDriverKind.make("claudeAgent")]: new Set(["fastMode"]),
+};
+
+/** `descriptors` without the options this app hides for `provider`. */
+export function withoutHiddenProviderOptions<T extends { readonly id: string }>(
+  provider: ProviderDriverKind,
+  descriptors: ReadonlyArray<T>,
+): ReadonlyArray<T> {
+  const hidden = HIDDEN_PROVIDER_OPTION_IDS[provider];
+  return hidden ? descriptors.filter((descriptor) => !hidden.has(descriptor.id)) : descriptors;
+}
+
 export function formatProviderDriverKindLabel(provider: ProviderDriverKind): string {
   return provider
     .replace(/([a-z])([A-Z])/g, "$1 $2")

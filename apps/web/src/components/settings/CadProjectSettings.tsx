@@ -3,7 +3,11 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
-import { CadUserOperationError, type CadUserStartInput } from "@cadsense/contracts";
+import {
+  CadUserOperationError,
+  isSolidWorksFile,
+  type CadUserStartInput,
+} from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { useEffect, useRef, useState } from "react";
 import { onshapeProjectEnvironment } from "../../state/onshapeProjects";
@@ -18,6 +22,59 @@ const size = (bytes: number) =>
   bytes < 1024 ** 2 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
 const timestamp = (value: string) => new Date(value).toLocaleString();
 const isCadUserOperationError = Schema.is(CadUserOperationError);
+
+/** Wording that differs between Onshape documents and local CAD files in a project folder. */
+const COPY = {
+  onshape: {
+    sectionRow: "Downloaded CAD",
+    sectionDescription:
+      "Snapshots are local and read-only. Only you can refresh the CAD catalog or sync a snapshot. Each action uses Onshape API requests.",
+    refresh: "Refresh CAD catalog",
+    refreshing: "Refreshing CAD catalog…",
+    syncing: "Syncing CAD snapshot…",
+    refreshed: (at: string) => `Catalog refreshed ${at}`,
+    rootLabel: "CAD root",
+    choose: "Choose CAD",
+    syncSelected: "Sync snapshot",
+    emptyCatalog: "No Assembly or Part Studio roots were found in this CAD document.",
+    noCatalog:
+      "Refresh the CAD catalog to choose an Assembly or Part Studio. Nothing is downloaded automatically.",
+    synced: "Synced",
+    missing: "No snapshot downloaded",
+    discoverDone: "CAD catalog refreshed.",
+    syncDone: "CAD snapshot synced.",
+    off: "CAD access is off. Your source, downloaded data, and saved views are kept.",
+    unchanged: "Existing downloaded CAD is unchanged.",
+  },
+  local: {
+    sectionRow: "CAD file",
+    sectionDescription:
+      "Imports are read-only and stay on this machine. Sync again after re-exporting the file.",
+    refresh: "Rescan folder",
+    refreshing: "Scanning folder…",
+    syncing: "Importing CAD…",
+    refreshed: (at: string) => `Folder scanned ${at}`,
+    rootLabel: "Other CAD file",
+    choose: "Choose a file",
+    syncSelected: "Import",
+    emptyCatalog: "No STEP, IGES, or SolidWorks files are in this folder.",
+    noCatalog: "Rescan the folder to import another CAD file.",
+    synced: "Imported",
+    missing: "Not imported",
+    discoverDone: "Folder scanned.",
+    syncDone: "CAD imported.",
+    off: "CAD access is off. Your file, imported data, and saved views are kept.",
+    unchanged: "Existing imported CAD is unchanged.",
+  },
+} as const;
+
+/** A linked SolidWorks file converts with the SolidWorks on this machine, so the wording says so. */
+const SOLIDWORKS_COPY = {
+  ...COPY.local,
+  sectionDescription:
+    "Imports are read-only and stay on this machine. SolidWorks opens a copy of the file to convert it, so it needs to be installed here. Sync again after saving the file.",
+  syncing: "Converting with SolidWorks…",
+};
 
 export function CadProjectSettings({
   project,
@@ -42,6 +99,12 @@ export function CadProjectSettings({
   const [configuration, setConfiguration] = useState(
     project.onshapeSource?.configuration || "default",
   );
+  const local = project.localCadSource !== undefined;
+  const copy = !project.localCadSource
+    ? COPY.onshape
+    : isSolidWorksFile(project.localCadSource.filePath)
+      ? SOLIDWORKS_COPY
+      : COPY.local;
   const cad = project.cad;
   const retryAt = cad?.lastOutcome?.retryAt;
   const [clock, setClock] = useState(Date.now);
@@ -59,6 +122,11 @@ export function CadProjectSettings({
   const locked =
     runActive || pending || !!operation || project.onshapeSource?.managedWorkspaceReady === false;
   const selected = cad?.catalog?.roots.find((root) => root.elementId === elementId);
+  // Onshape roots and SolidWorks files have configurations. STEP and IGES files do not.
+  const configurable = !local || (selected !== undefined && isSolidWorksFile(selected.name));
+  /** The catalog's name for a root: the workspace-relative path, for a local file. */
+  const rootName = (rootElementId: string) =>
+    cad?.catalog?.roots.find((root) => root.elementId === rootElementId)?.name;
   const remoteLocked = locked || !enabled || throttled;
   const perform = async (action: () => Promise<AtomCommandResult<unknown, unknown>>) => {
     if (pendingRef.current) return;
@@ -72,7 +140,7 @@ export function CadProjectSettings({
         setError(
           isCadUserOperationError(cause) && cause.reason === "busy"
             ? "CAD is busy. Wait for agent runs and the current operation to finish."
-            : "The CAD action could not be completed. Existing downloaded CAD is unchanged.",
+            : `The CAD action could not be completed. ${copy.unchanged}`,
         );
       }
     } finally {
@@ -92,8 +160,18 @@ export function CadProjectSettings({
   return (
     <SettingsSection title="CAD">
       <SettingsRow
-        title="Downloaded CAD"
-        description="Snapshots are local and read-only. Only you can refresh the CAD catalog or sync a snapshot. Each action uses Onshape API requests."
+        title={copy.sectionRow}
+        description={
+          project.localCadSource ? (
+            <>
+              <span className="break-all font-mono text-xs">{project.localCadSource.filePath}</span>
+              <br />
+              {copy.sectionDescription}
+            </>
+          ) : (
+            copy.sectionDescription
+          )
+        }
         control={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -125,7 +203,7 @@ export function CadProjectSettings({
                 );
               }}
             >
-              Refresh CAD catalog
+              {copy.refresh}
             </Button>
           </div>
         }
@@ -142,19 +220,13 @@ export function CadProjectSettings({
             CAD controls are locked while an agent run is active in this project.
           </p>
         ) : null}
-        {!enabled ? (
-          <p className="text-sm text-muted-foreground">
-            CAD access is off. Your source, downloaded data, and saved views are kept.
-          </p>
-        ) : null}
+        {!enabled ? <p className="text-sm text-muted-foreground">{copy.off}</p> : null}
         {operation ? (
           <div
             role="status"
             className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
           >
-            <span>
-              {operation.kind === "discover" ? "Refreshing CAD catalog…" : "Syncing CAD snapshot…"}
-            </span>
+            <span>{operation.kind === "discover" ? copy.refreshing : copy.syncing}</span>
             <Button
               size="sm"
               variant="outline"
@@ -175,38 +247,48 @@ export function CadProjectSettings({
         {cad?.catalog ? (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Catalog refreshed {timestamp(cad.catalog.refreshedAt)}
+              {copy.refreshed(timestamp(cad.catalog.refreshedAt))}
             </p>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+            <div
+              className={
+                configurable
+                  ? "grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                  : "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+              }
+            >
               <div className="space-y-1.5">
-                <span className="text-sm font-medium">CAD root</span>
+                <span className="text-sm font-medium">{copy.rootLabel}</span>
                 <Select
                   value={elementId}
                   onValueChange={setElementId}
                   disabled={locked || !enabled}
                 >
-                  <SelectTrigger aria-label="CAD root">
-                    <SelectValue placeholder="Choose CAD">{selected?.name}</SelectValue>
+                  <SelectTrigger aria-label={copy.rootLabel}>
+                    <SelectValue placeholder={copy.choose}>{selected?.name}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
                     {cad.catalog.roots.map((root) => (
                       <SelectItem key={root.elementId} value={root.elementId}>
-                        {root.name} · {root.kind === "assembly" ? "Assembly" : "Part Studio"}
+                        {local
+                          ? root.name
+                          : `${root.name} · ${root.kind === "assembly" ? "Assembly" : "Part Studio"}`}
                       </SelectItem>
                     ))}
                   </SelectPopup>
                 </Select>
               </div>
-              <label className="space-y-1.5 text-sm font-medium">
-                Configuration
-                <Input
-                  value={configuration}
-                  maxLength={4096}
-                  disabled={locked || !enabled}
-                  onChange={(event) => setConfiguration(event.target.value)}
-                  placeholder="default"
-                />
-              </label>
+              {configurable ? (
+                <label className="space-y-1.5 text-sm font-medium">
+                  Configuration
+                  <Input
+                    value={configuration}
+                    maxLength={4096}
+                    disabled={locked || !enabled}
+                    onChange={(event) => setConfiguration(event.target.value)}
+                    placeholder="default"
+                  />
+                </label>
+              ) : null}
               <Button
                 disabled={remoteLocked || !selected}
                 onClick={() => {
@@ -214,24 +296,19 @@ export function CadProjectSettings({
                     sync({
                       elementId: selected.elementId,
                       kind: selected.kind,
-                      configuration: configuration || "default",
+                      configuration: configurable ? configuration || "default" : "default",
                     });
                 }}
               >
-                Sync snapshot
+                {copy.syncSelected}
               </Button>
             </div>
             {cad.catalog.roots.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No Assembly or Part Studio roots were found in this CAD document.
-              </p>
+              <p className="text-sm text-muted-foreground">{copy.emptyCatalog}</p>
             ) : null}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            Refresh the CAD catalog to choose an Assembly or Part Studio. Nothing is downloaded
-            automatically.
-          </p>
+          <p className="text-sm text-muted-foreground">{copy.noCatalog}</p>
         )}
         {cad?.roots.map((root) => (
           <div
@@ -240,16 +317,24 @@ export function CadProjectSettings({
           >
             <div className="min-w-0 space-y-1">
               <p className="break-words text-sm font-medium">
-                {cad.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
+                {rootName(root.elementId) ??
                   (root.kind === "assembly" ? "Assembly" : "Part Studio")}
+                {/* The linked file, in the configuration the project imports it in. */}
+                {local &&
+                cad.catalog?.sourceElement?.elementId === root.elementId &&
+                root.configuration === "default" ? (
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">Default</span>
+                ) : null}
               </p>
-              <p className="break-all text-xs text-muted-foreground">
-                Configuration: {root.configuration}
-              </p>
+              {!local || isSolidWorksFile(rootName(root.elementId) ?? "") ? (
+                <p className="break-all text-xs text-muted-foreground">
+                  Configuration: {root.configuration}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 {root.current
-                  ? `Synced ${timestamp(root.current.createdAt)} · ${size(root.current.assetBytes + root.current.manifestBytes)}`
-                  : "No snapshot downloaded"}
+                  ? `${copy.synced} ${timestamp(root.current.createdAt)} · ${size(root.current.assetBytes + root.current.manifestBytes)}`
+                  : copy.missing}
               </p>
               {root.rollback ? (
                 <p className="text-xs text-muted-foreground">
@@ -279,9 +364,7 @@ export function CadProjectSettings({
         {!operation && cad?.lastOutcome ? (
           <p role="status" className="text-sm text-muted-foreground">
             {cad.lastOutcome.reason ??
-              (cad.lastOutcome.kind === "discover"
-                ? "CAD catalog refreshed."
-                : "CAD snapshot synced.")}
+              (cad.lastOutcome.kind === "discover" ? copy.discoverDone : copy.syncDone)}
           </p>
         ) : null}
         {error ? (
