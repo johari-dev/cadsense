@@ -17,7 +17,8 @@ through the SolidWorks installed on the machine (see [SolidWorks files](#solidwo
 4. The new chat opens with the CAD panel loading. The sync result also carries the folder's file
    list, so project settings can switch to another file without a separate catalog refresh.
 5. After editing and re-exporting the file, Sync in the CAD panel header or project settings imports
-   the new revision.
+   the new revision. The header button, which Onshape projects share, is disabled while any chat in
+   the project runs, and its tooltip names those chats. A toast reports the result.
 
 ### From the CAD panel
 

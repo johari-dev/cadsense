@@ -39,7 +39,7 @@ import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
 import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
-import { CadLocalSyncButton } from "./CadLocalSyncButton";
+import { CadSyncButton } from "./CadSyncButton";
 import { CadFilePrompt } from "./CadFilePrompt";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
@@ -739,7 +739,7 @@ export function CadPanel({
   const shownFile = project.localCadSource
     ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
     : undefined;
-  // The header row: the scene picker and, for a local CAD file, its Sync button.
+  // The header row: the scene picker and the Sync button for the shown root.
   const scenePicker = !compact && (
     <>
       <CadScenePicker
@@ -794,10 +794,10 @@ export function CadPanel({
             });
         }}
       />
-      <CadLocalSyncButton
+      <CadSyncButton
         project={project}
         rootId={shownRootId}
-        disabled={!!runBlocker || !!data?.agentControlling || !!historicalView}
+        disabled={!!data?.agentControlling || !!historicalView}
       />
     </>
   );
