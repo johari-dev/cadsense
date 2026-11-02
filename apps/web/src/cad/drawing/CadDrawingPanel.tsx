@@ -28,11 +28,10 @@ import {
 } from "./drawingModel";
 import { loadGlbPart } from "./loadPart";
 import { SHEET_H, SHEET_W } from "./sheetKit";
-import { VARIANTS, describePart, type SheetData, type VariantKey } from "./sheets";
+import { FormalSheet, type SheetData } from "./sheets";
 import {
   formatLength,
   holeReadings,
-  operationsFor,
   stockFor,
   unitSuffix,
   type HoleReading,
@@ -80,7 +79,6 @@ const prepare = (sha256: string, fetchAsset: (sha256: string) => Promise<ArrayBu
 interface SheetForm {
   requester: string;
   team: string;
-  due: string;
   notes: string;
 }
 
@@ -112,14 +110,12 @@ const buildSheet = (
     part: prepared.part,
     views: prepared.views,
     name: entry.name,
-    description: describePart(prepared.part, readings, units),
     qty: choices?.qty ?? entry.qty,
     material,
     ...form,
     units,
     readings,
     stock: stockFor(prepared.part, material, units),
-    operations: operationsFor(prepared.part, material, readings, units),
     source: { partId: entry.partId, revision, date: new Date().toISOString().slice(0, 10) },
   };
 };
@@ -142,9 +138,8 @@ export function CadDrawingPanel({
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
-  const [variant, setVariant] = useState<VariantKey>("A");
   const [units, setUnits] = useState<Units>("in");
-  const [form, setForm] = useState<SheetForm>({ requester: "", team: "", due: "", notes: "" });
+  const [form, setForm] = useState<SheetForm>({ requester: "", team: "", notes: "" });
   const [choices, setChoices] = useState<Record<string, PartChoices>>({});
   const [prepared, setPrepared] = useState<Record<string, Prepared>>({});
   const [printing, setPrinting] = useState<SheetData[] | null>(null);
@@ -266,7 +261,6 @@ export function CadDrawingPanel({
     entry && ready
       ? buildSheet(entry, ready, form, choices[entry.geometryKey], units, revision)
       : null;
-  const current = VARIANTS.find((v) => v.key === variant)!;
 
   const printAll = async () => {
     if (!fetchAsset) return;
@@ -361,12 +355,6 @@ export function CadDrawingPanel({
           </div>
         )}
         <Segmented
-          label="Sheet style"
-          value={variant}
-          options={VARIANTS.map((v) => ({ value: v.key, label: v.name }))}
-          onChange={setVariant}
-        />
-        <Segmented
           label="Units"
           value={units}
           options={[
@@ -390,7 +378,7 @@ export function CadDrawingPanel({
               style={SHEET_STYLE}
               data-testid="cad-drawing-sheet"
             >
-              <current.Sheet data={data} />
+              <FormalSheet data={data} />
             </svg>
           ) : (
             <div className="flex aspect-[11/8.5] w-full items-center justify-center text-sm text-muted-foreground">
@@ -438,22 +426,13 @@ export function CadDrawingPanel({
                 onChange={(e) => setForm({ ...form, requester: e.target.value })}
               />
             </Field>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Team">
-                <input
-                  className={inputClass}
-                  value={form.team}
-                  onChange={(e) => setForm({ ...form, team: e.target.value })}
-                />
-              </Field>
-              <Field label="Due">
-                <input
-                  className={inputClass}
-                  value={form.due}
-                  onChange={(e) => setForm({ ...form, due: e.target.value })}
-                />
-              </Field>
-            </div>
+            <Field label="Team">
+              <input
+                className={inputClass}
+                value={form.team}
+                onChange={(e) => setForm({ ...form, team: e.target.value })}
+              />
+            </Field>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Qty">
                 <input
@@ -537,7 +516,7 @@ export function CadDrawingPanel({
               xmlns="http://www.w3.org/2000/svg"
             >
               <rect width={SHEET_W} height={SHEET_H} fill="white" />
-              <current.Sheet data={sheet} />
+              <FormalSheet data={sheet} />
             </svg>
           ))}
         </div>

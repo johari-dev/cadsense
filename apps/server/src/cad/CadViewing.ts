@@ -644,7 +644,7 @@ export const make = Effect.gen(function* () {
                 title,
                 sheets: card.sheets,
                 notDrawn: { platesForTheRouter: skipped.cnc, printedParts: skipped.print },
-                note: "The sheets are open in the user's Part drawing panel, where they can switch sheet styles and print. Dimensions come from this model; tap sizes are guessed from hole diameters and the user confirms them there. Reply in two or three sentences: what you drew and anything the shop should know, such as a material that needs a decision. Do not describe the card or panel, and do not repeat dimensions.",
+                note: "The sheets are open in the user's Part drawing panel, where they can fill in the title block and print. Dimensions come from this model; tap sizes are guessed from hole diameters and the user confirms them there. Reply in two or three sentences: what you drew and anything the shop should know, such as a material that needs a decision. Do not describe the card or panel, and do not repeat dimensions.",
               };
             }),
           );
