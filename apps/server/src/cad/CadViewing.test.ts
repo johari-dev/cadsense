@@ -960,6 +960,14 @@ it.effect("runs cad_checks over the pinned snapshot and caches part bounds per a
     assert.equal(first.summary.meshUnknown, 0);
     // One bounds read, cached for the activation, and one triangle read for this call.
     assert.equal(reads(), 2);
+    // Asking again (as paging does) reuses the activation's pass instead of intersecting again,
+    // which takes minutes on a full robot.
+    const again = yield* decodeChecks(
+      (yield* tools.invoke(null, turnId, "cad_checks", { expectedRevision: context.revision }))
+        .result,
+    );
+    assert.deepEqual(again.findings, first.findings);
+    assert.equal(reads(), 2);
     const leads = yield* decodeChecks(
       (yield* tools.invoke(null, turnId, "cad_checks", {
         expectedRevision: context.revision,
