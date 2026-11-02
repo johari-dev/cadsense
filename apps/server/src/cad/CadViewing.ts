@@ -58,7 +58,13 @@ import {
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
 import { readCadDesignBrief } from "./CadDesignBrief.ts";
-import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
+import {
+  loadCadBounds,
+  loadCadMeshes,
+  readCadChecks,
+  type CadBounds,
+  type CadCheckRuns,
+} from "./CadChecks.ts";
 import {
   cadDiffSnapshot,
   chooseCadDiffBase,
@@ -359,6 +365,8 @@ export const make = Effect.gen(function* () {
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
         // cad_checks and cad_find_parts share this cache.
         const boundsCache = new Map<string, CadBounds | null>();
+        // A full robot's pass takes minutes, so paging and repeat calls reuse it.
+        const checkRuns: CadCheckRuns = new Map();
         const checks: CadAgentTools["checks"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -372,10 +380,11 @@ export const make = Effect.gen(function* () {
                 state,
                 {
                   bounds: (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
-                  // Triangles are only needed while intersecting, so they are read per call, not cached.
+                  // Triangles are only needed while intersecting, so they are read once per pass, not cached.
                   meshes: (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
                 },
                 input,
+                checkRuns,
               );
             }),
           );
