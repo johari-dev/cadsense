@@ -135,6 +135,10 @@
       "types": "./src/chatList.ts",
       "import": "./src/chatList.ts"
     },
+    "./toolCallFacts": {
+      "types": "./src/toolCallFacts.ts",
+      "import": "./src/toolCallFacts.ts"
+    },
     "./hostProcess": {
       "types": "./src/hostProcess.ts",
       "import": "./src/hostProcess.ts"

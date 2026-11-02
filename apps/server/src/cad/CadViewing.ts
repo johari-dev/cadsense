@@ -1,11 +1,12 @@
 import { measureCad } from "./CadMeasure.ts";
+import { CadDriveCatalog } from "./CadDriveCatalog.ts";
+import { readCadDriveOptions } from "./CadDriveOptions.ts";
 import { findCadParts } from "./CadFindParts.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   hasCadSource,
   CAD_PART_DRAWING_ACTIVITY,
   CadPartDrawingInput,
-  EventId,
   type CadPartDrawingCard,
   CadViewError,
   CadViewState,
@@ -13,7 +14,10 @@ import {
   CadCaptureInput,
   CadDiffInput,
   CadRenderError,
+  CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
   CommandId,
+  EventId,
+  type CadFeatureScriptPreviewCard,
   type CadDiffResult,
   type CadDiffSnapshot,
   type CadRetainedSnapshot,
@@ -22,6 +26,7 @@ import {
   type CadContextResult,
   type CadHierarchyResult,
   type CadMeasureResult,
+  type CadDriveOptionsResult,
   type CadFindPartsResult,
   type CadSnapshotManifest,
   type OrchestrationCommand,
@@ -30,6 +35,7 @@ import {
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -61,9 +67,14 @@ import {
   shopRoute,
   type ShopRoute,
 } from "@cadsense/shared/cadDrawing";
-import * as DateTime from "effect/DateTime";
 import { readCadDesignBrief } from "./CadDesignBrief.ts";
-import { loadCadBounds, loadCadMeshes, readCadChecks, type CadBounds } from "./CadChecks.ts";
+import {
+  loadCadBounds,
+  loadCadMeshes,
+  readCadChecks,
+  type CadBounds,
+  type CadCheckRuns,
+} from "./CadChecks.ts";
 import {
   cadDiffSnapshot,
   chooseCadDiffBase,
@@ -76,6 +87,10 @@ import { readThreadCadComments } from "./CadCommentPersistence.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { makeCadToolActivity, type CadToolActivityState } from "./CadToolActivity.ts";
+import {
+  FeatureScriptPreviews,
+  type FeatureScriptPreviewDelivery,
+} from "../featurescript/FeatureScriptPreviews.ts";
 
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
 const conflict = () => new CadViewError({ reason: "revision-conflict" });
@@ -91,10 +106,14 @@ export interface CadAgentTools {
   readonly diff: (input: unknown) => Effect.Effect<CadDiffResult, CadViewError>;
   readonly measure: (input: unknown) => Effect.Effect<CadMeasureResult, CadViewError>;
   readonly findParts: (input: unknown) => Effect.Effect<CadFindPartsResult, CadViewError>;
+  readonly driveOptions: (input: unknown) => Effect.Effect<CadDriveOptionsResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
   /** Posts a part drawing card to the chat; the web draws the sheets. */
   readonly partDrawing: (input: unknown) => Effect.Effect<unknown, CadViewError>;
+  readonly featureScriptPreview: (
+    input: unknown,
+  ) => Effect.Effect<FeatureScriptPreviewDelivery, CadViewError>;
 }
 export interface CadViewingShape {
   readonly watchActivity: (threadId: ThreadId) => Stream.Stream<CadToolActivityState>;
@@ -129,7 +148,9 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const artifacts = yield* Effect.serviceOption(CadCaptureArtifacts);
+  const driveCatalog = yield* Effect.serviceOption(CadDriveCatalog);
   const commentService = yield* Effect.serviceOption(CadComments);
+  const featureScriptPreviews = yield* Effect.serviceOption(FeatureScriptPreviews);
   const active = new Set<string>();
   const activity = yield* makeCadToolActivity;
   const db = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
@@ -359,6 +380,8 @@ export const make = Effect.gen(function* () {
         // Part mesh extents for shop routing, read the way the web panels read them so a card and
         // its panel always route a part the same way. Keyed by mesh hash.
         const extentsCache = new Map<string, [number, number, number] | null>();
+        // A full robot's pass takes minutes, so paging and repeat calls reuse it.
+        const checkRuns: CadCheckRuns = new Map();
         const checks: CadAgentTools["checks"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -372,10 +395,11 @@ export const make = Effect.gen(function* () {
                 state,
                 {
                   bounds: (keys) => loadCadBounds(binding.snapshot, readAsset, boundsCache, keys),
-                  // Triangles are only needed while intersecting, so they are read per call, not cached.
+                  // Triangles are only needed while intersecting, so they are read once per pass, not cached.
                   meshes: (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
                 },
                 input,
+                checkRuns,
               );
             }),
           );
@@ -496,6 +520,24 @@ export const make = Effect.gen(function* () {
                 initialized.state,
                 input,
                 initialized.binding.readAsset,
+              );
+            }),
+          );
+        // Triangles feed axis fits only when the input names parts, so they are read per call.
+        const driveOptions: CadAgentTools["driveOptions"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized || Option.isNone(driveCatalog)) return yield* unavailable();
+              const { binding, state } = initialized;
+              const readAsset = (sha256: string) =>
+                binding.readAsset(sha256).pipe(Effect.mapError(unavailable));
+              return yield* readCadDriveOptions(
+                binding.snapshot,
+                state,
+                (keys) => loadCadMeshes(binding.snapshot, readAsset, keys),
+                driveCatalog.value.current,
+                input,
               );
             }),
           );
@@ -681,6 +723,48 @@ export const make = Effect.gen(function* () {
               });
             }),
           );
+        // Previews read the workspace and run locally; they don't touch the view, so skip the FIFO.
+        const featureScriptPreview: CadAgentTools["featureScriptPreview"] = (input) =>
+          Effect.gen(function* () {
+            if (!open || Option.isNone(featureScriptPreviews)) return yield* unavailable();
+            const project = yield* projectFor(session.threadId);
+            const delivery = yield* featureScriptPreviews.value.preview(
+              project.workspaceRoot,
+              input,
+              session.threadId,
+            );
+            if (delivery.card) yield* recordFeatureScriptPreview(delivery.card);
+            const { card: _card, ...forAgent } = delivery;
+            return forAgent;
+          });
+        /** Shows the preview as a card in the chat. Display only, so failures never fail the tool. */
+        const recordFeatureScriptPreview = (card: CadFeatureScriptPreviewCard) =>
+          Effect.gen(function* () {
+            const id = yield* commandId;
+            const createdAt = DateTime.formatIso(yield* DateTime.now);
+            const name = card.typeName ?? card.path.split("/").at(-1) ?? card.path;
+            yield* dispatch({
+              type: "thread.activity.append",
+              commandId: id,
+              threadId: session.threadId,
+              activity: {
+                id: EventId.make(`cad-featurescript-${id}`),
+                tone: "info",
+                kind: CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+                summary: `Previewed ${name}: ${card.status}`,
+                payload: card,
+                turnId: turnId ?? null,
+                createdAt,
+              },
+              createdAt,
+            });
+          }).pipe(
+            Effect.catch(() =>
+              Effect.logWarning("FeatureScript preview chat activity was not recorded", {
+                threadId: session.threadId,
+              }),
+            ),
+          );
         const commentActivation =
           turnId && Option.isSome(commentService)
             ? yield* commentService.value
@@ -713,9 +797,12 @@ export const make = Effect.gen(function* () {
           diff: (input) => activity.track(session.threadId, turnId, diff(input)),
           measure: (input) => activity.track(session.threadId, turnId, measure(input)),
           findParts: (input) => activity.track(session.threadId, turnId, findParts(input)),
+          driveOptions: (input) => activity.track(session.threadId, turnId, driveOptions(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
           partDrawing: (input) => activity.track(session.threadId, turnId, partDrawing(input)),
+          featureScriptPreview: (input) =>
+            activity.track(session.threadId, turnId, featureScriptPreview(input)),
         });
       }),
     );

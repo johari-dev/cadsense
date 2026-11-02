@@ -33,7 +33,7 @@ const localExtensions = LOCAL_CAD_FILE_EXTENSIONS.join(", ");
 
 export const CAD_MCP_INSTRUCTIONS = [
   `Cadsense reviews CAD from Onshape or from a CAD file on this machine (${localExtensions}). When the user shares a cad.onshape.com link, names a local CAD file, or asks for feedback on a CAD design, call cad_open with {url} for the Onshape link or {file} for the file's path. Onshape links need this server's API key, so fetching them over HTTP only reaches a sign-in page. Local files need no key. cad_open downloads or imports the model, opens a review, and returns the review guidance to follow.`,
-  "Then inspect the model with cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, cad_find_parts, cad_update_view, and cad_capture, and leave findings on the model with cad_comments_list, cad_comment_locate, cad_comment_inspect, and cad_comments_publish.",
+  "Then inspect the model with cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, cad_find_parts, cad_drive_options, cad_update_view, and cad_capture, and leave findings on the model with cad_comments_list, cad_comment_locate, cad_comment_inspect, and cad_comments_publish.",
   "Published comments and an HTML report stay on disk after the session. cad_open returns the report path.",
 ].join(" ");
 
@@ -44,5 +44,10 @@ export const cadMcpToolDefinitions: ReadonlyArray<CadMcpToolDefinition> = [
     inputSchema: { ...openSchema.schema, type: "object", $defs: openSchema.definitions },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
-  ...mcpCadToolDefinitions.filter((tool) => !CAD_PANEL_TOOLS.has(tool.name)),
+  // Panel tools need the app beside the chat. FeatureScript previews read scripts from the project
+  // workspace, and a review's workspace is managed by Cadsense, so an outside agent has no way to
+  // put a script there.
+  ...mcpCadToolDefinitions.filter(
+    (tool) => !CAD_PANEL_TOOLS.has(tool.name) && tool.name !== "cad_featurescript_preview",
+  ),
 ];

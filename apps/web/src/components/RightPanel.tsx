@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, XIcon as X } from "~/lib/icons";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { isElectron } from "~/env";
 import type { RightPanelSection } from "~/rightPanelStore";
@@ -9,6 +9,25 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
+import { holdInspection } from "./sidebarInspection";
+import { THREAD_SIDEBAR_DEFAULT_WIDTH } from "./threadSidebarWidth";
+
+/** Chat column width the CAD panel's default leaves beside the default sidebar. */
+const CAD_PANEL_DEFAULT_CHAT_WIDTH = 440;
+
+/**
+ * Initial CAD panel width before the user resizes it, for `defaultWidth`. It leaves a
+ * readable chat column (440px beside the default sidebar, so 760px of CAD at 1440 wide)
+ * and never takes less than half the window, so the model stays the dominant column.
+ */
+export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
+  return Math.round(
+    Math.max(
+      viewportWidth * 0.5,
+      viewportWidth - THREAD_SIDEBAR_DEFAULT_WIDTH - CAD_PANEL_DEFAULT_CHAT_WIDTH,
+    ),
+  );
+}
 
 interface RightPanelProps {
   mode: PreviewPanelMode;
@@ -26,6 +45,11 @@ interface RightPanelProps {
   home: RightPanelSection | null;
   /** Names `home` on the Back button, such as the synced model's name. */
   homeLabel: string;
+  /**
+   * The project name, shown as the title while CAD is home and on screen. The CAD panel's
+   * scene picker follows it in the title slot as the document's secondary label.
+   */
+  projectTitle?: string | undefined;
   onBack: () => void;
   /**
    * Receives the title row's slot while CAD is home and on screen, so the CAD panel can
@@ -55,6 +79,12 @@ const SECTION_LABEL = {
 export function RightPanel(props: RightPanelProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const atHome = props.section !== null && props.section === props.home;
+  // A maximized inline panel is an inspection: the app sidebar folds to its icon rail.
+  const holdsInspection = props.mode === "inline" && props.maximized === true;
+  useEffect(
+    () => (holdsInspection ? holdInspection("panel-maximized") : undefined),
+    [holdsInspection],
+  );
 
   return (
     <PreviewPanelShell
@@ -84,7 +114,20 @@ export function RightPanel(props: RightPanelProps) {
           )}
         >
           {props.section === "cad" && atHome ? (
-            <div ref={props.titleSlotRef} className="flex min-w-0 flex-1 items-center pl-1" />
+            <>
+              {props.projectTitle ? (
+                <h2 className="max-w-[50%] shrink-0 truncate pl-2 text-sm font-medium">
+                  {props.projectTitle}
+                </h2>
+              ) : null}
+              <div
+                ref={props.titleSlotRef}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center",
+                  props.projectTitle ? "pl-1.5" : "pl-1",
+                )}
+              />
+            </>
           ) : props.section !== null ? (
             <>
               {props.home !== null && !atHome ? (

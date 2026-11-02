@@ -104,7 +104,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { formatRelativeTimeLabel } from "../timestampFormat";
+import { formatRelativeTime, formatRelativeTimeLabel } from "../timestampFormat";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -159,6 +159,8 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
+  describeProjectSource,
+  resolveSidebarThreadTitle,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -198,6 +200,21 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
   "inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-icon-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
+
+/**
+ * One tile for every project: a model thumbnail fills it once one is captured; until then
+ * the source logo sits inside it, desaturated so a row of uncaptured projects reads as
+ * neutral placeholders rather than a column of brand marks.
+ */
+const SIDEBAR_PROJECT_ICON_CLASS =
+  "size-7 rounded-md border border-sidebar-border bg-sidebar-control-surface p-1 [&[src='/onshape.svg']]:opacity-70 [&[src='/onshape.svg']]:grayscale";
+
+/** The thread row's timestamp: the relative value without its "ago" suffix. */
+function formatCompactRelativeTime(isoDate: string): string {
+  const relative = formatRelativeTime(isoDate);
+  if (!relative) return "";
+  return relative.suffix === null ? "now" : relative.value;
+}
 
 function SidebarThreadDetailPrewarmer({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
   useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
@@ -261,6 +278,8 @@ function buildThreadJumpLabelMap(input: {
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
+  /** The project name shown above the row; a title that repeats it drops it on display. */
+  projectName: string;
   projectCwd: string | null;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
@@ -320,13 +339,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     cancelRename,
     attemptArchiveThread,
     thread,
+    projectName,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isMobile = useIsMobile();
-  const isHighlighted = isActive || isSelected;
+  const lastActivityAt = thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt;
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
   const threadStatus = resolveThreadStatusPill({
@@ -568,21 +588,26 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-sm"
+                    className="min-w-0 flex-1 truncate text-[13px]"
                     data-testid={`thread-title-${thread.id}`}
                   >
-                    {thread.title}
+                    {resolveSidebarThreadTitle(thread.title, projectName)}
                   </span>
                 }
               />
               <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
                 {thread.title}
+                <span className="mt-0.5 block text-muted-foreground">
+                  Active {formatRelativeTimeLabel(lastActivityAt)}
+                </span>
               </TooltipPopup>
             </Tooltip>
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <div className="flex min-w-12 justify-end max-sm:min-w-20">
+          {/* A fixed column for the row's age, so every title has the same width whether
+              or not the row is selected. Hover controls take the column's place. */}
+          <div className="flex w-6 justify-end max-sm:w-20">
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -651,14 +676,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
                 ) : (
-                  <span
-                    className={`text-[10px] tabular-nums ${
-                      isHighlighted ? "text-foreground" : "text-secondary-label"
-                    }`}
-                  >
-                    {formatRelativeTimeLabel(
-                      thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
-                    )}
+                  <span className="text-xs text-tertiary-foreground tabular-nums">
+                    {formatCompactRelativeTime(lastActivityAt)}
                   </span>
                 )}
               </span>
@@ -672,6 +691,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
 
 interface SidebarProjectThreadListProps {
   projectKey: string;
+  projectName: string;
   projectExpanded: boolean;
   hasOverflowingThreads: boolean;
   hiddenThreadStatus: ThreadStatusPill | null;
@@ -731,6 +751,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
+    projectName,
     projectCwd,
     activeRouteThreadKey,
     threadJumpLabelByKey,
@@ -760,9 +781,11 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
   return (
+    // The extra 0.75rem start inset lines thread titles up with the project icon's left
+    // edge: one visible tree step that still leaves titles most of the row.
     <SidebarMenuSub
       ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 px-1 py-0 sm:mx-1 sm:px-1.5"
+      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 py-0 ps-4 pe-1 sm:mx-1 sm:ps-4.5 sm:pe-1.5"
     >
       {shouldShowThreadPanel && showEmptyThreadState ? (
         <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
@@ -781,6 +804,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             <SidebarThreadRow
               key={threadKey}
               thread={thread}
+              projectName={projectName}
               projectCwd={projectCwd}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
@@ -2029,17 +2053,27 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
   const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
-  // One synced model shows its Onshape name; several show a count.
-  const cadSummary =
-    singleCadModelName(project.cad) ??
-    (currentCadRoots.length > 1 ? `${currentCadRoots.length} models` : null);
+  // The subtitle shows the source (the Onshape logo, or a file format) and kind; the model's own name (an Onshape element such
+  // as "Part Studio 1", or the local file's path) moves to the subtitle's tooltip.
+  const source = describeProjectSource(project);
+  const subtitle = (
+    <>
+      {source.logo === "onshape" ? (
+        <img src="/onshape.svg" alt="Onshape" className="size-3 shrink-0 object-contain" />
+      ) : null}
+      <span className="truncate">{source.label}</span>
+    </>
+  );
+  const modelName = project.localCadSource?.filePath ?? singleCadModelName(project.cad);
 
   return (
     <>
       <div className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
-          className={`h-auto min-h-12 pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
+          // The hover actions take their room only while shown, so project names use the
+          // full row the rest of the time.
+          className={`h-auto min-h-12 pr-2 group-focus-within/project-header:pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:pr-14 group-hover/project-header:text-sidebar-foreground max-sm:pr-14 ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2079,7 +2113,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           )}
           <ProjectFavicon
             cadSnapshotId={currentCadRoots[0]?.current?.snapshotId}
-            className="size-7 rounded border border-sidebar-border bg-sidebar-control-surface p-1"
+            className={SIDEBAR_PROJECT_ICON_CLASS}
             environmentId={project.environmentId}
             cwd={project.workspaceRoot}
             onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
@@ -2089,12 +2123,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <span className="block truncate text-sm font-semibold text-sidebar-foreground">
                 {project.displayName}
               </span>
-              <span className="block truncate text-[10px] text-sidebar-muted-foreground">
-                {cadSummary ?? (project.onshapeSource ? "Onshape project" : "Local project")}
-              </span>
+              {modelName ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="flex min-w-0 items-center gap-1 text-xs text-tertiary-foreground" />
+                    }
+                  >
+                    {subtitle}
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">{modelName}</TooltipPopup>
+                </Tooltip>
+              ) : (
+                <span className="flex min-w-0 items-center gap-1 text-xs text-tertiary-foreground">
+                  {subtitle}
+                </span>
+              )}
             </span>
             {project.groupedProjectCount > 1 ? (
-              <span className="shrink-0 text-secondary-label text-[10px]">
+              <span className="shrink-0 text-tertiary-foreground text-[11px]">
                 {project.groupedProjectCount} projects
               </span>
             ) : null}
@@ -2139,6 +2186,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       <SidebarProjectThreadList
         projectKey={project.projectKey}
+        projectName={project.displayName}
         projectExpanded={projectExpanded}
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}
@@ -2345,7 +2393,7 @@ function ProjectSortMenu({
       <Tooltip>
         <TooltipTrigger
           render={
-            <MenuTrigger className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-icon-muted transition-colors hover:bg-accent hover:text-foreground" />
+            <MenuTrigger className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-icon-muted transition-colors hover:bg-accent hover:text-foreground" />
           }
         >
           <ArrowUpDownIcon className="size-3.5" />
@@ -2481,6 +2529,8 @@ interface SidebarProjectsContentProps {
   threadPreviewCount: SidebarThreadPreviewCount;
   updateSettings: ReturnType<typeof useUpdateClientSettings>;
   openAddProject: () => void;
+  /** Starts a thread in the active project (or the first one); null with no projects. */
+  newThreadTarget: { readonly label: string; readonly start: () => void } | null;
   isManualProjectSorting: boolean;
   projectDnDSensors: ReturnType<typeof useSensors>;
   projectCollisionDetection: CollisionDetection;
@@ -2521,6 +2571,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     threadPreviewCount,
     updateSettings,
     openAddProject,
+    newThreadTarget,
     isManualProjectSorting,
     projectDnDSensors,
     projectCollisionDetection,
@@ -2594,7 +2645,29 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
+            {newThreadTarget ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      aria-label={newThreadTarget.label}
+                      className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
+                      onClick={newThreadTarget.start}
+                    />
+                  }
+                >
+                  <SquarePenIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup side="right">
+                  {newThreadShortcutLabel
+                    ? `${newThreadTarget.label} (${newThreadShortcutLabel})`
+                    : newThreadTarget.label}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
             <ProjectSortMenu
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
@@ -2611,7 +2684,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                     variant="ghost-muted"
                     aria-label="Add project"
                     data-testid="sidebar-add-project-trigger"
-                    className="size-6 [--control-icon-color:currentColor] text-icon-muted"
+                    className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
                     onClick={openAddProject}
                   />
                 }
@@ -2703,6 +2776,111 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     </SidebarContent>
   );
 });
+
+/** One square control in the icon rail, with its label as a tooltip. */
+function SidebarRailButton({
+  label,
+  onClick,
+  children,
+}: {
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="right">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * The collapsed sidebar: an icon rail (see sidebarInspection.ts) with a new thread in the
+ * current project, one tile per project, and settings. A project tile, or the sidebar toggle
+ * that sits above the rail in the titlebar row, opens the full sidebar.
+ */
+function SidebarIconRail({
+  projects,
+  activeProjectKey,
+  onCreateThread,
+}: {
+  readonly projects: readonly SidebarProjectSnapshot[];
+  readonly activeProjectKey: string | null;
+  readonly onCreateThread: (project: SidebarProjectSnapshot) => void;
+}) {
+  const navigate = useNavigate();
+  const { setOpen } = useSidebar();
+  const expand = useCallback(() => void setOpen(true), [setOpen]);
+  const threadProject =
+    projects.find((project) => project.projectKey === activeProjectKey) ?? projects[0];
+
+  return (
+    <div
+      className="hidden min-h-0 flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
+      data-sidebar-icon-rail=""
+    >
+      {threadProject ? (
+        <SidebarRailButton
+          label={`New thread in ${threadProject.displayName}`}
+          onClick={() => onCreateThread(threadProject)}
+        >
+          <SquarePenIcon className="size-4" />
+        </SidebarRailButton>
+      ) : null}
+      <div aria-hidden className="my-1 h-px w-5 shrink-0 bg-sidebar-border" />
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+        {projects.map((project) => {
+          const isActiveProject = project.projectKey === activeProjectKey;
+          return (
+            <Tooltip key={project.projectKey}>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`Show ${project.displayName} threads`}
+                    aria-current={isActiveProject ? "true" : undefined}
+                    // The same 32px square as every other rail button; the active project
+                    // differs only by its fill.
+                    className={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
+                      isActiveProject ? "bg-sidebar-row-active" : ""
+                    }`}
+                    onClick={expand}
+                  />
+                }
+              >
+                <ProjectFavicon
+                  cadSnapshotId={
+                    project.cad?.roots.find((root) => root.current)?.current?.snapshotId
+                  }
+                  className={SIDEBAR_PROJECT_ICON_CLASS}
+                  environmentId={project.environmentId}
+                  cwd={project.workspaceRoot}
+                  onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="right">{project.displayName}</TooltipPopup>
+            </Tooltip>
+          );
+        })}
+      </div>
+      <SidebarRailButton label="Settings" onClick={() => void navigate({ to: "/settings" })}>
+        <SettingsIcon className="size-4" />
+      </SidebarRailButton>
+    </div>
+  );
+}
 
 export default function ThreadSidebar() {
   const projects = useProjects();
@@ -3289,50 +3467,96 @@ export default function ThreadSidebar() {
     });
   }, []);
 
+  const createThreadInProject = useCallback(
+    (project: SidebarProjectSnapshot) => {
+      const member = project.memberProjects[0];
+      if (!member) return;
+      void (async () => {
+        const result = await settlePromise(() =>
+          handleNewThread(scopeProjectRef(member.environmentId, member.id)),
+        );
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not create thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [handleNewThread],
+  );
+  const newThreadProject =
+    sortedProjects.find((project) => project.projectKey === activeRouteProjectKey) ??
+    sortedProjects[0];
+  const newThreadTarget = useMemo(
+    () =>
+      newThreadProject
+        ? {
+            label: `New thread in ${newThreadProject.displayName}`,
+            start: () => createThreadInProject(newThreadProject),
+          }
+        : null,
+    [createThreadInProject, newThreadProject],
+  );
+
   return (
     <>
       {prewarmedSidebarThreadRefs.map((threadRef) => (
         <SidebarThreadDetailPrewarmer key={scopedThreadKey(threadRef)} threadRef={threadRef} />
       ))}
-      <SidebarChromeHeader isElectron={isElectron} />
+      {/* The full sidebar hides while it is folded to the icon rail; both stay mounted, so
+          expanded thread lists survive the fold. */}
+      <div className="contents group-data-[collapsible=icon]:hidden">
+        <SidebarChromeHeader isElectron={isElectron} />
 
-      <SidebarProjectsContent
-        showArm64IntelBuildWarning={showArm64IntelBuildWarning}
-        arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
-        desktopUpdateButtonAction={desktopUpdateButtonAction}
-        desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
-        desktopUpdateActionPending={desktopUpdateActionPending}
-        handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
-        projectSortOrder={sidebarProjectSortOrder}
-        threadSortOrder={sidebarThreadSortOrder}
-        threadPreviewCount={sidebarThreadPreviewCount}
-        updateSettings={updateSettings}
-        openAddProject={openAddProjectCommandPalette}
-        isManualProjectSorting={isManualProjectSorting}
-        projectDnDSensors={projectDnDSensors}
-        projectCollisionDetection={projectCollisionDetection}
-        handleProjectDragStart={handleProjectDragStart}
-        handleProjectDragEnd={handleProjectDragEnd}
-        handleProjectDragCancel={handleProjectDragCancel}
-        handleNewThread={handleNewThread}
-        archiveThread={archiveThread}
-        deleteThread={deleteThread}
-        sortedProjects={sortedProjects}
-        expandedThreadListsByProject={expandedThreadListsByProject}
-        activeRouteProjectKey={activeRouteProjectKey}
-        routeThreadKey={routeThreadKey}
-        newThreadShortcutLabel={newThreadShortcutLabel}
-        threadJumpLabelByKey={visibleThreadJumpLabelByKey}
-        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-        expandThreadListForProject={expandThreadListForProject}
-        collapseThreadListForProject={collapseThreadListForProject}
-        dragInProgressRef={dragInProgressRef}
-        suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-        suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-        attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-        projectsLength={projects.length}
+        <SidebarProjectsContent
+          showArm64IntelBuildWarning={showArm64IntelBuildWarning}
+          arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
+          desktopUpdateButtonAction={desktopUpdateButtonAction}
+          desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
+          desktopUpdateActionPending={desktopUpdateActionPending}
+          handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
+          projectSortOrder={sidebarProjectSortOrder}
+          threadSortOrder={sidebarThreadSortOrder}
+          threadPreviewCount={sidebarThreadPreviewCount}
+          updateSettings={updateSettings}
+          openAddProject={openAddProjectCommandPalette}
+          newThreadTarget={newThreadTarget}
+          isManualProjectSorting={isManualProjectSorting}
+          projectDnDSensors={projectDnDSensors}
+          projectCollisionDetection={projectCollisionDetection}
+          handleProjectDragStart={handleProjectDragStart}
+          handleProjectDragEnd={handleProjectDragEnd}
+          handleProjectDragCancel={handleProjectDragCancel}
+          handleNewThread={handleNewThread}
+          archiveThread={archiveThread}
+          deleteThread={deleteThread}
+          sortedProjects={sortedProjects}
+          expandedThreadListsByProject={expandedThreadListsByProject}
+          activeRouteProjectKey={activeRouteProjectKey}
+          routeThreadKey={routeThreadKey}
+          newThreadShortcutLabel={newThreadShortcutLabel}
+          threadJumpLabelByKey={visibleThreadJumpLabelByKey}
+          attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+          expandThreadListForProject={expandThreadListForProject}
+          collapseThreadListForProject={collapseThreadListForProject}
+          dragInProgressRef={dragInProgressRef}
+          suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+          suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+          attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
+          projectsLength={projects.length}
+        />
+        <SidebarChromeFooter />
+      </div>
+      <SidebarIconRail
+        projects={sortedProjects}
+        activeProjectKey={activeRouteProjectKey}
+        onCreateThread={createThreadInProject}
       />
-      <SidebarChromeFooter />
     </>
   );
 }

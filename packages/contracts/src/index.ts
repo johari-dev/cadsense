@@ -29,6 +29,7 @@ export * from "./rpc.ts";
 export * from "./cadLifecycle.ts";
 export * from "./cadView.ts";
 export * from "./cadTools.ts";
+export * from "./featurescript.ts";
 export * from "./cadRender.ts";
 export * from "./cadCaptures.ts";
 export * from "./cadUser.ts";
@@ -37,5 +38,6 @@ export * from "./cadStorage.ts";
 
 export * from "./cadComments.ts";
 export * from "./cadMeasure.ts";
+export * from "./cadDriveOptions.ts";
 export * from "./cadFindParts.ts";
 export * from "./cadDrawing.ts";

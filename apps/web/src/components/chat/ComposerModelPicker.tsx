@@ -6,7 +6,14 @@ import type {
   ResolvedKeybindingsConfig,
 } from "@cadsense/contracts";
 import { resolveSelectableModel } from "@cadsense/shared/model";
-import { LightningIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "~/lib/icons";
+import {
+  CaretDownIcon,
+  CheckIcon,
+  LightningIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+  StarIcon,
+} from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -40,8 +47,9 @@ type PickerRow = {
 };
 
 const JUMP_SHORTCUT_OPTIONS = { context: { modelPickerOpen: true } } as const;
+// Header controls: 28px tall; the open tab adds a 13px label, the rest are 28px squares.
 const TAB_CLASS_NAME =
-  "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center rounded-lg px-1.5 text-muted-foreground/70 outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
+  "relative flex h-7.5 min-w-7.5 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-[0.8667rem] text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
 
 export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   /** The instance currently selected in the composer. */
@@ -58,7 +66,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   /** Trait rows (effort, speed, ...) for the selected model, from renderProviderTraitsRows. */
   traitRows: ReactNode;
   activeProviderIconClassName?: string;
-  /** Narrow composer: the effort label moves to the tooltip. */
+  /** Narrow composer: the trigger gets less room, so the model name truncates sooner. */
   compact?: boolean;
   disabled?: boolean;
   open?: boolean;
@@ -116,9 +124,10 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   });
 
   // Every open starts on Starred when there is anything starred, otherwise on the
-  // composer's own provider, with an empty search.
+  // composer's own provider, with an empty search and older models folded away.
   const [tab, setTab] = useState<PickerTab>(STARRED_TAB);
   const [query, setQuery] = useState("");
+  const [showLegacy, setShowLegacy] = useState(false);
   const [wasMenuOpen, setWasMenuOpen] = useState(isMenuOpen);
   if (wasMenuOpen !== isMenuOpen) {
     setWasMenuOpen(isMenuOpen);
@@ -128,6 +137,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         : (readyEntries[0]?.instanceId ?? STARRED_TAB);
       setTab(starredRows.length > 0 ? STARRED_TAB : ownTab);
       setQuery("");
+      setShowLegacy(false);
     }
   }
   const tabEntry =
@@ -140,13 +150,23 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
     `${row.model.name} ${row.model.slug} ${row.model.subProvider ?? ""} ${tabEntry ? "" : row.entry.displayName}`
       .toLowerCase()
       .includes(normalizedQuery);
-  const rows = (
+  const matchingRows = (
     tabEntry
       ? (props.modelOptionsByInstance.get(tabEntry.instanceId) ?? []).map((model) =>
           toRow(tabEntry, model),
         )
       : starredRows
   ).filter(matchesQuery);
+  // In a provider tab, models the manifest marks legacy fold under "More models" until
+  // expanded. Searching, or having one of them selected, shows them inline instead.
+  const foldLegacy =
+    tabEntry !== null &&
+    normalizedQuery.length === 0 &&
+    !showLegacy &&
+    matchingRows.some((row) => !row.model.isLegacy) &&
+    !matchingRows.some((row) => row.selected && row.model.isLegacy);
+  const rows = foldLegacy ? matchingRows.filter((row) => !row.model.isLegacy) : matchingRows;
+  const foldedCount = matchingRows.length - rows.length;
   // Jump shortcuts and Enter in the search field address the rows that can be picked.
   const pickableRows = rows.filter((row) => row.disabledReason === null);
 
@@ -206,7 +226,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     // A ghost control like the rest of the footer: no fill until hovered or
                     // open. 28px tall with 10px side padding at the default interface size.
                     "flex h-7.5 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-[var(--control-radius)] px-2.75 text-[0.8333rem] text-foreground/90 outline-none transition-colors duration-150 hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-60 data-popup-open:bg-accent data-popup-open:text-foreground motion-reduce:transition-none",
-                    props.compact ? "max-w-40" : "max-w-64",
+                    props.compact ? "max-w-52" : "max-w-64",
                   )}
                 />
               }
@@ -230,18 +250,22 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             </>
           ) : null}
           {props.traits?.label ? (
-            <span className={props.compact ? "sr-only" : "shrink-0 text-muted-foreground"}>
+            // The reasoning level always follows the model name as its own quiet pill, in every
+            // composer, so "Claude Opus 5.5" and "Medium" never read as one long name.
+            <span className="shrink-0 rounded-md bg-foreground/[0.07] px-1.5 py-px text-[0.75rem] leading-4 text-muted-foreground">
               {props.traits.label}
             </span>
           ) : null}
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
+      {/* Opens from the trigger: 8px above it and aligned to its end. The positioner shifts
+          or flips it to stay on screen in narrow columns and on the home hero. */}
       <MenuPopup
         align="end"
         side="top"
         sideOffset={8}
-        className="composer-model-panel w-[min(18.5rem,92vw)]"
+        className="composer-model-panel w-[min(20rem,92vw)]"
         onKeyDownCapture={(event) => {
           // Tab walks the provider tabs instead of leaving (and closing) the menu.
           if (event.key === "Tab") {
@@ -268,61 +292,66 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         {/* -m-1 bleeds over the popup body padding so the dividers run edge to edge.
             data-model-picker-content tells the sidebar to yield mod+1...9 (modelPickerVisibility.ts). */}
         <div data-model-picker-content className="-m-1 flex flex-col">
-          <div
-            role="tablist"
-            aria-label="Model sources"
-            className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 pt-1.5 pb-[7px]"
-          >
-            <PickerTabButton
-              label="Starred"
-              active={openTab === STARRED_TAB}
-              onSelect={() => {
-                setTab(STARRED_TAB);
-                setQuery("");
-              }}
+          {/* Only the open tab shows its name; the rest are 28px icons with tooltips, so the
+              header fits at any provider count. The tab strip clips rather than scrolls if it
+              ever runs out of room, and "Add provider" stays pinned at the end. */}
+          <div className="flex shrink-0 items-center gap-1 border-b border-border px-1.5 pt-1.5 pb-[7px]">
+            <div
+              role="tablist"
+              aria-label="Model sources"
+              className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
             >
-              <StarIcon aria-hidden="true" weight="fill" className="size-3.5" />
-            </PickerTabButton>
-            {entries.map((entry) => {
-              const ready = isProviderInstancePickerReady(entry);
-              return (
-                <PickerTabButton
-                  key={entry.instanceId}
-                  label={ready ? entry.displayName : `${entry.displayName} is unavailable`}
-                  active={openTab === entry.instanceId}
-                  disabled={!ready}
-                  onSelect={() => {
-                    setTab(entry.instanceId);
-                    setQuery("");
-                  }}
-                >
-                  <ProviderInstanceIcon
-                    driverKind={entry.driverKind}
-                    displayName={entry.displayName}
-                    className="size-4"
-                    iconClassName="size-4"
-                  />
-                </PickerTabButton>
-              );
-            })}
-            <span className="flex-1" />
+              <PickerTabButton
+                label="Favorites"
+                active={openTab === STARRED_TAB}
+                onSelect={() => {
+                  setTab(STARRED_TAB);
+                  setQuery("");
+                }}
+              >
+                <StarIcon aria-hidden="true" weight="fill" className="size-3.5" />
+              </PickerTabButton>
+              {entries.map((entry) => {
+                const ready = isProviderInstancePickerReady(entry);
+                return (
+                  <PickerTabButton
+                    key={entry.instanceId}
+                    label={entry.displayName}
+                    {...(ready ? {} : { unavailableReason: `${entry.displayName} is unavailable` })}
+                    active={openTab === entry.instanceId}
+                    onSelect={() => {
+                      setTab(entry.instanceId);
+                      setQuery("");
+                    }}
+                  >
+                    <ProviderInstanceIcon
+                      driverKind={entry.driverKind}
+                      displayName={entry.displayName}
+                      className="size-4"
+                      iconClassName="size-4"
+                    />
+                  </PickerTabButton>
+                );
+              })}
+            </div>
+            {/* Opens Settings > Providers, where providers are added and configured. */}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Link
                     to="/settings/providers"
-                    aria-label="Add providers"
-                    className={TAB_CLASS_NAME}
+                    aria-label="Add provider"
+                    className={cn(TAB_CLASS_NAME, "px-0")}
                     onClick={() => setMenuOpen(false)}
                   />
                 }
               >
                 <PlusIcon aria-hidden="true" className="size-3.5" />
               </TooltipTrigger>
-              <TooltipPopup side="top">Add providers</TooltipPopup>
+              <TooltipPopup side="top">Add provider (opens Settings)</TooltipPopup>
             </Tooltip>
           </div>
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-[0.8rem]">
             <MagnifyingGlassIcon
               aria-hidden="true"
               className="size-3.5 shrink-0 text-muted-foreground/60"
@@ -331,7 +360,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               ref={searchRef}
               type="text"
               aria-label="Search models"
-              placeholder={tabEntry ? "Search models…" : "Search starred…"}
+              placeholder={tabEntry ? "Search models…" : "Search favorites…"}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="h-8.5 min-w-0 flex-1 bg-transparent text-[0.8667rem] outline-none placeholder:text-muted-foreground/55"
@@ -361,7 +390,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
           </div>
           <div
             role="tabpanel"
-            className="flex max-h-[min(12.5rem,40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
+            // Six whole rows (2.4rem each, set by .composer-model-row; 1px gaps, plus
+            // padding) so the last visible row is never cut in half against the footer.
+            className="flex max-h-[min(calc(6*2.4rem+5px+0.5rem),40vh)] min-h-20 flex-col gap-px overflow-y-auto overscroll-contain p-1"
           >
             {rows.map((row) => {
               const hint = jumpHintFor(row);
@@ -372,9 +403,19 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   aria-current={row.selected ? "true" : undefined}
                   disabled={row.disabledReason !== null}
                   title={row.disabledReason ?? undefined}
-                  className={cn("composer-model-row group", row.selected && "bg-foreground/[0.06]")}
+                  className={cn(
+                    "composer-model-row group",
+                    row.selected && "bg-foreground/[0.12] text-foreground",
+                  )}
                   onClick={() => selectRow(row)}
                 >
+                  {/* Fixed leading column: the check never shifts the name or crowds the
+                      right edge, where the shortcut and star keep their own columns. */}
+                  <span className="flex w-3.5 shrink-0 justify-center">
+                    {row.selected ? (
+                      <CheckIcon aria-hidden="true" className="size-3.5 text-foreground" />
+                    ) : null}
+                  </span>
                   {tabEntry ? null : (
                     <ProviderInstanceIcon
                       driverKind={row.entry.driverKind}
@@ -387,18 +428,17 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     {getDisplayModelName(row.model)}
                     {row.model.isUnavailable ? " (Unavailable)" : ""}
                   </span>
-                  {hint ? (
-                    <kbd className="h-4 shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-[14px] text-muted-foreground">
-                      {hint}
-                    </kbd>
-                  ) : null}
+                  <kbd className="w-11 shrink-0 text-right font-sans text-[0.8rem] tabular-nums text-muted-foreground">
+                    {hint}
+                  </kbd>
                   <button
                     type="button"
                     aria-label={`${row.starred ? "Unstar" : "Star"} ${row.model.name}`}
                     aria-pressed={row.starred}
                     className={cn(
-                      "-me-0.5 shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                      row.starred ? "opacity-90" : "opacity-40",
+                      // Set stars stay (filled); unset ones appear on row hover or keyboard focus.
+                      "-me-0.5 shrink-0 cursor-pointer rounded p-1 text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-data-highlighted:opacity-100",
+                      row.starred ? "opacity-100" : "opacity-0",
                     )}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -408,20 +448,34 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   >
                     <StarIcon
                       aria-hidden="true"
-                      className="size-3.25"
+                      className="size-3.5"
                       weight={row.starred ? "fill" : "regular"}
                     />
                   </button>
                 </MenuItem>
               );
             })}
+            {foldedCount > 0 ? (
+              <MenuItem
+                closeOnClick={false}
+                className="composer-model-row text-muted-foreground"
+                onClick={() => setShowLegacy(true)}
+              >
+                <span aria-hidden="true" className="w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">More models</span>
+                <span className="shrink-0 text-[0.8rem] tabular-nums text-muted-foreground">
+                  {foldedCount}
+                </span>
+                <CaretDownIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              </MenuItem>
+            ) : null}
             {rows.length === 0 ? (
               <div className="px-2 py-3 text-[0.8667rem] leading-relaxed text-muted-foreground">
                 {normalizedQuery.length > 0
                   ? "No matching models"
                   : tabEntry
                     ? "No models found"
-                    : "Star a model to keep it here, across every provider."}
+                    : "Star a model to keep it in Favorites, across every provider."}
               </div>
             ) : null}
           </div>
@@ -434,37 +488,43 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
   );
 });
 
+/**
+ * One source tab. The open tab shows its icon and name on a filled pill; the others are 28px
+ * icons whose tooltip names them.
+ */
 function PickerTabButton(props: {
   label: string;
+  /** Set when the source cannot be picked right now; shown as the tooltip. */
+  unavailableReason?: string;
   active: boolean;
-  disabled?: boolean;
   onSelect: () => void;
   children: ReactNode;
 }) {
+  const tooltip = props.unavailableReason ?? (props.active ? null : props.label);
+  const tab = (
+    <button
+      type="button"
+      role="tab"
+      aria-label={props.unavailableReason ?? props.label}
+      aria-selected={props.active}
+      aria-disabled={props.unavailableReason !== undefined}
+      className={cn(
+        TAB_CLASS_NAME,
+        props.active ? "min-w-0 shrink bg-foreground/[0.1] text-foreground" : "px-0",
+      )}
+      onClick={() => {
+        if (props.unavailableReason === undefined) props.onSelect();
+      }}
+    >
+      {props.children}
+      {props.active ? <span className="truncate">{props.label}</span> : null}
+    </button>
+  );
+  if (tooltip === null) return tab;
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            role="tab"
-            aria-label={props.label}
-            aria-selected={props.active}
-            aria-disabled={props.disabled ?? false}
-            className={cn(
-              TAB_CLASS_NAME,
-              props.active &&
-                "text-foreground after:absolute after:inset-x-1.5 after:-bottom-[5px] after:h-0.5 after:rounded-full after:bg-[var(--accent-text)]",
-            )}
-            onClick={() => {
-              if (!props.disabled) props.onSelect();
-            }}
-          />
-        }
-      >
-        {props.children}
-      </TooltipTrigger>
-      <TooltipPopup side="top">{props.label}</TooltipPopup>
+      <TooltipTrigger render={tab} />
+      <TooltipPopup side="top">{tooltip}</TooltipPopup>
     </Tooltip>
   );
 }

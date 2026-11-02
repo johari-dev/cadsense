@@ -48,6 +48,26 @@ const decodeGlb = Schema.decodeUnknownSync(
     }),
   ),
 );
+const decodeGlbLayout = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      meshes: Schema.Array(
+        Schema.Struct({
+          primitives: Schema.Array(
+            Schema.Struct({
+              attributes: Schema.Struct({ POSITION: Schema.Number, NORMAL: Schema.Number }),
+              indices: Schema.Number,
+            }),
+          ),
+        }),
+      ),
+      accessors: Schema.Array(
+        Schema.Struct({ bufferView: Schema.Number, componentType: Schema.Number }),
+      ),
+      bufferViews: Schema.Array(Schema.Struct({ byteOffset: Schema.optionalKey(Schema.Number) })),
+    }),
+  ),
+);
 describe("3MF source geometry", () => {
   it.effect("maps reordered instances and retains face colors in linear glTF space", () =>
     Effect.gen(function* () {
@@ -76,6 +96,47 @@ describe("3MF source geometry", () => {
           0.00001,
         );
         assert.equal(doc.materials[1]!.pbrMetallicRoughness.baseColorFactor[1], 1);
+      }
+    }),
+  );
+  it.effect("splits normals where faces meet at a sharp edge", () =>
+    Effect.gen(function* () {
+      // The fixture's two triangles share an edge at a right angle, one per color.
+      const d = yield* draft();
+      const b = yield* normalizeCadGeometry(
+        readOnshapeThreeMf(d, threeMfArchive(threeMfXml())).extract(d.parts[0]!.geometryKey),
+      );
+      const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+      const jsonLength = view.getUint32(12, true);
+      const doc = decodeGlbLayout(new TextDecoder().decode(b.subarray(20, 20 + jsonLength)));
+      const bin = 28 + jsonLength;
+      const read = (accessor: number, k: number) => {
+        const a = doc.accessors[accessor]!;
+        const offset = bin + (doc.bufferViews[a.bufferView]!.byteOffset ?? 0);
+        return a.componentType === 5126
+          ? view.getFloat32(offset + k * 4, true)
+          : view.getUint32(offset + k * 4, true);
+      };
+      const vec = (accessor: number, i: number) => [0, 1, 2].map((k) => read(accessor, i * 3 + k));
+      for (const primitive of doc.meshes[0]!.primitives) {
+        const corners = [0, 1, 2].map((k) => read(primitive.indices, k));
+        const [p0, p1, p2] = corners.map((i) => vec(primitive.attributes.POSITION, i));
+        const u = [0, 1, 2].map((k) => p1![k]! - p0![k]!),
+          v = [0, 1, 2].map((k) => p2![k]! - p0![k]!);
+        const face = [
+          u[1]! * v[2]! - u[2]! * v[1]!,
+          u[2]! * v[0]! - u[0]! * v[2]!,
+          u[0]! * v[1]! - u[1]! * v[0]!,
+        ];
+        const length = Math.hypot(...face);
+        for (const corner of corners) {
+          const normal = vec(primitive.attributes.NORMAL, corner);
+          assert.closeTo(
+            normal.reduce((sum, n, k) => sum + (n * face[k]!) / length, 0),
+            1,
+            1e-6,
+          );
+        }
       }
     }),
   );

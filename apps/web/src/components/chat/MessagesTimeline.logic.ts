@@ -4,15 +4,18 @@ import {
   workEntryDisplayIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workLogEntryIsToolLike,
+  type PendingApproval,
   type TimelineEntry,
   type TurnPlanEntry,
   type WorkLogEntry,
 } from "../../session-logic";
+import { buildToolCallCard, toolCallKindIsCad, type ToolCallCard } from "./ToolCallCard.logic";
 import { type ChatMessage, type ProposedPlan } from "../../types";
 import {
   type CadCaptureCard,
   type CadCommentsPublishedCard,
   type CadPartDrawingCard,
+  type CadFeatureScriptPreviewCard,
   type MessageId,
   type OrchestrationLatestTurn,
   type TurnId,
@@ -207,32 +210,38 @@ export type MessagesTimelineRow =
       card: CadPartDrawingCard;
     }
   | {
+      /** One agent FeatureScript preview. A turn's last one stays visible when the turn folds. */
+      kind: "featurescript-preview";
+      id: string;
+      createdAt: string;
+      card: CadFeatureScriptPreviewCard;
+    }
+  | {
+      /** One run of consecutive tool calls, shown as a card that folds to its header. */
+      kind: "tool-card";
+      id: string;
+      createdAt: string;
+      groupId: string;
+      card: ToolCallCard;
+      expanded: boolean;
+      /** Long cards show only their latest calls until the user asks for the rest. */
+      showAllCalls: boolean;
+    }
+  | {
+      /** Log entries that are not tool calls, such as runtime warnings. */
       kind: "work";
       id: string;
       createdAt: string;
       groupedEntries: WorkLogEntry[];
-      isExpandedToolGroupEntry: boolean;
-      isLastExpandedToolGroupEntry: boolean;
     }
   | {
-      kind: "work-live";
-      id: string;
-      createdAt: string;
-      entry: WorkLogEntry;
-      groupedEntries: WorkLogEntry[];
-      groupId: string;
-      expanded: boolean;
-    }
-  | {
+      /** "+N previous log entries" for a long run of non-tool log entries. */
       kind: "work-toggle";
       id: string;
       createdAt: string;
       groupId: string;
       hiddenCount: number;
       expanded: boolean;
-      onlyToolEntries: boolean;
-      summary: string | null;
-      summaryKind: ToolGroupSummaryKind | null;
       hasFailure: boolean;
     }
   | {
@@ -309,8 +318,10 @@ const toolActionLabels: Readonly<Record<string, string>> = {
   cad_diff: "Comparing CAD versions",
   cad_measure: "Measuring CAD",
   cad_find_parts: "Finding CAD parts",
+  cad_drive_options: "Finding drive options",
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",
+  cad_featurescript_preview: "Previewing FeatureScript",
   cad_comments_list: "Reading CAD comments",
   cad_comment_locate: "Placing comment markers",
   cad_comment_inspect: "Checking comment markers",
@@ -357,20 +368,16 @@ export function formatToolActionLabel(value: string): string {
   return `${readable.charAt(0).toUpperCase()}${readable.slice(1)}`;
 }
 
-/** Follow the live row, including gaps after a tool completes, until chat moves on. */
+/** Follow the live card's latest call, including gaps after it completes, until chat moves on. */
 export function timelineShowsCadActivity(rows: readonly MessagesTimelineRow[]): boolean {
   return rows.some((row) => {
-    if (row.kind !== "work-live") return false;
-    const label = normalizeCompactToolLabel(row.entry.toolTitle ?? row.entry.label);
-    return (
-      /(?:^|\s*·\s*|\.|__)cad_[a-z_]+$/iu.test(label) ||
-      Object.values(toolActionLabels).includes(label)
-    );
+    if (row.kind !== "tool-card" || !row.card.live) return false;
+    const latest = row.card.calls.at(-1);
+    return latest !== undefined && toolCallKindIsCad(latest.kind);
   });
 }
 
 type ToolGroupAction = "cad" | "read" | "edit" | "command" | "code-search" | "search" | "other";
-type ToolGroupSummaryKind = ToolGroupAction | "dynamic-tool" | "agent-tool" | "tone-tool" | "mixed";
 
 export function workLogEntryIsLocalCodeSearch(entry: WorkLogEntry): boolean {
   return (
@@ -401,68 +408,6 @@ export function toolGroupAction(entry: WorkLogEntry): ToolGroupAction {
   if (workLogEntryIsLocalCodeSearch(entry)) return "code-search";
   if (entry.itemType === "web_search") return "search";
   return "other";
-}
-
-function toolGroupActionCount(
-  action: ToolGroupAction,
-  entries: ReadonlyArray<WorkLogEntry>,
-): number {
-  // CAD groups count the views the agent captured, not individual tool calls.
-  if (action === "cad") return entries.filter((entry) => entry.cadCapture !== undefined).length;
-  if (action !== "edit") return entries.length;
-
-  const changedFiles = new Set<string>();
-  let editsWithoutFileDetails = 0;
-  for (const entry of entries) {
-    if (!entry.changedFiles || entry.changedFiles.length === 0) {
-      editsWithoutFileDetails += 1;
-      continue;
-    }
-    for (const file of entry.changedFiles) changedFiles.add(file);
-  }
-  return changedFiles.size + editsWithoutFileDetails;
-}
-
-function toolGroupActionLabel(action: ToolGroupAction, count: number): string {
-  switch (action) {
-    case "cad":
-      return count === 0
-        ? "Checked CAD"
-        : `Checked CAD in ${count} ${count === 1 ? "view" : "views"}`;
-    case "read":
-      return `Read ${count} ${count === 1 ? "file" : "files"}`;
-    case "edit":
-      return `Changed ${count} ${count === 1 ? "file" : "files"}`;
-    case "command":
-      return `Ran ${count} ${count === 1 ? "command" : "commands"}`;
-    case "search":
-      return `Searched the web ${count} ${count === 1 ? "time" : "times"}`;
-    case "code-search":
-      return `Searched code ${count} ${count === 1 ? "time" : "times"}`;
-    case "other":
-      return `Used ${count} ${count === 1 ? "tool" : "tools"}`;
-  }
-}
-
-/** Immediate, provider-neutral fallback while generated tool summaries are disabled or unavailable. */
-export function summarizeToolGroup(entries: ReadonlyArray<WorkLogEntry>): string {
-  const summaryEntries = omitSupersededLifecycleMarkers(entries, (entry) => entry);
-  const groupedEntries = new Map<ToolGroupAction, WorkLogEntry[]>();
-  for (const entry of summaryEntries) {
-    const action = toolGroupAction(entry);
-    const group = groupedEntries.get(action);
-    if (group) group.push(entry);
-    else groupedEntries.set(action, [entry]);
-  }
-  const labels = [...groupedEntries].map(([action, actionEntries]) =>
-    toolGroupActionLabel(action, toolGroupActionCount(action, actionEntries)),
-  );
-  const sentenceLabels = labels.map((label, index) =>
-    index === 0 ? label : label.charAt(0).toLowerCase() + label.slice(1),
-  );
-  if (sentenceLabels.length < 2) return sentenceLabels[0] ?? "";
-  if (sentenceLabels.length === 2) return sentenceLabels.join(" and ");
-  return `${sentenceLabels.slice(0, -1).join(", ")}, and ${sentenceLabels.at(-1)}`;
 }
 
 function omitSupersededLifecycleMarkers<T>(
@@ -499,26 +444,6 @@ function omitSupersededLifecycleMarkers<T>(
   }
 
   return reversedEntries.toReversed();
-}
-
-function toolGroupSummaryKind(entries: ReadonlyArray<WorkLogEntry>): ToolGroupSummaryKind {
-  const actions = new Set(entries.map(toolGroupAction));
-  if (actions.size !== 1) return "mixed";
-
-  const action = actions.values().next().value!;
-  if (action !== "other") return action;
-
-  const fallbackKinds = new Set(
-    entries.map((entry): ToolGroupSummaryKind => {
-      if (entry.itemType === "mcp_tool_call") return "other";
-      if (entry.itemType === "dynamic_tool_call") return "dynamic-tool";
-      if (entry.itemType === "collab_agent_tool_call" || entry.taskId) return "agent-tool";
-      if (entry.tone === "thinking") return "agent-tool";
-      if (entry.tone === "tool") return "tone-tool";
-      return "other";
-    }),
-  );
-  return fallbackKinds.size === 1 ? fallbackKinds.values().next().value! : "mixed";
 }
 
 /**
@@ -563,8 +488,10 @@ function mergeCadCommentCards(
   return merged;
 }
 
+/** Tool calls keep one identity from start to completion, though their entry id changes. */
 function workGroupIdentity(timelineEntryId: string, entry: WorkLogEntry): string {
-  return entry.toolCallId
+  // An approval names the call it gates; it must not take that call's identity.
+  return entry.toolCallId && entry.approvalRequestId === undefined
     ? `tool:${entry.turnId ?? "no-turn"}:${entry.toolCallId}`
     : timelineEntryId;
 }
@@ -741,6 +668,9 @@ function deriveTurnFolds(input: {
     const firstAssistantEntry = group.entries.find(
       (entry): entry is Extract<TimelineEntry, { kind: "message" }> => entry.kind === "message",
     );
+    const lastPreviewEntryId = group.entries.findLast(
+      (entry) => entry.kind === "work" && entry.entry.featureScriptPreview !== undefined,
+    )?.id;
     const hiddenEntryIds = new Set<string>();
     for (const entry of group.entries) {
       if (entry.id === firstAssistantEntry?.id || entry.id === group.terminalEntry?.id) {
@@ -757,6 +687,10 @@ function deriveTurnFolds(input: {
         continue;
       }
       if (entry.kind === "work" && entry.entry.cadDrawing !== undefined) {
+        continue;
+      }
+      // The turn's final preview is where the agent's script ended up.
+      if (entry.id === lastPreviewEntryId) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
@@ -814,6 +748,10 @@ export function deriveMessagesTimelineRows(input: {
   runningTurnId?: TurnId | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
   expandedWorkGroupIds?: ReadonlySet<string>;
+  /** Cards the user opened or closed; the rest are open exactly while live. */
+  toolCardOpenOverrides?: ReadonlyMap<string, boolean>;
+  /** Shown inline on the tool calls they gate. */
+  pendingApprovals?: ReadonlyArray<PendingApproval>;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
 }): MessagesTimelineRow[] {
@@ -890,81 +828,139 @@ export function deriveMessagesTimelineRows(input: {
     return false;
   });
 
-  const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
+  // The running turn's trailing tool calls form its live card: more calls may still join it,
+  // so it stays open (and in the present tense) until the turn moves on.
+  const liveToolEntryIds = new Set<string>();
+  let showsLiveToolCard = false;
   for (let index = input.timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
     const entry = input.timelineEntries[index]!;
     if (
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
-      entry.entry.agentSpawn !== undefined ||
-      entry.entry.tone === "error" ||
       !workEntryJoinsToolGroup(entry.entry)
     ) {
       break;
     }
-    activeToolEntries.unshift(entry);
+    liveToolEntryIds.add(entry.id);
+    if (isVisibleActiveToolEntry(entry.entry)) showsLiveToolCard = true;
   }
-  const visibleActiveToolEntries = omitSupersededLifecycleMarkers(
-    activeToolEntries.filter((entry) => isVisibleActiveToolEntry(entry.entry)),
-    (entry) => entry.entry,
-  );
-  const activeWorkAnchor = activeToolEntries[0];
-  const latestActiveToolEntry = visibleActiveToolEntries.at(-1);
-  const activeWorkPlacementEntryId = latestActiveToolEntry?.id;
-  const activeWorkRow =
-    activeWorkAnchor && latestActiveToolEntry
-      ? (() => {
-          const groupId = workGroupId(activeWorkAnchor.id, activeWorkAnchor.entry);
-          return {
-            kind: "work-live" as const,
-            id: `work-live:${workGroupIdentity(activeWorkAnchor.id, activeWorkAnchor.entry)}`,
-            createdAt: activeWorkAnchor.createdAt,
-            entry: latestActiveToolEntry.entry,
-            groupedEntries: visibleActiveToolEntries.map((entry) => entry.entry),
-            groupId,
-            expanded: input.expandedWorkGroupIds?.has(groupId) ?? false,
-          };
-        })()
-      : null;
-  // Captures only belong to the live row when it renders; otherwise their own group shows them.
-  const activeWorkEntryIds = new Set(
-    activeToolEntries
-      .filter((entry) => activeWorkRow !== null || entry.entry.cadCapture === undefined)
-      .map((entry) => entry.id),
-  );
-  const activeCaptures = activeToolEntries.flatMap((entry) =>
-    entry.entry.cadCapture ? [entry.entry.cadCapture] : [],
+  const pendingApprovals = new Map(
+    (input.pendingApprovals ?? []).map((approval) => [approval.requestId, approval]),
   );
   const appendWorkingRow = () => {
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
       createdAt: input.activeTurnStartedAt,
-      showThinking: activeWorkRow === null && !activeTurnHasVisibleContent,
+      showThinking: !showsLiveToolCard && !activeTurnHasVisibleContent,
     });
   };
-  const appendActiveWorkRows = () => {
-    if (activeWorkRow === null) return;
-    nextRows.push(activeWorkRow);
-    if (activeWorkRow.expanded)
-      for (const [entryIndex, workEntry] of activeWorkRow.groupedEntries.entries()) {
+
+  /**
+   * One run of tool calls, split at its captures: a capture ends the card before it, its image
+   * shows at that point in the run, and the calls after it start a new card. Captures with no
+   * calls between them share one filmstrip. The first card keeps the run's identity, so a card
+   * that a new capture splits keeps its row while the turn streams.
+   */
+  const appendToolCard = (entries: ReadonlyArray<WorkLogEntry>) => {
+    const first = entries[0];
+    if (!first) return;
+    const visibleEntries = omitSupersededLifecycleMarkers(
+      entries.filter((entry) => workEntryIsVisibleInGroup(entry, workEntryIsInActiveRun(entry))),
+      (entry) => entry,
+    );
+    const pieces: Array<{ captures: boolean; entries: WorkLogEntry[] }> = [];
+    for (const entry of visibleEntries) {
+      const isCapture = entry.cadCapture !== undefined;
+      const piece = pieces.at(-1);
+      if (piece?.captures === isCapture) piece.entries.push(entry);
+      else pieces.push({ captures: isCapture, entries: [entry] });
+    }
+    // Only the run's trailing calls can still grow; a card that a capture ended is done.
+    const runIsLive = entries.some((entry) => liveToolEntryIds.has(entry.id));
+    pieces.forEach((piece, index) => {
+      const pieceFirst = index === 0 ? first : piece.entries[0]!;
+      const identity = workGroupIdentity(pieceFirst.id, pieceFirst);
+      if (piece.captures) {
         nextRows.push({
-          kind: "work",
-          id: workEntry.id,
-          createdAt: workEntry.createdAt,
-          groupedEntries: [workEntry],
-          isExpandedToolGroupEntry: true,
-          isLastExpandedToolGroupEntry: entryIndex === activeWorkRow.groupedEntries.length - 1,
+          kind: "cad-filmstrip",
+          id: `cad-filmstrip:${identity}`,
+          createdAt: piece.entries[0]!.createdAt,
+          captures: piece.entries.flatMap((entry) => (entry.cadCapture ? [entry.cadCapture] : [])),
         });
+        return;
       }
-    // Like settled groups, the filmstrip follows the group's rows so it never splits them.
-    if (activeCaptures.length > 0)
-      nextRows.push({
-        kind: "cad-filmstrip",
-        id: `cad-filmstrip:${activeWorkRow.id}`,
-        createdAt: activeWorkRow.createdAt,
-        captures: activeCaptures,
+      const card = buildToolCallCard({
+        entries: piece.entries,
+        live: runIsLive && index === pieces.length - 1,
+        runningTurnId: input.isWorking ? unsettledTurnId : null,
+        pendingApprovals,
       });
+      if (!card) return;
+      const groupId = workGroupId(pieceFirst.id, pieceFirst);
+      nextRows.push({
+        kind: "tool-card",
+        id: `tool-card:${identity}`,
+        createdAt: pieceFirst.createdAt,
+        groupId,
+        card,
+        expanded: input.toolCardOpenOverrides?.get(groupId) ?? card.live,
+        showAllCalls: input.expandedWorkGroupIds?.has(groupId) ?? false,
+      });
+    });
+  };
+
+  const appendLogEntries = (entries: ReadonlyArray<WorkLogEntry>) => {
+    const first = entries[0];
+    if (!first) return;
+    const steps = entries.filter((entry) => workEntryIsVisibleInGroup(entry));
+    if (steps.length === 0) return;
+    if (steps.length <= MAX_VISIBLE_WORK_LOG_ENTRIES) {
+      nextRows.push({
+        kind: "work",
+        id: first.id,
+        createdAt: first.createdAt,
+        groupedEntries: steps,
+      });
+      return;
+    }
+    const groupId = workGroupId(first.id, first);
+    const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+    // Agent-spawn CTA rows are always visible: a running fleet must
+    // never hide behind a "+N log entries" toggle. Selection is by
+    // membership (spawn OR recent-tail), preserving the group's
+    // chronological order in both collapsed and expanded states
+    // (review finding: concatenating two filtered lists moved a
+    // mid-group spawn row above earlier rows).
+    const overflowCandidates = steps.filter((entry) => entry.agentSpawn === undefined);
+    const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
+    const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
+    const renderedEntries = expanded
+      ? steps
+      : steps.filter((entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id));
+    for (const workEntry of renderedEntries) {
+      nextRows.push({
+        kind: "work",
+        id: workEntry.id,
+        createdAt: workEntry.createdAt,
+        groupedEntries: [workEntry],
+      });
+    }
+    if (hiddenEntries.length > 0) {
+      const latestEntry = steps.at(-1);
+      nextRows.push({
+        kind: "work-toggle",
+        id: `work-toggle:${first.id}`,
+        createdAt: first.createdAt,
+        groupId,
+        hiddenCount: hiddenEntries.length,
+        expanded,
+        hasFailure:
+          latestEntry !== undefined &&
+          workEntryDisplayIndicatesToolFailure(latestEntry) &&
+          hiddenEntries.some(workEntryDisplayIndicatesToolFailure),
+      });
+    }
   };
 
   const cadCommentRows = mergeCadCommentCards(input.timelineEntries);
@@ -977,10 +973,6 @@ export function deriveMessagesTimelineRows(input: {
 
     if (input.isWorking && index === activeTurnHeaderIndex) {
       appendWorkingRow();
-    }
-
-    if (timelineEntry.id === activeWorkPlacementEntryId) {
-      appendActiveWorkRows();
     }
 
     const anchoredTurnFold = foldsByAnchorEntryId.get(timelineEntry.id);
@@ -999,7 +991,13 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (activeWorkEntryIds.has(timelineEntry.id)) {
+    if (timelineEntry.kind === "work" && timelineEntry.entry.featureScriptPreview !== undefined) {
+      nextRows.push({
+        kind: "featurescript-preview",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        card: timelineEntry.entry.featureScriptPreview,
+      });
       continue;
     }
 
@@ -1046,7 +1044,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.kind !== "work" ||
           nextEntry.entry.cadComments !== undefined ||
           nextEntry.entry.cadDrawing !== undefined ||
-          activeWorkEntryIds.has(nextEntry.id) ||
+          nextEntry.entry.featureScriptPreview !== undefined ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
         ) {
@@ -1055,145 +1053,17 @@ export function deriveMessagesTimelineRows(input: {
         groupedEntries.push(nextEntry.entry);
         cursor += 1;
       }
-      const visibleGroupedEntries = omitSupersededLifecycleMarkers(
-        groupedEntries.filter((entry) =>
-          workEntryIsVisibleInGroup(entry, workEntryIsInActiveRun(entry)),
-        ),
-        (entry) => entry,
-      );
-      // Captures render once, as a filmstrip under their group, instead of as rows inside it.
-      const captures = visibleGroupedEntries.flatMap((entry) =>
-        entry.cadCapture ? [entry.cadCapture] : [],
-      );
-      const steps = visibleGroupedEntries.filter((entry) => entry.cadCapture === undefined);
-      const pushFilmstrip = () => {
-        if (captures.length > 0)
-          nextRows.push({
-            kind: "cad-filmstrip",
-            id: `cad-filmstrip:${timelineEntry.id}`,
-            createdAt: timelineEntry.createdAt,
-            captures,
-          });
-      };
-      if (steps.length === 0) {
-        pushFilmstrip();
-      } else {
-        const onlyToolEntries = visibleGroupedEntries.every(workEntryJoinsToolGroup);
-        const activeInProgressToolEntries = steps.filter(workEntryIsInActiveRun);
-        if (onlyToolEntries && activeInProgressToolEntries.length > 0) {
-          const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
-          const latestActiveToolEntry = activeInProgressToolEntries.at(-1)!;
-          nextRows.push({
-            kind: "work-live",
-            id: `work-live:${workGroupIdentity(timelineEntry.id, timelineEntry.entry)}`,
-            createdAt: timelineEntry.createdAt,
-            entry: latestActiveToolEntry,
-            groupedEntries: steps,
-            groupId,
-            expanded,
-          });
-          if (expanded) {
-            for (const [entryIndex, workEntry] of steps.entries()) {
-              nextRows.push({
-                kind: "work",
-                id: workEntry.id,
-                createdAt: workEntry.createdAt,
-                groupedEntries: [workEntry],
-                isExpandedToolGroupEntry: true,
-                isLastExpandedToolGroupEntry: entryIndex === steps.length - 1,
-              });
-            }
-          }
-          pushFilmstrip();
-        } else if (onlyToolEntries) {
-          const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
-          const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
-          nextRows.push({
-            kind: "work-toggle",
-            id: `work-toggle:${timelineEntry.id}`,
-            createdAt: timelineEntry.createdAt,
-            groupId,
-            hiddenCount: steps.length,
-            expanded,
-            onlyToolEntries: true,
-            summary: summarizeToolGroup(visibleGroupedEntries),
-            summaryKind,
-            hasFailure: workEntryDisplayIndicatesToolFailure(steps.at(-1)!),
-          });
-          if (expanded) {
-            for (const [entryIndex, workEntry] of steps.entries()) {
-              nextRows.push({
-                kind: "work",
-                id: workEntry.id,
-                createdAt: workEntry.createdAt,
-                groupedEntries: [workEntry],
-                isExpandedToolGroupEntry: true,
-                isLastExpandedToolGroupEntry: entryIndex === steps.length - 1,
-              });
-            }
-          }
-          pushFilmstrip();
-        } else if (steps.length <= MAX_VISIBLE_WORK_LOG_ENTRIES) {
-          nextRows.push({
-            kind: "work",
-            id: timelineEntry.id,
-            createdAt: timelineEntry.createdAt,
-            groupedEntries: steps,
-            isExpandedToolGroupEntry: false,
-            isLastExpandedToolGroupEntry: false,
-          });
-          pushFilmstrip();
-        } else {
-          const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
-          // Agent-spawn CTA rows are always visible: a running fleet must
-          // never hide behind a "+N tool calls" toggle. Selection is by
-          // membership (spawn OR recent-tail), preserving the group's
-          // chronological order in both collapsed and expanded states
-          // (review finding: concatenating two filtered lists moved a
-          // mid-group spawn row above earlier tool rows).
-          const overflowCandidates = steps.filter((entry) => entry.agentSpawn === undefined);
-          const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
-          const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
-          const visibleEntries = steps.filter(
-            (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
-          );
-          const renderedEntries = expanded ? steps : visibleEntries;
-
-          for (const workEntry of renderedEntries) {
-            nextRows.push({
-              kind: "work",
-              id: workEntry.id,
-              createdAt: workEntry.createdAt,
-              groupedEntries: [workEntry],
-              isExpandedToolGroupEntry: false,
-              isLastExpandedToolGroupEntry: false,
-            });
-          }
-
-          if (hiddenEntries.length > 0) {
-            const latestToolEntry = steps.findLast(workLogEntryIsToolLike);
-
-            nextRows.push({
-              kind: "work-toggle",
-              id: `work-toggle:${timelineEntry.id}`,
-              createdAt: timelineEntry.createdAt,
-              groupId,
-              hiddenCount: hiddenEntries.length,
-              expanded,
-              onlyToolEntries: hiddenEntries.every(workLogEntryIsToolLike),
-              summary: null,
-              summaryKind: null,
-              hasFailure:
-                latestToolEntry !== undefined &&
-                workEntryDisplayIndicatesToolFailure(latestToolEntry) &&
-                hiddenEntries.some(workEntryDisplayIndicatesToolFailure),
-            });
-          }
-          pushFilmstrip();
-        }
+      // Tool calls become cards; other log entries between them split the run, in order.
+      const segments: Array<{ joinsToolGroup: boolean; entries: WorkLogEntry[] }> = [];
+      for (const entry of groupedEntries) {
+        const joinsToolGroup = workEntryJoinsToolGroup(entry);
+        const segment = segments.at(-1);
+        if (segment?.joinsToolGroup === joinsToolGroup) segment.entries.push(entry);
+        else segments.push({ joinsToolGroup, entries: [entry] });
+      }
+      for (const segment of segments) {
+        if (segment.joinsToolGroup) appendToolCard(segment.entries);
+        else appendLogEntries(segment.entries);
       }
       index = cursor - 1;
       continue;
@@ -1296,6 +1166,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return Equal.equals(a.card, (b as typeof a).card);
 
     case "cad-drawing":
+    case "featurescript-preview":
       return a.id === (b as typeof a).id;
 
     case "working":
@@ -1318,25 +1189,19 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.createdAt === bp.createdAt && a.turnPlan.plan === bp.turnPlan.plan;
     }
 
-    case "work": {
-      const bw = b as typeof a;
+    case "tool-card": {
+      const bc = b as typeof a;
       return (
-        a.isExpandedToolGroupEntry === bw.isExpandedToolGroupEntry &&
-        a.isLastExpandedToolGroupEntry === bw.isLastExpandedToolGroupEntry &&
-        Equal.equals(a.groupedEntries, bw.groupedEntries)
+        a.createdAt === bc.createdAt &&
+        a.groupId === bc.groupId &&
+        a.expanded === bc.expanded &&
+        a.showAllCalls === bc.showAllCalls &&
+        Equal.equals(a.card, bc.card)
       );
     }
 
-    case "work-live": {
-      const bw = b as typeof a;
-      return (
-        a.createdAt === bw.createdAt &&
-        a.groupId === bw.groupId &&
-        a.expanded === bw.expanded &&
-        Equal.equals(a.entry, bw.entry) &&
-        Equal.equals(a.groupedEntries, bw.groupedEntries)
-      );
-    }
+    case "work":
+      return Equal.equals(a.groupedEntries, (b as typeof a).groupedEntries);
 
     case "work-toggle": {
       const bw = b as typeof a;
@@ -1345,9 +1210,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.groupId === bw.groupId &&
         a.hiddenCount === bw.hiddenCount &&
         a.expanded === bw.expanded &&
-        a.onlyToolEntries === bw.onlyToolEntries &&
-        a.summary === bw.summary &&
-        a.summaryKind === bw.summaryKind &&
         a.hasFailure === bw.hasFailure
       );
     }
@@ -1364,4 +1226,39 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
   }
+}
+
+const COLLAPSED_USER_MESSAGE_PREVIEW_LINES = 6;
+const COLLAPSED_USER_MESSAGE_PREVIEW_CHARS = 280;
+// A cut line keeps at least this much budget, so a preview never ends on a stub of a word.
+const COLLAPSED_USER_MESSAGE_MIN_CUT_CHARS = 60;
+
+/**
+ * The source text shown while a long user message is collapsed. It is cut on whole source
+ * lines (a long line at a word boundary, ending in "…"), so the collapsed bubble ends on
+ * complete rendered lines instead of a half-hidden one. An unclosed code fence is closed.
+ */
+export function collapsedUserMessagePreview(text: string): string {
+  const kept: string[] = [];
+  let budget = COLLAPSED_USER_MESSAGE_PREVIEW_CHARS;
+  for (const line of text.trimEnd().split("\n")) {
+    if (kept.length === COLLAPSED_USER_MESSAGE_PREVIEW_LINES) break;
+    if (line.length <= budget) {
+      kept.push(line);
+      budget -= line.length;
+      continue;
+    }
+    if (budget >= COLLAPSED_USER_MESSAGE_MIN_CUT_CHARS) {
+      const cut = line.slice(0, budget);
+      const space = cut.lastIndexOf(" ");
+      // Trailing punctuation before the ellipsis reads as a typo (",…"), so it goes too.
+      kept.push(`${(space > budget / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:]+$/, "")}…`);
+    }
+    break;
+  }
+  while (kept.length > 0 && kept.at(-1)?.trim() === "") kept.pop();
+  if (kept.filter((line) => line.trimStart().startsWith("```")).length % 2 === 1) {
+    kept.push("```");
+  }
+  return kept.join("\n");
 }

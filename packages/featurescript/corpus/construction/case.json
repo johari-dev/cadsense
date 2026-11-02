@@ -1,0 +1,10 @@
+{
+  "description": "opPlane at z = 10 mm and opPoint, read back with evPlane and evVertexPoint; a boss sketched on the plane.",
+  "steps": [{ "file": "feature.fs", "feature": "construction" }],
+  "expect": {
+    "source": "analytic: PI 5^2 4",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 314.1593, "faces": 3, "edges": 2, "vertices": 0 }],
+    "variables": { "planeZ": 10, "planeIsConstruction": 1, "pointX": 7, "bossTopZ": 14 }
+  }
+}

@@ -170,24 +170,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS arm64
-            runner: macos-26
-            platform: mac
-            target: dmg
-            arch: arm64
-            rust_target: aarch64-apple-darwin
-          - label: macOS x64
-            runner: macos-26
-            platform: mac
-            target: dmg
-            arch: x64
-            rust_target: x86_64-apple-darwin
-          - label: Linux x64
-            runner: ubuntu-24.04
-            platform: linux
-            target: AppImage
-            arch: x64
-            rust_target: x86_64-unknown-linux-gnu
+          # Releases ship Windows only for now. To bring macOS or Linux back,
+          # uncomment its entries here, its asset globs in both publish steps
+          # (*.dmg + *.zip for macOS, *.AppImage for Linux), and, for Linux,
+          # the publish_aur job. Unsigned macOS installs can never take an
+          # update, so set up the Apple signing secrets before enabling it.
+          # - label: macOS arm64
+          #   runner: macos-26
+          #   platform: mac
+          #   target: dmg
+          #   arch: arm64
+          #   rust_target: aarch64-apple-darwin
+          # - label: macOS x64
+          #   runner: macos-26
+          #   platform: mac
+          #   target: dmg
+          #   arch: x64
+          #   rust_target: x86_64-apple-darwin
+          # - label: Linux x64
+          #   runner: ubuntu-24.04
+          #   platform: linux
+          #   target: AppImage
+          #   arch: x64
+          #   rust_target: x86_64-unknown-linux-gnu
           - label: Windows x64
             runner: windows-2025
             platform: win
@@ -346,13 +351,14 @@ jobs:
         shell: bash
         env:
           CADSENSE_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
+          # Baked into the server bundle (apps/server/vite.config.ts). Without it, the release
+          # sends no usage analytics.
+          CADSENSE_POSTHOG_KEY: ${{ secrets.CADSENSE_POSTHOG_KEY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -379,21 +385,12 @@ jobs:
           }
 
           if [[ "${{ matrix.platform }}" == "mac" ]]; then
+            # Developer ID certificate (CSC_*) signs; the App Store Connect
+            # team API key (APPLE_API_*) lets electron-builder notarize.
             if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              if ! has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
-                echo "macOS signing is configured, but APPLE_TEAM_ID or MACOS_PROVISIONING_PROFILE is missing." >&2
-                exit 1
-              fi
-
               key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
               printf '%s' "$APPLE_API_KEY" > "$key_path"
               export APPLE_API_KEY="$key_path"
-
-              profile_path="$RUNNER_TEMP/cadsense.provisionprofile"
-              printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
-              security cms -D -i "$profile_path" >/dev/null
-              export CADSENSE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
-              export CADSENSE_MACOS_PROVISIONING_PROFILE="$profile_path"
 
               echo "macOS signing enabled."
               args+=(--signed)
@@ -551,9 +548,6 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.AppImage
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
@@ -571,24 +565,22 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.AppImage
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
-  publish_aur:
-    name: Publish AUR package
-    needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
-    uses: ./.github/workflows/publish-aur.yml
-    with:
-      release_tag: ${{ needs.preflight.outputs.tag }}
-    secrets:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+  # Disabled while releases ship no Linux AppImage; the AUR packages wrap it.
+  # publish_aur:
+  #   name: Publish AUR package
+  #   needs: [preflight, release]
+  #   if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
+  #   uses: ./.github/workflows/publish-aur.yml
+  #   with:
+  #     release_tag: ${{ needs.preflight.outputs.tag }}
+  #   secrets:
+  #     AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
   finalize:
     name: Finalize release
@@ -596,36 +588,22 @@ jobs:
     needs: [preflight, release]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # main has no branch protection, so the workflow token can push the
+    # version bump. Pushes made with this token do not start CI, which is
+    # fine for a package.json-only commit.
+    permissions:
+      contents: write
     steps:
-      - id: app_token
-        name: Mint release app token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token }}
           persist-credentials: true
           sparse-checkout: |
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
-
-      - id: app_bot
-        name: Resolve GitHub App bot identity
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
-        run: |
-          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
-          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
-          echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -662,8 +640,8 @@ jobs:
             exit 0
           fi
 
-          git config user.name "${{ steps.app_bot.outputs.name }}"
-          git config user.email "${{ steps.app_bot.outputs.email }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml
           git commit -m "chore(release): prepare $RELEASE_TAG"

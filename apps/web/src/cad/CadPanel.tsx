@@ -36,7 +36,8 @@ import {
 } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
-import { captureModelThumbnail } from "./modelThumbnails";
+import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
+import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
 import { CadLocalSyncButton } from "./CadLocalSyncButton";
@@ -57,12 +58,61 @@ import {
   type CadCommentLocation,
 } from "./cadCommentReviewStore";
 import { cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
-import { CadCommentsCard, type CadCommentsCardProps } from "./CadCommentsCard";
+import {
+  CAD_COMMENTS_CARD_WIDTH,
+  CadCommentsCard,
+  type CadCommentsCardProps,
+} from "./CadCommentsCard";
+import { holdInspection } from "../components/sidebarInspection";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
 // Threads with click-to-draw mode on, so the mode outlives the scene remounting.
 const clickModeThreads = new Set<string>();
 const EMPTY_CAPTURE_VIEWS: CadCommentsCardProps["captureViews"] = {};
+/**
+ * Overlay chrome fits and comment focus keep the model clear of: the parts chip along the top,
+ * the camera toolbar along the bottom, and a floating comments card (12px from the right edge)
+ * plus 32px of clearance. A docked card sits beside the canvas, so it needs no inset. The
+ * compact preview shows no chip or toolbar.
+ */
+const frameInsets = (compact: boolean, cardFloating: boolean) => ({
+  top: compact ? 0 : 48,
+  bottom: compact ? 0 : 64,
+  right: cardFloating ? CAD_COMMENTS_CARD_WIDTH + 12 + 32 : 0,
+});
+/**
+ * Whether a view change should travel to its new camera rather than jump: a new comment capture,
+ * an explosion change, a different preset, or a different fitted pose (Fit, or a view cube edge or
+ * corner). A pose without `fit` is an orbit the user already made, so it applies in place.
+ */
+export function animatesViewChange(
+  previous: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+  next: {
+    readonly camera: CadViewState["camera"];
+    readonly explosion: CadViewState["explosion"];
+    readonly captureId: string | null;
+  },
+) {
+  if (next.captureId && next.captureId !== previous.captureId) return true;
+  if (next.explosion !== previous.explosion) return true;
+  const camera = next.camera;
+  if (camera.kind === "preset")
+    return previous.camera.kind !== "preset" || previous.camera.preset !== camera.preset;
+  return camera.fit !== null && JSON.stringify(camera) !== JSON.stringify(previous.camera);
+}
+/** Width of the docked comments column, in CSS px. */
+const DOCK_WIDTH = 320;
+/**
+ * Below this scene width the open comments card floats over the viewport; at or above it, the
+ * card docks as a column beside a viewport that keeps at least 420px, so it never covers the
+ * model. The default CAD panel in a 1440px window (about 760px) docks.
+ */
+const DOCK_MIN_WIDTH = DOCK_WIDTH + 420;
+const prefersReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** One-line reason the CAD panel ignores input, shown along the bottom of the viewer. */
 function CadLockStrip({ status }: { status: CadPanelLockStatus }) {
@@ -141,7 +191,13 @@ export function CadScene({
   // Where the primary pointer went down on the viewer, to tell a click from an orbit drag.
   const press = useRef<{ id: number; x: number; y: number } | null>(null);
   const attachmentRef = useRef<ReturnType<typeof cadVisibleViewer.acquire> | null>(null);
-  const latest = useRef({ view, disabled, onChange });
+  // The docked comments column, mounted while the scene is wide enough to dock (hidden while the
+  // card is closed), so the card can portal into it from the moment it opens.
+  const [dock, setDock] = useState<HTMLElement | null>(null);
+  const [dockable, setDockable] = useState(false);
+  const sceneRow = useRef<HTMLDivElement>(null);
+  const cardFloating = commentsCard.open && !dock;
+  const latest = useRef({ view, disabled, onChange, compact, cardFloating });
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<CadLoadProgress | null>(null);
@@ -200,8 +256,30 @@ export function CadScene({
     };
   }, [picking, setPicking, renderer]);
   useLayoutEffect(() => {
-    latest.current = { view, disabled, onChange };
-  }, [disabled, onChange, view]);
+    latest.current = { view, disabled, onChange, compact, cardFloating };
+  }, [cardFloating, compact, disabled, onChange, view]);
+  useLayoutEffect(() => {
+    const row = sceneRow.current;
+    if (compact || !row) return;
+    const measure = () => setDockable(row.getBoundingClientRect().width >= DOCK_MIN_WIDTH);
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    measure();
+    return () => observer.disconnect();
+  }, [compact]);
+  const docked = commentsCard.open && dock !== null;
+  // Docked comments are an inspection: the app sidebar folds to its icon rail. The hold
+  // re-renders the app layout synchronously, so the fold (and the width this panel takes back
+  // from it) starts animating in the same frame as the dock column. The canvas follows every
+  // frame of that animation through its ResizeObserver below.
+  useLayoutEffect(() => (docked ? holdInspection("cad-comments-docked") : undefined), [docked]);
+  // A layout effect, so the card's focus (a passive effect) already frames clear of the card it
+  // just opened. Closing the card ends its review afterwards, which recenters the model.
+  useLayoutEffect(() => {
+    renderer.current?.setFrameInsets(frameInsets(compact, cardFloating), {
+      reducedMotion: prefersReducedMotion(),
+    });
+  }, [cardFloating, compact]);
   useLayoutEffect(() => {
     try {
       renderer.current?.setInteractive(!disabled);
@@ -217,11 +295,14 @@ export function CadScene({
       applied.current = { manifest, state: serialized };
       if (manifest) {
         if (
-          ((captureId && previousCapture.current !== captureId) ||
-            previousExplosion.current !== view.explosion ||
-            (view.camera.kind === "preset" &&
-              (previousCamera.current.kind !== "preset" ||
-                previousCamera.current.preset !== view.camera.preset))) &&
+          animatesViewChange(
+            {
+              camera: previousCamera.current,
+              explosion: previousExplosion.current,
+              captureId: previousCapture.current,
+            },
+            { camera: view.camera, explosion: view.explosion, captureId },
+          ) &&
           !matchMedia("(prefers-reduced-motion: reduce)").matches
         )
           renderer.current?.transition(view);
@@ -234,6 +315,19 @@ export function CadScene({
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
   }, [captureId, manifest, view]);
+  // The server keeps one thumbnail per snapshot. Capture it only when the server has none.
+  const environmentId = threadRef.environmentId;
+  const thumbnailMissing = useModelThumbnail(environmentId, view.snapshotId).missing;
+  const saveThumbnail = useAtomCommand(cadThumbnailEnvironment.save, { reportFailure: false });
+  useLayoutEffect(() => {
+    const current = renderer.current;
+    const snapshotId = view.snapshotId;
+    if (!thumbnailMissing || !current || manifest?.snapshotId !== snapshotId) return;
+    void saveModelThumbnail(environmentId, snapshotId, current, async (image) => {
+      const result = await saveThumbnail({ environmentId, input: { snapshotId, image } });
+      return result._tag === "Success";
+    });
+  }, [environmentId, manifest, saveThumbnail, thumbnailMissing, view.snapshotId]);
   // OrbitControls disconnects from canvas.getRootNode(); dispose before React detaches that root.
   useLayoutEffect(() => {
     if (!baseUrl || !canvas.current) return;
@@ -260,6 +354,9 @@ export function CadScene({
     const { renderer: current, canvas: node, diagnostics } = attachment;
     attachmentRef.current = attachment;
     renderer.current = current;
+    current.setFrameInsets(frameInsets(latest.current.compact, latest.current.cardFloating), {
+      reducedMotion: true,
+    });
     const stopLoad = attachment.watchLoad(view.snapshotId, (state) => {
       try {
         if (state.status === "idle") {
@@ -298,7 +395,6 @@ export function CadScene({
         setLoadProgress(null);
         setError(null);
         setManifest(state.manifest);
-        void captureModelThumbnail(threadRef.environmentId, view.snapshotId, current);
       } catch {
         setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
       }
@@ -396,134 +492,158 @@ export function CadScene({
     <div className={`flex min-h-0 flex-1 ${fullscreen ? "flex-row" : "flex-col"}`}>
       {/* The wrapper holds the viewer's minimum height so the strip never pushes it over the tree. */}
       <div className={`flex ${compact ? "min-h-0" : "min-h-48"} min-w-0 flex-1 flex-col`}>
-        <div
-          className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
-        >
+        {/* The viewport and, when docked, the comments column beside it. Viewport overlays stay
+            inside the viewport, so they follow its narrower width. */}
+        <div ref={sceneRow} className="flex min-h-0 min-w-0 flex-1">
           <div
-            ref={canvas}
-            className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""} ${picking ? "cursor-crosshair" : ""}`}
-            style={{ pointerEvents: disabled ? "none" : "auto" }}
-            onPointerMove={(event) => {
-              if (!picking) return;
-              // Highlight the part under the cursor, at most once a frame.
-              const target = {
-                clientX: event.clientX,
-                clientY: event.clientY,
-                currentTarget: event.currentTarget,
-              };
-              cancelAnimationFrame(pickFrame.current);
-              pickFrame.current = requestAnimationFrame(() => {
-                const node = partAt(target);
-                // Redraw only when the hovered part changes; a scene redraw is the costly part.
-                if ((node?.id ?? null) === hoveredId.current) return;
-                hoveredId.current = node?.id ?? null;
-                setPickHover(node ? partName(node) : null);
-                renderer.current?.previewHighlight(node ? [node.id] : null);
-              });
-            }}
-            onPointerLeave={() => {
-              if (!picking) return;
-              cancelAnimationFrame(pickFrame.current);
-              hoveredId.current = null;
-              setPickHover(null);
-              renderer.current?.previewHighlight(null);
-            }}
-            onPointerDown={(event) => {
-              press.current =
-                event.isPrimary && event.button === 0
-                  ? { id: event.pointerId, x: event.clientX, y: event.clientY }
-                  : null;
-            }}
-            onPointerUp={(event) => {
-              // A click (not a drag) on empty space leaves the focused comment.
-              const start = press.current;
-              press.current = null;
-              if (
-                picking &&
-                start &&
-                Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 4
-              ) {
-                const node = partAt(event);
-                clearTimeout(pickTimer.current);
-                if (!node) {
-                  setPickMiss(true);
-                  pickTimer.current = setTimeout(() => setPickMiss(false), 1500);
+            className={`relative min-h-0 min-w-0 flex-1 overflow-hidden bg-background ${disabled ? "cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_[role=toolbar]]:grayscale [&_[role=toolbar]_svg]:opacity-50" : ""}`}
+          >
+            <div
+              ref={canvas}
+              className={`h-full w-full ${cadDimmed ? "grayscale opacity-55" : ""} ${picking ? "cursor-crosshair" : ""}`}
+              style={{ pointerEvents: disabled ? "none" : "auto" }}
+              onPointerMove={(event) => {
+                if (!picking) return;
+                // Highlight the part under the cursor, at most once a frame.
+                const target = {
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                  currentTarget: event.currentTarget,
+                };
+                cancelAnimationFrame(pickFrame.current);
+                pickFrame.current = requestAnimationFrame(() => {
+                  const node = partAt(target);
+                  // Redraw only when the hovered part changes; a scene redraw is the costly part.
+                  if ((node?.id ?? null) === hoveredId.current) return;
+                  hoveredId.current = node?.id ?? null;
+                  setPickHover(node ? partName(node) : null);
+                  renderer.current?.previewHighlight(node ? [node.id] : null);
+                });
+              }}
+              onPointerLeave={() => {
+                if (!picking) return;
+                cancelAnimationFrame(pickFrame.current);
+                hoveredId.current = null;
+                setPickHover(null);
+                renderer.current?.previewHighlight(null);
+              }}
+              onPointerDown={(event) => {
+                press.current =
+                  event.isPrimary && event.button === 0
+                    ? { id: event.pointerId, x: event.clientX, y: event.clientY }
+                    : null;
+              }}
+              onPointerUp={(event) => {
+                // A click (not a drag) on empty space leaves the focused comment.
+                const start = press.current;
+                press.current = null;
+                if (
+                  picking &&
+                  start &&
+                  Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 4
+                ) {
+                  const node = partAt(event);
+                  clearTimeout(pickTimer.current);
+                  if (!node) {
+                    setPickMiss(true);
+                    pickTimer.current = setTimeout(() => setPickMiss(false), 1500);
+                    return;
+                  }
+                  // Flash the clicked part so the user sees what they picked, then open its drawing.
+                  setPickMiss(false);
+                  renderer.current?.previewHighlight([node.id]);
+                  pickTimer.current = setTimeout(() => {
+                    renderer.current?.previewHighlight(null);
+                    // Forget the hover so the next move over this part highlights it again.
+                    hoveredId.current = null;
+                    openDrawing([node.id], partName(node));
+                  }, 450);
                   return;
                 }
-                // Flash the clicked part so the user sees what they picked, then open its drawing.
-                setPickMiss(false);
-                renderer.current?.previewHighlight([node.id]);
-                pickTimer.current = setTimeout(() => {
-                  renderer.current?.previewHighlight(null);
-                  // Forget the hover so the next move over this part highlights it again.
-                  hoveredId.current = null;
-                  openDrawing([node.id], partName(node));
-                }, 450);
-                return;
-              }
-              if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
-              if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
-              const box = event.currentTarget.getBoundingClientRect();
-              if (renderer.current?.isEmptyAt(event.clientX - box.left, event.clientY - box.top))
-                commentsCard.clearSelection();
-            }}
-          />
-          {(!manifest || unavailable) && (
-            <div
-              className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
-              role="status"
-            >
-              {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
-            </div>
-          )}
-          <CadCommentsCard
-            {...commentsCard}
-            manifest={manifest}
-            displayedSnapshotId={view.snapshotId}
-          />
-          {manifest && !unavailable && !compact && (
-            <CadCameraToolbar
-              view={view}
-              disabled={disabled}
-              onChange={onChange}
-              picking={picking}
-              onTogglePicking={() => {
-                setPicking(!picking);
-                setPickMiss(false);
+                if (!start || start.id !== event.pointerId || !commentsCard.selection) return;
+                if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+                const box = event.currentTarget.getBoundingClientRect();
+                if (renderer.current?.isEmptyAt(event.clientX - box.left, event.clientY - box.top))
+                  commentsCard.clearSelection();
               }}
             />
-          )}
-          {manifest && !unavailable && !compact && (
-            <CadViewChanges
-              manifest={manifest}
-              view={view}
-              disabled={disabled}
-              onChange={onChange}
-              belowRevisionNotice={commentsCard.historical}
-              onOpenDrawing={openDrawing}
-            />
-          )}
-          {picking && (
-            <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center">
+            {(!manifest || unavailable) && (
               <div
-                className="rounded-full border border-border bg-background px-3 py-1.5 text-xs shadow-lg"
+                className="absolute inset-0 flex items-center justify-center bg-background/90 p-8 text-center text-sm text-muted-foreground"
                 role="status"
               >
-                {pickMiss ? (
-                  "No part there. Click a part to draw it."
-                ) : pickHover ? (
-                  <>
-                    Click to draw <span className="font-medium">{pickHover}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="font-medium">Click mode is on.</span> Click a part to make its
-                    drawing.
-                  </>
-                )}
+                {unavailable ?? <CadLoadingProgress progress={loadProgress} />}
               </div>
-            </div>
-          )}
+            )}
+            <CadCommentsCard
+              {...commentsCard}
+              manifest={manifest}
+              displayedSnapshotId={view.snapshotId}
+              dock={dock}
+            />
+            {manifest && !unavailable && !compact && (
+              <CadCameraToolbar
+                renderer={renderer}
+                view={view}
+                disabled={disabled}
+                onChange={onChange}
+                picking={picking}
+                onTogglePicking={() => {
+                  setPicking(!picking);
+                  setPickMiss(false);
+                }}
+              />
+            )}
+            {manifest && !unavailable && !compact && (
+              <CadViewChanges
+                manifest={manifest}
+                view={view}
+                disabled={disabled}
+                onChange={onChange}
+                belowRevisionNotice={commentsCard.historical}
+                onOpenDrawing={openDrawing}
+              />
+            )}
+            {picking && (
+              <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center">
+                <div
+                  className="rounded-full border border-border bg-background px-3 py-1.5 text-xs shadow-lg"
+                  role="status"
+                >
+                  {pickMiss ? (
+                    "No part there. Click a part to draw it."
+                  ) : pickHover ? (
+                    <>
+                      Click to draw <span className="font-medium">{pickHover}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium">Click mode is on.</span> Click a part to make
+                      its drawing.
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          {dockable &&
+            !compact && (
+              // The column animates its width (CadPanel.css); its content keeps the full width
+              // from the first frame, rides the column's moving left edge, and is clipped, so it
+              // slides in without reflowing. The card portals into the inner surface.
+              <aside
+                aria-label="Comments panel"
+                data-open={commentsCard.open}
+                style={{ width: commentsCard.open ? DOCK_WIDTH : 0 }}
+                className="cad-comments-dock-column shrink-0 overflow-hidden"
+              >
+                <div
+                  ref={setDock}
+                  style={{ width: DOCK_WIDTH }}
+                  className="flex h-full flex-col border-l bg-popover text-popover-foreground"
+                />
+              </aside>
+            )}
         </div>
         {lockStatus && <CadLockStrip status={lockStatus} />}
       </div>

@@ -24,6 +24,7 @@ import {
   IconBolt,
   IconBoltFilled,
   IconBlockquote,
+  IconBoxMultiple,
   IconBraces,
   IconBroadcast,
   IconBrush,
@@ -42,6 +43,7 @@ import {
   IconClick,
   IconCode,
   IconColorPicker,
+  IconComponents,
   IconCopy,
   IconCornerDownLeft,
   IconCpu,
@@ -71,6 +73,7 @@ import {
   IconHelpCircle,
   IconHighlight,
   IconHistory,
+  IconHome,
   IconInfoCircle,
   IconKey,
   IconKeyboard,
@@ -107,6 +110,7 @@ import {
   IconShape,
   IconSitemap,
   IconSparkles,
+  IconSquareHalf,
   IconStack2,
   IconStar,
   IconStarFilled,
@@ -125,6 +129,7 @@ import {
   IconWifiOff,
   IconWorld,
   IconX,
+  IconZoomScan,
   createReactComponent,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
@@ -169,6 +174,7 @@ export const ArrowsInSimpleIcon = tablerIcon(IconArrowsDiagonalMinimize2);
 export const ArrowsOutSimpleIcon = tablerIcon(IconArrowsDiagonal);
 export const BatteryFullIcon = tablerIcon(IconBattery4);
 export const BoundingBoxIcon = tablerIcon(IconMarquee2);
+export const BoxMultipleIcon = tablerIcon(IconBoxMultiple);
 export const BracketsCurlyIcon = tablerIcon(IconBraces);
 export const BroadcastIcon = tablerIcon(IconBroadcast);
 export const CameraIcon = tablerIcon(IconCamera);
@@ -189,6 +195,7 @@ export const CpuIcon = tablerIcon(IconCpu);
 export const CrosshairIcon = tablerIcon(IconCrosshair);
 export const PartDrawingIcon = tablerIcon(IconFileDescription);
 export const PrinterIcon = tablerIcon(IconPrinter);
+export const ComponentsIcon = tablerIcon(IconComponents);
 export const CubeIcon = tablerIcon(IconCube);
 export const CursorClickIcon = tablerIcon(IconClick);
 export const CursorIcon = tablerIcon(IconPointer);
@@ -213,6 +220,7 @@ export const GlobeIcon = tablerIcon(IconWorld);
 export const HammerIcon = tablerIcon(IconHammer);
 export const HardDriveIcon = tablerIcon(IconServer);
 export const HighlighterIcon = tablerIcon(IconHighlight);
+export const HouseIcon = tablerIcon(IconHome);
 export const InfoIcon = tablerIcon(IconInfoCircle);
 export const IntersectIcon = tablerIcon(IconVectorTriangle);
 export const KeyIcon = tablerIcon(IconKey);
@@ -246,6 +254,7 @@ export const SidebarIcon = tablerIcon(IconLayoutSidebar);
 export const SidebarSimpleIcon = tablerIcon(IconLayoutSidebar);
 export const SlidersHorizontalIcon = tablerIcon(IconAdjustmentsHorizontal);
 export const SparkleIcon = tablerIcon(IconSparkles);
+export const SquareHalfIcon = tablerIcon(IconSquareHalf);
 export const SpeakerHighIcon = tablerIcon(IconVolume);
 export const SpeakerSlashIcon = tablerIcon(IconVolumeOff);
 export const SpinnerIcon = tablerIcon(IconLoader2);
@@ -261,6 +270,7 @@ export const WifiSlashIcon = tablerIcon(IconWifiOff);
 export const WrenchIcon = tablerIcon(IconTool);
 export const XCircleIcon = tablerIcon(IconCircleX);
 export const XIcon = tablerIcon(IconX);
+export const ZoomScanIcon = tablerIcon(IconZoomScan);
 export const RecordIcon = tablerIcon(IconCircleDot);
 export const ProhibitIcon = tablerIcon(IconBan);
 export const WarningOctagonIcon = tablerIcon(IconAlertOctagon);
@@ -271,15 +281,15 @@ export const QuotesIcon = tablerIcon(IconBlockquote);
 export const ThumbsDownIcon = tablerIcon(IconThumbDown, IconThumbDownFilled);
 export const ThumbsUpIcon = tablerIcon(IconThumbUp, IconThumbUpFilled);
 export const ArrowElbowDownLeftIcon = tablerIcon(IconCornerDownLeft);
-// The composer's stop glyph. Tabler's square spans 18 of 24 units, a third wider than the
-// send arrow's 13, so this one spans 13 units (5.5 to 18.5) with the same stroke width.
-// Both glyphs then cover the same share of the button and draw lines the same thickness.
+// The composer's stop glyph. Tabler's square spans 18 of 24 units. A closed square reads
+// larger than the open send arrow at the same extent, so this one spans 11 units (6.5 to
+// 17.5) with the same stroke width, which makes the two look the same size in the button.
 export const StopIcon = tablerIcon(
   createReactComponent("outline", "stop", "Stop", [
     [
       "path",
       {
-        d: "M5.5 7a1.5 1.5 0 0 1 1.5 -1.5h10a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1 -1.5 1.5h-10a1.5 1.5 0 0 1 -1.5 -1.5z",
+        d: "M6.5 8a1.5 1.5 0 0 1 1.5 -1.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1 -1.5 1.5h-8a1.5 1.5 0 0 1 -1.5 -1.5z",
         key: "svg-0",
       },
     ],

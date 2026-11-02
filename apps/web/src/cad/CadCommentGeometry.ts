@@ -198,3 +198,79 @@ export const cadCommentVisible = (
     (hit) => hit.distance <= Math.max(0, distance - epsilon) || cadHitIsTransparent(hit),
   );
 };
+
+/** Height of a comment pin in CSS px; one- and two-character pins are round, so also their width. */
+export const CAD_COMMENT_PIN_SIZE = 22;
+/** Height of a group's count marker in CSS px. */
+export const CAD_COMMENT_CLUSTER_SIZE = 24;
+/** A comment pin projected onto the viewport. Pinned pins (the focused comment's) never group. */
+export interface CadCommentScreenPin {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly pinned: boolean;
+}
+
+/**
+ * Groups pins so no two visible markers overlap: any two markers whose shapes come within
+ * `gap` px (pins as circles or pills, count markers as boxes) merge into one count marker at
+ * their members' centre, and that marker (usually wider than
+ * a pin) is checked again against its neighbours until nothing overlaps. Pinned pins stay on
+ * their own and never bridge a merge. Returns indices into `pins`, each group and the list
+ * ordered by first appearance. Runs on every orbit frame; a review has a few dozen pins, and
+ * every merge removes a marker, so the repeated pairwise pass stays cheap.
+ */
+export const groupOverlappingCommentPins = (
+  pins: readonly CadCommentScreenPin[],
+  {
+    gap = 4,
+    clusterWidth,
+  }: {
+    gap?: number;
+    /** Width of the count marker for a group of `count` pins. */
+    clusterWidth: (count: number) => number;
+  },
+): number[][] => {
+  const markers = pins.map((pin, i) => ({
+    members: [i],
+    x: pin.x,
+    y: pin.y,
+    width: pin.width,
+    height: CAD_COMMENT_PIN_SIZE,
+    pinned: pin.pinned,
+  }));
+  type Marker = (typeof markers)[number];
+  const overlaps = (a: Marker, b: Marker) => {
+    if (a.pinned || b.pinned) return false;
+    const dx = Math.abs(a.x - b.x);
+    const dy = Math.abs(a.y - b.y);
+    // Two pins are horizontal capsules (circles when round): compare the distance between
+    // their flat segments with their radii, so diagonal neighbours that don't touch stay apart.
+    if (a.members.length === 1 && b.members.length === 1) {
+      const flat = Math.max(0, dx - (a.width - a.height) / 2 - (b.width - b.height) / 2);
+      return Math.hypot(flat, dy) < (a.height + b.height) / 2 + gap;
+    }
+    // A count marker is a rounded square: compare boxes.
+    return dx < (a.width + b.width) / 2 + gap && dy < (a.height + b.height) / 2 + gap;
+  };
+  const findOverlap = (): [number, number] | null => {
+    for (let i = 0; i < markers.length; i++)
+      for (let j = i + 1; j < markers.length; j++)
+        if (overlaps(markers[i]!, markers[j]!)) return [i, j];
+    return null;
+  };
+  for (let pair = findOverlap(); pair; pair = findOverlap()) {
+    const [i, j] = pair;
+    const members = [...markers[i]!.members, ...markers[j]!.members].sort((a, b) => a - b);
+    markers[i] = {
+      members,
+      x: members.reduce((sum, m) => sum + pins[m]!.x, 0) / members.length,
+      y: members.reduce((sum, m) => sum + pins[m]!.y, 0) / members.length,
+      width: clusterWidth(members.length),
+      height: CAD_COMMENT_CLUSTER_SIZE,
+      pinned: false,
+    };
+    markers.splice(j, 1);
+  }
+  return markers.map((marker) => marker.members).sort((a, b) => a[0]! - b[0]!);
+};

@@ -1,1 +1,2 @@
-export const DISCONNECTED_COMPOSER_PLACEHOLDER = "Describe a change or ask about your model";
+/** The one prompt placeholder: the home hero, every thread, and the settings font preview. */
+export const COMPOSER_PLACEHOLDER = "Ask about this model or describe a change…";

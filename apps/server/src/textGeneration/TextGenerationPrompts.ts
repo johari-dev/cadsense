@@ -45,7 +45,8 @@ Editorial rules:
 - For research, name the question domain rather than the requested research process.
 - Do not claim the work is complete.
 - Do not copy and truncate the user's message.
-- Avoid project names already visible in the UI, quotes, labels, filler, and trailing punctuation.
+- Do not repeat the project's or model's name (for example "Elevator cascade"); the sidebar already groups threads under the project. Name the task instead, such as "Motor cradle review".
+- Avoid quotes, labels, filler, and trailing punctuation.
 - Use attached images as primary context for UI issues.
 - When a URL or attachment is the only source of the subject, use available tools to inspect it. If it cannot be resolved, remain accurate rather than guessing.`;
 
@@ -72,7 +73,8 @@ Editorial rules:
 - For research, name the question domain rather than the research process.
 - Do not claim the work is complete.
 - Do not copy and truncate a thread message.
-- Avoid project names already visible in the UI, quotes, labels, filler, and trailing punctuation.
+- Do not repeat the project's or model's name (for example "Elevator cascade"); the sidebar already groups threads under the project. Name the task instead, such as "Motor cradle review".
+- Avoid quotes, labels, filler, and trailing punctuation.
 - Use attached images as primary context for UI issues.
 - When a URL or attachment is the only source of the subject, use available tools to inspect it. If it cannot be resolved, remain accurate rather than guessing.
 - Return a meaningfully improved title, not a cosmetic paraphrase of the previous title.

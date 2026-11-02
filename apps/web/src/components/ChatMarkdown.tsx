@@ -34,7 +34,7 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
+import type { Components, ExtraProps, Options as ReactMarkdownOptions } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -193,6 +193,18 @@ export function orderedListGutterStyle(
   const markerWidth = Math.max(String(firstNumber).length, String(lastNumber).length);
   if (markerWidth <= 2) return undefined;
   return { "--list-gutter": `${markerWidth + 1}ch` };
+}
+
+/**
+ * A paragraph that is only bold text, like "**Quick cleanup:**" before a list. It reads
+ * as a small heading, so it is tagged `data-markdown-lead` for heading-like spacing.
+ */
+function isRunInHeading(node: ExtraProps["node"]): boolean {
+  const children = (node?.children ?? []).filter(
+    (child) => !(child.type === "text" && child.value.trim() === ""),
+  );
+  const only = children[0];
+  return children.length === 1 && only?.type === "element" && only.tagName === "strong";
 }
 
 type MarkdownImageHastNode = {
@@ -1624,8 +1636,12 @@ function ChatMarkdown({
     };
 
     return {
-      p({ node: _node, children, ...props }) {
-        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+      p({ node, children, ...props }) {
+        return (
+          <p {...props} data-markdown-lead={isRunInHeading(node) ? "" : undefined}>
+            {renderSkillInlineMarkdownChildren(children, skills)}
+          </p>
+        );
       },
       ol({ node, start, style, ...props }) {
         const itemCount =
@@ -1870,7 +1886,10 @@ function ChatMarkdown({
   return (
     <div
       className={cn(
-        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]",
+        // Tuned for long reviews in the chat column: 14px on a 21px line, and semibold
+        // (not bold) emphasis so run-in headings like "**Quick cleanup:**" lead their
+        // section without outshining the body text. Block spacing lives in index.css.
+        "chat-markdown w-full min-w-0 text-[0.9333rem] leading-[1.5] text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word] [&_strong]:font-semibold",
         className,
       )}
       onCopy={handleCopy}

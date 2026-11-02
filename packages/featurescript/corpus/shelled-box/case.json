@@ -1,0 +1,9 @@
+{
+  "description": "A 40 x 30 x 20 mm block shelled inward 2 mm with its top open, with std's shell.",
+  "steps": [{ "file": "feature.fs", "feature": "shelledBox" }],
+  "expect": {
+    "source": "analytic: 24000 - 36 * 26 * 18 mm^3",
+    "statuses": ["OK"],
+    "solids": [{ "volumeMm3": 7152, "faces": 11, "edges": 24, "vertices": 16 }]
+  }
+}

@@ -137,7 +137,7 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { RightPanel } from "./RightPanel";
+import { RightPanel, resolveDefaultCadPanelWidth } from "./RightPanel";
 import { singleCadModelName } from "../cad/cadModelName";
 import { AgentsPanel } from "./AgentsPanel";
 import {
@@ -145,11 +145,7 @@ import {
   foldSubagentActivities,
 } from "@cadsense/client-runtime/state/subagentRuntime";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import {
-  CaretDownIcon as ChevronDownIcon,
-  PaperclipIcon,
-  WifiSlashIcon as WifiOffIcon,
-} from "~/lib/icons";
+import { ArrowDownIcon, PaperclipIcon, WifiSlashIcon as WifiOffIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -285,6 +281,7 @@ import { readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button } from "./ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { resolveAssetUrl, useAssetUrls } from "../assets/assetUrls";
 
 const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
@@ -1962,6 +1959,9 @@ function ChatViewContent(props: ChatViewProps) {
   const showScrollDebouncer = useRef(
     new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
   );
+  // Whether the pill is currently wanted (see onEndTextCoveredChange); reset wherever the
+  // pill is force-hidden so the next covered report can show it again.
+  const scrollToEndWantedRef = useRef(false);
   const timelineScrollModeRef = useRef<TimelineScrollMode>("following-end");
   // State mirror of the follow mode refs. LegendList's maintainScrollAtEnd
   // re-pins on its own (independent of the refs), so the timeline needs a
@@ -2051,6 +2051,7 @@ function ChatViewContent(props: ChatViewProps) {
     settledTimelineAnchorRef.current = null;
     activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
+    scrollToEndWantedRef.current = false;
     setShowScrollToBottom(false);
     setTimelineAnchor(releaseChatTimelineAnchor);
     requestAnimationFrame(() => {
@@ -2234,13 +2235,12 @@ function ChatViewContent(props: ChatViewProps) {
     requestAnimationFrame(() => positionAnchor(12));
   }, []);
 
+  // Follow state only; the "Scroll to end" button is driven by onEndTextCoveredChange.
   const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
     if (
       !isAtEnd &&
       liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current
     ) {
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
       return;
     }
     if (isAtEndRef.current === isAtEnd) return;
@@ -2254,12 +2254,27 @@ function ChatViewContent(props: ChatViewProps) {
       // edge and expects the stream to stick to it again, exactly like the
       // scroll-to-bottom pill.
       setTimelineAnchor(releaseChatTimelineAnchor);
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
     } else {
       timelineScrollModeRef.current = "free-scrolling";
       liveFollowUserScrollGenerationRef.current = null;
+    }
+  }, []);
+
+  // "Scroll to end" shows as soon as any text of the last message sits under the composer
+  // or its fade (not when only its hover actions are hidden), but never while the timeline
+  // is still auto-following a turn the user has not scrolled away from. Only a change in
+  // that wish touches the debouncer, so steady scrolling does not keep postponing it.
+  const onEndTextCoveredChange = useCallback((covered: boolean) => {
+    const wanted =
+      covered &&
+      liveFollowUserScrollGenerationRef.current !== anchorUserScrollGenerationRef.current;
+    if (wanted === scrollToEndWantedRef.current) return;
+    scrollToEndWantedRef.current = wanted;
+    if (wanted) {
       showScrollDebouncer.current.maybeExecute();
+    } else {
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
     }
   }, []);
 
@@ -2325,6 +2340,7 @@ function ChatViewContent(props: ChatViewProps) {
     settledTimelineAnchorRef.current = null;
     activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
+    scrollToEndWantedRef.current = false;
     setShowScrollToBottom(false);
     // activeThreadRef resets transitively with the active thread.
   }, [activeThread?.id]);
@@ -3007,6 +3023,7 @@ function ChatViewContent(props: ChatViewProps) {
       pendingTimelineAnchorRef.current = messageIdForSend;
       activeTimelineAnchorIndexRef.current = null;
       showScrollDebouncer.current.cancel();
+      scrollToEndWantedRef.current = false;
       setShowScrollToBottom(false);
       setTimelineAnchor({
         threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
@@ -3963,6 +3980,7 @@ function ChatViewContent(props: ChatViewProps) {
     },
     onCloseBrowser: closeBrowserPage,
     titleSlotRef: setCadTitleSlot,
+    projectTitle: activeProject?.title,
   };
 
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
@@ -3982,12 +4000,12 @@ function ChatViewContent(props: ChatViewProps) {
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
-        {/* Top bar */}
+        {/* Top bar. Its 1px bottom divider gives text scrolling under it a clean edge. */}
         <WorkspacePageHeader
           data-chat-header
           electron={isElectron}
           reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
-          className="relative bg-background"
+          className="relative border-b border-border bg-background"
         >
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
@@ -3999,6 +4017,8 @@ function ChatViewContent(props: ChatViewProps) {
             activeProjectOnshapeSource={activeProject?.onshapeSource}
             openInCwd={activeProject?.workspaceRoot ?? null}
             rightPanelOpen={rightPanelOpen}
+            projectShownInRightPanel={rightPanelOpen && rightPanelSection === "cad"}
+            isDraftHero={isDraftHeroState}
             onNewThreadInProject={handleNewThreadInActiveProject}
           />
         </WorkspacePageHeader>
@@ -4070,30 +4090,40 @@ function ChatViewContent(props: ChatViewProps) {
                 contentInsetEndAdjustment={composerOverlayHeight}
                 liveFollowEnabled={timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChange}
+                onEndTextCoveredChange={onEndTextCoveredChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
                 onRedoWithFeedback={onRedoWithFeedback}
+                pendingApprovals={pendingApprovals}
+                respondingApprovalIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApproval}
               />
 
-              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
+              {/* Scroll to end: shown once any text of the last message is covered (see
+                  onEndTextCoveredChange). An icon-only round button on its own solid,
+                  bordered, shadowed surface; nothing else is drawn with it, so the area
+                  around it looks the same whether or not it is showing. */}
               {showScrollToBottom && (
-                <div
-                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
-                  style={{ bottom: scrollToEndClearance + 4 }}
-                >
-                  <Button
-                    aria-label="Scroll to end"
-                    onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto gap-1.5 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                    size="xs"
-                    variant="glass"
+                // The overlay's top 1rem is its fade; the button sits right at that edge,
+                // 1rem above the composer itself.
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Scroll to end"
+                        onClick={() => scrollToEnd(true)}
+                        className="absolute left-1/2 z-30 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-input bg-popover text-foreground/85 shadow-lg shadow-black/50 transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                        style={{ bottom: `${scrollToEndClearance}px` }}
+                      />
+                    }
                   >
-                    <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
-                  </Button>
-                </div>
+                    <ArrowDownIcon className="size-4" aria-hidden />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Scroll to end</TooltipPopup>
+                </Tooltip>
               )}
             </div>
 
@@ -4103,10 +4133,18 @@ function ChatViewContent(props: ChatViewProps) {
               data-chat-composer-overlay="true"
               className={
                 isDraftHeroState
-                  ? "pointer-events-none absolute inset-0 z-20 flex items-center"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+                  ? "pointer-events-none absolute inset-0 z-20 flex items-center pt-56"
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
               }
             >
+              {/* Docked, the composer sits on a solid backing down to the window edge so the
+                  transcript never shows through below or beside it; the top 1rem fades in. */}
+              {isDraftHeroState ? null : (
+                <div
+                  aria-hidden
+                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_1rem)]"
+                />
+              )}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
                 className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
@@ -4135,7 +4173,8 @@ function ChatViewContent(props: ChatViewProps) {
                   <div className="relative">
                     <div
                       className={cn(
-                        "chat-composer-glass-shell relative mx-auto w-full max-w-[50rem]",
+                        "chat-composer-glass-shell relative mx-auto w-full",
+                        isDraftHeroState ? "max-w-[42.5rem]" : "max-w-[50rem]",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >
@@ -4273,7 +4312,7 @@ function ChatViewContent(props: ChatViewProps) {
           {...(cadAvailable
             ? {
                 widthStorageKey: "cadsense:design-viewport-width",
-                defaultWidth: Math.round(window.innerWidth * 0.6),
+                defaultWidth: resolveDefaultCadPanelWidth(window.innerWidth),
               }
             : {})}
           maximized={rightPanelMaximized}

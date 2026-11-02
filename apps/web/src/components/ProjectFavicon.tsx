@@ -1,4 +1,4 @@
-import { modelThumbnailKey, useModelThumbnails } from "../cad/modelThumbnails";
+import { useModelThumbnail } from "../cad/modelThumbnails";
 import type { EnvironmentId, OnshapeProjectSource } from "@cadsense/contracts";
 import {
   getProjectFaviconCacheKey,
@@ -36,11 +36,7 @@ export function ProjectFavicon(input: ProjectFaviconProps) {
 }
 
 function ProjectModelThumbnail(input: ProjectFaviconProps) {
-  const thumbnail = useModelThumbnails((state) =>
-    input.cadSnapshotId
-      ? state.images[modelThumbnailKey(input.environmentId, input.cadSnapshotId)]
-      : undefined,
-  );
+  const thumbnail = useModelThumbnail(input.environmentId, input.cadSnapshotId).url;
   if (thumbnail)
     return (
       <img

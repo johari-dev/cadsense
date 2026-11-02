@@ -23,7 +23,6 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -61,7 +60,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <SidebarBrand onBackdrop={backdropVariant !== null} />
       {pillLabel ? (
         <Badge
-          className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground"
+          className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground group-data-[collapsible=icon]:hidden"
           data-environment-identification="pill"
           size="sm"
           variant="secondary"
@@ -78,7 +77,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     <Link
       aria-label="Go to design workspace"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex group-data-[collapsible=icon]:md:hidden",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
@@ -152,9 +151,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center">
+    // On the icon rail only the Back or Settings icon shows, centered under the toggle.
+    <SidebarMenu className="flex-row items-center group-data-[collapsible=icon]:justify-center">
       {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
+        <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
           <SidebarMenuButton onClick={handleBackClick}>
             <ArrowLeftIcon />
             <span>Back</span>
@@ -177,7 +177,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
-      <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />
     </SidebarFooter>

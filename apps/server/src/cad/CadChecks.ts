@@ -38,7 +38,7 @@ import {
   upperFirst,
 } from "./CadDrivetrain.ts";
 import { MAX_PART_EXPORT_BYTES } from "./CadGeometry.ts";
-import { decodeCadToolInput } from "./CadViewState.ts";
+import { CAD_TOOL_PAGE_BYTES, decodeCadToolInput } from "./CadViewState.ts";
 
 /** Thresholds in meters (volume in cubic meters). Findings below them are treated as numerical noise. */
 export const CAD_CHECK_LIMITS = {
@@ -53,8 +53,8 @@ export const CAD_CHECK_LIMITS = {
   // Triangles per part mesh; larger meshes are reported as unknown instead of intersected.
   meshTriangles: 500_000,
   pageSize: 50,
-  // Serialized page budget, well under Claude's MCP output limit so a page is never spilled to a file.
-  pageBytes: 32 * 1024,
+  // Serialized page budget shared with cad_hierarchy, so a page is never spilled to a file.
+  pageBytes: CAD_TOOL_PAGE_BYTES,
 } as const;
 
 type Vector3 = readonly [number, number, number];
@@ -633,7 +633,9 @@ export const readOverlap = (
 };
 
 /** Exact intersection of every broad-phase pair whose parts both form closed solids.
- * Solids are built once per asset and placed per occurrence; every WASM object is freed before returning. */
+ * Solids are built once per asset and live for the call. Each pair places its own copies and frees
+ * them with the intersection before the next pair, so WASM memory stays flat however many pairs a
+ * model has (see "Mesh interference" in CadChecks.md). */
 const meshInterference = (
   manifest: CadSnapshotManifest,
   occurrences: readonly PartOccurrence[],
@@ -668,15 +670,25 @@ const meshInterference = (
     const meshUnknown = occurrences.filter(
       (occurrence) => !localSolid(occurrence.geometryKey),
     ).length;
-    const placed = new Map<string, CadSolid>();
-    const place = (occurrence: PartOccurrence, solid: CadSolid) => {
-      let result = placed.get(occurrence.occurrenceId);
-      if (!result) {
-        result = solid.transform(columnMajor(occurrence.transform));
-        owned.push(result);
-        placed.set(occurrence.occurrenceId, result);
+    /** The intersection volume of two placed solids and each one's own volume. Frees every copy. */
+    const intersect = (
+      a: PartOccurrence,
+      solidA: CadSolid,
+      b: PartOccurrence,
+      solidB: CadSolid,
+    ) => {
+      const temporary: CadSolid[] = [];
+      try {
+        const placedA = solidA.transform(columnMajor(a.transform));
+        temporary.push(placedA);
+        const placedB = solidB.transform(columnMajor(b.transform));
+        temporary.push(placedB);
+        const common = placedA.intersect(placedB);
+        temporary.push(common);
+        return { volume: common.volume(), volumeA: placedA.volume(), volumeB: placedB.volume() };
+      } finally {
+        for (const solid of temporary) solid.delete();
       }
-      return result;
     };
     const within = sharesSubassembly(manifest);
     const ranked = pairs.flatMap(
@@ -687,20 +699,15 @@ const meshInterference = (
         const solidA = localSolid(a.occurrence.geometryKey);
         const solidB = localSolid(b.occurrence.geometryKey);
         if (!solidA || !solidB) return [];
-        const placedA = place(a.occurrence, solidA);
-        const placedB = place(b.occurrence, solidB);
-        const common = placedA.intersect(placedB);
-        owned.push(common);
-        const intersectionVolume = common.volume();
+        const {
+          volume: intersectionVolume,
+          volumeA,
+          volumeB,
+        } = intersect(a.occurrence, solidA, b.occurrence, solidB);
         if (intersectionVolume <= CAD_CHECK_LIMITS.overlapVolume) return [];
         const [smaller, larger] =
-          placedA.volume() <= placedB.volume()
-            ? [a.occurrence, b.occurrence]
-            : [b.occurrence, a.occurrence];
-        const intersectionFraction = Math.min(
-          1,
-          intersectionVolume / Math.min(placedA.volume(), placedB.volume()),
-        );
+          volumeA <= volumeB ? [a.occurrence, b.occurrence] : [b.occurrence, a.occurrence];
+        const intersectionFraction = Math.min(1, intersectionVolume / Math.min(volumeA, volumeB));
         const withinSubassembly = within(a.occurrence.occurrenceId, b.occurrence.occurrenceId);
         const { rank, reading } = readOverlap(
           smaller.name,
@@ -1573,12 +1580,16 @@ export interface CadCheckGeometry {
     geometryKeys: ReadonlySet<string>,
   ) => Effect.Effect<ReadonlyMap<string, CadTriangleMesh | null>, CadViewError>;
 }
+/** Full passes kept for one activation, keyed like cursors (snapshot and selected checks), so paging
+ * and repeat calls never intersect again. A pass is deterministic for its key. */
+export type CadCheckRuns = Map<string, ReturnType<typeof runCadChecks>>;
 /** Tool entry point. Cursors are bound to the snapshot and the selected checks, like cad_hierarchy. */
 export const readCadChecks = Effect.fn("readCadChecks")(function* (
   manifest: CadSnapshotManifest,
   state: CadViewState,
   geometry: CadCheckGeometry,
   rawInput: unknown,
+  runs: CadCheckRuns = new Map(),
 ): Effect.fn.Return<CadChecksResult, CadViewError> {
   const input = yield* decodeCadToolInput(CadChecksInput, rawInput);
   if (input.expectedRevision !== state.revision)
@@ -1595,23 +1606,22 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
       "cursor does not belong to this snapshot and check selection. Start again without a cursor.",
     );
   const offset = suffix === undefined ? 0 : Number(suffix);
-  const keys = new Set(partOccurrences(manifest).map((occurrence) => occurrence.geometryKey));
-  const needsBounds =
-    selected.has("mesh-interference") ||
-    selected.has("overlapping-bounds") ||
-    selected.has("degenerate-geometry");
-  const bounds = needsBounds ? yield* geometry.bounds(keys) : new Map<string, CadBounds | null>();
-  const solids =
-    selected.has("mesh-interference") || selected.has("drivetrain")
-      ? { meshes: yield* geometry.meshes(keys), kernel: yield* loadCadSolidKernel }
-      : undefined;
-  const { findings, summary, placements, comments } = runCadChecks(
-    manifest,
-    bounds,
-    selected,
-    CAD_CHECK_LIMITS.pairBudget,
-    solids,
-  );
+  let run = runs.get(prefix);
+  if (!run) {
+    const keys = new Set(partOccurrences(manifest).map((occurrence) => occurrence.geometryKey));
+    const needsBounds =
+      selected.has("mesh-interference") ||
+      selected.has("overlapping-bounds") ||
+      selected.has("degenerate-geometry");
+    const bounds = needsBounds ? yield* geometry.bounds(keys) : new Map<string, CadBounds | null>();
+    const solids =
+      selected.has("mesh-interference") || selected.has("drivetrain")
+        ? { meshes: yield* geometry.meshes(keys), kernel: yield* loadCadSolidKernel }
+        : undefined;
+    run = runCadChecks(manifest, bounds, selected, CAD_CHECK_LIMITS.pairBudget, solids);
+    runs.set(prefix, run);
+  }
+  const { findings, summary, placements, comments } = run;
   if (!Number.isSafeInteger(offset) || offset > findings.length)
     return yield* invalid("cursor is past the end of the findings. Start again without a cursor.");
   const explanations = Object.fromEntries(

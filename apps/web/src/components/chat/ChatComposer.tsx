@@ -43,7 +43,6 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
-import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
@@ -298,6 +297,7 @@ import {
   getProviderSkillsForSlashMenu,
 } from "@cadsense/client-runtime/providerSkills";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -2701,7 +2701,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : prompt.trim() ||
                       (noProviderAvailable
                         ? "Enable a provider in Settings"
-                        : "Describe a design change...")}
+                        : COMPOSER_PLACEHOLDER)}
                 </button>
                 {inlineTasksBadge}
                 <button
@@ -2725,7 +2725,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               className={cn(
                 // Text lines up with the footer's attach glyph: 14px inset plus the
                 // glyph's 6.5px inside a 28px button, at the default interface size.
-                "relative px-5.5 pt-4.25 pb-2",
+                // 12px above the first line of text.
+                "relative px-5.5 pt-3.25 pb-1.5",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
               )}
@@ -3082,7 +3083,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   cursor={composerCursor}
                   skills={selectedProviderStatus?.skills ?? []}
-                  {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                  // Two lines tall when empty, so the composer reads as a place to write; it
+                  // grows with the text up to the editor's max height.
+                  className={cn("min-h-[2lh]", showMobilePendingAnswerActions && "max-sm:pb-11")}
                   onChange={onPromptChange}
                   onCommandKeyDown={onComposerCommandKey}
                   onPaste={onComposerPaste}
@@ -3098,9 +3101,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ? "Choose a project above to start a thread"
                             : noProviderAvailable
                               ? "Enable a provider in Settings to send a message"
-                              : phase === "disconnected"
-                                ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                : "Describe a change or ask about your model. @ for files, / for tools."
+                              : COMPOSER_PLACEHOLDER
                   }
                   disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
                 />
@@ -3145,8 +3146,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
-                  // 14px from the sides and 12px from the bottom at the default interface size.
-                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3.75 pb-3.25",
+                  // 14px from the sides and 10px from the bottom at the default interface size.
+                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3.75 pb-2.75",
                   pendingUserInputs.length > 0 && "pt-2",
                   showMobilePendingAnswerActions && "hidden sm:flex",
                 )}
@@ -3206,7 +3207,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5"
+                  className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
                 >
                   {showMobilePendingAnswerActions ? null : inlineTasksBadge}
                   <ComposerFooterPrimaryActions

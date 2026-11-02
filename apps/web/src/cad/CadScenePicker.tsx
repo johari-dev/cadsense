@@ -1,4 +1,5 @@
-import { CaretDownIcon as ChevronDown } from "~/lib/icons";
+import { ArrowSquareOutIcon, CaretDownIcon as ChevronDown } from "~/lib/icons";
+import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { readLocalApi } from "../localApi";
@@ -30,12 +31,25 @@ export function CadScenePicker({
   const onlyScene = scenes.length === 1 ? scenes[0] : undefined;
   const selected = scenes.find((scene) => scene.id === selectedId);
   const label = onlyScene?.label ?? selected?.label ?? "CAD";
+  // The document reads as a link: the source's logo (Onshape) leads its name, and an external-link
+  // icon follows it, inside a chip that lights up on hover.
+  const linkContent = (
+    <>
+      {documentUrl ? (
+        <img src="/onshape.svg" alt="Onshape" className="size-3.5 shrink-0 object-contain" />
+      ) : null}
+      <span className="truncate">{label}</span>
+      <ArrowSquareOutIcon aria-hidden className="size-3 shrink-0 opacity-70" />
+    </>
+  );
+  const linkClassName =
+    "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
   const heading = documentUrl ? (
     <a
       href={documentUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className="min-w-0 flex-1 truncate rounded-sm py-2 text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+      className={linkClassName}
       onClick={(event) => {
         const api = readLocalApi();
         if (!api) return;
@@ -49,18 +63,16 @@ export function CadScenePicker({
         });
       }}
     >
-      {label}
+      {linkContent}
     </a>
   ) : openFile ? (
-    <button
-      type="button"
-      className="min-w-0 flex-1 truncate rounded-sm py-2 text-left text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-      onClick={openFile.onOpen}
-    >
-      {label}
+    <button type="button" className={cn(linkClassName, "text-left")} onClick={openFile.onOpen}>
+      {linkContent}
     </button>
   ) : (
-    <h2 className="min-w-0 flex-1 truncate py-2 text-sm font-medium">{label}</h2>
+    <h2 className="min-w-0 flex-1 truncate py-2 text-xs font-normal text-muted-foreground">
+      {label}
+    </h2>
   );
   const action = documentUrl ? "Open in Onshape" : openFile?.action;
   if (scenes.length === 0 || onlyScene) {

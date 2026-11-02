@@ -3,19 +3,57 @@ import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScen
 import {
   CaretDownIcon as ChevronDown,
   CaretRightIcon as ChevronRight,
+  BoxMultipleIcon,
+  CubeIcon,
+  EyeIcon,
+  EyeSlashIcon,
   BoundingBoxIcon as Focus,
   HighlighterIcon as Highlighter,
   IntersectIcon as Blend,
+  MagnifyingGlassIcon,
+  PartDrawingIcon,
 } from "~/lib/icons";
+import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PartDrawingIcon } from "~/lib/icons";
+import { cn } from "~/lib/utils";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { ScrollBar } from "../components/ui/scroll-area";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../components/ui/tooltip";
+import {
+  CAD_HIERARCHY_DETAIL_ROW_HEIGHT,
+  CAD_HIERARCHY_ROW_HEIGHT,
+  cadHierarchyWindow,
+} from "./CadHierarchyWindow";
 import { partName } from "./drawing/drawingModel";
 import { isBoughtPart } from "./drawing/shopKnowledge";
-import { Button } from "../components/ui/button";
-import { Checkbox } from "../components/ui/checkbox";
-import { Input } from "../components/ui/input";
-import { Tooltip, TooltipTrigger, TooltipPopup } from "../components/ui/tooltip";
-import { cadHierarchyWindow } from "./CadHierarchyWindow";
+
+/**
+ * Splits a part name for display. Onshape's instance suffix ("top support <2>") becomes a
+ * number, and a trailing spec in parentheses or a part number becomes a muted detail line, so
+ * '2" x 1" x 0.125" MAXTube (30" L, Full Pattern, 0.5" Pitch)' keeps its length visible
+ * instead of truncating it away.
+ */
+function partLabel(name: string) {
+  const numbered = /^(.*\S)\s*<(\d+)>$/.exec(name);
+  const named = numbered?.[1] ?? name;
+  const detailed =
+    /^(.+?)\s+\(([^()]+)\)$/.exec(named) ?? /^(.+?)\s+([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)$/.exec(named);
+  return {
+    title: detailed?.[1] ?? named,
+    detail: detailed?.[2] ?? null,
+    instance: numbered?.[2] ?? null,
+  };
+}
+
+/** Indent per tree level in px. */
+const INDENT = 16;
+
+/** A row action. Hover actions sit over the end of the name, on the row's own background, so
+    names get the full row width until the pointer or focus arrives. An active effect stays
+    shown with a white icon. */
+const rowAction =
+  "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 aria-pressed:bg-foreground/10 aria-pressed:opacity-100 aria-pressed:[--control-icon-color:var(--foreground)]";
 
 export function CadHierarchyTree({
   manifest,
@@ -83,7 +121,7 @@ export function CadHierarchyTree({
     measure();
     return () => observer.disconnect();
   }, []);
-  const rows = useMemo(() => {
+  const tree = useMemo(() => {
     const visible = index.visible(view);
     const matches = new Set<string>();
     const query = search.trim().toLocaleLowerCase();
@@ -121,23 +159,59 @@ export function CadHierarchyTree({
       );
     }
     let hiddenDepth = Number.POSITIVE_INFINITY;
-    return all.flatMap((row) => {
+    const shownRows = all.flatMap((row) => {
       if (query && !matches.has(row.id)) return [];
       if (!query && row.depth > hiddenDepth) return [];
       hiddenDepth = !query && collapsed.has(row.id) ? row.depth : Number.POSITIVE_INFINITY;
-      return [{ ...row, ...counts.get(row.id)! }];
+      const node = index.nodes.get(row.id)!;
+      const label = partLabel(node.name);
+      const detail = node.suppressed
+        ? ["Suppressed", label.detail].filter(Boolean).join(" · ")
+        : label.detail;
+      return [{ ...row, ...counts.get(row.id)!, ...label, detail }];
     });
+    const offsets = [0];
+    for (const row of shownRows)
+      offsets.push(
+        offsets.at(-1)! + (row.detail ? CAD_HIERARCHY_DETAIL_ROW_HEIGHT : CAD_HIERARCHY_ROW_HEIGHT),
+      );
+    return {
+      rows: shownRows,
+      offsets,
+      // Parts the footer can bring back: not the assemblies that group them, and not
+      // suppressed parts, which no view can show.
+      hidden: manifest.nodes
+        .filter((node) => node.sourcePartKey !== null && !node.suppressed && !visible.get(node.id))
+        .map((node) => node.id),
+    };
   }, [collapsed, index, manifest, search, view]);
-  const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, rows.length);
+  const { rows, offsets, hidden: hiddenParts } = tree;
+  const listHeight = offsets.at(-1)!;
+  const { start, end } = cadHierarchyWindow(scrollTop, viewportHeight, offsets);
+  // A short, shallow fade at whichever edge has more rows past it: enough to show the list
+  // continues, never enough to make the row there look disabled.
+  const edge = (more: boolean) => (more ? "rgb(0 0 0 / 60%)" : "black");
+  const moreAbove = scrollTop > 0;
+  const moreBelow = scrollTop + viewportHeight < listHeight - 1;
+  const scrollFade =
+    moreAbove || moreBelow
+      ? `linear-gradient(to bottom, ${edge(moreAbove)}, black 12px, black calc(100% - 12px), ${edge(moreBelow)})`
+      : undefined;
   return (
     <div
       className={`flex min-h-0 flex-col ${fullHeight ? "flex-1" : "border-t"}`}
       aria-label="CAD components"
     >
-      <div className="flex shrink-0 items-center gap-2 p-2">
+      <div className="relative shrink-0 p-2">
+        <MagnifyingGlassIcon
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-4.5 z-10 size-4 -translate-y-1/2 text-muted-foreground"
+        />
         <Input
           aria-label="Search CAD components"
-          placeholder="Search components"
+          placeholder="Search parts"
+          size="sm"
+          className="text-[13px] sm:text-[13px] [&_input]:ps-8"
           value={search}
           disabled={disabled}
           onChange={(event) => {
@@ -147,178 +221,297 @@ export function CadHierarchyTree({
           }}
         />
       </div>
-      <div
-        ref={scroller}
-        role="tree"
-        aria-label="Components"
-        className={fullHeight ? "min-h-0 flex-1 overflow-auto" : "h-60 overflow-auto"}
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      <ScrollAreaPrimitive.Root
+        className={cn("relative min-h-0 overflow-hidden", fullHeight ? "flex-1" : "h-60")}
       >
-        <div style={{ height: rows.length * 28, position: "relative" }}>
-          {rows.slice(start, end).map((row, offset) => {
-            const node = index.nodes.get(row.id)!;
-            const branch = (index.children.get(row.id)?.length ?? 0) > 0;
-            const expanded = !!search.trim() || !collapsed.has(row.id);
-            return (
-              <div
-                key={row.id}
-                role="treeitem"
-                aria-level={row.depth + 1}
-                aria-expanded={branch ? expanded : undefined}
-                className={`group absolute left-0 flex h-7 w-full items-center gap-1 pr-2 text-xs ${disabled ? "" : "hover:bg-muted/50"} ${menu?.id === row.id ? "bg-muted/70" : ""}`}
-                style={{ top: (start + offset) * 28, paddingLeft: 8 + row.depth * 14 }}
-                onContextMenu={(event) => {
-                  if (!onOpenDrawing || node.suppressed || (node.kind !== "part" && !branch))
-                    return;
-                  event.preventDefault();
-                  setMenu({ id: row.id, x: event.clientX, y: event.clientY });
+        <ScrollAreaPrimitive.Viewport
+          ref={scroller}
+          role="tree"
+          aria-label="Components"
+          className="h-full overscroll-contain outline-none"
+          style={{ maskImage: scrollFade }}
+          onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        >
+          <div style={{ height: listHeight + 4, position: "relative" }}>
+            {rows.slice(start, end).map((row, offset) => {
+              const node = index.nodes.get(row.id)!;
+              const branch = (index.children.get(row.id)?.length ?? 0) > 0;
+              const expanded = !!search.trim() || !collapsed.has(row.id);
+              const shown = row.shown === row.total;
+              const hidden = row.shown === 0;
+              const top = offsets[start + offset]!;
+              return (
+                <div
+                  key={row.id}
+                  role="treeitem"
+                  aria-level={row.depth + 1}
+                  aria-expanded={branch ? expanded : undefined}
+                  className={cn(
+                    "group absolute inset-x-1 flex items-center gap-1 rounded-md pe-1 text-[13px] [--row:var(--popover)]",
+                    !disabled &&
+                      "hover:[--row:color-mix(in_srgb,var(--popover),var(--foreground)_5%)] focus-within:[--row:color-mix(in_srgb,var(--popover),var(--foreground)_5%)]",
+                    menu?.id === row.id &&
+                      "[--row:color-mix(in_srgb,var(--popover),var(--foreground)_8%)]",
+                    "bg-(--row)",
+                  )}
+                  style={{
+                    top,
+                    height: offsets[start + offset + 1]! - top,
+                    paddingLeft: 4 + row.depth * INDENT,
+                  }}
+                  onContextMenu={(event) => {
+                    if (!onOpenDrawing || node.suppressed || (node.kind !== "part" && !branch))
+                      return;
+                    event.preventDefault();
+                    setMenu({ id: row.id, x: event.clientX, y: event.clientY });
+                  }}
+                >
+                  {/* Indent guides: one line per ancestor, under that ancestor's chevron. */}
+                  {Array.from({ length: row.depth }, (_, level) => (
+                    <span
+                      key={level}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 w-px bg-border"
+                      style={{ left: 4 + level * INDENT + 10 }}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`}
+                    disabled={disabled || !branch || !!search.trim()}
+                    className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+                    onClick={() =>
+                      setCollapsed((prior) => {
+                        const next = new Set(prior);
+                        if (next.has(row.id)) next.delete(row.id);
+                        else next.add(row.id);
+                        return next;
+                      })
+                    }
+                  >
+                    {branch && (!expanded ? <ChevronRight size={14} /> : <ChevronDown size={14} />)}
+                  </button>
+                  {node.kind === "part" ? (
+                    <CubeIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                  ) : (
+                    <BoxMultipleIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          className={cn(
+                            "flex min-w-0 flex-1 flex-col",
+                            (hidden || node.suppressed) && "text-muted-foreground",
+                          )}
+                        />
+                      }
+                    >
+                      <span className="flex min-w-0 items-baseline gap-1.5 leading-[18px]">
+                        <span className="truncate">{row.title}</span>
+                        {row.instance && (
+                          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                            #{row.instance}
+                          </span>
+                        )}
+                      </span>
+                      {row.detail && (
+                        <span className="truncate text-xs leading-4 text-muted-foreground">
+                          {row.detail}
+                        </span>
+                      )}
+                    </TooltipTrigger>
+                    <TooltipPopup>{node.name}</TooltipPopup>
+                  </Tooltip>
+                  <div className="pointer-events-none absolute inset-y-0 right-8 flex items-center gap-0.5 ps-6 group-hover:pointer-events-auto group-focus-within:pointer-events-auto [background:linear-gradient(to_right,transparent,var(--row)_1.25rem)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-aria-pressed:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`Highlight ${node.name}`}
+                            aria-pressed={highlighted.has(row.id)}
+                            className={rowAction}
+                            disabled={disabled || node.suppressed}
+                            onClick={() =>
+                              onChange({
+                                ...view,
+                                highlightedOccurrenceIds: highlighted.has(row.id) ? [] : [row.id],
+                              })
+                            }
+                          />
+                        }
+                      >
+                        <Highlighter />
+                      </TooltipTrigger>
+                      <TooltipPopup>Highlight</TooltipPopup>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`Ghost ${node.name}`}
+                            aria-pressed={ghosted.has(row.id)}
+                            className={rowAction}
+                            disabled={disabled || node.suppressed}
+                            onClick={() =>
+                              onChange({
+                                ...view,
+                                ghost: ghosted.has(row.id)
+                                  ? null
+                                  : { occurrenceIds: [row.id], opacity: 0.2 },
+                              })
+                            }
+                          />
+                        }
+                      >
+                        <Blend />
+                      </TooltipTrigger>
+                      <TooltipPopup>Ghost: make see-through</TooltipPopup>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`Isolate ${node.name}`}
+                            className={rowAction}
+                            disabled={disabled || node.suppressed}
+                            onClick={() =>
+                              onChange({
+                                ...view,
+                                visibility: revealCadOccurrences(index, view, [row.id]),
+                                isolatedOccurrenceIds: [row.id],
+                                camera: { kind: "preset", preset: "isometric", fit: [row.id] },
+                              })
+                            }
+                          />
+                        }
+                      >
+                        <Focus />
+                      </TooltipTrigger>
+                      <TooltipPopup>Isolate and zoom to fit</TooltipPopup>
+                    </Tooltip>
+                  </div>
+                  {/* Visibility, in a fixed 28px column on every row: a muted eye when shown, a
+                      stronger crossed eye when hidden, brighter on hover. */}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-label={`Show ${node.name}`}
+                    aria-checked={shown ? true : hidden ? false : "mixed"}
+                    disabled={disabled || node.suppressed}
+                    className={cn(
+                      "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
+                      hidden ? "text-foreground/85" : "text-muted-foreground/70",
+                    )}
+                    onClick={() => {
+                      const visibility = !shown
+                        ? revealCadOccurrences(index, view, [row.id])
+                        : { ...view.visibility };
+                      if (shown) for (const id of index.subtree([row.id])) visibility[id] = false;
+                      onChange({ ...view, visibility, isolatedOccurrenceIds: [] });
+                    }}
+                  >
+                    {hidden ? (
+                      <EyeSlashIcon className="size-4" />
+                    ) : (
+                      <EyeIcon className={cn("size-4", !shown && "opacity-60")} />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {rows.length === 0 && (
+            <p className="p-3 text-[13px] text-muted-foreground">No matching parts.</p>
+          )}
+        </ScrollAreaPrimitive.Viewport>
+        {/* Always shown, so the list reads as scrollable before anyone scrolls it. */}
+        <ScrollBar className="opacity-100" />
+      </ScrollAreaPrimitive.Root>
+      {menu &&
+        onOpenDrawing &&
+        (() => {
+          const node = index.nodes.get(menu.id)!;
+          const single = node.kind === "part";
+          const count = single ? 1 : madePartCount(menu.id);
+          return (
+            <div
+              role="menu"
+              aria-label={`${partName(node)} actions`}
+              className="fixed z-50 min-w-52 rounded-lg border border-border bg-popover p-1 text-[13px] text-popover-foreground shadow-lg"
+              style={{ left: menu.x, top: menu.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                disabled={count === 0}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent disabled:opacity-50"
+                onClick={() => {
+                  setMenu(null);
+                  onOpenDrawing([menu.id], partName(node));
                 }}
               >
-                <button
-                  type="button"
-                  aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`}
-                  disabled={disabled || !branch || !!search.trim()}
-                  className="flex size-5 shrink-0 items-center justify-center"
-                  onClick={() =>
-                    setCollapsed((prior) => {
-                      const next = new Set(prior);
-                      if (next.has(row.id)) next.delete(row.id);
-                      else next.add(row.id);
-                      return next;
-                    })
-                  }
-                >
-                  {branch && (!expanded ? <ChevronRight size={12} /> : <ChevronDown size={12} />)}
-                </button>
-                <Checkbox
-                  aria-label={`Show ${node.name}`}
-                  checked={row.shown === row.total}
-                  indeterminate={row.shown > 0 && row.shown < row.total}
-                  disabled={disabled || node.suppressed}
-                  onCheckedChange={() => {
-                    const show = row.shown !== row.total;
-                    const visibility = show
-                      ? revealCadOccurrences(index, view, [row.id])
-                      : { ...view.visibility };
-                    if (!show) for (const id of index.subtree([row.id])) visibility[id] = false;
-                    onChange({ ...view, visibility, isolatedOccurrenceIds: [] });
-                  }}
-                />
-                <Tooltip>
-                  <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
-                    {node.name}
-                    {node.suppressed ? " (suppressed)" : ""}
-                  </TooltipTrigger>
-                  <TooltipPopup>{node.name}</TooltipPopup>
-                </Tooltip>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Highlight ${node.name}`}
-                  aria-pressed={highlighted.has(row.id)}
-                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-pressed:bg-accent aria-pressed:opacity-100"
-                  disabled={disabled || node.suppressed}
-                  onClick={() =>
-                    onChange({
-                      ...view,
-                      highlightedOccurrenceIds: highlighted.has(row.id) ? [] : [row.id],
-                    })
-                  }
-                >
-                  <Highlighter size={12} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Ghost ${node.name}`}
-                  aria-pressed={ghosted.has(row.id)}
-                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-pressed:bg-accent aria-pressed:opacity-100"
-                  disabled={disabled || node.suppressed}
-                  onClick={() =>
-                    onChange({
-                      ...view,
-                      ghost: ghosted.has(row.id) ? null : { occurrenceIds: [row.id], opacity: 0.2 },
-                    })
-                  }
-                >
-                  <Blend size={12} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Isolate ${node.name}`}
-                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                  disabled={disabled || node.suppressed}
-                  onClick={() =>
-                    onChange({
-                      ...view,
-                      visibility: revealCadOccurrences(index, view, [row.id]),
-                      isolatedOccurrenceIds: [row.id],
-                      camera: { kind: "preset", preset: "isometric", fit: [row.id] },
-                    })
-                  }
-                >
-                  <Focus size={12} />
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-        {rows.length === 0 && (
-          <p className="p-3 text-xs text-muted-foreground">No matching components.</p>
-        )}
-        {menu &&
-          onOpenDrawing &&
-          (() => {
-            const node = index.nodes.get(menu.id)!;
-            const single = node.kind === "part";
-            const count = single ? 1 : madePartCount(menu.id);
-            return (
-              <div
-                role="menu"
-                aria-label={`${partName(node)} actions`}
-                className="fixed z-50 min-w-52 rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg"
-                style={{ left: menu.x, top: menu.y }}
-                onPointerDown={(event) => event.stopPropagation()}
+                <PartDrawingIcon size={14} />
+                {single
+                  ? "Make part drawing"
+                  : count === 0
+                    ? "No made parts to draw"
+                    : "Make drawings for this group"}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
+                onClick={() => {
+                  setMenu(null);
+                  onChange({
+                    ...view,
+                    visibility: revealCadOccurrences(index, view, [menu.id]),
+                    isolatedOccurrenceIds: [menu.id],
+                    camera: { kind: "preset", preset: "isometric", fit: [menu.id] },
+                  });
+                }}
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={count === 0}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent disabled:opacity-50"
-                  onClick={() => {
-                    setMenu(null);
-                    onOpenDrawing([menu.id], partName(node));
-                  }}
-                >
-                  <PartDrawingIcon size={14} />
-                  {single
-                    ? "Make part drawing"
-                    : count === 0
-                      ? "No made parts to draw"
-                      : "Make drawings for this group"}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent"
-                  onClick={() => {
-                    setMenu(null);
-                    onChange({
-                      ...view,
-                      visibility: revealCadOccurrences(index, view, [menu.id]),
-                      isolatedOccurrenceIds: [menu.id],
-                      camera: { kind: "preset", preset: "isometric", fit: [menu.id] },
-                    });
-                  }}
-                >
-                  <Focus size={14} />
-                  Isolate
-                </button>
-              </div>
-            );
-          })()}
-      </div>
+                <Focus size={14} />
+                Isolate
+              </button>
+            </div>
+          );
+        })()}
+      {/* The chip and the tab carry the part count; the footer only offers to bring hidden
+          parts back, the same reveal the row eye does. */}
+      {hiddenParts.length > 0 && (
+        <div className="flex shrink-0 items-center border-t p-1.5">
+          <Button
+            size="compact"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() =>
+              onChange({
+                ...view,
+                visibility: revealCadOccurrences(index, view, hiddenParts),
+                isolatedOccurrenceIds: [],
+              })
+            }
+          >
+            <EyeIcon />
+            Show {hiddenParts.length} hidden
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

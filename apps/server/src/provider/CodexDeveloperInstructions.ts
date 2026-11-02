@@ -201,14 +201,22 @@ export function buildCodexDeveloperInstructions(
     interactionMode === "plan"
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
-  const cad = cadToolsAvailable
-    ? `
+  const cad = cadToolsAvailable ? cadToolInstructions(cadReviewLearnings, designBrief) : "";
+  return `${base}${cad}
+
+<runtime_info>In case you're asked: you are running in Cadsense through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+}
+
+const cadToolInstructions = (
+  learnings: ReadonlyArray<{ readonly text: string }>,
+  designBrief: CadDesignBrief | null,
+) => `
 
 ## Local CAD tools
 
-${cadReviewInstructions({ learnings: cadReviewLearnings, designBrief })}
+${cadReviewInstructions({ learnings, designBrief })}
 
-When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, cad_find_parts, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
+When using CAD tools through exec, cad_context, cad_hierarchy, cad_checks, cad_diff, cad_measure, cad_find_parts, cad_drive_options, and cad_update_view return JSON strings. Parse them as needed. cad_capture returns a string containing JSON metadata followed by an image data URL, not an MCP content object, and so does cad_featurescript_preview when its features ran. You must emit the image to inspect it; creating a capture alone does not make it visible to you. Use this pattern with the current revision:
 
 \`\`\`javascript
 const result = await tools.cad_capture({expectedRevision: revision});
@@ -218,9 +226,23 @@ if (start >= 0) image(result.slice(start).trim());
 \`\`\`
 
 Never print the image data URL as text. Native subagents must emit their own capture images too.
-`
-    : "";
-  return `${base}${cad}
+`;
 
-<runtime_info>In case you're asked: you are running in Cadsense through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+/**
+ * A Codex thread's `developerInstructions`, sent on thread/start and thread/resume: the browser block
+ * when the `cadsense` MCP server is attached, and the CAD block when the thread has CAD tools. Codex
+ * (checked on 0.166) replaces the developer_instructions in turn/start's collaborationMode with its own
+ * mode text, so guidance the model must see goes here. Learnings and the design brief are read when
+ * the thread opens, as for Claude. Returns undefined when there is nothing to add.
+ */
+export function buildCodexThreadInstructions(
+  browserToolsAvailable: boolean,
+  cad: {
+    readonly learnings: ReadonlyArray<{ readonly text: string }>;
+    readonly designBrief: CadDesignBrief | null;
+  } | null,
+): string | undefined {
+  const text =
+    `${browserToolInstructions(browserToolsAvailable)}${cad ? cadToolInstructions(cad.learnings, cad.designBrief) : ""}`.trim();
+  return text.length > 0 ? text : undefined;
 }
