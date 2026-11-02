@@ -5,6 +5,9 @@ import { findCadParts } from "./CadFindParts.ts";
 import { CadComments, type CadCommentDelivery } from "./CadComments.ts";
 import {
   hasCadSource,
+  CAD_PART_DRAWING_ACTIVITY,
+  CadPartDrawingInput,
+  type CadPartDrawingCard,
   CadViewError,
   CadViewState,
   CadUpdateViewInput,
@@ -57,6 +60,13 @@ import {
   indexCadSnapshot,
 } from "./CadViewState.ts";
 import { readCadHierarchy } from "./CadHierarchy.ts";
+import {
+  glbExtents,
+  partName,
+  resolveDrawingSheets,
+  shopRoute,
+  type ShopRoute,
+} from "@cadsense/shared/cadDrawing";
 import { readCadDesignBrief } from "./CadDesignBrief.ts";
 import {
   loadCadBounds,
@@ -99,6 +109,8 @@ export interface CadAgentTools {
   readonly driveOptions: (input: unknown) => Effect.Effect<CadDriveOptionsResult, CadViewError>;
   readonly updateView: (input: unknown) => Effect.Effect<CadViewState, CadViewError>;
   readonly capture: (input: unknown) => Effect.Effect<CadCaptureDelivery, CadViewError>;
+  /** Posts a part drawing card to the chat; the web draws the sheets. */
+  readonly partDrawing: (input: unknown) => Effect.Effect<unknown, CadViewError>;
   readonly featureScriptPreview: (
     input: unknown,
   ) => Effect.Effect<FeatureScriptPreviewDelivery, CadViewError>;
@@ -365,6 +377,9 @@ export const make = Effect.gen(function* () {
         // Bounds are content-addressed by asset hash, so one activation reads each GLB at most once.
         // cad_checks and cad_find_parts share this cache.
         const boundsCache = new Map<string, CadBounds | null>();
+        // Part mesh extents for shop routing, read the way the web panels read them so a card and
+        // its panel always route a part the same way. Keyed by mesh hash.
+        const extentsCache = new Map<string, [number, number, number] | null>();
         // A full robot's pass takes minutes, so paging and repeat calls reuse it.
         const checkRuns: CadCheckRuns = new Map();
         const checks: CadAgentTools["checks"] = (input) =>
@@ -542,6 +557,97 @@ export const make = Effect.gen(function* () {
               );
             }),
           );
+        const partDrawing: CadAgentTools["partDrawing"] = (input) =>
+          fifo.withPermits(1)(
+            Effect.gen(function* () {
+              const initialized = yield* initialize();
+              if (!initialized) return yield* unavailable();
+              const request = yield* decodeCadToolInput(CadPartDrawingInput, input);
+              const { snapshot } = initialized.binding;
+              if (request.snapshotId !== snapshot.snapshotId) return yield* conflict();
+              const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
+              const unknown = request.occurrenceIds.filter((id) => {
+                const node = nodes.get(id);
+                return !node || node.suppressed || node.kind === "unsupported";
+              });
+              if (unknown.length > 0)
+                return yield* new CadViewError({
+                  reason: "invalid-operation",
+                  details: `occurrenceIds must be unsuppressed part, assembly, or Part Studio occurrences from cad_hierarchy or cad_find_parts: ${unknown.join(", ")}`,
+                });
+              const candidates = resolveDrawingSheets(snapshot, request.occurrenceIds);
+              // Parts named one by one are drawn as asked. An assembly draws only the parts the shop
+              // draws: plates go to the router and printed parts to the printer. Only those parts'
+              // meshes are read, and their extents are cached across calls.
+              const routed = yield* Effect.forEach(candidates, (candidate) =>
+                Effect.gen(function* () {
+                  if (candidate.named) return { candidate, route: "named" as const };
+                  let extents = extentsCache.get(candidate.sha256);
+                  if (extents === undefined) {
+                    const bytes = yield* initialized.binding
+                      .readAsset(candidate.sha256)
+                      .pipe(Effect.mapError(unavailable));
+                    extents = glbExtents(bytes);
+                    extentsCache.set(candidate.sha256, extents);
+                  }
+                  return { candidate, route: shopRoute(candidate.material, extents) };
+                }),
+              );
+              const sheets = routed
+                .filter((entry) => entry.route === "named" || entry.route === "drawing")
+                .map((entry) => entry.candidate);
+              const skippedQty = (route: ShopRoute) =>
+                routed
+                  .filter((entry) => entry.route === route)
+                  .reduce((sum, entry) => sum + entry.candidate.qty, 0);
+              const skipped = { cnc: skippedQty("cnc"), print: skippedQty("print") };
+              if (sheets.length === 0)
+                return yield* new CadViewError({
+                  reason: "invalid-operation",
+                  details: `Nothing in the selection needs a drawing: bought parts are skipped, ${skipped.cnc} plate instances go to the router, and ${skipped.print} printed part instances go to the printer.`,
+                });
+              const first = nodes.get(request.occurrenceIds[0]!)!;
+              const title =
+                request.title ??
+                (request.occurrenceIds.length === 1 ? partName(first) : `${sheets.length} parts`);
+              const card: CadPartDrawingCard = {
+                snapshotId: snapshot.snapshotId,
+                occurrenceIds: [...request.occurrenceIds],
+                title,
+                sheets: sheets.map((sheet) => ({
+                  name: sheet.name,
+                  qty: sheet.qty,
+                  material: sheet.material,
+                })),
+                ...(skipped.cnc + skipped.print > 0 ? { skipped } : {}),
+              };
+              const createdAt = DateTime.formatIso(yield* DateTime.now);
+              const id = yield* commandId;
+              yield* dispatch({
+                type: "thread.activity.append",
+                commandId: id,
+                threadId: session.threadId,
+                activity: {
+                  id: EventId.make(`cad-drawing-${id}`),
+                  tone: "info",
+                  kind: CAD_PART_DRAWING_ACTIVITY,
+                  summary:
+                    sheets.length === 1 ? `Part drawing: ${title}` : `Part drawings: ${title}`,
+                  payload: card,
+                  turnId: turnId ?? null,
+                  createdAt,
+                },
+                createdAt,
+              });
+              return {
+                opened: true,
+                title,
+                sheets: card.sheets,
+                notDrawn: { platesForTheRouter: skipped.cnc, printedParts: skipped.print },
+                note: "The sheets are open in the user's Part drawing panel, where they can fill in the title block and print. Dimensions come from this model; tap sizes are guessed from hole diameters and the user confirms them there. Reply in two or three sentences: what you drew and anything the shop should know, such as a material that needs a decision. Do not describe the card or panel, and do not repeat dimensions.",
+              };
+            }),
+          );
         const updateView: CadAgentTools["updateView"] = (input) =>
           fifo.withPermits(1)(
             Effect.gen(function* () {
@@ -694,6 +800,7 @@ export const make = Effect.gen(function* () {
           driveOptions: (input) => activity.track(session.threadId, turnId, driveOptions(input)),
           updateView: (input) => activity.track(session.threadId, turnId, updateView(input)),
           capture: (input) => activity.track(session.threadId, turnId, capture(input)),
+          partDrawing: (input) => activity.track(session.threadId, turnId, partDrawing(input)),
           featureScriptPreview: (input) =>
             activity.track(session.threadId, turnId, featureScriptPreview(input)),
         });

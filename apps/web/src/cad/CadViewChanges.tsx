@@ -77,6 +77,7 @@ export function CadViewChanges({
   disabled,
   onChange,
   belowRevisionNotice,
+  onOpenDrawing,
 }: {
   manifest: CadSnapshotManifest;
   view: CadViewState;
@@ -85,6 +86,8 @@ export function CadViewChanges({
   onChange: (view: CadViewState) => void;
   /** Sit below the "Previous CAD revision" notice, which also uses the top-left corner. */
   belowRevisionNotice: boolean;
+  /** Opens a part drawing for parts, or a packet for an assembly. */
+  onOpenDrawing?: (occurrenceIds: string[], title: string) => void;
 }) {
   const index = useMemo(() => indexCadSnapshot(manifest), [manifest]);
   const partCount = useMemo(
@@ -241,6 +244,7 @@ export function CadViewChanges({
               disabled={disabled}
               onChange={onChange}
               fullHeight
+              {...(onOpenDrawing ? { onOpenDrawing } : {})}
             />
           ) : (
             <>

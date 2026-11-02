@@ -14,6 +14,7 @@ vi.mock("react", async (original) => {
     useMemo: h.useMemo,
     useRef: h.useRef,
     useLayoutEffect: h.useEffect,
+    useEffect: h.useEffect,
   };
 });
 vi.mock("react/compiler-runtime", async () => {

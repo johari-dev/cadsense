@@ -98,6 +98,8 @@ const descriptions = {
   ].join(" "),
   cad_capture:
     "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-* errors are rendering failures, not CAD being off: follow their details to recover.",
+  cad_part_drawing:
+    "Open print-ready shop drawings (one formal drawing per part, with a title block and hole table) for parts the user wants made. Shop drawings are for tubing, shafts (round and hex), and other parts cut from stock. Input: {snapshotId, occurrenceIds:[id], title?}. Pass part occurrence IDs from cad_find_parts or cad_hierarchy, or one assembly occurrence to draw every part under it that needs a drawing. For an assembly, bought parts (fasteners, bearings, motors, vendor parts) are skipped, plates are counted as router (CNC) parts, and printed parts as printer parts; notDrawn reports those counts. Parts named one by one are always drawn. Each sheet carries the part's quantity across the assembly. Use it when the user asks for a part drawing, shop drawing, fab sheet, or print. It changes no view state.",
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
 
 /** Tools that change no view, comment, or evidence state. MCP clients receive this as readOnlyHint. */
@@ -111,6 +113,14 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
   "cad_find_parts",
   "cad_drive_options",
   "cad_featurescript_preview",
+]);
+
+/**
+ * Tools that open a panel beside the user's chat. `cadsense mcp` reviews run outside the app with
+ * no panel to open, so it does not offer them.
+ */
+export const CAD_PANEL_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD_TOOL_INPUTS>([
+  "cad_part_drawing",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -299,6 +309,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: agentViewState(yield* tools.updateView(input)) };
     case "cad_capture":
       return yield* tools.capture(input);
+    case "cad_part_drawing":
+      return { result: yield* tools.partDrawing(input) };
     case "cad_featurescript_preview":
       return yield* tools.featureScriptPreview(input);
     default:

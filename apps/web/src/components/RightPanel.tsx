@@ -64,6 +64,7 @@ interface RightPanelProps {
 const SECTION_LABEL = {
   cad: "CAD",
   files: "Files",
+  drawing: "Part drawing",
   agents: "Agents",
   browser: "Browser",
 } as const satisfies Record<RightPanelSection, string>;

@@ -6,7 +6,7 @@ import {
 } from "@cadsense/contracts";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { mcpCadToolDefinitions } from "../provider/CadProviderTools.ts";
+import { CAD_PANEL_TOOLS, mcpCadToolDefinitions } from "../provider/CadProviderTools.ts";
 import type { CadMcpToolDefinition } from "./CadMcpStdio.ts";
 
 // What `cadsense mcp` advertises before its backend has loaded. Keep this module's imports light:
@@ -44,7 +44,10 @@ export const cadMcpToolDefinitions: ReadonlyArray<CadMcpToolDefinition> = [
     inputSchema: { ...openSchema.schema, type: "object", $defs: openSchema.definitions },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
-  // FeatureScript previews read scripts from the project workspace. A review's workspace is managed by
-  // Cadsense, so an outside agent has no way to put a script there.
-  ...mcpCadToolDefinitions.filter((tool) => tool.name !== "cad_featurescript_preview"),
+  // Panel tools need the app beside the chat. FeatureScript previews read scripts from the project
+  // workspace, and a review's workspace is managed by Cadsense, so an outside agent has no way to
+  // put a script there.
+  ...mcpCadToolDefinitions.filter(
+    (tool) => !CAD_PANEL_TOOLS.has(tool.name) && tool.name !== "cad_featurescript_preview",
+  ),
 ];

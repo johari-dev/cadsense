@@ -33,6 +33,15 @@ const boundary = vi.hoisted(() => ({
 vi.mock("react", async (original) => {
   const actual = await original<typeof import("react")>();
   const { reactHookHarness: h } = await import("../test/reactHookHarness");
+  // Layout and passive effects both run when the test flushes boundary.effects.
+  const deferred = (effect: EffectCallback, deps: DependencyList) =>
+    h.useEffect(() => {
+      let cleanup: ReturnType<EffectCallback>;
+      boundary.effects.push(() => {
+        cleanup = effect();
+      });
+      return () => cleanup?.();
+    }, deps);
   return {
     ...actual,
     useRef: h.useRef,
@@ -42,14 +51,8 @@ vi.mock("react", async (original) => {
     useSyncExternalStore: h.useSyncExternalStore,
     useDebugValue: () => {},
     useContext: () => ({ mount: boundary.mount }),
-    useLayoutEffect: (effect: EffectCallback, deps: DependencyList) =>
-      h.useEffect(() => {
-        let cleanup: ReturnType<EffectCallback>;
-        boundary.effects.push(() => {
-          cleanup = effect();
-        });
-        return () => cleanup?.();
-      }, deps),
+    useLayoutEffect: deferred,
+    useEffect: deferred,
   };
 });
 vi.mock("react/compiler-runtime", () => ({ c: hooks.useMemoCache }));
