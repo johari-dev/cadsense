@@ -55,11 +55,12 @@ export function isReviewerReady(provider: ServerProvider | undefined): boolean {
  * reload mid-download lands on the same screen. A signed-in reviewer wins
  * over a sign-in still waiting on the browser and over a stale failure. A
  * failure wins over the plain "not installed" or "signed out" states, so its
- * reason stays on screen until the next attempt.
+ * reason stays on screen until the next attempt. Onboarding never signs out,
+ * so a sign-out started from settings does not change the stage.
  */
 export function reviewerStage(provider: ServerProvider | undefined): ReviewerStage {
   if (provider === undefined) return { kind: "checking" };
-  const setup = provider.setup;
+  const setup = provider.setup?.action === "signOut" ? undefined : provider.setup;
   if (setup?.status === "running" && setup.action === "install") return { kind: "installing" };
   if (isReviewerReady(provider)) return { kind: "ready" };
   if (setup?.status === "running") return { kind: "signingIn" };

@@ -225,7 +225,8 @@ function setPendingProviderSetup(key: string, action: ServerProviderSetupAction 
 /**
  * Settings for the two built-in provider slots on one environment. Each row
  * shows the CLI's status, a one-click Install or Sign in when the CLI needs
- * it, and the enable switch, which stays off until the CLI is installed.
+ * it, Sign out once it has an account, and the enable switch, which stays off
+ * until the CLI is installed.
  */
 function EnvironmentProviderSettings({
   environmentId,
@@ -288,8 +289,11 @@ function EnvironmentProviderSettings({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title:
-            action === "install" ? `Could not install ${label}` : `Could not sign in to ${label}`,
+          title: {
+            install: `Could not install ${label}`,
+            signIn: `Could not sign in to ${label}`,
+            signOut: `Could not sign out of ${label}`,
+          }[action],
           description: error instanceof Error ? error.message : "The provider command failed.",
         }),
       );
@@ -409,14 +413,19 @@ function ProviderRow({
 }) {
   const Icon = option.icon;
   const installed = liveProvider?.installed === true;
+  // Sign out stays offered whenever the CLI may hold credentials, including
+  // when its account check failed: a token the CLI can no longer refresh
+  // still reads as signed in until the user signs out and back in.
   const setupAction: ServerProviderSetupAction | null =
     liveProvider === undefined
       ? null
       : !installed
         ? "install"
-        : enabled && liveProvider.auth.status === "unauthenticated"
-          ? "signIn"
-          : null;
+        : !enabled
+          ? null
+          : liveProvider.auth.status === "unauthenticated"
+            ? "signIn"
+            : "signOut";
   // Keep the button while its command runs, even if a refresh lands first.
   const visibleAction = pendingSetup ?? setupAction;
 
@@ -455,6 +464,16 @@ function ProviderRow({
               {pendingSetup === "signIn" ? "Restart sign-in" : "Sign in"}
             </Button>
           ) : null}
+          {visibleAction === "signOut" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pendingSetup === "signOut"}
+              onClick={() => onSetup("signOut")}
+            >
+              {pendingSetup === "signOut" ? "Signing out…" : "Sign out"}
+            </Button>
+          ) : null}
           {/* A provider can only be turned on once its CLI is installed. */}
           <Switch
             checked={enabled && installed}
@@ -481,6 +500,7 @@ function ProviderStatusLine({
 }) {
   if (pendingSetup === "install") return <>Installing the {label} CLI.</>;
   if (pendingSetup === "signIn") return <>Finish signing in to {label} in your browser.</>;
+  if (pendingSetup === "signOut") return <>Signing out of {label}.</>;
   if (liveProvider === undefined) return <>Checking status</>;
   if (!liveProvider.installed) return <>The {label} CLI is not installed.</>;
   if (!enabled) return <>Disabled</>;

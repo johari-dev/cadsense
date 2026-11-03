@@ -6,6 +6,14 @@
  * - a sign-in the CLI can't confirm (its account check timed out) counts as ok
  *
  * An attempt replaced by a newer one is interrupted, so it never reaches either count.
+ *
+ * Ways sign-out could go wrong:
+ *
+ * - the CLI still reports a signed-in account, but the sign-out reports success
+ * - the logout command failed, but the CLI now reports signed out, and the sign-out reports failure
+ * - a sign-out counts as a sign-in
+ * - a sign-out leaves a sign-in that waits on the browser running, so its login process lives on
+ *
  * The commands are real child processes (this Node binary), so each attempt goes through the
  * runner's own exit-code and re-probe decisions.
  */
@@ -18,7 +26,10 @@ import {
 } from "@cadsense/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 
 import type { DailyCounter } from "../telemetry/AnalyticsEvents.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
@@ -34,6 +45,8 @@ const node = (script: string): ProviderSetupCommand => ({
 });
 const EXIT_OK = node("");
 const EXIT_FAILED = node("process.exit(1)");
+// A login that waits on the browser until the runner kills it.
+const WAITS_FOREVER = node("setInterval(() => {}, 1000)");
 
 const provider = (auth: ServerProviderAuthStatus): ServerProvider => ({
   instanceId,
@@ -53,6 +66,7 @@ const provider = (auth: ServerProviderAuthStatus): ServerProvider => ({
 const harness = Effect.fn(function* (options: {
   readonly signIns?: ReadonlyArray<ProviderSetupCommand>;
   readonly install?: ProviderSetupCommand;
+  readonly signOut?: ProviderSetupCommand;
   readonly authAfter: ServerProviderAuthStatus;
 }) {
   const counted = yield* Ref.make<DailyCounter[]>([]);
@@ -63,7 +77,11 @@ const harness = Effect.fn(function* (options: {
       ...registry,
       getProviderSetupCommands: () =>
         Ref.modify(signIns, ([next = EXIT_OK, ...rest]) => [
-          { install: options.install ?? EXIT_OK, signIn: next },
+          {
+            install: options.install ?? EXIT_OK,
+            signIn: next,
+            signOut: options.signOut ?? EXIT_OK,
+          },
           rest,
         ]),
     }),
@@ -104,6 +122,39 @@ it.layer(NodeServices.layer)("ProviderSetupRunner analytics", (it) => {
       const h = yield* harness({ install: EXIT_FAILED, authAfter: "unauthenticated" });
       yield* h.runner.run({ instanceId, action: "install" }).pipe(Effect.flip);
       assert.deepEqual(yield* Ref.get(h.counted), ["provider_installs_failed"]);
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("ProviderSetupRunner sign-out", (it) => {
+  it.effect("succeeds only when the CLI ends up signed out", () =>
+    Effect.gen(function* () {
+      const stillSignedIn = yield* harness({ authAfter: "authenticated" });
+      const error = yield* stillSignedIn.runner
+        .run({ instanceId, action: "signOut" })
+        .pipe(Effect.flip);
+      assert.strictEqual(error.action, "signOut");
+
+      // The command failed, but the credentials are gone, so the attempt worked.
+      const recovered = yield* harness({ signOut: EXIT_FAILED, authAfter: "unauthenticated" });
+      yield* recovered.runner.run({ instanceId, action: "signOut" });
+
+      // Sign-out is not a sign-in, so neither attempt counts toward sign-in analytics.
+      assert.deepEqual(yield* Ref.get(stillSignedIn.counted), []);
+      assert.deepEqual(yield* Ref.get(recovered.counted), []);
+    }),
+  );
+
+  it.effect("stops a sign-in still waiting on the browser", () =>
+    Effect.gen(function* () {
+      const h = yield* harness({ signIns: [WAITS_FOREVER], authAfter: "unauthenticated" });
+      const signIn = yield* h.runner.run({ instanceId, action: "signIn" }).pipe(Effect.forkChild);
+      // Let the login process start before signing out. Real time: it.effect runs a test clock.
+      yield* Effect.sleep("200 millis").pipe(TestClock.withLive);
+      yield* h.runner.run({ instanceId, action: "signOut" });
+      const exit = yield* Fiber.await(signIn);
+      assert.isTrue(Exit.isFailure(exit));
+      assert.deepEqual(yield* Ref.get(h.counted), []);
     }),
   );
 });

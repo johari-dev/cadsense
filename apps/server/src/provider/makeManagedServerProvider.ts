@@ -33,6 +33,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>;
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
+  /**
+   * Runs before an explicit `refresh` (the refresh button, or the re-check
+   * after a sign-in or sign-out) so `checkProvider` cannot answer from a
+   * cache that hides a credential change. Interval refreshes keep the cache.
+   */
+  readonly clearCachesBeforeRefresh?: Effect.Effect<void>;
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
@@ -240,7 +246,11 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   return {
     setupCommands: input.setupCommands,
     getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
-    refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
+    refresh: (input.clearCachesBeforeRefresh ?? Effect.void).pipe(
+      Effect.andThen(refreshSnapshot()),
+      Effect.tapError(Effect.logError),
+      Effect.orDie,
+    ),
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },

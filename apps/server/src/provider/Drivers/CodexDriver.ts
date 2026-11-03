@@ -136,7 +136,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
       // `effectiveHomePath` is the shadow home when one is configured, so
-      // `codex login` writes auth.json where this instance reads it.
+      // `codex login` and `codex logout` touch the auth.json this instance reads.
+      const authEnv = {
+        ...processEnv,
+        ...(homeLayout.effectiveHomePath
+          ? { CODEX_HOME: expandHomePath(homeLayout.effectiveHomePath) }
+          : {}),
+      };
       const setupCommands: ProviderSetupCommands = {
         // Installs to ~/.local/bin, or %LOCALAPPDATA%\Programs\OpenAI\Codex\bin
         // on Windows. CODEX_NON_INTERACTIVE stops it asking questions on the
@@ -146,16 +152,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           windowsUrl: "https://chatgpt.com/codex/install.ps1",
           env: { ...processEnv, CODEX_NON_INTERACTIVE: "1" },
         }),
-        signIn: {
-          executable: effectiveConfig.binaryPath,
-          args: ["login"],
-          env: {
-            ...processEnv,
-            ...(homeLayout.effectiveHomePath
-              ? { CODEX_HOME: expandHomePath(homeLayout.effectiveHomePath) }
-              : {}),
-          },
-        },
+        signIn: { executable: effectiveConfig.binaryPath, args: ["login"], env: authEnv },
+        signOut: { executable: effectiveConfig.binaryPath, args: ["logout"], env: authEnv },
       };
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
