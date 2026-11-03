@@ -11,6 +11,7 @@ import {
   type OnshapeConnectionError,
   type OnshapeConnectionSummary,
   type OnshapeProjectSource,
+  onshapeStackOrigin,
 } from "@cadsense/contracts";
 import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
 import * as Clock from "effect/Clock";
@@ -565,7 +566,10 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
     readonly title: string | undefined;
   }) {
     const host = yield* Effect.try({
-      try: () => new URL(request.url).origin,
+      try: () => {
+        const url = new URL(request.url);
+        return onshapeStackOrigin(url) ?? url.origin;
+      },
       catch: () => fail("invalid-url", "The url is not a valid Onshape URL."),
     });
     const problem = onshapeUrlProblem(request.url);

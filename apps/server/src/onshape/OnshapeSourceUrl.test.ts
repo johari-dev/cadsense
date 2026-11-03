@@ -63,6 +63,50 @@ describe("Onshape source URLs", () => {
     }),
   );
 
+  it.effect("reads public stack aliases as links on cad.onshape.com", () =>
+    Effect.gen(function* () {
+      for (const host of [
+        "onshape.com",
+        "www.onshape.com",
+        "oauth.onshape.com",
+        "api.onshape.com",
+        "cad-euw1.onshape.com",
+      ]) {
+        const url = `https://${host}/documents/${documentId}/w/${workspaceId}/e/${elementId}`;
+        const source = yield* OnshapeSourceUrl.parse({ connection, url });
+        assert.strictEqual(source.host, "https://cad.onshape.com", url);
+        assert.strictEqual(source.elementId, OnshapeElementId.make(elementId), url);
+      }
+    }),
+  );
+
+  it.effect("keeps alias links off an enterprise connection", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        OnshapeSourceUrl.parse({
+          connection: { connectionId, host: "https://team.example.onshape.com" },
+          url: `https://onshape.com/documents/${documentId}/w/${workspaceId}`,
+        }),
+      );
+
+      assert.strictEqual(error._tag, "OnshapeProjectHostMismatchError");
+    }),
+  );
+
+  it.effect("keeps enterprise and separate stack links off a cad.onshape.com connection", () =>
+    Effect.gen(function* () {
+      for (const host of ["1678.onshape.com", "cad.usgov.onshape.com", "partner.dev.onshape.com"]) {
+        const error = yield* Effect.flip(
+          OnshapeSourceUrl.parse({
+            connection,
+            url: `https://${host}/documents/${documentId}/w/${workspaceId}`,
+          }),
+        );
+        assert.strictEqual(error._tag, "OnshapeProjectHostMismatchError", host);
+      }
+    }),
+  );
+
   it.effect("reports a host mismatch without accepting a lookalike domain", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(

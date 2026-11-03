@@ -6,6 +6,7 @@ import {
   OnshapeProjectHostMismatchError,
   OnshapeProjectInvalidUrlError,
   type OnshapeProjectSource,
+  onshapeStackOrigin,
   OnshapeWorkspaceId,
   type OnshapeConnectionSummary,
   OnshapeWorkspaceType,
@@ -39,7 +40,7 @@ export const parse = Effect.fn("OnshapeSourceUrl.parse")(function* (input: {
     try: () => new URL(input.connection.host),
     catch: () => new OnshapeProjectInvalidUrlError(),
   });
-  if (parsed.origin !== connectionUrl.origin) {
+  if (onshapeStackOrigin(parsed) !== connectionUrl.origin) {
     return yield* new OnshapeProjectHostMismatchError();
   }
 

@@ -18,6 +18,7 @@ import {
   OnshapeRateLimitError,
   OnshapeRedirectError,
   OnshapeVerificationThrottledError,
+  onshapeStackOrigin,
 } from "./onshape.ts";
 
 const decodeCreateInput = Schema.decodeUnknownSync(OnshapeConnectionCreateInput);
@@ -189,5 +190,51 @@ describe("Onshape connection contracts", () => {
       "00000000-0000-4000-8000-000000000001",
     );
     expect(() => decodeConnectionId("../../unsafe-secret-path")).toThrow();
+  });
+});
+
+describe("onshapeStackOrigin", () => {
+  const stackOf = (link: string) => onshapeStackOrigin(new URL(link));
+
+  // Each of these served the same public document as cad.onshape.com when probed.
+  it("reads public stack aliases as cad.onshape.com", () => {
+    for (const host of [
+      "cad.onshape.com",
+      "onshape.com",
+      "www.onshape.com",
+      "WWW.Onshape.com",
+      "oauth.onshape.com",
+      "api.onshape.com",
+      "cad-usw2.onshape.com",
+      "cad-euw1.onshape.com",
+      "cad-aps1.onshape.com",
+      "cad-aps2.onshape.com",
+      "cad-apn1.onshape.com",
+    ]) {
+      expect(stackOf(`https://${host}/documents/x`), host).toBe("https://cad.onshape.com");
+    }
+  });
+
+  it("keeps enterprise domains and separate stacks as their own origin", () => {
+    for (const host of [
+      "1678.onshape.com",
+      "team.example.onshape.com",
+      "cad.usgov.onshape.com",
+      "partner.dev.onshape.com",
+      "cad-euw1.dev.onshape.com",
+    ]) {
+      expect(stackOf(`https://${host}/documents/x`), host).toBe(`https://${host}`);
+    }
+  });
+
+  it("rejects links that are not https on onshape.com", () => {
+    for (const link of [
+      "https://cad.onshape.com.attacker.example/documents/x",
+      "https://notonshape.com/documents/x",
+      "http://cad.onshape.com/documents/x",
+      "https://cad.onshape.com:8443/documents/x",
+    ]) {
+      expect(stackOf(link), link).toBeNull();
+    }
   });
 });
