@@ -185,9 +185,123 @@ describe("CAD panel Sync button", () => {
     );
   });
   it("renders nothing when an Onshape project has no root to sync from the panel", () => {
-    expect(render(onshapeWith([], null), null)).toBeNull();
     const missing = { ...catalog("Bracket", "assembly"), roots: [] };
     expect(render(onshapeWith([], missing), null)).toBeNull();
+    // A document link without an element names nothing to sync, so a refresh can't help either.
+    const documentOnly = onshapeWith([], null);
+    const { elementId: _, ...source } = documentOnly.onshapeSource!;
+    expect(render({ ...documentOnly, onshapeSource: source }, null)).toBeNull();
+  });
+  describe("before the Onshape catalog was ever refreshed", () => {
+    // The refresh is its own operation, so its outcome never reads as the sync's.
+    const discoverId = CadSnapshotId.make("00000000-0000-4000-8000-00000000000d");
+    beforeEach(() => {
+      start.mockResolvedValueOnce(AsyncResult.success({ operationId: discoverId }));
+    });
+    const discoverOutcome = (status: string, reason: string | null = null) => ({
+      ...outcome(status, reason),
+      operationId: discoverId,
+      kind: "discover",
+    });
+    const fresh = () => onshapeWith([], null);
+    const discovered = (project: TestProject, sourceCatalog: unknown) =>
+      withCad(project, { catalog: sourceCatalog, lastOutcome: discoverOutcome("succeeded") });
+    const discover = {
+      environmentId: EnvironmentId.make("test"),
+      input: { projectId: "cad-sync-button", kind: "discover" },
+    };
+    it("refreshes the catalog first, as only it says which kind the linked element is", async () => {
+      expect(syncButton(render(fresh(), null))).toBeDefined();
+      press(fresh(), null);
+      await settle();
+      expect(start).toHaveBeenCalledExactlyOnceWith(discover);
+      expect(text(render(fresh(), null))).toContain("Syncing…");
+    });
+    it("then syncs the linked element once, with the catalog's kind and the project's configuration", async () => {
+      press(fresh(), null);
+      await settle();
+      const after = discovered(fresh(), catalog("FullTelescope", "assembly"));
+      render(after, null);
+      await settle();
+      render(after, null);
+      await settle();
+      expect(start).toHaveBeenCalledTimes(2);
+      expect(start).toHaveBeenLastCalledWith(
+        synced({ elementId: element, kind: "assembly", configuration: "size=large" }),
+      );
+      // The sync it chained reports its outcome like any other.
+      render(
+        withCad(after, {
+          roots: [{ ...roots[0]!, configuration: "size=large", current: snapshot(3) }],
+          lastOutcome: outcome("succeeded"),
+        }),
+        null,
+      );
+      expect(toast).toHaveBeenCalledExactlyOnceWith({
+        type: "success",
+        title: "FullTelescope synced",
+        description: "Chats showing it now show the new revision.",
+      });
+    });
+    it("explains a linked element it can't sync, and syncs nothing", async () => {
+      for (const status of ["unsupported", "missing"] as const) {
+        hooks.reset();
+        start.mockClear();
+        start.mockResolvedValueOnce(AsyncResult.success({ operationId: discoverId }));
+        toast.mockReset();
+        press(fresh(), null);
+        await settle();
+        const unsyncable = {
+          ...catalog("Drawing", "assembly"),
+          roots: [],
+          sourceElement: { elementId: element, status },
+        };
+        render(discovered(fresh(), unsyncable), null);
+        await settle();
+        expect(start).toHaveBeenCalledOnce();
+        expect(toast).toHaveBeenCalledExactlyOnceWith({
+          type: "error",
+          title: "Could not sync CAD",
+          description:
+            status === "missing"
+              ? "The Onshape tab this project links to is no longer in the document. Choose CAD in project settings."
+              : "The Onshape tab this project links to is not an Assembly or Part Studio. Choose CAD in project settings.",
+        });
+      }
+    });
+    it("shows why the refresh failed, stays quiet when it is cancelled, and syncs nothing", async () => {
+      const reason = "Could not reach Onshape.";
+      press(fresh(), null);
+      await settle();
+      render(withCad(fresh(), { lastOutcome: discoverOutcome("failed", reason) }), null);
+      expect(toast).toHaveBeenCalledExactlyOnceWith({
+        type: "error",
+        title: "Could not sync CAD",
+        description: reason,
+      });
+      hooks.reset();
+      toast.mockReset();
+      start.mockResolvedValueOnce(AsyncResult.success({ operationId: discoverId }));
+      press(fresh(), null);
+      await settle();
+      render(withCad(fresh(), { lastOutcome: discoverOutcome("cancelled") }), null);
+      await settle();
+      expect(toast).not.toHaveBeenCalled();
+      expect(start).toHaveBeenCalledTimes(2);
+    });
+    it("explains a refresh the server refuses to start", async () => {
+      start.mockReset();
+      start.mockResolvedValue(
+        AsyncResult.failure(Cause.fail(new CadUserOperationError({ reason: "throttled" }))),
+      );
+      press(fresh(), null);
+      await settle();
+      expect(toast).toHaveBeenCalledExactlyOnceWith({
+        type: "error",
+        title: "Could not sync CAD",
+        description: "Onshape is limiting requests. Try again in a few minutes.",
+      });
+    });
   });
   it("is disabled and names the chats that block it while another chat runs", () => {
     threads.current = [
