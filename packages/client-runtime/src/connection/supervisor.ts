@@ -124,24 +124,6 @@ function availableState(intent: SupervisorIntent, generation: number): Superviso
   };
 }
 
-function offlineState(
-  intent: SupervisorIntent,
-  generation: number,
-  attempt: number,
-  lastFailure: ConnectionAttemptError | null,
-): SupervisorConnectionState {
-  return {
-    desired: true,
-    network: intent.network,
-    phase: "offline",
-    stage: null,
-    attempt,
-    generation,
-    lastFailure,
-    retryAt: null,
-  };
-}
-
 function connectingState(
   intent: SupervisorIntent,
   generation: number,
@@ -235,11 +217,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   // the first backoff rung instead of sleeping.
   const wakeProbeFailed = yield* Ref.make(false);
   const state = yield* SubscriptionRef.make<SupervisorConnectionState>(
-    !initialIntent.desired
-      ? availableState(initialIntent, 0)
-      : initialIntent.network === "offline"
-        ? offlineState(initialIntent, 0, 0, null)
-        : connectingState(initialIntent, 0, 1, null),
+    initialIntent.desired
+      ? connectingState(initialIntent, 0, 1, null)
+      : availableState(initialIntent, 0),
   );
   const session = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(Option.none());
   const prepared = yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(Option.none());
@@ -349,10 +329,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "RetryRequested":
           return false;
         case "NetworkChanged":
-          if (next.network === "offline") {
-            return false;
-          }
-          break;
         case "ConnectRequested":
           break;
         case "Wakeup":
@@ -371,9 +347,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "RetryRequested":
           return false;
         case "NetworkChanged":
-          if (next.network === "offline") {
-            return false;
-          }
           break;
         case "Wakeup":
           if (next.reason === "application-active") {
@@ -412,10 +385,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
                   yield* Fiber.interrupt(probe);
                   return false;
                 case "NetworkChanged":
-                  if (probeEvent.signal.network === "offline") {
-                    yield* Fiber.interrupt(probe);
-                    return false;
-                  }
                   break;
                 case "Wakeup":
                   // Repeated foreground notifications share the in-flight health check.
@@ -507,7 +476,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
     const active = establishment.exit.value;
     const currentIntent = yield* Ref.get(intent);
-    if (!currentIntent.desired || currentIntent.network === "offline") {
+    if (!currentIntent.desired) {
       return {
         _tag: "Interrupted",
         established: false,
@@ -569,10 +538,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           switch (next._tag) {
             case "Wakeup":
               return ConnectionWakeups.isApplicationActiveWakeup(next.reason);
+            case "NetworkChanged":
+              // Coming back online is a good moment to retry a failed attempt early.
+              if (next.network === "online") return false;
+              break;
             case "ConnectRequested":
             case "DisconnectRequested":
             case "RetryRequested":
-            case "NetworkChanged":
               return false;
           }
         }
@@ -611,16 +583,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         yield* waitForSignal;
         continue;
       }
-      if (currentIntent.network === "offline") {
-        yield* clearLease;
-        yield* setState(offlineState(currentIntent, generation, failureCount + 1, latestFailure));
-        const applicationActivated = yield* waitForSignal;
-        if (applicationActivated) {
-          resetRetryLadder();
-        }
-        continue;
-      }
-
       const attempt = failureCount + 1;
       const nextGeneration = generation + 1;
       const outcome: AttemptOutcome = yield* Effect.scoped(

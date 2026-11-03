@@ -6,7 +6,6 @@ import type { NetworkStatus, SupervisorConnectionState } from "./model.ts";
 
 export type EnvironmentConnectionPhase =
   | "available"
-  | "offline"
   | "connecting"
   | "reconnecting"
   | "connected"
@@ -30,8 +29,6 @@ export function presentConnectionState(
   switch (state.phase) {
     case "available":
       return { phase: "available", error: null, traceId: null };
-    case "offline":
-      return { phase: "offline", error: null, traceId: null };
     case "connecting":
       return {
         phase: state.attempt <= 1 && state.lastFailure === null ? "connecting" : "reconnecting",
@@ -59,8 +56,6 @@ export function connectionStatusText(connection: EnvironmentConnectionPresentati
   switch (connection.phase) {
     case "available":
       return "Available";
-    case "offline":
-      return "Offline";
     case "connecting":
       return "Connecting...";
     case "reconnecting":
@@ -103,7 +98,7 @@ export function connectionPhaseMessage(
   label: string,
   networkStatus: NetworkStatus,
 ): string {
-  if (networkStatus === "offline" || phase === "offline") {
+  if (networkStatus === "offline") {
     return "You are offline";
   }
   switch (phase) {

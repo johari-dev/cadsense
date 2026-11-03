@@ -9,13 +9,16 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as TestClock from "effect/testing/TestClock";
 import { Connectivity } from "./connectivity.ts";
 import { ConnectionDriver } from "./driver.ts";
-import { ConnectionTransientError, PrimaryConnectionTarget } from "./model.ts";
+import { ConnectionTransientError, type NetworkStatus, PrimaryConnectionTarget } from "./model.ts";
 import { ConnectionWakeups, type ConnectionWakeup } from "./wakeups.ts";
 import { make } from "./supervisor.ts";
 import type { RpcSession } from "../rpc/session.ts";
 
-const harness = Effect.gen(function* () {
+// Builds a supervisor against an in-memory driver. `initialNetwork` is what the
+// browser reports at startup; push later browser events onto `network`.
+const makeHarness = Effect.fnUntraced(function* (initialNetwork: NetworkStatus = "online") {
   const wakes = yield* Queue.unbounded<ConnectionWakeup>();
+  const network = yield* Queue.unbounded<NetworkStatus>();
   const probeStarted = yield* Deferred.make<void>();
   const probeResult = yield* Deferred.make<void, ConnectionTransientError>();
   let connections = 0,
@@ -43,8 +46,8 @@ const harness = Effect.gen(function* () {
     { initiallyDesired: true },
   ).pipe(
     Effect.provideService(Connectivity, {
-      status: Effect.succeed("online" as const),
-      changes: Stream.never,
+      status: Effect.succeed(initialNetwork),
+      changes: Stream.fromQueue(network),
     }),
     Effect.provideService(ConnectionWakeups, { changes: Stream.fromQueue(wakes) }),
     Effect.provideService(ConnectionDriver, {
@@ -76,12 +79,14 @@ const harness = Effect.gen(function* () {
   );
   return {
     wakes,
+    network,
     probeStarted,
     probeResult,
     supervisor,
     counts: () => ({ connections, releases, probes }),
   };
 });
+const harness = makeHarness();
 
 it.effect("coalesces foreground notifications while a connection probe is pending", () =>
   Effect.gen(function* () {
@@ -125,5 +130,25 @@ it.effect("does not extend the health check timeout when foreground notification
     yield* Queue.offer(h.wakes, "application-active");
     yield* TestClock.adjust("5 seconds");
     expect(h.counts()).toEqual({ connections: 2, releases: 1, probes: 1 });
+  }).pipe(Effect.scoped),
+);
+
+// The primary backend is a local process, so losing internet must not touch it.
+it.effect("keeps a live session when the browser reports it went offline", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* Queue.offer(h.network, "offline");
+    yield* TestClock.adjust("100 millis");
+    expect(h.counts()).toEqual({ connections: 1, releases: 0, probes: 0 });
+    expect((yield* SubscriptionRef.get(h.supervisor.state)).phase).toBe("connected");
+    expect(Option.isSome(yield* SubscriptionRef.get(h.supervisor.session))).toBe(true);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("connects when the browser already reports offline at startup", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness("offline");
+    expect(h.counts().connections).toBe(1);
+    expect((yield* SubscriptionRef.get(h.supervisor.state)).phase).toBe("connected");
   }).pipe(Effect.scoped),
 );

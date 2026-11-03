@@ -53,11 +53,6 @@ class TestQueryError extends Schema.TaggedErrorClass<TestQueryError>()("TestQuer
   message: Schema.String,
 }) {}
 
-const OFFLINE_QUERY_FAILURE = new ConnectionTransientError({
-  reason: "transport",
-  detail: "Backend transport is unavailable.",
-});
-
 const BLOCKED_QUERY_FAILURE = new ConnectionBlockedError({
   reason: "permission",
   detail: "Access denied.",
@@ -369,16 +364,6 @@ describe("environment query lifecycle", () => {
         attempt: 0,
       }),
       expectedFailure: null,
-    },
-    {
-      condition: "while the environment is offline",
-      state: queryConnectionState({
-        network: "offline",
-        phase: "offline",
-        stage: null,
-        lastFailure: OFFLINE_QUERY_FAILURE,
-      }),
-      expectedFailure: OFFLINE_QUERY_FAILURE,
     },
     {
       condition: "when connection recovery is blocked",

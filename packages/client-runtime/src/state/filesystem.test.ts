@@ -63,7 +63,7 @@ describe("browse navigation", () => {
 
   it("only preloads connected environments", () => {
     expect(canPreloadBrowsePath("connected")).toBe(true);
-    expect(canPreloadBrowsePath("offline")).toBe(false);
+    expect(canPreloadBrowsePath("available")).toBe(false);
     expect(canPreloadBrowsePath("reconnecting")).toBe(false);
     expect(canPreloadBrowsePath(null)).toBe(false);
   });
