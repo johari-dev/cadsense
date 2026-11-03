@@ -52,6 +52,7 @@ import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
 import {
+  cadRevisionConflict,
   decodeCadToolInput,
   defaultCadRoot,
   initialCadView,
@@ -564,7 +565,8 @@ export const make = Effect.gen(function* () {
               if (!initialized) return yield* unavailable();
               const request = yield* decodeCadToolInput(CadPartDrawingInput, input);
               const { snapshot } = initialized.binding;
-              if (request.snapshotId !== snapshot.snapshotId) return yield* conflict();
+              if (request.snapshotId !== snapshot.snapshotId)
+                return yield* cadRevisionConflict(initialized.state);
               const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
               const unknown = request.occurrenceIds.filter((id) => {
                 const node = nodes.get(id);
@@ -659,7 +661,7 @@ export const make = Effect.gen(function* () {
                 update.expectedRevision !==
                 (initialized?.state.revision ?? currentSession.revision ?? 0)
               )
-                return yield* conflict();
+                return yield* initialized ? cadRevisionConflict(initialized.state) : conflict();
               const candidates: Binding[] = [];
               const result = yield* Effect.exit(
                 Effect.gen(function* () {
@@ -711,7 +713,7 @@ export const make = Effect.gen(function* () {
               if (!initialized || turnId === undefined || Option.isNone(artifacts))
                 return yield* unavailable();
               if (initialized.state.revision !== requested.expectedRevision)
-                return yield* conflict();
+                return yield* cadRevisionConflict(initialized.state);
               return yield* artifacts.value.capture({
                 sessionId: contextId,
                 runId: turnId,

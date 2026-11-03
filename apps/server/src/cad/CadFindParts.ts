@@ -10,9 +10,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { presentCadBounds, worldCadBounds, type CadCheckGeometry } from "./CadChecks.ts";
-import { indexCadSnapshot } from "./CadViewState.ts";
+import { cadRevisionConflict, decodeCadToolInput, indexCadSnapshot } from "./CadViewState.ts";
 
-const decodeInput = Schema.decodeUnknownEffect(CadFindPartsInput);
 const encodeEntry = Schema.encodeSync(Schema.fromJsonString(CadFindPartsEntry));
 const encodeResult = Schema.encodeSync(Schema.fromJsonString(CadFindPartsResult));
 // The field and ancestor caps keep even one maximally JSON-escaped entry below this budget.
@@ -20,7 +19,13 @@ const MAX_RESULT_BYTES = 64 * 1024;
 const encodeFingerprint = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.Union([Schema.String, Schema.Number, Schema.Null]))),
 );
-const invalid = () => new CadViewError({ reason: "invalid-operation" });
+// Cursors encode the query and the view revision, so a changed filter, limit, or view voids them.
+const staleCursor = () =>
+  new CadViewError({
+    reason: "invalid-operation",
+    details:
+      "cursor belongs to a different query or view revision. Repeat the search without cursor, or pass the same filters and limit as the page that returned it.",
+  });
 const normalize = (value: string | undefined) => value?.trim().toLowerCase() ?? "";
 
 /** Search immutable manifest order. Only the page window (at most `limit` matches) reads part
@@ -33,14 +38,14 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
   bounds: CadCheckGeometry["bounds"],
   rawInput: unknown,
 ): Effect.fn.Return<CadFindPartsResult, CadViewError> {
-  const input = yield* decodeInput(rawInput).pipe(Effect.mapError(invalid));
+  const input = yield* decodeCadToolInput(CadFindPartsInput, rawInput);
   if (
     input.snapshotId !== state.snapshotId ||
     input.expectedRevision !== state.revision ||
     snapshot.snapshotId !== state.snapshotId ||
     snapshot.rootId !== state.rootId
   )
-    return yield* new CadViewError({ reason: "revision-conflict" });
+    return yield* cadRevisionConflict(state);
   const name = normalize(input.nameQuery),
     materialName = normalize(input.materialName),
     bodyType = normalize(input.bodyType),
@@ -67,9 +72,11 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
   let offset = 0;
   if (input.cursor !== undefined) {
     const suffix = input.cursor.slice(prefix.length);
-    if (!input.cursor.startsWith(prefix) || !/^[1-9][0-9]*$/.test(suffix)) return yield* invalid();
+    if (!input.cursor.startsWith(prefix) || !/^[1-9][0-9]*$/.test(suffix))
+      return yield* staleCursor();
     offset = Number(suffix);
-    if (!Number.isSafeInteger(offset) || offset >= snapshot.nodes.length) return yield* invalid();
+    if (!Number.isSafeInteger(offset) || offset >= snapshot.nodes.length)
+      return yield* staleCursor();
   }
   const index = indexCadSnapshot(snapshot),
     visible = index.visible(state),
@@ -120,7 +127,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     // Stored manifests have validated parent links. Bound the walk even for malformed callers.
     while (parentId !== null) {
       const parent = index.nodes.get(parentId);
-      if (!parent || ancestorCount++ >= snapshot.nodes.length) return yield* invalid();
+      if (!parent || ancestorCount++ >= snapshot.nodes.length) return yield* staleCursor();
       if (assemblyPath.length < 16)
         assemblyPath.push({ occurrenceId: parent.id, name: text(parent.name) });
       suppressed ||= parent.suppressed;
@@ -166,7 +173,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
       geometryKey: node.kind === "part" && !suppressed ? node.sourcePartKey : null,
     });
   }
-  if (offset > 0 && offset >= totalMatches) return yield* invalid();
+  if (offset > 0 && offset >= totalMatches) return yield* staleCursor();
   const local = yield* bounds(
     new Set(candidates.flatMap(({ geometryKey }) => (geometryKey === null ? [] : [geometryKey]))),
   );
@@ -177,7 +184,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     const entry = { ...candidate, bounds: world && presentCadBounds(world) };
     const entryBytes = Buffer.byteLength(encodeEntry(entry)) + (entries.length > 0 ? 1 : 0);
     if (resultBytes + entryBytes > MAX_RESULT_BYTES) {
-      if (entries.length === 0) return yield* invalid();
+      if (entries.length === 0) return yield* staleCursor();
       // Leave this entry and every later match for the next page.
       break;
     }

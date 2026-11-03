@@ -1,6 +1,5 @@
 import {
   CadMeasureInput,
-  CadViewError,
   type CadMeasureGeometryProvenance,
   type CadMeasurePointInput,
   type CadMeasureResult,
@@ -8,7 +7,6 @@ import {
   type CadViewState,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import {
   CAD_MESH_MAX_BYTES,
   CadMeshGeometryError,
@@ -17,8 +15,8 @@ import {
   type CadMeshPoint,
 } from "./CadMeshGeometry.ts";
 import { CAD_DISTANCE_LIMITS, cadSurfaceDistance } from "./CadSurfaceDistance.ts";
+import { cadRevisionConflict, decodeCadToolInput } from "./CadViewState.ts";
 
-const decode = Schema.decodeUnknownEffect(CadMeasureInput);
 type UnknownReason = Extract<CadMeasureResult, { status: "unknown" }>["reason"];
 const pointLimitations = [
   "Input points are caller-specified and are not verified surface locations.",
@@ -38,15 +36,13 @@ export const measureCad = Effect.fn("measureCad")(function* <E>(
   input: unknown,
   readAsset: (hash: string) => Effect.Effect<Uint8Array, E>,
 ) {
-  const request = yield* decode(input).pipe(
-    Effect.mapError(() => new CadViewError({ reason: "invalid-operation" })),
-  );
+  const request = yield* decodeCadToolInput(CadMeasureInput, input);
   if (
     request.expectedRevision !== state.revision ||
     request.snapshotId !== snapshot.snapshotId ||
     state.snapshotId !== snapshot.snapshotId
   )
-    return yield* new CadViewError({ reason: "revision-conflict" });
+    return yield* cadRevisionConflict(state);
   const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
   const assets = new Map(snapshot.assets.map((asset) => [asset.geometryKey, asset]));
   const parts = new Map(snapshot.parts.map((part) => [part.geometryKey, part]));
