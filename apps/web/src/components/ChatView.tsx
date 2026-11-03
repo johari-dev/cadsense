@@ -3992,7 +3992,6 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {!shouldUseRightPanelSheet || !rightPanelOpen ? panelLayoutControls : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -4321,6 +4320,10 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanel>
       ) : null}
+      {/* Must follow the chat header and inline panel in the DOM. Electron on Windows
+          builds the window drag area in DOM order and ignores z-index, so a no-drag
+          control placed before a drag-region header stays a title-bar drag target. */}
+      {!shouldUseRightPanelSheet || !rightPanelOpen ? panelLayoutControls : null}
       {shouldUseRightPanelSheet && rightPanelPresence.present && activeThreadRef ? (
         <RightPanelSheet
           open={rightPanelOpen}
