@@ -74,6 +74,18 @@ export const CodeFontSize = Schema.Int.check(
 export type CodeFontSize = typeof CodeFontSize.Type;
 export const DEFAULT_CODE_FONT_SIZE: CodeFontSize = 13;
 
+/**
+ * How deep part drawings call out a tap from each end of a hole, in inches. Through holes always
+ * get the drill THRU and the thread to this depth, so no tap is ever called out THRU.
+ */
+export const MIN_DRAWING_MAX_TAP_DEPTH = 0.05;
+export const MAX_DRAWING_MAX_TAP_DEPTH = 3;
+export const DrawingMaxTapDepth = Schema.Number.check(
+  Schema.isBetween({ minimum: MIN_DRAWING_MAX_TAP_DEPTH, maximum: MAX_DRAWING_MAX_TAP_DEPTH }),
+);
+export type DrawingMaxTapDepth = typeof DrawingMaxTapDepth.Type;
+export const DEFAULT_DRAWING_MAX_TAP_DEPTH: DrawingMaxTapDepth = 0.5;
+
 export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill", "none"]);
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
 export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
@@ -121,6 +133,9 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadUnpin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   dismissedProviderUpdateNotificationKeys: Schema.Array(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  drawingMaxTapDepth: DrawingMaxTapDepth.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DRAWING_MAX_TAP_DEPTH)),
   ),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE)),
@@ -635,6 +650,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
+  drawingMaxTapDepth: Schema.optionalKey(DrawingMaxTapDepth),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),

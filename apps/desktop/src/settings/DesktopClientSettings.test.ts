@@ -22,6 +22,7 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   confirmThreadUnpin: false,
   dismissedProviderUpdateNotificationKeys: [],
+  drawingMaxTapDepth: 0.5,
   environmentIdentificationMode: "artwork",
   favorites: [],
   fontFamilyCode: "",

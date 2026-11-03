@@ -211,19 +211,27 @@ export const holeReadings = (group: HoleGroup, units: Units): HoleReading[] => {
 };
 
 /**
- * Callout text for a hole group, e.g. "10-32 UNF ↧.50 BOTH ENDS". `toward` is the direction to
- * the viewer of the view the callout sits in; a countersink on the side away from the viewer
- * says FAR SIDE. Without a view, sides are named from where the drill enters. A BOTH ENDS pair
- * has each countersink at its own entry, so it names no side.
+ * Callout lines for a hole group, e.g. ["10-32 UNF ↧.38", "BOTH ENDS"]. A tap threads at most
+ * `tapDepth` (meters, the user's max tap depth) into each end. A through hole or a deeper blind
+ * hole calls out its drill, then its thread: ["Ø.159 THRU", "10-32 UNF ↧.50 BOTH ENDS"].
+ * `toward` is the direction to the viewer of the view the callout sits in; a countersink on the
+ * side away from the viewer says FAR SIDE. Without a view, sides are named from where the drill
+ * enters. A BOTH ENDS pair has each countersink at its own entry, so it names no side.
  */
 export const holeCallout = (
   group: HoleGroup,
   reading: HoleReading,
   units: Units,
+  tapDepth: number,
   toward?: Vec3,
-) => {
+): string[] => {
   const count = group.bothEnds ? "" : group.holes.length > 1 ? `${group.holes.length}X ` : "";
   const depth = group.depth === null ? "THRU" : `↧${formatLength(group.depth, units, 2)}`;
+  // A blind hole within the tap's reach threads to its bottom. A through hole never threads
+  // THRU, however thin: it taps to the cap from each end. The slack keeps a .500 hole whole.
+  const threadsAll =
+    reading.tap === null ||
+    (group.depth !== null && group.depth < tapDepth + 0.001 * METERS_PER_INCH);
   const sink = (countersink: Countersink) =>
     `⌵Ø${formatLength(countersink.diameter, units)}×${countersink.angle.toFixed(0)}°`;
   const { countersink: entry, farCountersink: exit } = group;
@@ -242,8 +250,16 @@ export const holeCallout = (
         ]
           .map((text) => ` ${text}`)
           .join("");
-  const where = group.bothEnds ? " BOTH ENDS" : "";
-  return `${count}${reading.callout} ${depth}${sinks}${where}`;
+  if (threadsAll) {
+    const hole = `${count}${reading.callout} ${depth}${sinks}`;
+    return group.bothEnds ? [hole, "BOTH ENDS"] : [hole];
+  }
+  // A through hole is tapped from both of its ends; a blind hole only from its entry.
+  const tapEnds = group.bothEnds || group.depth === null ? " BOTH ENDS" : "";
+  return [
+    `${count}Ø${formatLength(group.diameter, units)} ${depth}${sinks}`,
+    `${reading.callout} ↧${formatLength(tapDepth, units, 2)}${tapEnds}`,
+  ];
 };
 
 const STANDARD_ROUND_IN = [

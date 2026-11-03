@@ -2,18 +2,30 @@
 // `RightPanelDrawing`, built in the browser from the snapshot's cached part meshes. A group
 // selection keeps only parts the shop draws; plates and printed parts are counted, not drawn.
 import { useAtomValue } from "@effect/atom-react";
-import { CadSnapshotManifest, type ScopedThreadRef } from "@cadsense/contracts";
+import {
+  CadSnapshotManifest,
+  DrawingMaxTapDepth,
+  MAX_DRAWING_MAX_TAP_DEPTH,
+  MIN_DRAWING_MAX_TAP_DEPTH,
+  type ScopedThreadRef,
+} from "@cadsense/contracts";
 import { CaretLeftIcon, CaretRightIcon, PrinterIcon } from "~/lib/icons";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button } from "../../components/ui/button";
+import {
+  useClientSettings,
+  useClientSettingsHydrated,
+  useUpdateClientSettings,
+} from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import type { RightPanelDrawing } from "../../rightPanelStore";
 import { cadPanelEnvironment } from "../../state/cadPanel";
 import { useEnvironmentHttpBaseUrl } from "../../state/environments";
 import {
   analyzePart,
+  METERS_PER_INCH,
   projectView,
   viewSpecs,
   type DrawingView,
@@ -39,6 +51,7 @@ import {
 } from "./shopKnowledge";
 
 const decodeManifest = Schema.decodeUnknownSync(CadSnapshotManifest);
+const isTapDepth = Schema.is(DrawingMaxTapDepth);
 const MAX_TRIANGLES = 150_000;
 const SHEET_STYLE = {
   "--sheet-font": '"Inter", "Helvetica Neue", Arial, sans-serif',
@@ -95,6 +108,7 @@ const buildSheet = (
   form: SheetForm,
   choices: PartChoices | undefined,
   units: Units,
+  tapDepthIn: number,
   revision: string,
 ): SheetData => {
   const readings = new Map<string, HoleReading>();
@@ -115,6 +129,7 @@ const buildSheet = (
     ...form,
     units,
     readings,
+    tapDepth: tapDepthIn * METERS_PER_INCH,
     stock: stockFor(prepared.part, material, units),
     source: { partId: entry.partId, revision, date: new Date().toISOString().slice(0, 10) },
   };
@@ -139,6 +154,13 @@ export function CadDrawingPanel({
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [units, setUnits] = useState<Units>("in");
+  // Inches, saved with the client settings so every drawing uses the shop's cap.
+  const tapDepthIn = useClientSettings((settings) => settings.drawingMaxTapDepth);
+  const updateClientSettings = useUpdateClientSettings();
+  const settingsHydrated = useClientSettingsHydrated();
+  // The cap in the sheet's units, as the field shows it.
+  const perInch = units === "mm" ? 25.4 : 1;
+  const shownTapDepth = +(tapDepthIn * perInch).toFixed(units === "mm" ? 1 : 3);
   const [form, setForm] = useState<SheetForm>({ requester: "", team: "", notes: "" });
   const [choices, setChoices] = useState<Record<string, PartChoices>>({});
   const [prepared, setPrepared] = useState<Record<string, Prepared>>({});
@@ -259,7 +281,7 @@ export function CadDrawingPanel({
   const revision = manifest?.root.microversionId.slice(0, 8) ?? "";
   const data =
     entry && ready
-      ? buildSheet(entry, ready, form, choices[entry.geometryKey], units, revision)
+      ? buildSheet(entry, ready, form, choices[entry.geometryKey], units, tapDepthIn, revision)
       : null;
 
   const printAll = async () => {
@@ -274,6 +296,7 @@ export function CadDrawingPanel({
             form,
             choices[sheet.geometryKey],
             units,
+            tapDepthIn,
             revision,
           ),
         ),
@@ -465,6 +488,33 @@ export function CadDrawingPanel({
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
               />
             </Field>
+            {ready.part.holes.some((group) =>
+              holeReadings(group, units).some((reading) => reading.tap),
+            ) && (
+              <Field label={`Max tap depth from each end (${units})`}>
+                {/* Uncontrolled so a half-typed number can sit in the box; valid ones save, and
+                    leaving the box shows the saved value again. It remounts when the units
+                    change or the saved value loads. */}
+                <input
+                  key={`${units}:${settingsHydrated}`}
+                  className={inputClass}
+                  type="number"
+                  min={+(MIN_DRAWING_MAX_TAP_DEPTH * perInch).toFixed(2)}
+                  max={+(MAX_DRAWING_MAX_TAP_DEPTH * perInch).toFixed(2)}
+                  step={units === "mm" ? "any" : 0.05}
+                  defaultValue={shownTapDepth}
+                  onChange={(e) => {
+                    // Rounded so 76.2 mm lands on 3 in, not just past it.
+                    const value = +(Number(e.target.value) / perInch).toFixed(6);
+                    if (e.target.value !== "" && isTapDepth(value))
+                      updateClientSettings({ drawingMaxTapDepth: value });
+                  }}
+                  onBlur={(e) => {
+                    e.target.value = String(shownTapDepth);
+                  }}
+                />
+              </Field>
+            )}
             {ready.part.holes.map((group) => {
               const options = holeReadings(group, units);
               const confirmed = group.key in (choices[entry.geometryKey]?.readings ?? {});
