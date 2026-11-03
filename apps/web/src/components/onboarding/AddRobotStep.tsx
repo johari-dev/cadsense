@@ -1,6 +1,13 @@
 import { scopeProjectRef } from "@cadsense/client-runtime/environment";
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
-import type { EnvironmentId, OnshapeConnectionId, ServerProvider } from "@cadsense/contracts";
+import {
+  ONSHAPE_PUBLIC_STACK_ORIGIN,
+  onshapeStackOrigin,
+  type EnvironmentId,
+  type OnshapeConnectionId,
+  type OnshapeConnectionSummary,
+  type ServerProvider,
+} from "@cadsense/contracts";
 import { useState, type ReactNode } from "react";
 
 import { ArrowSquareOutIcon, CheckIcon, EyeIcon, EyeSlashIcon } from "~/lib/icons";
@@ -13,10 +20,7 @@ import { onshapeConnectionEnvironment } from "../../state/onshapeConnections";
 import { onshapeProjectEnvironment } from "../../state/onshapeProjects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import {
-  DEFAULT_ONSHAPE_HOST,
-  safeOnshapeConnectionErrorMessage,
-} from "../settings/OnshapeConnectionsSettings.logic";
+import { safeOnshapeConnectionErrorMessage } from "../settings/OnshapeConnectionsSettings.logic";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -26,10 +30,11 @@ const ONSHAPE_API_KEYS_URL = "https://dev-portal.onshape.com/keys";
 
 /**
  * Step 2 of onboarding (A6 and A7): add the first robot. An Onshape link
- * needs an API key once; when this environment has no Onshape connection
- * yet, Continue opens the key step, and connecting creates the project in
- * the same click. SolidWorks and STEP files open the existing add-project
- * form.
+ * needs an API key once per Onshape stack; when this environment has no
+ * connection on the link's stack (cad.onshape.com, or an Enterprise domain
+ * like 1678.onshape.com), Continue opens the key step, and connecting
+ * creates the project in the same click. SolidWorks and STEP files open the
+ * existing add-project form.
  */
 export function AddRobotStep({
   environmentId,
@@ -62,10 +67,19 @@ export function AddRobotStep({
   const [linkError, setLinkError] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
   // A connection made on the key step, kept so a failed project create can
-  // be retried from the link step without creating a second connection.
-  const [createdConnectionId, setCreatedConnectionId] = useState<OnshapeConnectionId | null>(null);
-  const connectionId =
-    createdConnectionId ?? connectionsQuery.data?.connections[0]?.connectionId ?? null;
+  // be retried from the link step before the list refreshes, without
+  // creating a second connection.
+  const [createdConnection, setCreatedConnection] = useState<OnshapeConnectionSummary | null>(null);
+  const connections = connectionsQuery.data?.connections ?? [];
+  const knownConnections =
+    createdConnection === null ? connections : [createdConnection, ...connections];
+  // The stack the pasted link is on, or null until the link is an Onshape URL.
+  const linkStack = URL.canParse(url.trim()) ? onshapeStackOrigin(new URL(url.trim())) : null;
+  const linkConnection =
+    linkStack === null ? undefined : knownConnections.find((entry) => entry.host === linkStack);
+  const needsKey =
+    linkStack === null ? knownConnections.length === 0 : linkConnection === undefined;
+  const linkHostname = linkStack === null ? null : new URL(linkStack).hostname;
 
   /** Creates the Onshape project and opens its first chat. Returns an error, or null. */
   const addOnshapeRobot = async (connectionId: OnshapeConnectionId): Promise<string | null> => {
@@ -90,14 +104,18 @@ export function AddRobotStep({
   const submitLink = async () => {
     if (!url.trim()) return setLinkError("Paste the link to your Onshape document.");
     if (!title.trim()) return setLinkError("Give your robot a name.");
+    if (linkStack === null) {
+      return setLinkError("Paste the full Onshape link from your browser, starting with https://.");
+    }
     setLinkError(null);
-    if (connectionId === null) return setStep("key");
+    if (linkConnection === undefined) return setStep("key");
     setPending(true);
-    setLinkError(await addOnshapeRobot(connectionId));
+    setLinkError(await addOnshapeRobot(linkConnection.connectionId));
     setPending(false);
   };
 
   const submitKey = async () => {
+    if (linkStack === null) return setStep("link");
     if (!accessKeyId.trim() || !secretKey.trim()) {
       return setKeyError("Paste both codes from Onshape.");
     }
@@ -106,8 +124,8 @@ export function AddRobotStep({
     const created = await createConnection({
       environmentId,
       input: {
-        name: "Onshape",
-        host: DEFAULT_ONSHAPE_HOST,
+        name: linkStack === ONSHAPE_PUBLIC_STACK_ORIGIN ? "Onshape" : `Onshape (${linkHostname})`,
+        host: linkStack,
         accessKeyId: accessKeyId.trim(),
         secretKey: secretKey.trim(),
       },
@@ -117,7 +135,7 @@ export function AddRobotStep({
       setPending(false);
       return;
     }
-    setCreatedConnectionId(created.value.connectionId);
+    setCreatedConnection(created.value);
     connectionsQuery.refresh();
     // The key worked. A project error is about the link, so show it there.
     const projectError = await addOnshapeRobot(created.value.connectionId);
@@ -152,6 +170,12 @@ export function AddRobotStep({
           Cadsense needs an Onshape API key, a pair of codes that lets it read documents your
           Onshape account can open. You make it once.
         </p>
+        {linkStack !== null && linkStack !== ONSHAPE_PUBLIC_STACK_ORIGIN ? (
+          <p className="mt-2 text-muted-foreground text-sm">
+            This link is on <b className="font-medium">{linkHostname}</b>. Make the key with the
+            Onshape account you use there.
+          </p>
+        ) : null}
         <ol className="mt-5 space-y-3 text-sm">
           <KeyStep n={1}>
             <span className="flex-1">Open Onshape's API keys page and sign in.</span>
@@ -303,7 +327,7 @@ export function AddRobotStep({
           <p role="alert" className="text-destructive-foreground text-xs">
             {linkError}
           </p>
-        ) : connectionId === null ? (
+        ) : needsKey ? (
           <p className="text-tertiary-foreground text-xs">
             The first Onshape link needs a read-only key from Onshape. We walk you through it next.
           </p>

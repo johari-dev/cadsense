@@ -54,6 +54,34 @@ export const OnshapeConnectionHost = TrimmedNonEmptyString.check(
 );
 export type OnshapeConnectionHost = typeof OnshapeConnectionHost.Type;
 
+export const ONSHAPE_PUBLIC_STACK_ORIGIN = "https://cad.onshape.com";
+
+/**
+ * Hostnames that serve the public stack under another name: the marketing
+ * site (whose /documents paths 404, but users paste them), the sign-in and
+ * API hosts, and regional hosts such as cad-euw1. Enterprise domains like
+ * 1678.onshape.com reach the same servers but keep their own origin, because
+ * the domain selects the company.
+ */
+const ONSHAPE_PUBLIC_STACK_ALIAS = /^(?:www\.|oauth\.|api\.|cad-[a-z]+\d+\.)?onshape\.com$/;
+
+/**
+ * The origin of the Onshape stack a link or host is on, in the form saved
+ * connections store, or null when it is not https on onshape.com. Compare it
+ * with a connection's host to tell whether the connection can open the link.
+ */
+export function onshapeStackOrigin(url: URL): string | null {
+  const hostname = url.hostname;
+  if (
+    url.protocol !== "https:" ||
+    url.port !== "" ||
+    (hostname !== "onshape.com" && !hostname.endsWith(".onshape.com"))
+  ) {
+    return null;
+  }
+  return ONSHAPE_PUBLIC_STACK_ALIAS.test(hostname) ? ONSHAPE_PUBLIC_STACK_ORIGIN : url.origin;
+}
+
 /** Non-secret Onshape document binding and managed-workspace state for a project. */
 export const OnshapeProjectSource = Schema.Struct({
   connectionId: OnshapeConnectionId,
