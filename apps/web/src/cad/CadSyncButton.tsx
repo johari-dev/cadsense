@@ -7,6 +7,7 @@ import {
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
+  type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import { useEffect, useState } from "react";
@@ -22,6 +23,7 @@ import type { Project } from "../types";
 import { cadSyncBlocker } from "./CadProjectState";
 
 type CadSyncRoot = Extract<CadUserStartInput, { kind: "sync" }>["root"];
+type CadOperationId = NonNullable<CadProjectState["lastOutcome"]>["operationId"];
 const isCadUserOperationError = Schema.is(CadUserOperationError);
 
 /**
@@ -48,6 +50,28 @@ function cadSyncTarget(project: Project, rootId: string | null): CadSyncRoot | n
   };
 }
 
+/**
+ * What one click on the panel's Sync button does: sync a root, or first refresh the catalog of an
+ * Onshape project that was never refreshed, as only the catalog says whether its linked element is
+ * an Assembly or a Part Studio. Null when the panel has nothing to sync.
+ */
+export function cadSyncPlan(
+  project: Project,
+  rootId: string | null,
+): { kind: "sync"; root: CadSyncRoot } | { kind: "discover" } | null {
+  const root = cadSyncTarget(project, rootId);
+  if (root) return { kind: "sync", root };
+  if (project.onshapeSource?.elementId && !project.cad?.catalog) return { kind: "discover" };
+  return null;
+}
+
+/** Why a refreshed catalog leaves nothing to sync for the project's linked Onshape element. */
+function unsyncableDescription(project: Project): string {
+  return project.cad?.catalog?.sourceElement?.status === "missing"
+    ? "The Onshape tab this project links to is no longer in the document. Choose CAD in project settings."
+    : "The Onshape tab this project links to is not an Assembly or Part Studio. Choose CAD in project settings.";
+}
+
 /** The toast for a start the server refused. Busy and throttled are expected, so they explain. */
 function refusedDescription(cause: unknown): string {
   if (isCadUserOperationError(cause) && cause.reason === "busy")
@@ -62,7 +86,9 @@ function refusedDescription(cause: unknown): string {
  * local file after it was re-exported (a SolidWorks file converts with SolidWorks again). It is
  * disabled while any chat in the project runs, as the server would refuse the sync, and its tooltip
  * names those chats. Once the server records the outcome of a sync it started, a toast says whether
- * the model changed, stayed the same, or failed and why. Renders nothing without a root to sync.
+ * the model changed, stayed the same, or failed and why. For an Onshape project that was never
+ * refreshed, the click refreshes the catalog and then syncs the linked element. Renders nothing
+ * without a root to sync.
  */
 export function CadSyncButton({
   project,
@@ -77,13 +103,18 @@ export function CadSyncButton({
     reportFailure: false,
   });
   const threads = useThreadShells();
-  // The sync this button started, until the server records its outcome.
-  const [started, setStarted] = useState<{
-    operationId: NonNullable<CadProjectState["lastOutcome"]>["operationId"];
-    root: CadSyncRoot;
-    name: string;
-    before: string | null;
-  } | null>(null);
+  // The operation this button started, until the server records its outcome.
+  const [started, setStarted] = useState<
+    | {
+        kind: "sync";
+        operationId: CadOperationId;
+        root: CadSyncRoot;
+        name: string;
+        before: string | null;
+      }
+    | { kind: "discover"; operationId: CadOperationId }
+    | null
+  >(null);
   const cad = project.cad;
   const outcome = cad?.lastOutcome;
   /**
@@ -95,10 +126,62 @@ export function CadSyncButton({
     cad?.roots.find(
       (entry) => entry.elementId === root.elementId && entry.configuration === root.configuration,
     )?.current?.microversionId ?? null;
-  const startedVersion = started ? currentVersion(started.root) : null;
+  const startedVersion = started?.kind === "sync" ? currentVersion(started.root) : null;
+  const nameOf = (root: CadSyncRoot) =>
+    cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
+    project.localCadSource?.filePath ??
+    "CAD";
+  /** The toast for a start the server refused, from the start command's settled result. */
+  const refused = (name: string, result: AtomCommandResult<unknown, unknown>) => {
+    if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+    toastManager.add({
+      type: "error",
+      title: `Could not sync ${name}`,
+      description: refusedDescription(squashAtomCommandFailure(result)),
+    });
+  };
+  const sync = async (root: CadSyncRoot) => {
+    const name = nameOf(root);
+    const before = currentVersion(root);
+    const result = await start({
+      environmentId: project.environmentId,
+      input: { projectId: project.id, kind: "sync", root },
+    });
+    if (result._tag === "Success")
+      setStarted({ kind: "sync", operationId: result.value.operationId, root, name, before });
+    else refused(name, result);
+  };
+  const discover = async () => {
+    const result = await start({
+      environmentId: project.environmentId,
+      input: { projectId: project.id, kind: "discover" },
+    });
+    if (result._tag === "Success")
+      setStarted({ kind: "discover", operationId: result.value.operationId });
+    else refused("CAD", result);
+  };
   useEffect(() => {
     if (!started || !outcome || outcome.operationId !== started.operationId) return;
     setStarted(null);
+    if (started.kind === "discover") {
+      if (outcome.status === "failed")
+        toastManager.add({
+          type: "error",
+          title: "Could not sync CAD",
+          description: outcome.reason ?? "The CAD catalog could not be refreshed.",
+        });
+      if (outcome.status !== "succeeded") return;
+      // The refreshed catalog now says which kind the linked element is, so the sync can start.
+      const root = cadSyncTarget(project, rootId);
+      if (root) void sync(root);
+      else
+        toastManager.add({
+          type: "error",
+          title: "Could not sync CAD",
+          description: unsyncableDescription(project),
+        });
+      return;
+    }
     if (outcome.status === "failed")
       toastManager.add({
         type: "error",
@@ -117,32 +200,13 @@ export function CadSyncButton({
       });
   }, [started, outcome, startedVersion]);
 
-  const root = cadSyncTarget(project, rootId);
-  if (!root) return null;
-  const name =
-    cad?.catalog?.roots.find((entry) => entry.elementId === root.elementId)?.name ??
-    project.localCadSource?.filePath ??
-    "CAD";
+  const plan = cadSyncPlan(project, rootId);
+  if (!plan) return null;
+  const root = plan.kind === "sync" ? plan.root : null;
+  const name = root ? nameOf(root) : "CAD";
   const solidWorks = project.localCadSource !== undefined && isSolidWorksFile(name);
-  const syncing = cad?.operation?.kind === "sync";
+  const syncing = cad?.operation?.kind === "sync" || started?.kind === "discover";
   const blocker = cadSyncBlocker(project, threads);
-  const sync = async () => {
-    const before = currentVersion(root);
-    const result = await start({
-      environmentId: project.environmentId,
-      input: { projectId: project.id, kind: "sync", root },
-    });
-    if (result._tag === "Success") {
-      setStarted({ operationId: result.value.operationId, root, name, before });
-      return;
-    }
-    if (isAtomCommandInterrupted(result)) return;
-    toastManager.add({
-      type: "error",
-      title: `Could not sync ${name}`,
-      description: refusedDescription(squashAtomCommandFailure(result)),
-    });
-  };
   return (
     <Tooltip>
       {/* A disabled button gets no pointer events, so the span carries the tooltip. */}
@@ -151,7 +215,7 @@ export function CadSyncButton({
           size="xs"
           variant="outline"
           disabled={disabled || blocker !== null}
-          onClick={() => void sync()}
+          onClick={() => void (root ? sync(root) : discover())}
         >
           <ArrowsClockwiseIcon />
           {syncing
@@ -166,7 +230,7 @@ export function CadSyncButton({
       <TooltipPopup>
         {blocker ??
           (!project.localCadSource
-            ? `Download ${name} from Onshape again`
+            ? `Download ${name} from Onshape${root && currentVersion(root) ? " again" : ""}`
             : solidWorks
               ? `Convert ${name} with SolidWorks again after saving it`
               : `Import ${name} again after re-exporting it`)}

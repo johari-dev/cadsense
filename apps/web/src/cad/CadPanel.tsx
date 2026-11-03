@@ -40,7 +40,7 @@ import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
 import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { CadScenePicker } from "./CadScenePicker";
-import { CadSyncButton } from "./CadSyncButton";
+import { CadSyncButton, cadSyncPlan } from "./CadSyncButton";
 import { CadFilePrompt } from "./CadFilePrompt";
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
 import { useCadActivityIndicator } from "./useCadActivityIndicator";
@@ -997,8 +997,11 @@ export function CadPanel({
             "This downloaded CAD is unavailable. You can select another cached scene."
           ) : roots.length ? (
             "Select a CAD scene above."
+          ) : !compact && cadSyncPlan(project, shownRootId) ? (
+            // The header's Sync button can download it, before the catalog was ever refreshed too.
+            "No CAD has been downloaded. Press Sync to download it from Onshape."
           ) : (
-            "No CAD has been downloaded. Select and sync CAD in project settings."
+            "No CAD has been downloaded. Choose an Assembly or Part Studio in project settings, then sync it."
           )}
         </div>
       )}
