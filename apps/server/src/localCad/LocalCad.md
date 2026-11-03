@@ -90,7 +90,7 @@ and cancelling terminates the worker.
 | File parses to no triangles (wireframe only)          | Sync fails with a no-solid-geometry reason                   |
 | File over 512 MiB                                     | Sync fails before reading it                                 |
 | Cancel during import                                  | Worker terminated, outcome `cancelled`, nothing published    |
-| Unchanged file synced again                           | Same comment model descriptor, so the comment revision holds |
+| Unchanged file synced again                           | Latest snapshot reused; occt does not run                    |
 | Changed file synced again                             | New microversion; the previous snapshot becomes the rollback |
 | Repeated sibling names (three bolts)                  | Distinct, stable occurrence paths                            |
 | Folder already used by a folder project               | That project gets the CAD source                             |

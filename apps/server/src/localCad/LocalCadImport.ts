@@ -486,22 +486,16 @@ export const make = Effect.gen(function* () {
   });
 
   /**
-   * Converts a SolidWorks file with the local SolidWorks, in the root's configuration. The latest
-   * snapshot of the same root, so the same configuration, is what gets reused: unchanged files
-   * reuse it whole without starting SolidWorks. Otherwise SolidWorks exports only the parts it
-   * lacks, and every other part keeps its geometry, material, and mass.
+   * Converts a SolidWorks file with the local SolidWorks, in the root's configuration. SolidWorks
+   * exports only the parts the latest snapshot of the same root (so the same configuration) lacks,
+   * and every other part keeps its geometry, material, and mass.
    */
   const solidWorksDraft = Effect.fn("LocalCadImport.solidWorksDraft")(function* (
     context: CadSnapshotContext,
     files: readonly { readonly path: string; readonly bytes: Uint8Array }[],
     rootName: string,
+    latest: CadSnapshotManifest | null,
   ) {
-    const latest = yield* latestSnapshot(context);
-    if (
-      latest?.root.microversionId === context.root.microversionId &&
-      latest.root.tessellationProfile === context.root.tessellationProfile
-    )
-      return { unchanged: latest } as const;
     const reusable = reusableSolidWorksParts(latest?.parts ?? [], context.root.tessellationProfile);
     // Staged flat: the plan already picked one file per name, and SolidWorks looks for each
     // reference beside the assembly first. Each part meshes as soon as SolidWorks exports it.
@@ -569,6 +563,13 @@ export const make = Effect.gen(function* () {
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
+    // Unchanged files reuse the latest snapshot of this root whole, without SolidWorks or occt.
+    const latest = yield* latestSnapshot(context);
+    if (
+      latest?.root.microversionId === root.microversionId &&
+      latest.root.tessellationProfile === root.tessellationProfile
+    )
+      return latest;
     const rootName = path.basename(file.relativePath);
     let built: {
       readonly draft: Parameters<typeof completeSnapshotManifest>[0];
@@ -576,9 +577,7 @@ export const make = Effect.gen(function* () {
       readonly previousAssets: readonly CadGeometryAsset[];
     };
     if (file.format === "sldprt" || file.format === "sldasm") {
-      const solidWorksBuilt = yield* solidWorksDraft(context, files, rootName);
-      if ("unchanged" in solidWorksBuilt) return solidWorksBuilt.unchanged;
-      built = solidWorksBuilt;
+      built = yield* solidWorksDraft(context, files, rootName, latest);
     } else {
       const model = yield* tessellateLocalCad(bytes, file.format).pipe(tessellators.withPermits(1));
       built = {
