@@ -40,6 +40,8 @@ export interface SheetData {
   readonly notes: string;
   readonly units: Units;
   readonly readings: ReadonlyMap<string, HoleReading>;
+  /** Max tap depth from each end of a hole, in meters. */
+  readonly tapDepth: number;
   readonly stock: Stock;
   readonly source: { readonly partId: string; readonly revision: string; readonly date: string };
 }
@@ -247,16 +249,14 @@ const HoleLeaders = ({
                 side === "left" ? placed.left - 0.35 : placed.right + 0.35,
                 placed.top + 0.1 + i * 0.45,
               ];
-      const text = holeCallout(group, readingFor(data, group), data.units, placed.view.spec.toward);
-      const [main, ...rest] = text.split(" BOTH ENDS");
-      return (
-        <Leader
-          key={group.key}
-          at={at}
-          to={to}
-          lines={rest.length ? [main!, "BOTH ENDS"] : [text]}
-        />
+      const lines = holeCallout(
+        group,
+        readingFor(data, group),
+        data.units,
+        data.tapDepth,
+        placed.view.spec.toward,
       );
+      return <Leader key={group.key} at={at} to={to} lines={lines} />;
     })}
   </g>
 );
@@ -529,8 +529,8 @@ const ThirdAngleSymbol = ({ x, y }: { x: number; y: number }) => (
   </g>
 );
 
-const TABLE_X = [0, 0.4, 0.85, 1.4, 1.95];
-const TABLE_W = [0.4, 0.45, 0.55, 0.55, 1.45];
+const TABLE_X = [0, 0.4, 0.85, 1.3, 1.75];
+const TABLE_W = [0.4, 0.45, 0.45, 0.45, 1.65];
 // Hole table rows between its header and the sheet border.
 const TABLE_ROW = 0.14;
 const TABLE_ROWS = 8;
@@ -555,8 +555,9 @@ const tagHoles = (data: SheetData, views: readonly Placed[]) => {
             { ...group, holes: [group.holes[index]!], bothEnds: false },
             readingFor(data, group),
             data.units,
+            data.tapDepth,
             placed.view.spec.toward,
-          ),
+          ).join(", "),
         };
       }),
     ),
