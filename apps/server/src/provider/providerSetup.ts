@@ -1,14 +1,15 @@
 /**
  * One-click provider setup behind onboarding and the providers settings
- * page: install a missing CLI, or run the CLI's own browser sign-in.
+ * page: install a missing CLI, run the CLI's own browser sign-in, or sign
+ * out (say, when the CLI can no longer refresh its access token).
  *
  * Each driver supplies the exact commands for its instance through
- * `ServerProviderShape.setupCommands`, so sign-in runs with the same
- * environment (CODEX_HOME, CLAUDE_CONFIG_DIR) the instance reads credentials
- * from. While a command runs, and after it fails, the registry publishes its
+ * `ServerProviderShape.setupCommands`, so sign-in and sign-out run with the
+ * same environment (CODEX_HOME, CLAUDE_CONFIG_DIR) the instance reads
+ * credentials from. While a command runs, and after it fails, the registry publishes its
  * state on the instance's snapshot. After a command succeeds the runner
- * re-probes the instance and returns the fresh snapshots. Each finished attempt
- * counts toward usage analytics as an ok or failed install or sign-in.
+ * re-probes the instance and returns the fresh snapshots. Each finished install
+ * or sign-in counts toward usage analytics as ok or failed; sign-outs do not count.
  *
  * @module providerSetup
  */
@@ -16,6 +17,7 @@ import {
   ServerProviderSetupError,
   type ProviderInstanceId,
   type ServerProvider,
+  type ServerProviderSetupAction,
   type ServerProviderSetupInput,
   type ServerProviderUpdatedPayload,
 } from "@cadsense/contracts";
@@ -32,6 +34,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+import type { DailyCounter } from "../telemetry/AnalyticsEvents.ts";
 import { AnalyticsService } from "../telemetry/AnalyticsService.ts";
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
 
@@ -42,10 +45,10 @@ export interface ProviderSetupCommand {
   readonly env?: NodeJS.ProcessEnv | undefined;
 }
 
-export interface ProviderSetupCommands {
-  readonly install: ProviderSetupCommand;
-  readonly signIn: ProviderSetupCommand;
-}
+/** One command per setup action, run with the instance's own environment. */
+export type ProviderSetupCommands = {
+  readonly [Action in ServerProviderSetupAction]: ProviderSetupCommand;
+};
 
 /**
  * A vendor's standalone install script. Each one downloads a native binary,
@@ -97,6 +100,25 @@ export function installScriptCommand(
 const INSTALL_TIMEOUT = Duration.minutes(5);
 // Sign-in waits for the user to finish in the browser.
 const SIGN_IN_TIMEOUT = Duration.minutes(10);
+// `claude auth logout` keeps retrying to revoke the token for about 2.5
+// minutes when Anthropic is unreachable, and only then deletes it.
+const SIGN_OUT_TIMEOUT = Duration.minutes(5);
+
+const ACTION_LABELS = {
+  install: "Install",
+  signIn: "Sign-in",
+  signOut: "Sign-out",
+} satisfies Record<ServerProviderSetupAction, string>;
+const ACTION_TIMEOUTS = {
+  install: INSTALL_TIMEOUT,
+  signIn: SIGN_IN_TIMEOUT,
+  signOut: SIGN_OUT_TIMEOUT,
+} satisfies Record<ServerProviderSetupAction, Duration.Duration>;
+const FAILURE_COUNTERS = {
+  install: "provider_installs_failed",
+  signIn: "provider_signins_failed",
+  signOut: null,
+} as const satisfies Record<ServerProviderSetupAction, DailyCounter | null>;
 const OUTPUT_MAX_BYTES = 10_000;
 const FAILURE_OUTPUT_MAX_CHARS = 600;
 
@@ -129,10 +151,11 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   // Installers write shared folders such as ~/.local/bin, so run one at a time.
   const installLock = yield* Semaphore.make(1);
-  // A new sign-in for an instance interrupts (and kills) the previous one.
-  // Codex's login server holds a fixed port, and a user who closed the
-  // browser tab should not have to wait out the old attempt.
-  const signIns = yield* FiberMap.make<
+  // A new sign-in or sign-out for an instance interrupts (and kills) the
+  // previous one. Codex's login server holds a fixed port, a user who closed
+  // the browser tab should not have to wait out the old attempt, and a
+  // sign-out must not leave a login running that signs the account back in.
+  const authCommands = yield* FiberMap.make<
     ProviderInstanceId,
     ReadonlyArray<ServerProvider>,
     ServerProviderSetupError
@@ -191,42 +214,38 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
         status: "running",
         startedAt,
       });
+      const failureCounter = FAILURE_COUNTERS[input.action];
       const fail = (reason: string) =>
-        analytics
-          .count(
-            input.action === "install" ? "provider_installs_failed" : "provider_signins_failed",
-          )
-          .pipe(
-            Effect.andThen(
-              providerRegistry.setSetupState(input.instanceId, {
+        (failureCounter === null ? Effect.void : analytics.count(failureCounter)).pipe(
+          Effect.andThen(
+            providerRegistry.setSetupState(input.instanceId, {
+              action: input.action,
+              status: "failed",
+              startedAt,
+              reason,
+            }),
+          ),
+          Effect.andThen(
+            Effect.fail(
+              new ServerProviderSetupError({
+                instanceId: input.instanceId,
                 action: input.action,
-                status: "failed",
-                startedAt,
                 reason,
               }),
             ),
-            Effect.andThen(
-              Effect.fail(
-                new ServerProviderSetupError({
-                  instanceId: input.instanceId,
-                  action: input.action,
-                  reason,
-                }),
-              ),
-            ),
-          );
+          ),
+        );
 
       yield* running;
-      const label = input.action === "install" ? "Install" : "Sign-in";
-      const command = input.action === "install" ? commands.install : commands.signIn;
-      const timeout = input.action === "install" ? INSTALL_TIMEOUT : SIGN_IN_TIMEOUT;
-      const result = yield* runCommand(command, timeout).pipe(Effect.result);
+      const label = ACTION_LABELS[input.action];
+      const timeout = ACTION_TIMEOUTS[input.action];
+      const result = yield* runCommand(commands[input.action], timeout).pipe(Effect.result);
       const commandFailure =
         result._tag === "Failure"
           ? result.failure
           : result.success === null
             ? input.action === "signIn"
-              ? `Sign-in timed out after ${Duration.toMinutes(SIGN_IN_TIMEOUT)} minutes.`
+              ? `Sign-in timed out after ${Duration.toMinutes(timeout)} minutes.`
               : `${label} timed out.`
             : result.success.exitCode !== 0
               ? `${label} exited with code ${result.success.exitCode}.${
@@ -235,15 +254,22 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
               : null;
       if (commandFailure !== null) {
         // A sign-in that ends badly may still have signed the account in,
-        // for example when the browser finished but the CLI was stopped.
-        // The CLI's own account check decides.
-        const signedIn =
-          input.action === "signIn" &&
+        // for example when the browser finished but the CLI was stopped. A
+        // sign-out may fail to revoke a dead token yet still delete it. The
+        // CLI's own account check decides.
+        const wantedAuth =
+          input.action === "signIn"
+            ? "authenticated"
+            : input.action === "signOut"
+              ? "unauthenticated"
+              : null;
+        const reachedWantedAuth =
+          wantedAuth !== null &&
           (yield* providerRegistry.refreshInstance(input.instanceId)).some(
             (provider) =>
-              provider.instanceId === input.instanceId && provider.auth.status === "authenticated",
+              provider.instanceId === input.instanceId && provider.auth.status === wantedAuth,
           );
-        if (!signedIn) return yield* fail(commandFailure);
+        if (!reachedWantedAuth) return yield* fail(commandFailure);
       }
 
       if (input.action === "install") {
@@ -261,10 +287,13 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
       if (input.action === "signIn" && provider?.auth.status === "unauthenticated") {
         return yield* fail("Sign-in finished, but the CLI still reports no signed-in account.");
       }
+      if (input.action === "signOut" && provider?.auth.status === "authenticated") {
+        return yield* fail("Sign-out finished, but the CLI still reports a signed-in account.");
+      }
       yield* providerRegistry.setSetupState(input.instanceId, null);
       // A probe that timed out reads "unknown"; only a confirmed account counts as signed in.
       if (input.action === "install") yield* analytics.count("provider_installs_ok");
-      else if (provider?.auth.status === "authenticated")
+      else if (input.action === "signIn" && provider?.auth.status === "authenticated")
         yield* analytics.count("provider_signins_ok");
       return yield* providerRegistry.getProviders;
     });
@@ -290,7 +319,7 @@ export const make = Effect.fn("ProviderSetupRunner.make")(function* () {
                   installLock.withPermits(1)(perform(input, commands)),
                 ),
             })
-          : yield* FiberMap.run(signIns, input.instanceId, perform(input, commands));
+          : yield* FiberMap.run(authCommands, input.instanceId, perform(input, commands));
       return { providers: yield* Fiber.join(fiber) };
     },
   );

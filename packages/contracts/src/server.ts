@@ -135,7 +135,7 @@ export const ServerProviderContinuation = Schema.Struct({
 });
 export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
 
-export const ServerProviderSetupAction = Schema.Literals(["install", "signIn"]);
+export const ServerProviderSetupAction = Schema.Literals(["install", "signIn", "signOut"]);
 export type ServerProviderSetupAction = typeof ServerProviderSetupAction.Type;
 
 /**
@@ -570,7 +570,9 @@ export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.T
 /**
  * One-click provider setup from onboarding and the providers settings page.
  * `install` runs the vendor's install script; `signIn` runs the CLI's own
- * browser login. Input and errors live with the RPC below.
+ * browser login; `signOut` runs the CLI's logout, which removes the stored
+ * credentials (for example a token the CLI can no longer refresh). Input and
+ * errors live with the RPC below.
  */
 export const ServerProviderSetupInput = Schema.Struct({
   instanceId: ProviderInstanceId,

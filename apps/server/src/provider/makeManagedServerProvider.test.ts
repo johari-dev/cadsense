@@ -40,6 +40,7 @@ interface TestSettings {
 const setupCommands = {
   install: { executable: "npm", args: ["install", "-g", "@openai/codex@latest"] },
   signIn: { executable: "codex", args: ["login"] },
+  signOut: { executable: "codex", args: ["logout"] },
 } as const;
 
 const initialSnapshot: ServerProvider = {

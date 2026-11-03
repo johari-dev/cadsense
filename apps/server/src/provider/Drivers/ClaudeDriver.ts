@@ -110,21 +110,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
-      // Sign in with the instance's CLAUDE_CONFIG_DIR so the credentials land
-      // where this instance reads them.
+      // Sign in and out with the instance's CLAUDE_CONFIG_DIR so the
+      // credentials land, and get removed, where this instance reads them.
+      const authEnv = yield* makeClaudeEnvironment(effectiveConfig, processEnv).pipe(
+        Effect.provideService(Path.Path, path),
+      );
       const setupCommands: ProviderSetupCommands = {
         // Installs to ~/.local/bin (%USERPROFILE%\.local\bin on Windows).
         install: installScriptCommand(yield* HostProcessPlatform, {
           posix: { url: "https://claude.ai/install.sh", shell: "bash" },
           windowsUrl: "https://claude.ai/install.ps1",
         }),
-        signIn: {
-          executable: effectiveConfig.binaryPath,
-          args: ["auth", "login"],
-          env: yield* makeClaudeEnvironment(effectiveConfig, processEnv).pipe(
-            Effect.provideService(Path.Path, path),
-          ),
-        },
+        signIn: { executable: effectiveConfig.binaryPath, args: ["auth", "login"], env: authEnv },
+        signOut: { executable: effectiveConfig.binaryPath, args: ["auth", "logout"], env: authEnv },
       };
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
       const stampIdentity = withInstanceIdentity({
@@ -150,7 +148,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
       // A signed-out probe is not cached, so the check after a sign-in sees
-      // the new account right away.
+      // the new account right away. Explicit refreshes clear it (see below).
       const capabilitiesProbeCache = yield* Cache.makeWith(
         () =>
           probeClaudeCapabilities(effectiveConfig, processEnv, cwd).pipe(
@@ -203,6 +201,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             Effect.provideService(Path.Path, path),
           ),
         checkProvider,
+        // A signed-in probe stays cached, so without this the check right
+        // after a sign-out would still report the old account.
+        clearCachesBeforeRefresh: Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey),
       }).pipe(
         Effect.mapError(
           (cause) =>
