@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { CadGeometryError, normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
 import { ServerConfig } from "../config.ts";
@@ -67,6 +68,11 @@ const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const DEFAULT_COLOR: Rgb = [0.5, 0.5, 0.5];
 const MAX_NODES = 100_000;
 const MAX_DEPTH = 128;
+/**
+ * occt workers at once, across imports, as before meshing overlapped the SolidWorks export. Each
+ * worker's memory grows with its part: a 62 MB STEP export peaked at 2.7 GB on its own.
+ */
+const LOCAL_CAD_TESSELLATORS = 2;
 /** Any face entity: a STEP without one has no geometry to tessellate. */
 const STEP_FACE = /\b(?:ADVANCED_FACE|FACE_SURFACE|FACETED_BREP|POLY_LOOP|TRIANGULATED_FACE)\b/;
 
@@ -425,6 +431,8 @@ export const make = Effect.gen(function* () {
     );
 
   const solidWorks = yield* SolidWorks;
+  // Shared by every import on this server: each occt worker can take a few GB on a large part.
+  const tessellators = yield* Semaphore.make(LOCAL_CAD_TESSELLATORS);
   const unreadable = () => new LocalCadImportError({ reason: "unreadable" });
 
   /**
@@ -496,45 +504,32 @@ export const make = Effect.gen(function* () {
       return { unchanged: latest } as const;
     const reusable = reusableSolidWorksParts(latest?.parts ?? [], context.root.tessellationProfile);
     // Staged flat: the plan already picked one file per name, and SolidWorks looks for each
-    // reference beside the assembly first.
-    const exported = yield* solidWorks.exportParts({
-      files: files.map((file) => ({ path: path.basename(file.path), bytes: file.bytes })),
-      skip: [...reusable.keys()],
-      configuration: context.root.configuration,
-    });
+    // reference beside the assembly first. Each part meshes as soon as SolidWorks exports it.
+    const exported = yield* solidWorks.exportParts(
+      {
+        files: files.map((file) => ({ path: path.basename(file.path), bytes: file.bytes })),
+        skip: [...reusable.keys()],
+        configuration: context.root.configuration,
+      },
+      (step) =>
+        tessellateLocalCad(step, "step").pipe(
+          Effect.map((model) => mergeLocalCadMeshes(model.meshes)),
+          // A part with only sketches exports a STEP with no faces, which occt rejects.
+          Effect.catchTag("LocalCadImportError", (error) =>
+            STEP_FACE.test(Buffer.from(step).toString("latin1"))
+              ? Effect.fail(error)
+              : Effect.succeed(null),
+          ),
+          tessellators.withPermits(1),
+        ),
+    );
     for (const warning of exported.warnings)
       yield* Effect.logWarning("SolidWorks import warning", { warning });
     const geometry = new Map<string, SolidWorksPartGeometry>(
       [...reusable].map(([key, part]) => [key, { kind: "reused", part }] as const),
     );
-    yield* Effect.forEach(
-      exported.parts,
-      ([key, part]) =>
-        tessellateLocalCad(part.step, "step").pipe(
-          Effect.map((model) => mergeLocalCadMeshes(model.meshes)),
-          // A part with only sketches exports a STEP with no faces, which occt rejects.
-          Effect.catchTag("LocalCadImportError", (error) =>
-            STEP_FACE.test(Buffer.from(part.step).toString("latin1"))
-              ? Effect.fail(error)
-              : Effect.succeed(null),
-          ),
-          Effect.map((mesh) => {
-            geometry.set(
-              key,
-              mesh
-                ? {
-                    kind: "mesh",
-                    name: part.name,
-                    mesh,
-                    material: part.material,
-                    massKg: part.massKg,
-                  }
-                : { kind: "empty" },
-            );
-          }),
-        ),
-      { concurrency: 2, discard: true },
-    );
+    for (const [key, { geometry: mesh, ...part }] of exported.parts)
+      geometry.set(key, mesh ? { kind: "mesh", ...part, mesh } : { kind: "empty" });
     const built = yield* Effect.try({
       try: () => buildSolidWorksDraft(context, exported.root, rootName, geometry),
       catch: geometryFailure,
@@ -585,7 +580,7 @@ export const make = Effect.gen(function* () {
       if ("unchanged" in solidWorksBuilt) return solidWorksBuilt.unchanged;
       built = solidWorksBuilt;
     } else {
-      const model = yield* tessellateLocalCad(bytes, file.format);
+      const model = yield* tessellateLocalCad(bytes, file.format).pipe(tessellators.withPermits(1));
       built = {
         ...(yield* Effect.try({
           try: () => buildLocalCadDraft(context, model, rootName),
