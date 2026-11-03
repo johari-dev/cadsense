@@ -1,4 +1,5 @@
 import {
+  CAD_DEFAULT_GHOST_OPACITY,
   CadUpdateViewInput,
   CadViewError,
   CadViewState,
@@ -56,6 +57,16 @@ export const decodeCadToolInput = <S extends Schema.Top>(schema: S, input: unkno
     ),
   );
 
+/**
+ * A stale expectedRevision or snapshotId. Every view update bumps the revision, so agents that read
+ * it once from cad_context fall behind; the details name the current values to retry with.
+ */
+export const cadRevisionConflict = (current: Pick<CadViewState, "revision" | "snapshotId">) =>
+  new CadViewError({
+    reason: "revision-conflict",
+    details: `The view is at revision ${current.revision} on snapshot ${current.snapshotId}. Retry with expectedRevision ${current.revision} and snapshotId ${current.snapshotId}.`,
+  });
+
 export const initialCadView = (snapshot: CadSnapshotManifest, revision = 0): CadViewState => ({
   rootId: snapshot.rootId,
   snapshotId: snapshot.snapshotId,
@@ -73,8 +84,7 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
   snapshots: ReadonlyMap<string, CadSnapshotManifest>,
 ) {
   const update = yield* decodeCadToolInput(CadUpdateViewInput, input);
-  if (update.expectedRevision !== current.revision)
-    return yield* new CadViewError({ reason: "revision-conflict" });
+  if (update.expectedRevision !== current.revision) return yield* cadRevisionConflict(current);
   let state = current;
   let snapshot = snapshots.get(state.rootId);
   if (!snapshot || snapshot.snapshotId !== state.snapshotId)
@@ -100,7 +110,14 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
         break;
       }
       case "camera-preset":
-        state = { ...state, camera: { kind: "preset", preset: operation.preset, fit: [] } };
+        state = {
+          ...state,
+          camera: {
+            kind: "preset",
+            preset: operation.preset === "iso" ? "isometric" : operation.preset,
+            fit: [],
+          },
+        };
         break;
       case "camera-pose":
         state = { ...state, camera: { kind: "pose", pose: operation.pose, fit: null } };
@@ -132,12 +149,16 @@ export const updateCadView = Effect.fn("updateCadView")(function* (
         state = { ...state, highlightedOccurrenceIds: [...new Set(operation.occurrenceIds)] };
         break;
       case "ghost":
+        // Empty occurrenceIds clears ghosting, so it needs no opacity.
         state = {
           ...state,
-          ghost: {
-            occurrenceIds: [...new Set(operation.occurrenceIds)],
-            opacity: operation.opacity,
-          },
+          ghost:
+            operation.occurrenceIds.length === 0
+              ? null
+              : {
+                  occurrenceIds: [...new Set(operation.occurrenceIds)],
+                  opacity: operation.opacity ?? CAD_DEFAULT_GHOST_OPACITY,
+                },
         };
         break;
       case "section":

@@ -38,7 +38,7 @@ import {
   upperFirst,
 } from "./CadDrivetrain.ts";
 import { MAX_PART_EXPORT_BYTES } from "./CadGeometry.ts";
-import { CAD_TOOL_PAGE_BYTES, decodeCadToolInput } from "./CadViewState.ts";
+import { CAD_TOOL_PAGE_BYTES, cadRevisionConflict, decodeCadToolInput } from "./CadViewState.ts";
 
 /** Thresholds in meters (volume in cubic meters). Findings below them are treated as numerical noise. */
 export const CAD_CHECK_LIMITS = {
@@ -1592,8 +1592,7 @@ export const readCadChecks = Effect.fn("readCadChecks")(function* (
   runs: CadCheckRuns = new Map(),
 ): Effect.fn.Return<CadChecksResult, CadViewError> {
   const input = yield* decodeCadToolInput(CadChecksInput, rawInput);
-  if (input.expectedRevision !== state.revision)
-    return yield* new CadViewError({ reason: "revision-conflict" });
+  if (input.expectedRevision !== state.revision) return yield* cadRevisionConflict(state);
   const selected = new Set(input.checks ?? CAD_DEFAULT_CHECKS);
   const checks = CAD_CHECK_NAMES.filter((name) => selected.has(name));
   const prefix = `${state.snapshotId}:${checks.join("+")}:`;

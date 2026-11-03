@@ -64,6 +64,8 @@ export const CadSectionPlane = Schema.Struct({
   ),
 });
 const SectionPlanes = Schema.Array(CadSectionPlane).check(Schema.isMaxLength(6));
+/** Ghost opacity when an agent's ghost operation leaves it out. */
+export const CAD_DEFAULT_GHOST_OPACITY = 0.2;
 const GhostOpacity = Schema.Number.check(
   Schema.isFinite(),
   Schema.isBetween({ minimum: 0.05, maximum: 0.95 }),
@@ -85,17 +87,22 @@ export const CadViewState = Schema.Struct({
 export type CadViewState = typeof CadViewState.Type;
 export const CadViewOperation = Schema.Union([
   Schema.Struct({ type: Schema.Literal("select-root"), rootId: CadHash }),
-  Schema.Struct({ type: Schema.Literal("camera-preset"), preset: CadCameraPreset }),
+  // "iso" is an alias for "isometric", the word cad_featurescript_preview uses for the same view.
+  Schema.Struct({
+    type: Schema.Literal("camera-preset"),
+    preset: Schema.Literals([...CadCameraPreset.literals, "iso"]),
+  }),
   Schema.Struct({ type: Schema.Literal("camera-pose"), pose: CadCameraPose }),
   Schema.Struct({ type: Schema.Literal("fit"), occurrenceIds: Occurrences }),
   Schema.Struct({ type: Schema.Literals(["show", "hide", "isolate"]), occurrenceIds: Occurrences }),
   Schema.Struct({ type: Schema.Literal("reset-visibility") }),
   Schema.Struct({ type: Schema.Literal("explode"), amount: Unit }),
   Schema.Struct({ type: Schema.Literal("highlight"), occurrenceIds: Occurrences }),
+  // Empty occurrenceIds clears ghosting; opacity defaults to CAD_DEFAULT_GHOST_OPACITY.
   Schema.Struct({
     type: Schema.Literal("ghost"),
     occurrenceIds: Occurrences,
-    opacity: GhostOpacity,
+    opacity: Schema.optionalKey(GhostOpacity),
   }),
   Schema.Struct({ type: Schema.Literal("section"), planes: SectionPlanes }),
   Schema.Struct({ type: Schema.Literal("reset-inspection") }),

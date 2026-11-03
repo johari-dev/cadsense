@@ -33,7 +33,7 @@ import {
   type CadAxis,
 } from "./CadDrivetrain.ts";
 import type { DriveCatalog } from "./CadDriveCatalog.ts";
-import { decodeCadToolInput } from "./CadViewState.ts";
+import { cadRevisionConflict, decodeCadToolInput } from "./CadViewState.ts";
 
 type Vector3 = readonly [number, number, number];
 
@@ -652,8 +652,7 @@ export const readCadDriveOptions = Effect.fn("readCadDriveOptions")(function* (
   rawInput: unknown,
 ): Effect.fn.Return<CadDriveOptionsResult, CadViewError> {
   const input = yield* decodeCadToolInput(CadDriveOptionsInput, rawInput);
-  if (input.expectedRevision !== state.revision)
-    return yield* new CadViewError({ reason: "revision-conflict" });
+  if (input.expectedRevision !== state.revision) return yield* cadRevisionConflict(state);
 
   const named = { driver: input.driverOccurrenceId, driven: input.drivenOccurrenceId };
   const axes: {
