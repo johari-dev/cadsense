@@ -136,22 +136,6 @@ describe("connection presentation", () => {
     expect(connectionStatusTitle(connection)).toBe("Failed to connect. Reconnecting...");
   });
 
-  it("presents the supervisor's offline state without consulting shell state", () => {
-    expect(
-      presentEnvironmentConnection(
-        supervisorState({
-          network: "offline",
-          phase: "offline",
-          stage: null,
-        }),
-      ),
-    ).toEqual({
-      phase: "offline",
-      error: null,
-      traceId: null,
-    });
-  });
-
   it("presents a connected supervisor snapshot as connected", () => {
     expect(
       presentEnvironmentConnection(

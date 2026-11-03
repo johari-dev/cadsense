@@ -89,7 +89,6 @@ export interface PreparedConnection {
 
 export type SupervisorConnectionPhase =
   | "available"
-  | "offline"
   | "connecting"
   | "backoff"
   | "connected"
@@ -118,7 +117,6 @@ export function connectionProjectionPhase(
     case "connected":
       return "ready";
     case "available":
-    case "offline":
     case "backoff":
     case "blocked":
       return "disconnected";
