@@ -11,6 +11,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -81,22 +82,31 @@ const decodeResult = Schema.decodeUnknownEffect(
   ),
 );
 
-/** One exported part: its STEP, and what SolidWorks knows of it in the exported configuration. */
-export interface SolidWorksPart {
+/** What a successful bridge run reports, with each part's STEP as a job-relative path. */
+type BridgeExport = Extract<Effect.Success<ReturnType<typeof decodeResult>>, { readonly ok: true }>;
+
+/**
+ * One exported part: what the caller's `prepare` made of its STEP, and what SolidWorks knows of it
+ * in the exported configuration.
+ */
+export interface SolidWorksPart<G> {
   readonly name: string;
-  readonly step: Uint8Array;
+  readonly geometry: G;
   /** The assigned material's name, or null when the part has none. */
   readonly material: string | null;
   /** Kilograms, from the material or a user's mass override. Null when unknown. */
   readonly massKg: number | null;
 }
 
-export interface SolidWorksExport {
+export interface SolidWorksExport<G> {
   readonly root: SolidWorksNode;
   /** Every part that was not skipped, by key. */
-  readonly parts: ReadonlyMap<string, SolidWorksPart>;
+  readonly parts: ReadonlyMap<string, SolidWorksPart<G>>;
   readonly warnings: readonly string[];
 }
+
+/** Turns one part's STEP into the caller's geometry. Limits its own concurrency. */
+export type SolidWorksPrepare<G> = (step: Uint8Array) => Effect.Effect<G, LocalCadImportError>;
 
 export interface SolidWorksExportInput {
   /** Workspace-relative paths and bytes, the picked file first. */
@@ -113,12 +123,14 @@ export class SolidWorks extends Context.Service<
   {
     /**
      * Copies the files into a job folder, opens the picked one there read-only in the requested
-     * configuration, and returns its component tree with each part's STEP export, material, and
-     * known mass. Never writes to the project folder.
+     * configuration, and returns its component tree with each part's material, known mass, and
+     * geometry. `prepare` runs on each part's STEP export as soon as SolidWorks has written it,
+     * while SolidWorks exports the rest, in the caller's fiber. Never writes to the project folder.
      */
-    readonly exportParts: (
+    readonly exportParts: <G>(
       input: SolidWorksExportInput,
-    ) => Effect.Effect<SolidWorksExport, LocalCadImportError>;
+      prepare: SolidWorksPrepare<G>,
+    ) => Effect.Effect<SolidWorksExport<G>, LocalCadImportError>;
   }
 >()("@cadsense/server/localCad/SolidWorksBridge/SolidWorks") {}
 
@@ -208,6 +220,7 @@ namespace CadsenseSolidWorks {
     const int SaveSilentCopy = 3;             // swSaveAsOptions_Silent | swSaveAsOptions_Copy
     const int SameTitleOpen = 65536;          // swFileLoadError_e.swFileWithSameTitleAlreadyOpen
     const int AlreadyOpen = 128;              // swFileLoadWarning_e.swFileLoadWarning_AlreadyOpen
+    const string ExportedList = "out\\exported.txt";
 
     static string job, input;
     static HashSet<string> skip;
@@ -339,6 +352,8 @@ namespace CadsenseSolidWorks {
         { "name", Path.GetFileNameWithoutExtension(model.GetPathName()) }, { "step", step },
         { "material", material }, { "massKg", massKg },
       };
+      // One line per finished export, so the server can mesh it while the rest export.
+      File.AppendAllText(Path.Combine(job, ExportedList), step + "\n");
     }
 
     static Dictionary<string, object> Node(string name, string kind, string configuration, bool suppressed, bool visible, double[] transform, string key, List<object> children) {
@@ -698,11 +713,14 @@ export const make = (options: SolidWorksOptions = {}) =>
     /**
      * Converts in the job's folder and reads what the bridge left, then removes the folder. It
      * records whether Cadsense owns the SolidWorks used even when the caller already gave up.
+     * Each part's STEP goes to `announce` once, by its job-relative path: while the bridge runs,
+     * as the bridge lists it in `out/exported.txt`, and otherwise once the result is read.
      */
     const convert = (
       resolved: SolidWorksHost,
       input: SolidWorksExportInput,
       job: { readonly folder: string; cancelled: boolean },
+      announce: (step: string, bytes: Uint8Array) => Effect.Effect<void>,
     ) =>
       Effect.gen(function* () {
         const started = yield* Clock.currentTimeMillis;
@@ -721,7 +739,46 @@ export const make = (options: SolidWorksOptions = {}) =>
         // Checked once the folder exists: a cancel during staging had nowhere to put its marker,
         // and a later one leaves the marker for the bridge.
         if (job.cancelled) return yield* failed("Cancelled before SolidWorks started.");
-        yield* runBridge(resolved, job.folder);
+        const announced = new Set<string>();
+        const readStep = (step: string) =>
+          NodeFSP.readFile(NodePath.join(job.folder, ...step.split("\\")));
+        // Only whole lines: the bridge appends each after its STEP is written and closed.
+        const announceListed = Effect.promise(async () => {
+          const list = await NodeFSP.readFile(
+            NodePath.join(job.folder, "out", "exported.txt"),
+            "utf8",
+          ).catch(() => "");
+          const ready: { step: string; bytes: Uint8Array }[] = [];
+          for (const step of list.split("\n").slice(0, -1)) {
+            if (announced.has(step)) continue;
+            const bytes = await readStep(step).catch(() => null);
+            if (!bytes) break;
+            announced.add(step);
+            ready.push({ step, bytes });
+          }
+          return ready;
+        }).pipe(
+          Effect.flatMap((ready) =>
+            Effect.forEach(ready, ({ step, bytes }) => announce(step, bytes), { discard: true }),
+          ),
+        );
+        // Stopped by a flag, not interrupted, so a pass never ends between reading a STEP and
+        // announcing it.
+        const bridge = { exited: false };
+        const watcher = yield* Effect.gen(function* () {
+          while (!bridge.exited) {
+            yield* announceListed;
+            yield* Effect.sleep("250 millis");
+          }
+        }).pipe(Effect.forkChild);
+        yield* runBridge(resolved, job.folder).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              bridge.exited = true;
+            }),
+          ),
+        );
+        yield* Fiber.join(watcher);
         const result = yield* Effect.tryPromise({
           try: () => NodeFSP.readFile(NodePath.join(job.folder, "result.json"), "utf8"),
           catch: () => failed("SolidWorks stopped before it finished."),
@@ -753,22 +810,23 @@ export const make = (options: SolidWorksOptions = {}) =>
             default:
               return yield* failed(result.detail);
           }
-        const parts = new Map<string, SolidWorksPart>();
-        for (const [key, part] of Object.entries(result.parts))
-          parts.set(key, {
-            ...part,
-            step: yield* Effect.tryPromise({
-              try: () => NodeFSP.readFile(NodePath.join(job.folder, ...part.step.split("\\"))),
-              catch: () => failed(`SolidWorks did not export ${part.name}.`),
-            }),
+        yield* announceListed;
+        for (const part of Object.values(result.parts)) {
+          if (announced.has(part.step)) continue;
+          const bytes = yield* Effect.tryPromise({
+            try: () => readStep(part.step),
+            catch: () => failed(`SolidWorks did not export ${part.name}.`),
           });
+          announced.add(part.step);
+          yield* announce(part.step, bytes);
+        }
         yield* Effect.logInfo("Converted a SolidWorks file with SolidWorks", {
           file: input.files[0]!.path,
-          exportedParts: parts.size,
+          exportedParts: Object.keys(result.parts).length,
           reusedParts: input.skip.length,
           seconds: Math.round(((yield* Clock.currentTimeMillis) - started) / 100) / 10,
         });
-        return { root: result.root, parts, warnings: result.warnings } satisfies SolidWorksExport;
+        return result;
       }).pipe(Effect.ensuring(removeFolder(job.folder)));
 
     /**
@@ -838,8 +896,9 @@ export const make = (options: SolidWorksOptions = {}) =>
       ),
     );
 
-    const exportParts = Effect.fn("SolidWorks.exportParts")(function* (
+    const exportParts = Effect.fn("SolidWorks.exportParts")(function* <G>(
       input: SolidWorksExportInput,
+      prepare: SolidWorksPrepare<G>,
     ) {
       const resolved = yield* host;
       if (!resolved) return yield* unavailable();
@@ -848,7 +907,18 @@ export const make = (options: SolidWorksOptions = {}) =>
         folder: NodePath.join(resolved.serverRoot, NodeCrypto.randomUUID()),
         cancelled: false,
       };
-      const done = yield* Deferred.make<SolidWorksExport, LocalCadImportError>();
+      const done = yield* Deferred.make<BridgeExport, LocalCadImportError>();
+      // Each part's `prepare`, by STEP path. The job's fiber starts them in this caller's scope,
+      // so they stop when the caller does, while the job itself runs on until its bridge exits.
+      const callerScope = yield* Effect.scope;
+      const prepared = new Map<string, Fiber.Fiber<G, LocalCadImportError>>();
+      const announce = (step: string, bytes: Uint8Array) =>
+        prepare(bytes).pipe(
+          Effect.forkIn(callerScope),
+          Effect.map((fiber) => {
+            prepared.set(step, fiber);
+          }),
+        );
       waiting++;
       // Taking the slot and handing it to the job's own fiber happen together, so the slot is
       // released exactly once: when the job is over, whenever the caller stops waiting.
@@ -862,7 +932,7 @@ export const make = (options: SolidWorksOptions = {}) =>
           // A waiter that gives up may have been the reason to keep SolidWorks running.
           Effect.onInterrupt(() => Effect.forkIn(reconcile(resolved), scope)),
           Effect.andThen(
-            convert(resolved, input, job).pipe(
+            convert(resolved, input, job, announce).pipe(
               Effect.exit,
               Effect.flatMap((exit) => Deferred.done(done, exit)),
               Effect.ensuring(slot.release(1)),
@@ -881,14 +951,22 @@ export const make = (options: SolidWorksOptions = {}) =>
         Effect.andThen(writeCancel(job.folder)),
         Effect.andThen(Deferred.await(done).pipe(Effect.timeout(cancelGrace), Effect.ignore)),
       );
-      return yield* Deferred.await(done).pipe(
+      const result = yield* Deferred.await(done).pipe(
         Effect.onInterrupt(() => giveUp),
         Effect.timeoutOrElse({
           duration: CONVERSION_TIMEOUT,
           orElse: () => Effect.fail(new LocalCadImportError({ reason: "solidworks-timeout" })),
         }),
       );
-    });
+      // The job announced every part before it completed `done`.
+      const parts = new Map<string, SolidWorksPart<G>>();
+      for (const [key, { step, ...part }] of Object.entries(result.parts)) {
+        const fiber = prepared.get(step);
+        if (!fiber) return yield* failed(`SolidWorks did not export ${part.name}.`);
+        parts.set(key, { ...part, geometry: yield* Fiber.join(fiber) });
+      }
+      return { root: result.root, parts, warnings: result.warnings } satisfies SolidWorksExport<G>;
+    }, Effect.scoped);
 
     return SolidWorks.of({ exportParts });
   });

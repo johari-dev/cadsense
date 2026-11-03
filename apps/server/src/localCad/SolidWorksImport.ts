@@ -32,7 +32,7 @@ const PART_KEY = /^[0-9a-f]{64}$/;
 export type SolidWorksPartGeometry =
   | { readonly kind: "reused"; readonly part: CadSnapshotPart }
   | ({ readonly kind: "mesh"; readonly mesh: LocalCadMesh } & Pick<
-      SolidWorksPart,
+      SolidWorksPart<LocalCadMesh>,
       "name" | "material" | "massKg"
     >)
   /** A part with no bodies, such as one holding only sketches. It is left out of the tree. */

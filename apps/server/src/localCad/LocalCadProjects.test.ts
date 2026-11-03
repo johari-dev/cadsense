@@ -133,11 +133,11 @@ const layer = withSolidWorks(
     Effect.gen(function* () {
       const real = yield* SolidWorksBridge.make();
       return SolidWorksBridge.SolidWorks.of({
-        exportParts: (input) =>
+        exportParts: (input, prepare) =>
           Effect.suspend(() => {
             const call = { skipped: input.skip.length, exported: null as number | null };
             bridgeCalls.push(call);
-            return real.exportParts(input).pipe(
+            return real.exportParts(input, prepare).pipe(
               Effect.tap((result) =>
                 Effect.sync(() => {
                   call.exported = result.parts.size;
@@ -709,15 +709,11 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         const first = yield* settle(projectId);
         const firstManifest = yield* snapshots.load(first.cad!.roots[0]!.current!.snapshotId);
 
+        // An unchanged file reuses its snapshot without parsing it again.
         const unchanged = yield* sync(first, "models/dm1.step");
         const unchangedRoot = unchanged.cad!.roots[0]!;
-        assert.notStrictEqual(unchangedRoot.current!.snapshotId, firstManifest.snapshotId);
-        assert.strictEqual(unchangedRoot.rollback?.snapshotId, firstManifest.snapshotId);
-        const unchangedManifest = yield* snapshots.load(unchangedRoot.current!.snapshotId);
-        assert.strictEqual(
-          cadCommentModelDescriptor(unchangedManifest),
-          cadCommentModelDescriptor(firstManifest),
-        );
+        assert.strictEqual(unchangedRoot.current!.snapshotId, firstManifest.snapshotId);
+        assert.isNull(unchangedRoot.rollback);
 
         // A re-export with a new header timestamp is a new revision of the same structure.
         const file = path.join(root, "models/dm1.step");
@@ -1590,16 +1586,15 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
         const { service: first, stop: stopFirst } = yield* server();
         const { service: second, stop: stopSecond } = yield* server();
         const assembly = yield* first
-          .exportParts({
-            files: [live.assembly!, ...files].map(read),
-            skip: [],
-            configuration: "default",
-          })
+          .exportParts(
+            { files: [live.assembly!, ...files].map(read), skip: [], configuration: "default" },
+            Effect.succeed,
+          )
           .pipe(Effect.forkChild);
         // A bridge creates `out` once it holds the lock.
         const a = yield* jobFor(live.assembly!, (job) => inJob(job, "out"));
         const single = yield* second
-          .exportParts({ files: [read(part!)], skip: [], configuration: "default" })
+          .exportParts({ files: [read(part!)], skip: [], configuration: "default" }, Effect.succeed)
           .pipe(Effect.forkChild);
         const b = yield* jobFor(part!, () => true);
         // Whether a bridge process still runs for this job, from its command line.
@@ -2113,11 +2108,14 @@ it.layer(scriptedLayer, { timeout: 120_000, excludeTestServices: true })(
           cancelGrace: "300 millis",
         }).pipe(Effect.provideService(Scope.Scope, scope));
         const caller = yield* solidWorks
-          .exportParts({
-            files: [{ path: "Hold.SLDPRT", bytes: solidWorksFile({ "Contents/Config-0": "p" }) }],
-            skip: [],
-            configuration: "default",
-          })
+          .exportParts(
+            {
+              files: [{ path: "Hold.SLDPRT", bytes: solidWorksFile({ "Contents/Config-0": "p" }) }],
+              skip: [],
+              configuration: "default",
+            },
+            Effect.succeed,
+          )
           .pipe(Effect.forkChild);
         yield* scriptedLogged("start Hold.SLDPRT owned=0");
         const [job] = scriptedJobs();

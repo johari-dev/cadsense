@@ -294,15 +294,17 @@ describe("SolidWorks import profile", () => {
         const service = yield* makeImport.pipe(
           Effect.provideService(CadSnapshotStore, store),
           Effect.provideService(SolidWorks, {
-            exportParts: (input) => {
+            exportParts: (input, prepare) => {
               skipped.push(input.skip);
-              return Effect.succeed({
-                root: node,
-                parts: new Map([
-                  [key, { name: "Part", step, material: "Alloy Steel", massKg: 1.5 }],
-                ]),
-                warnings: [],
-              });
+              return prepare(step).pipe(
+                Effect.map((geometry) => ({
+                  root: node,
+                  parts: new Map([
+                    [key, { name: "Part", geometry, material: "Alloy Steel", massKg: 1.5 }],
+                  ]),
+                  warnings: [],
+                })),
+              );
             },
           }),
         );

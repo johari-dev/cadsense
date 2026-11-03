@@ -90,7 +90,7 @@ and cancelling terminates the worker.
 | File parses to no triangles (wireframe only)          | Sync fails with a no-solid-geometry reason                   |
 | File over 512 MiB                                     | Sync fails before reading it                                 |
 | Cancel during import                                  | Worker terminated, outcome `cancelled`, nothing published    |
-| Unchanged file synced again                           | Same comment model descriptor, so the comment revision holds |
+| Unchanged file synced again                           | Latest snapshot reused; occt does not run                    |
 | Changed file synced again                             | New microversion; the previous snapshot becomes the rollback |
 | Repeated sibling names (three bolts)                  | Distinct, stable occurrence paths                            |
 | Folder already used by a folder project               | That project gets the CAD source                             |
@@ -133,8 +133,10 @@ the Windows host's PowerShell through interop and stages files under the Windows
    configuration too (see [Materials and mass](#materials-and-mass)). Parts the latest snapshot
    of the same root already has, keyed by file hash and configuration, are skipped, and keep the
    metadata that snapshot gave them.
-5. Back in the server, occt tessellates each part's STEP (two at a time) at the usual tolerances,
-   and each part's bodies merge into one geometry. Every component becomes one part node placed by
+5. Back in the server, occt tessellates each part's STEP at the usual tolerances, and each part's
+   bodies merge into one geometry. Meshing starts while SolidWorks still exports the rest: the
+   bridge appends each finished export to `out/exported.txt`, and the server reads that list four
+   times a second. Every component becomes one part node placed by
    its SolidWorks transform, so the tree matches the SolidWorks feature tree, `cad_diff` sees real
    moves, and repeated components share geometry.
 
@@ -280,6 +282,9 @@ material or mass rather than failing the conversion.
   (Fusion, Inventor) are not supported. Export STEP.
 - A large assembly takes minutes the first time: the 312-component robot above exports 87 parts
   and tessellates 6.8 million triangles. Later syncs reuse every unchanged part.
+- occt runs at most two workers at once, across all imports. A worker's memory grows with its part:
+  that robot's 62 MB power distribution hub export peaks at 2.7 GB on its own, and a whole import
+  of it, holding every file and export, passes 3 GB even with one worker.
 
 ## Verify
 
@@ -295,6 +300,10 @@ other part's metadata kept, a missing part, a part with only sketches, and anoth
 Each part's mass is checked against its material's density times its mesh's volume.
 `samples/tutorial/smartcomponents/pillow_block.sldasm` with `NPD-16` has both materials and
 configurations. `LocalCadDraft.test.ts` covers how the manifest maps material and mass.
+
+`apps/server/scripts/local-cad-import-timing.ts` times `LocalCadImport.acquire` on a real file with
+the real bridge and store, on a fresh data directory, and appends each run to `timings.jsonl`.
+Run it on the same file before and after a change to compare.
 
 `apps/server/scripts/local-cad-project-e2e.ts` runs the dev app on a fresh data directory and drives
 headless Chromium through the dialog, the first import, the CAD panel and its heading's Open file,
