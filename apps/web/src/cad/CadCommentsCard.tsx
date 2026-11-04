@@ -1019,7 +1019,7 @@ export function CadCommentsCard({
       {!open && !settling && openCount > 0 && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute right-3 top-[calc(0.75rem+var(--cad-overlay-control)+0.375rem)] flex flex-col items-end gap-1 rounded-md border bg-popover/92 px-2 py-1.5 text-[11px] text-muted-foreground"
+          className="pointer-events-none absolute right-3 top-[calc(0.75rem+var(--cad-overlay-control)+0.375rem)] flex flex-col items-end gap-1 rounded-md border bg-popover/92 px-2 py-1.5 text-xs text-muted-foreground"
         >
           <div className="flex items-center gap-2.5">
             {legend.map((entry) => (
@@ -1029,7 +1029,7 @@ export function CadCommentsCard({
               </span>
             ))}
           </div>
-          {hasLetteredPins ? <span>1a, 1b: one comment, several spots</span> : null}
+          {hasLetteredPins ? <span>Letters mark locations of the same comment</span> : null}
         </div>
       )}
       {/* Docked, the card stays in its column while the column closes, then unmounts. */}

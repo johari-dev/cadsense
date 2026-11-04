@@ -14,9 +14,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { CubeIcon } from "~/lib/icons";
-import { Button } from "../ui/button";
+import type { Project } from "~/types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { CadModelChip } from "./CadModelChip";
 import { toastManager } from "../ui/toast";
 import { OpenInExplorerButton } from "./OpenInExplorerButton";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
@@ -41,8 +41,11 @@ interface ChatHeaderProps {
   /** The draft hero's large heading already names the project. */
   isDraftHero: boolean;
   onNewThreadInProject: () => void;
-  /** Opens the CAD panel. Set only for CAD projects; the header shows it while the panel is closed. */
-  onOpenCad?: (() => void) | undefined;
+  /**
+   * The CAD project and how to open its panel. Set only for CAD projects; while the panel is
+   * closed the header shows the model as a chip that opens it.
+   */
+  cad?: { readonly project: Project; readonly onOpen: () => void } | undefined;
 }
 
 /**
@@ -80,7 +83,7 @@ export const ChatHeader = memo(function ChatHeader({
   projectShownInRightPanel,
   isDraftHero,
   onNewThreadInProject,
-  onOpenCad,
+  cad,
 }: ChatHeaderProps) {
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
@@ -307,13 +310,10 @@ export const ChatHeader = memo(function ChatHeader({
             : "pr-[calc(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap))]",
         )}
       >
-        {/* The model is the point of a CAD chat, so with the panel closed its way back is a
-            labeled button rather than only the layout toggle's icon. */}
-        {onOpenCad && !rightPanelOpen && !isDraftHero ? (
-          <Button size="sm" variant="outline" onClick={onOpenCad}>
-            <CubeIcon className="size-4 text-(--accent-text)" />
-            Open CAD
-          </Button>
+        {/* The model is the point of a CAD chat, so with the panel closed the header names it,
+            and the name is the way back to the panel. */}
+        {cad && !rightPanelOpen && !isDraftHero ? (
+          <CadModelChip project={cad.project} onOpen={cad.onOpen} />
         ) : null}
         {activeProjectName && !activeProjectOnshapeSource && (
           <OpenInExplorerButton environmentId={activeThreadEnvironmentId} path={openInCwd} />

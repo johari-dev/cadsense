@@ -4022,7 +4022,11 @@ function ChatViewContent(props: ChatViewProps) {
             projectShownInRightPanel={rightPanelOpen && rightPanelSection === "cad"}
             isDraftHero={isDraftHeroState}
             onNewThreadInProject={handleNewThreadInActiveProject}
-            onOpenCad={cadAvailable ? toggleRightPanel : undefined}
+            cad={
+              cadAvailable && activeProject
+                ? { project: activeProject, onOpen: toggleRightPanel }
+                : undefined
+            }
           />
         </WorkspacePageHeader>
 
