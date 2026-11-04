@@ -262,7 +262,7 @@ function commentRow({
       </span>
       <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
       {severity || detail ? (
-        <span className="col-start-2 line-clamp-2 min-w-0 text-[0.8rem] leading-5 text-muted-foreground">
+        <span className="col-start-2 line-clamp-2 min-w-0 text-[13px] leading-[18px] text-muted-foreground">
           {/* The pin's color as a labeled pill, so the legend is on every row. */}
           {severity ? (
             <span className="cad-severity-pill me-1.5 align-[1px]" data-severity={severity}>

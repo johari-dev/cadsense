@@ -1977,6 +1977,30 @@ code {
     color: var(--contrast-tertiary-foreground);
     font-weight: 500;
   }
+
+  /* A severity pill joins the row's title line at the right, where it needs no label. */
+  .chat-markdown .chat-markdown-table-container tbody tr {
+    position: relative;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr:has(.cad-severity-pill) td:first-child {
+    padding-right: 5.5rem;
+  }
+
+  .chat-markdown .chat-markdown-table-container[data-expanded] td:has(> .cad-severity-pill) {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    margin: 0;
+  }
+
+  .chat-markdown
+    .chat-markdown-table-container
+    tbody
+    td
+    + td[data-label]:has(> .cad-severity-pill)::before {
+    content: none;
+  }
 }
 
 /* A CAD comment severity as a tinted pill: the word in the pin's hue on a 12-14% wash of it.

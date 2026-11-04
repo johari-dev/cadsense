@@ -328,7 +328,7 @@ function SourceOption({
         </span>
         <span
           id={`${id}-description`}
-          className="whitespace-normal font-normal text-muted-foreground text-xs"
+          className="whitespace-normal font-normal text-[13px] text-muted-foreground leading-[18px]"
         >
           {description}
         </span>
