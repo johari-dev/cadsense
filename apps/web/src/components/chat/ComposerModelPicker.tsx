@@ -30,6 +30,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
+  formatModelSlug,
   getDisplayModelName,
   getTriggerDisplayModelName,
   type ModelEsque,
@@ -204,7 +205,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
     setQuery("");
   };
 
-  const modelName = activeModel ? getTriggerDisplayModelName(activeModel) : props.model;
+  const modelName = activeModel
+    ? getTriggerDisplayModelName(activeModel)
+    : formatModelSlug(props.model);
   const unavailable = activeModel?.isUnavailable ?? false;
   const triggerTitle = [modelName, unavailable ? "Unavailable" : null, props.traits?.label]
     .filter(Boolean)
