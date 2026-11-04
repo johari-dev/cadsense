@@ -474,13 +474,19 @@ function ProviderRow({
               {pendingSetup === "signOut" ? "Signing out…" : "Sign out"}
             </Button>
           ) : null}
-          {/* A provider can only be turned on once its CLI is installed. */}
-          <Switch
-            checked={enabled && installed}
-            disabled={onEnabledChange === undefined || !installed}
-            onCheckedChange={(checked) => onEnabledChange?.(Boolean(checked))}
-            aria-label={`Enable ${option.label}`}
-          />
+          {/* A provider can only be turned on once its CLI is installed. The visible label and
+              the gap keep the switch from reading as a pair with the account action. */}
+          <span className="ms-2 flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted-foreground text-xs">
+              Enabled
+            </span>
+            <Switch
+              checked={enabled && installed}
+              disabled={onEnabledChange === undefined || !installed}
+              onCheckedChange={(checked) => onEnabledChange?.(Boolean(checked))}
+              aria-label={`Enable ${option.label}`}
+            />
+          </span>
         </>
       }
     />
@@ -527,8 +533,18 @@ function ProviderStatusLine({
             />
           </>
         ) : null}
-        {plan ? <span>· {plan}</span> : null}
-        {version ? <span>· {version}</span> : null}
+        {plan ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{plan}</span>
+          </>
+        ) : null}
+        {version ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="text-tertiary-foreground">{version}</span>
+          </>
+        ) : null}
       </span>
     );
   }

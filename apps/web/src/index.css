@@ -1174,7 +1174,7 @@
   --app-theme-blueprint-hover: #4580f2;
   --app-theme-accent-text: #7aa9ff;
   /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
-     for "on" and "selected" control states. */
+     for selected parts and rows. Switches and other "on" states use the blueprint accent. */
   --app-theme-selection: #7dbbff;
   /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
   --app-theme-control-off: #2c2c2f;
@@ -1855,7 +1855,25 @@ code {
 /* Tables sit in a framed sheet, like a title block: a hairline frame, a tinted header row,
    and body text one step below primary so headers lead. */
 .chat-markdown .chat-markdown-table-container {
+  position: relative;
   container-type: inline-size;
+}
+
+/* The copy menu sits in the table's top-right corner and shows on hover or focus, instead of
+   floating alone under the table. */
+.chat-markdown .chat-markdown-table-container > :last-child {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  margin: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background-color: var(--app-theme-surface-raised);
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.chat-markdown .chat-markdown-table-container:is(:hover, :focus-within) > :last-child {
+  opacity: 1;
 }
 
 .chat-markdown .chat-markdown-table-container > :first-child {
@@ -1961,22 +1979,35 @@ code {
   }
 }
 
-/* Severity words in agent tables take the CAD comment pins' hues (CadCommentsCard's
-   SEVERITY_FILL); "check" stays neutral. MarkdownTable sets data-severity. */
-.chat-markdown td[data-severity] {
+/* A CAD comment severity as a tinted pill: the word in the pin's hue on a 12-14% wash of it.
+   Used by agent review tables (ChatMarkdown's td) and the chat's comment rows. "check" and
+   "nit" stay neutral. Text plus hue, so color is never the only cue. */
+.cad-severity-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 0.0625rem 0.4375rem;
+  font-size: 0.6875rem;
   font-weight: 600;
+  line-height: 1.125rem;
+  text-transform: capitalize;
+  color: #a1a1aa;
+  background-color: rgb(161 161 170 / 12%);
 }
 
-.chat-markdown td[data-severity="blocker"] {
+.cad-severity-pill[data-severity="blocker"] {
   color: var(--color-red-300);
+  background-color: color-mix(in srgb, var(--color-red-400) 14%, transparent);
 }
 
-.chat-markdown td[data-severity="concern"] {
+.cad-severity-pill[data-severity="concern"] {
   color: var(--color-amber-200);
+  background-color: color-mix(in srgb, var(--color-amber-300) 12%, transparent);
 }
 
-.chat-markdown td[data-severity="question"] {
+.cad-severity-pill[data-severity="question"] {
   color: var(--color-violet-300);
+  background-color: color-mix(in srgb, var(--color-violet-400) 14%, transparent);
 }
 
 @keyframes ultrathink-rainbow {
@@ -2175,8 +2206,8 @@ code {
   }
 }
 
-/* Chats hang off their project on a guide line, like a feature tree in a CAD app, and the open
-   chat marks its place on the line in blueprint blue. The line sits under the project's caret. */
+/* Chats hang off their project on a guide line, like a feature tree in a CAD app. The line
+   sits under the project's caret. */
 [data-app-sidebar] [data-sidebar="menu-sub"] {
   position: relative;
 }
@@ -2192,18 +2223,10 @@ code {
   pointer-events: none;
 }
 
-/* The row's button clips its overflow, so the mark hangs off the list item. */
-[data-app-sidebar]
-  [data-sidebar="menu-sub-item"]:has([data-sidebar="menu-sub-button"][data-active="true"])::before {
-  content: "";
-  position: absolute;
-  top: 0.375rem;
-  bottom: 0.375rem;
-  left: calc(-0.5625rem - 1px);
-  width: 3px;
-  border-radius: 999px;
-  background-color: var(--app-theme-blueprint);
-  pointer-events: none;
+/* The open chat's mark sits on the inside edge of its highlight. An inset shadow, because the
+   row's button clips overflow. */
+[data-app-sidebar] [data-sidebar="menu-sub-button"][data-active="true"] {
+  box-shadow: inset 2px 0 0 var(--app-theme-blueprint);
 }
 
 /* The workspace is an inset sheet on the darker window chrome, with the sidebar sitting on the
@@ -2225,6 +2248,13 @@ code {
     margin-left: 0.375rem;
   }
 
+  /* The sheet starts 6px down, so its top bar is 12px shorter: its title then centers on the
+     same line as the sidebar's brand row. Native window controls overlays (.wco) keep the full
+     height so the controls never hang below the bar. */
+  :root:not(.wco) [data-slot="sidebar-wrapper"] > [data-slot="sidebar-inset"] {
+    --workspace-topbar-height: calc(52px - 0.75rem);
+  }
+
   /* The sheet's own border is the edge, so the sidebar drops its divider. */
   :root [data-app-sidebar] {
     border-color: transparent;
@@ -2233,6 +2263,6 @@ code {
 
 /* Settings navigation marks its open page the way the chat list marks the open chat. */
 [data-settings-nav] [data-sidebar="menu-button"][data-active="true"] {
-  box-shadow: inset 3px 0 0 var(--app-theme-blueprint);
+  box-shadow: inset 2px 0 0 var(--app-theme-blueprint);
   color: var(--contrast-sidebar-foreground);
 }

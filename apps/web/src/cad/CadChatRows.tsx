@@ -14,7 +14,6 @@ import {
 } from "~/lib/icons";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
-import { Button } from "../components/ui/button";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
@@ -154,6 +153,9 @@ export function describeCadCommentsHeading(card: CadCommentsPublishedCard): stri
     : describeCadCommentsPublished(card);
 }
 
+/** The frame every agent artifact in the chat shares: part drawings and review comments. */
+const ARTIFACT_CARD = "rounded-lg border border-border bg-card px-2.5 py-2";
+
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
   card,
@@ -167,19 +169,14 @@ export function CadPublishedComments({
   const unlisted = count - listed.length;
   const heading = describeCadCommentsHeading(card);
   // A card of its own, so the review's result reads as the main outcome of the turn rather
-  // than more narration. Its action is outlined: the composer's send keeps the only fill.
+  // than more narration. It shares the artifact card frame with part drawings (ARTIFACT_CARD).
   return (
-    <section
-      aria-label={heading}
-      className="rounded-xl border border-border bg-muted p-3 pt-2 text-[0.9333rem]"
-    >
-      <div className="flex min-h-8 items-center gap-1.5 px-1">
-        <span className="flex size-6 shrink-0 items-center justify-center text-foreground/70">
-          <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8]" aria-hidden />
+    <section aria-label={heading} className={`${ARTIFACT_CARD} pb-0 text-[0.9333rem]`}>
+      <div className="flex min-h-7 items-center gap-1.5 px-0.5">
+        <span className="flex size-6 shrink-0 items-center justify-center text-(--accent-text)">
+          <MessageSquareIcon className="size-4 shrink-0" aria-hidden />
         </span>
-        <h3 className="min-w-0 flex-1 truncate text-[1.0667rem] font-semibold text-foreground">
-          {heading}
-        </h3>
+        <h3 className="min-w-0 flex-1 truncate font-semibold text-foreground text-sm">{heading}</h3>
       </div>
       <div className="mt-0.5 flex flex-col gap-0.5">
         {listed.map((comment) =>
@@ -208,14 +205,15 @@ export function CadPublishedComments({
         )}
       </div>
       {count > 0 || card.proposed.length > 0 ? (
-        <Button
-          variant="outline"
-          className="mt-3 h-8.5 w-full bg-transparent text-[0.8667rem] dark:bg-transparent sm:h-8.5 sm:text-[0.8667rem]"
+        // The card's footer row, divided off rather than boxed, so no border sits in a border.
+        <button
+          type="button"
+          className="-mx-2.5 mt-2 flex h-9 w-[calc(100%+1.25rem)] cursor-pointer items-center justify-center gap-1.5 rounded-b-lg border-t border-border font-medium text-[13px] text-foreground/90 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           onClick={() => openCadComments(threadRef)}
         >
           {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}
-          <ArrowRightIcon aria-hidden />
-        </Button>
+          <ArrowRightIcon className="size-3.5" aria-hidden />
+        </button>
       ) : null}
       {card.rejected.map((rejection) => (
         <p
@@ -230,17 +228,9 @@ export function CadPublishedComments({
   );
 }
 
-/** Severity words in the same hues as the pins (CadCommentsCard's SEVERITY_FILL). */
-const SEVERITY_TEXT: Record<CadCommentSeverity, string> = {
-  blocker: "text-red-300",
-  concern: "text-amber-200",
-  question: "text-violet-300",
-  nit: "text-muted-foreground",
-};
-
 /**
  * One comment in the chat list: its severity-colored number and full title on the first line,
- * then the severity word and the secondary detail (the part, or the proposal state) on a second,
+ * then the severity pill and the secondary detail (the part, or the proposal state) on a second,
  * quieter line.
  * The badge sits in the header icon's column so titles line up with the header text.
  * A plain function, not a component, so each row stays a `<button>` in the element tree.
@@ -273,11 +263,12 @@ function commentRow({
       <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
       {severity || detail ? (
         <span className="col-start-2 line-clamp-2 min-w-0 text-[0.8rem] leading-5 text-muted-foreground">
-          {/* The word for the pin's color, so the legend is on every row. */}
+          {/* The pin's color as a labeled pill, so the legend is on every row. */}
           {severity ? (
-            <span className={`font-medium capitalize ${SEVERITY_TEXT[severity]}`}>{severity}</span>
+            <span className="cad-severity-pill me-1.5 align-[1px]" data-severity={severity}>
+              {severity}
+            </span>
           ) : null}
-          {severity && detail ? <span aria-hidden="true"> · </span> : null}
           {detail}
         </span>
       ) : null}
@@ -318,17 +309,14 @@ export function CadPartDrawings({
   }, [id]);
   const listed = card.sheets.slice(0, MAX_LISTED_COMMENTS);
   return (
-    // A drawing is an artifact the agent made, so it sits in a bounded sheet like the
-    // review comments card rather than reading as tool history.
-    <div
-      className="rounded-lg border border-border bg-card px-2.5 py-2 text-sm leading-relaxed"
-      data-testid="cad-part-drawing-card"
-    >
+    // A drawing is an artifact the agent made, so it shares the review comments card's frame
+    // rather than reading as tool history.
+    <div className={`${ARTIFACT_CARD} text-sm leading-relaxed`} data-testid="cad-part-drawing-card">
       <div className="flex min-h-7 items-center gap-1.5 px-0.5">
         <span className="flex size-6 shrink-0 items-center justify-center text-(--accent-text)">
           <PartDrawingIcon className="size-4 shrink-0" aria-hidden />
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+        <span className="min-w-0 flex-1 truncate font-semibold text-foreground">
           {card.sheets.length === 1
             ? `Part drawing: ${card.title}`
             : `${card.sheets.length} part drawings: ${card.title}`}

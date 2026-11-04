@@ -455,8 +455,7 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
 
   // Each body cell carries its column's header as data-label. A narrow chat column stacks the
   // rows into blocks (see index.css) and shows these labels so no column loses its header.
-  // A cell that is exactly a CAD comment severity also gets data-severity, so review tables use
-  // the same hues as the comment pins. Runs after every render because streaming adds cells.
+  // Runs after every render because streaming can add rows and cells.
   useLayoutEffect(() => {
     const table = tableRef.current;
     if (!table) return;
@@ -468,9 +467,6 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
       Array.from(row.children).forEach((cell, index) => {
         const label = headers[index];
         if (label) cell.setAttribute("data-label", label);
-        const severity = cell.textContent?.trim().toLowerCase() ?? "";
-        if (TABLE_SEVERITIES.has(severity)) cell.setAttribute("data-severity", severity);
-        else cell.removeAttribute("data-severity");
       });
     }
   });
@@ -1865,6 +1861,18 @@ function ChatMarkdown({
       },
       table({ node: _node, ...props }) {
         return <MarkdownTable {...props} />;
+      },
+      td({ node: _node, children, ...props }) {
+        // A cell that is exactly a CAD comment severity renders as the comment card's pill.
+        const severity = nodeToPlainText(children).trim().toLowerCase();
+        if (!TABLE_SEVERITIES.has(severity)) return <td {...props}>{children}</td>;
+        return (
+          <td {...props}>
+            <span className="cad-severity-pill" data-severity={severity}>
+              {children}
+            </span>
+          </td>
+        );
       },
       details({ node: _node, children, open: detailsOpen }) {
         return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;

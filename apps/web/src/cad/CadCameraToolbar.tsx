@@ -202,14 +202,14 @@ export function CadCameraToolbar({
               <ToolbarDivider />
               <Tooltip>
                 <TooltipTrigger
-                  aria-label="Click to draw"
+                  aria-label="Draw part"
                   aria-pressed={picking}
                   disabled={disabled}
                   className={toolbarControl}
                   onClick={onTogglePicking}
                 >
                   <CursorClickIcon aria-hidden="true" />
-                  <span className="@max-[592px]:sr-only">Click to draw</span>
+                  <span className="@max-[592px]:sr-only">Draw part</span>
                 </TooltipTrigger>
                 <TooltipPopup>
                   {picking ? "Stop picking parts" : "Click a part in the model to make its drawing"}

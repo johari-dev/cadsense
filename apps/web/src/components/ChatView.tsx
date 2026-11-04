@@ -4150,16 +4150,18 @@ function ChatViewContent(props: ChatViewProps) {
               )}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
-                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
+                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem)]"
               >
                 {/* The composer's width, which its attached drawers (banners, the sync pill) inset
-                    from so they line up with it in either layout. */}
+                    from so they line up with it in either layout. In a chat it matches the message
+                    column (48rem inside the timeline's 0.75rem/1.25rem padding), so their outer
+                    edges line up. */}
                 <div
                   className={cn(
                     "group/composer-stack pointer-events-auto relative z-10",
                     isDraftHeroState
                       ? "[--chat-composer-max-width:42.5rem]"
-                      : "[--chat-composer-max-width:50rem]",
+                      : "[--chat-composer-max-width:48rem]",
                   )}
                 >
                   {isDraftHeroState ? (
