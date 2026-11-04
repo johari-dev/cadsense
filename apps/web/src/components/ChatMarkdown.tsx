@@ -408,6 +408,9 @@ function extractCodeBlock(
   };
 }
 
+/** CAD comment severities, plus "check", the word agents use for a low-stakes item. */
+const TABLE_SEVERITIES = new Set(["blocker", "concern", "question", "nit", "check"]);
+
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -452,7 +455,8 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
 
   // Each body cell carries its column's header as data-label. A narrow chat column stacks the
   // rows into blocks (see index.css) and shows these labels so no column loses its header.
-  // Runs after every render because streaming can add rows and cells.
+  // A cell that is exactly a CAD comment severity also gets data-severity, so review tables use
+  // the same hues as the comment pins. Runs after every render because streaming adds cells.
   useLayoutEffect(() => {
     const table = tableRef.current;
     if (!table) return;
@@ -464,6 +468,9 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
       Array.from(row.children).forEach((cell, index) => {
         const label = headers[index];
         if (label) cell.setAttribute("data-label", label);
+        const severity = cell.textContent?.trim().toLowerCase() ?? "";
+        if (TABLE_SEVERITIES.has(severity)) cell.setAttribute("data-severity", severity);
+        else cell.removeAttribute("data-severity");
       });
     }
   });

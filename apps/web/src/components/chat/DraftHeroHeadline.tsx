@@ -164,14 +164,14 @@ export function DraftHeroHeadline({
           {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
             <Button
               key={label}
-              // One 36px size for all three. The first is the suggested start, so it takes a
-              // quiet fill; the others stay bordered. Neither competes with the blue send.
+              // One 36px size for all three. The first is the suggested start, so it is filled
+              // white; the others stay bordered.
               variant="outline"
               size="lg"
               onClick={() => onChooseTask(prompt)}
               className={
                 index === 0
-                  ? "pointer-events-auto border-foreground/30 font-semibold dark:bg-foreground/12 dark:[:hover,[data-pressed]]:bg-foreground/16"
+                  ? "pointer-events-auto border-transparent font-semibold text-background [--control-icon-color:currentColor] dark:bg-foreground dark:[:hover,[data-pressed]]:bg-foreground/88"
                   : "pointer-events-auto"
               }
             >

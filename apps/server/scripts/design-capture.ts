@@ -115,7 +115,7 @@ const setTitle = async (threadUrl: string, title: string) => {
 
 const newThread = async () => {
   await page
-    .getByRole("button", { name: /^New thread in / })
+    .getByRole("button", { name: /^New chat in / })
     .first()
     .click({ force: true });
   await page.locator('[data-chat-composer-form="true"]').waitFor();

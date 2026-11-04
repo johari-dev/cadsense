@@ -317,6 +317,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   <PickerTabButton
                     key={entry.instanceId}
                     label={entry.displayName}
+                    labeled
                     {...(ready ? {} : { unavailableReason: `${entry.displayName} is unavailable` })}
                     active={openTab === entry.instanceId}
                     onSelect={() => {
@@ -489,18 +490,21 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
 });
 
 /**
- * One source tab. The open tab shows its icon and name on a filled pill; the others are 28px
- * icons whose tooltip names them.
+ * One source tab: an icon and, for providers, the provider's name. The open tab sits on a filled
+ * pill. Favorites is a star alone, and its tooltip names it.
  */
 function PickerTabButton(props: {
   label: string;
+  /** Shows the name beside the icon even when the tab is not open. */
+  labeled?: boolean;
   /** Set when the source cannot be picked right now; shown as the tooltip. */
   unavailableReason?: string;
   active: boolean;
   onSelect: () => void;
   children: ReactNode;
 }) {
-  const tooltip = props.unavailableReason ?? (props.active ? null : props.label);
+  const showsLabel = props.active || props.labeled === true;
+  const tooltip = props.unavailableReason ?? (showsLabel ? null : props.label);
   const tab = (
     <button
       type="button"
@@ -510,14 +514,15 @@ function PickerTabButton(props: {
       aria-disabled={props.unavailableReason !== undefined}
       className={cn(
         TAB_CLASS_NAME,
-        props.active ? "min-w-0 shrink bg-foreground/[0.1] text-foreground" : "px-0",
+        props.active && "bg-foreground/[0.1] text-foreground",
+        showsLabel ? "min-w-0 shrink" : "px-0",
       )}
       onClick={() => {
         if (props.unavailableReason === undefined) props.onSelect();
       }}
     >
       {props.children}
-      {props.active ? <span className="truncate">{props.label}</span> : null}
+      {showsLabel ? <span className="truncate">{props.label}</span> : null}
     </button>
   );
   if (tooltip === null) return tab;

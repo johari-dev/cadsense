@@ -588,7 +588,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-[13px]"
+                    // Two lines, so similar CAD chats stay distinct at the default sidebar width.
+                    className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-[18px]"
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {resolveSidebarThreadTitle(thread.title, projectName)}
@@ -2643,33 +2644,36 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       ) : null}
       <LocalSecondaryStatus />
       <SidebarGroup className="px-2 py-2">
+        {/* The sidebar's one labeled action: starting a chat is the main thing people do here. */}
+        {newThreadTarget ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={newThreadTarget.label}
+                  className="mb-3 w-full justify-start gap-2 px-2.5 font-medium"
+                  onClick={newThreadTarget.start}
+                />
+              }
+            >
+              <SquarePenIcon className="size-4" />
+              <span aria-hidden="true">New chat</span>
+              {newThreadShortcutLabel ? (
+                <kbd className="ml-auto font-sans text-[11px] text-tertiary-foreground">
+                  {newThreadShortcutLabel}
+                </kbd>
+              ) : null}
+            </TooltipTrigger>
+            <TooltipPopup side="right">{newThreadTarget.label}</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="font-semibold text-[11px] text-sidebar-muted-foreground uppercase tracking-[0.08em]">
             Projects
           </span>
           <div className="flex items-center gap-0.5">
-            {newThreadTarget ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      aria-label={newThreadTarget.label}
-                      className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
-                      onClick={newThreadTarget.start}
-                    />
-                  }
-                >
-                  <SquarePenIcon className="size-4" />
-                </TooltipTrigger>
-                <TooltipPopup side="right">
-                  {newThreadShortcutLabel
-                    ? `${newThreadTarget.label} (${newThreadShortcutLabel})`
-                    : newThreadTarget.label}
-                </TooltipPopup>
-              </Tooltip>
-            ) : null}
             <ProjectSortMenu
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
@@ -2835,7 +2839,7 @@ function SidebarIconRail({
     >
       {threadProject ? (
         <SidebarRailButton
-          label={`New thread in ${threadProject.displayName}`}
+          label={`New chat in ${threadProject.displayName}`}
           onClick={() => onCreateThread(threadProject)}
         >
           <SquarePenIcon className="size-4" />
@@ -3498,7 +3502,7 @@ export default function ThreadSidebar() {
     () =>
       newThreadProject
         ? {
-            label: `New thread in ${newThreadProject.displayName}`,
+            label: `New chat in ${newThreadProject.displayName}`,
             start: () => createThreadInProject(newThreadProject),
           }
         : null,

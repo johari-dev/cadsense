@@ -1955,15 +1955,28 @@ code {
   }
 
   .chat-markdown .chat-markdown-table-container tbody td + td[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 0.125rem;
+    content: attr(data-label) ": ";
     color: var(--contrast-tertiary-foreground);
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-weight: 500;
   }
+}
+
+/* Severity words in agent tables take the CAD comment pins' hues (CadCommentsCard's
+   SEVERITY_FILL); "check" stays neutral. MarkdownTable sets data-severity. */
+.chat-markdown td[data-severity] {
+  font-weight: 600;
+}
+
+.chat-markdown td[data-severity="blocker"] {
+  color: var(--color-red-300);
+}
+
+.chat-markdown td[data-severity="concern"] {
+  color: var(--color-amber-200);
+}
+
+.chat-markdown td[data-severity="question"] {
+  color: var(--color-violet-300);
 }
 
 @keyframes ultrathink-rainbow {

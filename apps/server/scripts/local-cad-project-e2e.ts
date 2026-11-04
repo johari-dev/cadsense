@@ -715,7 +715,7 @@ try {
     await run("agent-answer", async (page) => {
       await page.goto(url, { waitUntil: "networkidle" });
       await page
-        .getByRole("button", { name: /^New thread in / })
+        .getByRole("button", { name: /^New chat in / })
         .first()
         .click({ force: true });
       // The model picker is the composer's first button; it has no label of its own.

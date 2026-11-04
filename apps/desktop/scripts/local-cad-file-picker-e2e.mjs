@@ -177,7 +177,7 @@ try {
     await page.getByTestId("sidebar-add-project-trigger").click();
     await page.getByRole("button", { name: "Folder project" }).click();
     await page
-      .getByRole("button", { name: /^New thread in bracket-rig/ })
+      .getByRole("button", { name: /^New chat in bracket-rig/ })
       .first()
       .waitFor();
   });
