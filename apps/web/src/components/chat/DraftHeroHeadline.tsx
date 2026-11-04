@@ -28,7 +28,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** Prompts the hero offers as one-click starts. The first is the suggested one. */
+/** Prompts the hero offers as one-click starts. */
 const STARTING_TASKS = [
   {
     label: "Review the design",
@@ -161,12 +161,12 @@ export function DraftHeroHeadline({
       </p>
       {activeProjectTitle ? (
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
+          {STARTING_TASKS.map(({ label, icon: Icon, prompt }) => (
             <Button
               key={label}
-              // One 36px size for all three. The first task is the suggested start; the
-              // others sit beside it as bordered secondary actions.
-              variant={index === 0 ? "default" : "outline"}
+              // One 36px size and one bordered style for all three, so the composer's send
+              // button stays the only solid action on the page.
+              variant="outline"
               size="lg"
               onClick={() => onChooseTask(prompt)}
               className="pointer-events-auto"

@@ -2396,7 +2396,7 @@ function ProjectSortMenu({
             <MenuTrigger className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-icon-muted transition-colors hover:bg-accent hover:text-foreground" />
           }
         >
-          <ArrowUpDownIcon className="size-3.5" />
+          <ArrowUpDownIcon className="size-4" />
         </TooltipTrigger>
         <TooltipPopup side="right">Sidebar options</TooltipPopup>
       </Tooltip>
@@ -2644,7 +2644,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <LocalSecondaryStatus />
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
-          <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
+          <span className="font-semibold text-[11px] text-sidebar-muted-foreground uppercase tracking-[0.08em]">
+            Projects
+          </span>
           <div className="flex items-center gap-0.5">
             {newThreadTarget ? (
               <Tooltip>
@@ -2659,7 +2661,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                     />
                   }
                 >
-                  <SquarePenIcon className="size-3.5" />
+                  <SquarePenIcon className="size-4" />
                 </TooltipTrigger>
                 <TooltipPopup side="right">
                   {newThreadShortcutLabel
@@ -2689,7 +2691,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   />
                 }
               >
-                <FolderPlusIcon className="size-3.5" />
+                <FolderPlusIcon className="size-4" />
               </TooltipTrigger>
               <TooltipPopup side="right">Add project</TooltipPopup>
             </Tooltip>

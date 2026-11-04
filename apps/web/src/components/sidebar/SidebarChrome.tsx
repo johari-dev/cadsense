@@ -77,11 +77,19 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     <Link
       aria-label="Go to design workspace"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex group-data-[collapsible=icon]:md:hidden",
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex group-data-[collapsible=icon]:md:hidden",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
     >
+      {/* The blueprint CS mark, the same artwork as the app icon and the boot screen. */}
+      <img
+        alt=""
+        aria-hidden="true"
+        className="size-5 shrink-0 rounded-[5px] shadow-xs"
+        draggable={false}
+        src="/app-icon.png"
+      />
       <span
         className={cn(
           "truncate text-base font-semibold tracking-tight",

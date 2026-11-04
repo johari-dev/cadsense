@@ -232,9 +232,18 @@ export function CadPublishedComments({
   );
 }
 
+/** Severity words in the same hues as the pins (CadCommentsCard's SEVERITY_FILL). */
+const SEVERITY_TEXT: Record<CadCommentSeverity, string> = {
+  blocker: "text-red-300",
+  concern: "text-amber-200",
+  question: "text-violet-300",
+  nit: "text-muted-foreground",
+};
+
 /**
  * One comment in the chat list: its severity-colored number and full title on the first line,
- * then the secondary detail (the part, or the proposal state) on a second, quieter line.
+ * then the severity word and the secondary detail (the part, or the proposal state) on a second,
+ * quieter line.
  * The badge sits in the header icon's column so titles line up with the header text.
  * A plain function, not a component, so each row stays a `<button>` in the element tree.
  */
@@ -263,13 +272,17 @@ function commentRow({
       <span className="flex h-5 items-center justify-center">
         <CommentBadge number={number} severity={severity} />
       </span>
-      <span className="line-clamp-2 leading-5 text-foreground">
-        {severity ? <span className="sr-only">{`${severity}: `}</span> : null}
-        {title}
-      </span>
-      {detail ? (
+      <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
+      {severity || detail ? (
         <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-[0.8rem] leading-5 text-muted-foreground">
-          {detail}
+          {/* The word for the pin's color, so the legend is on every row. */}
+          {severity ? (
+            <span className={`shrink-0 font-medium capitalize ${SEVERITY_TEXT[severity]}`}>
+              {severity}
+            </span>
+          ) : null}
+          {severity && detail ? <span aria-hidden="true">·</span> : null}
+          {detail ? <span className="flex min-w-0 items-center gap-1.5">{detail}</span> : null}
         </span>
       ) : null}
     </button>

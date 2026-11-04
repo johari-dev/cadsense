@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/ibm-plex-sans";
 @import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark, .dark *));
@@ -72,7 +73,10 @@
   --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.45);
   --shadow-xl: 0 20px 40px -10px rgb(0 0 0 / 0.65), 0 8px 12px -6px rgb(0 0 0 / 0.45);
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* IBM Plex Sans ships with the app, so every platform renders the same engineering face. */
+  --font-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    system-ui, sans-serif;
   --font-mono:
     "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Consolas,
     "Liberation Mono", Menlo, monospace;
@@ -1161,53 +1165,56 @@
 }
 
 :root {
-  /* Default dark theme: a near-black palette with an orange accent for focus and accent
-     text. */
+  /* Default dark theme: neutral near-black surfaces with white text, and blueprint blue (the
+     Cadsense mark's color) for primary actions, focus, links, and selection. The sidebar sits
+     one step darker than the workspace so the two panes read apart without a heavy border. */
   color-scheme: dark;
-  --radius: 0.625rem;
-  --app-theme-accent-text: rgb(245 128 86);
+  --radius: 0.5rem;
+  --app-theme-blueprint: #2f6fed;
+  --app-theme-blueprint-hover: #4580f2;
+  --app-theme-accent-text: #7aa9ff;
   /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
      for "on" and "selected" control states. */
   --app-theme-selection: #7dbbff;
   /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
-  --app-theme-control-off: #2e2e2e;
-  --app-theme-control-off-border: #4a4a4a;
-  --app-theme-canvas: #111111;
-  --app-theme-chrome: #101010;
-  --app-theme-toolbar: #111111;
-  --app-theme-toolbar-foreground: #fcfcfc;
-  --app-theme-toolbar-border: rgb(252 252 252 / 8%);
-  --app-theme-toolbar-control: rgb(252 252 252 / 2.6%);
-  --app-theme-toolbar-control-foreground: rgb(252 252 252 / 72.2%);
-  --app-theme-toolbar-control-hover: rgb(252 252 252 / 3.9%);
-  --app-theme-surface: #131313;
-  --app-theme-surface-raised: #171717;
-  /* Lighter than both the chrome (#101010 to #131313) and the CAD viewport (#171717), so
-     floating panels read as lifted from either. */
-  --app-theme-surface-overlay: #1c1c1c;
-  --app-theme-popover-border: rgb(252 252 252 / 12%);
+  --app-theme-control-off: #2c2c2f;
+  --app-theme-control-off-border: #46464b;
+  --app-theme-canvas: #111113;
+  --app-theme-chrome: #0c0c0d;
+  --app-theme-toolbar: #111113;
+  --app-theme-toolbar-foreground: #f5f5f6;
+  --app-theme-toolbar-border: rgb(255 255 255 / 7%);
+  --app-theme-toolbar-control: rgb(255 255 255 / 3%);
+  --app-theme-toolbar-control-foreground: rgb(245 245 246 / 74%);
+  --app-theme-toolbar-control-hover: rgb(255 255 255 / 6%);
+  --app-theme-surface: #151517;
+  --app-theme-surface-raised: #19191c;
+  /* Lighter than the workspace (#111113), the sidebar (#0c0c0d), and the CAD viewport, so
+     floating panels read as lifted from any of them. */
+  --app-theme-surface-overlay: #1d1d20;
+  --app-theme-popover-border: rgb(255 255 255 / 11%);
   /* Text tiers: primary (--app-theme-text), secondary (muted-foreground) for
      descriptions, subtitles, and inactive labels, and tertiary for timestamps,
      counts, and hints. Placeholders sit just above tertiary so an empty input
      still reads as empty. Disabled controls drop to 50% opacity, which keeps
      them below the secondary tier. */
-  --app-theme-text: #fcfcfc;
-  --app-theme-text-muted: rgb(252 252 252 / 68%);
-  --app-theme-text-tertiary: rgb(252 252 252 / 46%);
-  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split), matching
-     the sidebar edge's 8%. */
-  --app-theme-border: rgb(252 252 252 / 8%);
-  --app-theme-input: rgb(252 252 252 / 11.8%);
-  --app-theme-focus: rgb(245 128 86 / 63%);
-  --app-theme-accent: #fcfcfc;
-  --app-theme-accent-foreground: #111111;
-  --app-theme-secondary: rgb(252 252 252 / 2.6%);
-  --app-theme-secondary-foreground: #fcfcfc;
-  --app-theme-muted: rgb(252 252 252 / 2.6%);
+  --app-theme-text: #f5f5f6;
+  --app-theme-text-muted: rgb(245 245 246 / 66%);
+  --app-theme-text-tertiary: rgb(245 245 246 / 44%);
+  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split). */
+  --app-theme-border: rgb(255 255 255 / 7%);
+  --app-theme-input: rgb(255 255 255 / 11%);
+  --app-theme-focus: rgb(77 136 245 / 70%);
+  /* Solid "act now" controls: send, primary buttons, switches, sliders. */
+  --app-theme-accent: var(--app-theme-blueprint);
+  --app-theme-accent-foreground: #ffffff;
+  --app-theme-secondary: rgb(255 255 255 / 4%);
+  --app-theme-secondary-foreground: #f5f5f6;
+  --app-theme-muted: rgb(255 255 255 / 3%);
   --app-theme-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-placeholder: rgb(252 252 252 / 48%);
+  --app-theme-placeholder: rgb(245 245 246 / 46%);
   --app-theme-secondary-label: var(--app-theme-text-muted);
-  --app-theme-icon-muted: rgb(252 252 252 / 62%);
+  --app-theme-icon-muted: rgb(245 245 246 / 66%);
   --app-theme-error: oklch(0.734642 0.162647 21.864);
   --app-theme-error-foreground: oklch(0.702184 0.189226 22.228);
   --app-theme-error-surface: oklch(0.265257 0.046957 17.692);
@@ -1217,23 +1224,23 @@
   --app-theme-update: oklch(0.854514 0 0);
   --app-theme-update-foreground: oklch(0.854514 0 0);
   --app-theme-update-surface: oklch(0.430694 0 0);
-  --app-theme-accent-surface: rgb(252 252 252 / 3.9%);
-  --app-theme-accent-surface-foreground: #fcfcfc;
-  --app-theme-message-surface: rgb(252 252 252 / 2.6%);
-  --app-theme-message-foreground: #fcfcfc;
-  --app-theme-message-action: #fcfcfc;
-  --app-theme-message-action-foreground: #111111;
-  --app-theme-message-action-hover: #ffffff;
-  --app-theme-code-background: rgb(252 252 252 / 2.6%);
-  --app-theme-code-foreground: #fcfcfc;
-  --app-theme-sidebar: #111111;
-  --app-theme-sidebar-foreground: #fcfcfc;
+  --app-theme-accent-surface: rgb(255 255 255 / 5%);
+  --app-theme-accent-surface-foreground: #f5f5f6;
+  --app-theme-message-surface: #1b1b1e;
+  --app-theme-message-foreground: #f5f5f6;
+  --app-theme-message-action: var(--app-theme-blueprint);
+  --app-theme-message-action-foreground: #ffffff;
+  --app-theme-message-action-hover: var(--app-theme-blueprint-hover);
+  --app-theme-code-background: rgb(255 255 255 / 3.5%);
+  --app-theme-code-foreground: #f5f5f6;
+  --app-theme-sidebar: #0c0c0d;
+  --app-theme-sidebar-foreground: #f5f5f6;
   --app-theme-sidebar-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-sidebar-control-surface: rgb(252 252 252 / 2.6%);
-  --app-theme-sidebar-row-hover: rgb(252 252 252 / 3.9%);
-  --app-theme-sidebar-row-active: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-row-selected: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-border: rgb(252 252 252 / 8%);
+  --app-theme-sidebar-control-surface: rgb(255 255 255 / 3%);
+  --app-theme-sidebar-row-hover: rgb(255 255 255 / 4%);
+  --app-theme-sidebar-row-active: rgb(255 255 255 / 6.5%);
+  --app-theme-sidebar-row-selected: rgb(255 255 255 / 6.5%);
+  --app-theme-sidebar-border: rgb(255 255 255 / 6%);
 }
 
 /* Map the permanent application palette onto the semantic surface tokens. */
@@ -1837,27 +1844,52 @@ code {
 .chat-markdown table {
   width: 100%;
   min-width: max-content;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   overflow-wrap: normal;
   word-break: normal;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+/* Tables sit in a framed sheet, like a title block: a hairline frame, a tinted header row,
+   and body text one step below primary so headers lead. */
+.chat-markdown .chat-markdown-table-container {
+  container-type: inline-size;
+}
+
+.chat-markdown .chat-markdown-table-container > :first-child {
+  border: 1px solid var(--contrast-border);
+  border-radius: var(--radius);
 }
 
 .chat-markdown th,
 .chat-markdown td {
-  padding: 0.45rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   text-align: left;
+  vertical-align: top;
 }
 
 .chat-markdown thead th {
-  border-bottom: 1px solid color-mix(in srgb, var(--contrast-border) 60%, transparent);
-  padding-block: 0.55rem;
+  border-bottom: 1px solid var(--contrast-border);
+  background-color: color-mix(in srgb, var(--contrast-foreground) 3.5%, transparent);
+  padding-block: 0.5rem;
+  color: var(--contrast-foreground);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .chat-markdown tbody td {
-  border-bottom: 1px solid color-mix(in srgb, var(--contrast-border) 60%, transparent);
+  border-bottom: 1px solid var(--contrast-border);
+  color: color-mix(in srgb, var(--contrast-foreground) 82%, transparent);
+}
+
+.chat-markdown tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.chat-markdown tbody td:first-child {
+  color: var(--contrast-foreground);
 }
 
 /* Collapsed (default): single-line cells truncate so arbitrary chat content
@@ -1873,6 +1905,21 @@ code {
 .chat-markdown .chat-markdown-table-container[data-expanded="true"] td {
   max-width: 24rem;
   overflow-wrap: anywhere;
+}
+
+/* Beside the CAD panel the chat column is narrow. Rather than scroll a wide table sideways and
+   hide its last columns, let every column wrap at word boundaries. */
+@container (max-width: 36rem) {
+  .chat-markdown table {
+    min-width: 0;
+  }
+
+  .chat-markdown .chat-markdown-table-container[data-expanded] th,
+  .chat-markdown .chat-markdown-table-container[data-expanded] td {
+    max-width: none;
+    overflow-wrap: normal;
+    white-space: normal;
+  }
 }
 
 @keyframes ultrathink-rainbow {
