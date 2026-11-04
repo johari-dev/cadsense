@@ -207,15 +207,15 @@ describe("ComposerPrimaryActions", () => {
     expect(renderSendButton()).toContain("size-7.5");
   });
 
-  it("renders send and stop as quiet icon buttons with no fill", () => {
+  it("renders send as the solid primary action and stop as a quiet icon button", () => {
     const send = renderSendButton();
     const stop = renderStandaloneStop();
 
     // Static markup escapes the "&" in the class's arbitrary variant.
     const quiet = COMPOSER_ICON_ACTION_CLASS_NAME.replaceAll("&", "&amp;");
-    expect(send).toContain(quiet);
+    expect(send).toContain("bg-primary");
+    expect(send).not.toContain(quiet);
     expect(stop).toContain(quiet);
-    expect(send).not.toContain("bg-message-action");
     expect(stop).not.toContain("bg-destructive");
   });
 
