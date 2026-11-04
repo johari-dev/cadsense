@@ -71,6 +71,7 @@ import {
   CursorClickIcon as MousePointerClickIcon,
   PaintBrushIcon as PaintbrushIcon,
   PlayIcon,
+  PulseIcon,
   MagnifyingGlassIcon as SearchIcon,
   NotePencilIcon as SquarePenIcon,
   TerminalWindowIcon as TerminalIcon,
@@ -1330,8 +1331,10 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
         onClick={() => ctx.onToggleTurnFold(row.turnId)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        // A bordered chip: the agent's work is a record you can open, not a line of prose.
+        className="inline-flex h-7 cursor-pointer select-none items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs font-medium text-muted-foreground tabular-nums transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
+        <PulseIcon className="size-3.5 text-(--accent-text)" aria-hidden="true" />
         <span>{row.label}</span>
         <Icon className="size-3.5" />
       </button>
