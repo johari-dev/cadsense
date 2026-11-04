@@ -7,6 +7,7 @@ export type SettingsPath =
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/cad-storage"
+  | "/settings/drawings"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -24,6 +25,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/cad-storage": "CAD storage",
+  "/settings/drawings": "Drawings",
   "/settings/archived": "Archive",
 };
 
@@ -60,8 +62,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Chat title model",
     to: "/settings/general",
   },
-  { id: "drawing-units", title: "Drawing units", to: "/settings/general" },
-  { id: "drawing-tap-depth", title: "Tap depth limit", to: "/settings/general" },
+  { id: "drawing-units", title: "Drawing units", to: "/settings/drawings" },
+  { id: "drawing-tap-depth", title: "Tap depth limit", to: "/settings/drawings" },
   { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
   {

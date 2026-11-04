@@ -16,6 +16,7 @@ import { Route as SettingsProvidersRouteImport } from './routes/settings.provide
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
+import { Route as SettingsDrawingsRouteImport } from './routes/settings.drawings'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsCadStorageRouteImport } from './routes/settings.cad-storage'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
@@ -56,6 +57,11 @@ const SettingsIntegrationsRoute = SettingsIntegrationsRouteImport.update({
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsDrawingsRoute = SettingsDrawingsRouteImport.update({
+  id: '/drawings',
+  path: '/drawings',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
@@ -103,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cad-storage': typeof SettingsCadStorageRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/drawings': typeof SettingsDrawingsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
@@ -117,6 +124,7 @@ export interface FileRoutesByTo {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cad-storage': typeof SettingsCadStorageRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/drawings': typeof SettingsDrawingsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cad-storage': typeof SettingsCadStorageRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/drawings': typeof SettingsDrawingsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
@@ -152,6 +161,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/cad-storage'
     | '/settings/diagnostics'
+    | '/settings/drawings'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
@@ -166,6 +176,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/cad-storage'
     | '/settings/diagnostics'
+    | '/settings/drawings'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
@@ -182,6 +193,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/cad-storage'
     | '/settings/diagnostics'
+    | '/settings/drawings'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
@@ -246,6 +258,13 @@ declare module '@tanstack/react-router' {
       path: '/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof SettingsGeneralRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/drawings': {
+      id: '/settings/drawings'
+      path: '/drawings'
+      fullPath: '/settings/drawings'
+      preLoaderRoute: typeof SettingsDrawingsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/diagnostics': {
@@ -319,6 +338,7 @@ interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsCadStorageRoute: typeof SettingsCadStorageRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
+  SettingsDrawingsRoute: typeof SettingsDrawingsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
@@ -330,6 +350,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsCadStorageRoute: SettingsCadStorageRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
+  SettingsDrawingsRoute: SettingsDrawingsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,

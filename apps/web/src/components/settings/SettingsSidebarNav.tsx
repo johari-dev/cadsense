@@ -11,6 +11,7 @@ import {
 import {
   ArchiveIcon,
   HardDriveIcon,
+  PartDrawingIcon,
   ShapesIcon as BlocksIcon,
   RobotIcon as BotIcon,
   KeyboardIcon,
@@ -51,6 +52,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
   "/settings/cad-storage": HardDriveIcon,
+  "/settings/drawings": PartDrawingIcon,
   "/settings/archived": ArchiveIcon,
 };
 
@@ -71,7 +73,10 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
       "/settings/archived",
     ],
   },
-  { label: "CAD", paths: ["/settings/integrations", "/settings/cad-storage"] },
+  {
+    label: "CAD",
+    paths: ["/settings/integrations", "/settings/drawings", "/settings/cad-storage"],
+  },
   { label: "Agents", paths: ["/settings/providers"] },
 ];
 

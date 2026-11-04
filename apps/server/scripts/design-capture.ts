@@ -290,6 +290,13 @@ const shoot = async () => {
   await screen("settings-providers", "Settings, Providers page.", async () => {
     await page.goto(new URL("settings/providers", url).href, { waitUntil: "networkidle" });
   });
+  await screen(
+    "settings-drawings",
+    "Settings, CAD > Drawings page: drawing units and tap depth.",
+    async () => {
+      await page.goto(new URL("settings/drawings", url).href, { waitUntil: "networkidle" });
+    },
+  );
 
   NodeFS.writeFileSync(
     NodePath.join(out, "manifest.json"),

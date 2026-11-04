@@ -18,6 +18,7 @@ const PAGES_TITLED_BY_FIRST_SECTION: ReadonlySet<string> = new Set([
   "/settings/general",
   "/settings/providers",
   "/settings/cad-storage",
+  "/settings/drawings",
 ]);
 
 function settingsBreadcrumbLabel(pathname: string): string | null {
