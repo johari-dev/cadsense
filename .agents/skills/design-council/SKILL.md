@@ -24,6 +24,8 @@ Keep these the same for every round so scores compare.
   - `t3code-upstream.png`. Cadsense is a T3 Code fork. It must not look like this.
   - Peer app shots (Claude desktop, Codex app, others the user adds). Name the peer in the
     file name. Reviewers also know these apps; name them in the brief even without a shot.
+    Agent apps block computer use, so prefer the user's own screenshots; public marketing
+    crops are a weak fallback.
 
 ## Setup
 
@@ -97,18 +99,26 @@ Score 1-10 (decimals allowed) for Cadsense current, Cadsense original, T3 Code, 
 and Codex app, in each category:
 hierarchy, typography, color-and-contrast, spacing-and-layout, iconography, consistency,
 polish, identity (reads as its own product made for CAD work, not a T3 Code reskin).
-Base the scores only on what you see. Then list the top problems in the current screens, worst
-first, each with: screen file, what is wrong, a concrete fix (values where you can: sizes,
-colors, weights, spacing).
+Base the scores only on what you see. Then answer the fork check: if someone who uses T3 Code
+every day saw the current Cadsense screens, would they say "that's T3 Code" at a glance? Answer
+for the original screens too. Then list the top problems in the current screens, worst first,
+each with: screen file, what is wrong, a concrete fix (values where you can: sizes, colors,
+weights, spacing).
 
 Reply exactly:
 SCORES
 | app | hierarchy | typography | color-and-contrast | spacing-and-layout | iconography | consistency | polish | identity |
 ...
+FORK CHECK
+current: YES or NO. <one sentence why>
+original: YES or NO. <one sentence why>
 FINDINGS
 D1 <screen> <problem>. Fix: <fix>
 ...
 ```
+
+The fork check asks the goal directly. Scores say "better"; the fork check says "its own
+product". Done needs a NO for current from every seat.
 
 ## Constraints on the design
 
@@ -128,5 +138,6 @@ Cadsense current and the peers, plus what changed and which findings were declin
 round table into the PR description (no jester scores).
 
 Done when, in the same round, every active seat rates every category at or above the bar the
-user set (default 9), and Cadsense current scores at or above every peer app on average.
+user set (default 9), Cadsense current scores at or above every peer app on average, and every
+seat answers NO to the fork check for the current screens.
 Report the rounds, the cost if the tools expose it, and what a person should still eyeball.
