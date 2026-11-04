@@ -1,5 +1,4 @@
 import { ArrowLeftIcon, GearSixIcon as SettingsIcon } from "~/lib/icons";
-import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
@@ -22,7 +21,6 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -102,31 +100,6 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-function SidebarUtilityItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <SidebarMenuItem className="shrink-0">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
-              {icon}
-            </SidebarMenuButton>
-          }
-        />
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
-    </SidebarMenuItem>
-  );
-}
-
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
@@ -169,13 +142,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-        </>
+        // Labeled like Back, so the footer reads as navigation rather than a stray icon.
+        <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+          <SidebarMenuButton aria-label="Settings" onClick={handleSettingsClick}>
+            <SettingsIcon />
+            <span>Settings</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
       )}
       <SidebarUpdatePill />
     </SidebarMenu>
