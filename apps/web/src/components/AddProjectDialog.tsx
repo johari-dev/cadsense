@@ -272,7 +272,7 @@ export function AddProjectDialog() {
             <SourceOption
               icon={<CubeIcon className="size-5" />}
               label="Local CAD file"
-              description="One STEP or SolidWorks file. Cadsense imports it and watches for re-exports."
+              description="Import a STEP or SolidWorks file. Updates when you export again."
               disabled={busy || !environment || environment.connection.phase !== "connected"}
               onClick={() => setKind("local-cad")}
             />

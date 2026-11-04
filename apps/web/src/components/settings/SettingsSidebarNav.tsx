@@ -232,6 +232,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             </p>
           ) : null}
           <SidebarMenu
+            data-settings-nav=""
             className="ps-px group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:ps-0"
             id={isSearching && hasResults ? "settings-search-results" : undefined}
             role={isSearching && hasResults ? "listbox" : undefined}

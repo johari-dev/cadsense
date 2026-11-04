@@ -212,7 +212,7 @@ export function CadSyncButton({
       {/* A disabled button gets no pointer events, so the span carries the tooltip. */}
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
         <Button
-          size="xs"
+          size="sm"
           variant="outline"
           disabled={disabled || blocker !== null}
           onClick={() => void (root ? sync(root) : discover())}

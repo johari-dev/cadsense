@@ -1848,7 +1848,7 @@ code {
   border-spacing: 0;
   overflow-wrap: normal;
   word-break: normal;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   line-height: 1.25rem;
 }
 
@@ -2229,4 +2229,10 @@ code {
   :root [data-app-sidebar] {
     border-color: transparent;
   }
+}
+
+/* Settings navigation marks its open page the way the chat list marks the open chat. */
+[data-settings-nav] [data-sidebar="menu-button"][data-active="true"] {
+  box-shadow: inset 3px 0 0 var(--app-theme-blueprint);
+  color: var(--contrast-sidebar-foreground);
 }
