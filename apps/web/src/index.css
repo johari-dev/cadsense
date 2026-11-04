@@ -2245,6 +2245,10 @@ code {
     overflow: hidden;
     border: 1px solid var(--app-theme-border);
     border-radius: 0.625rem;
+    /* Lifted off the window chrome: a faint top highlight and a soft drop shadow. */
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 4%),
+      0 10px 28px -14px rgb(0 0 0 / 85%);
   }
 
   /* The sheet has an even 6px gutter. It starts 6px down, so its top bar is 12px shorter: its title then centers on the
@@ -2282,4 +2286,12 @@ code {
 .chat-markdown li > strong:first-child,
 .chat-markdown li > p:first-child > strong:first-child {
   font-weight: 550;
+}
+
+/* The open chat's row is a small raised card, like the sheet beside it. */
+[data-app-sidebar] [data-sidebar="menu-sub-button"][data-active="true"] {
+  background-image: linear-gradient(rgb(255 255 255 / 3%), transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    0 1px 2px rgb(0 0 0 / 45%);
 }
