@@ -317,18 +317,21 @@ function EnvironmentProviderSettings({
         <Tooltip>
           <TooltipTrigger
             render={
+              // Labeled and framed like the General page's Restore defaults, so the page's one
+              // action reads as a control rather than a stray glyph.
               <Button
-                size="icon-micro"
-                variant="ghost-muted"
+                size="xs"
+                variant="outline"
                 disabled={isRefreshingProviders}
                 onClick={() => void refreshProviders()}
                 aria-label="Refresh provider status"
               >
                 {isRefreshingProviders ? (
-                  <LoaderIcon className="size-3 animate-spin" />
+                  <LoaderIcon className="size-3.5 animate-spin" />
                 ) : (
-                  <RefreshCwIcon className="size-3" />
+                  <RefreshCwIcon className="size-3.5" />
                 )}
+                Check again
               </Button>
             }
           />

@@ -67,7 +67,7 @@ export const OpenInExplorerButton = memo(function OpenInExplorerButton({
             onClick={() => void onOpen()}
             // Icon-only at every width, so it never reads as a twin of the labeled Open CAD.
             size="icon-sm"
-            variant="outline"
+            variant="ghost"
             data-toolbar-control=""
           />
         }

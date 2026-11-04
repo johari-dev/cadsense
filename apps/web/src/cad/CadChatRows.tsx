@@ -229,9 +229,8 @@ export function CadPublishedComments({
 }
 
 /**
- * One comment in the chat list: its severity-colored number and full title on the first line,
- * then the severity pill and the secondary detail (the part, or the proposal state) on a second,
- * quieter line.
+ * One comment in the chat list: its severity-colored number, full title, and severity pill on the
+ * first line, then the secondary detail (the part, or the proposal state) on a second, quieter line.
  * The badge sits in the header icon's column so titles line up with the header text.
  * A plain function, not a component, so each row stays a `<button>` in the element tree.
  */
@@ -254,21 +253,24 @@ function commentRow({
     <button
       key={key}
       type="button"
-      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
       onClick={onOpen}
     >
       <span className="flex h-5 items-center justify-center">
         <CommentBadge number={number} severity={severity} />
       </span>
       <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
-      {severity || detail ? (
-        <span className="col-start-2 line-clamp-2 min-w-0 text-[13px] leading-[18px] text-muted-foreground">
-          {/* The pin's color as a labeled pill, so the legend is on every row. */}
-          {severity ? (
-            <span className="cad-severity-pill me-1.5 align-[1px]" data-severity={severity}>
-              {severity}
-            </span>
-          ) : null}
+      {/* The pin's color as a labeled pill at the title row's end, so the legend is on every
+          row and the detail below keeps a clean left edge. */}
+      {severity ? (
+        <span className="cad-severity-pill mt-px self-start" data-severity={severity}>
+          {severity}
+        </span>
+      ) : (
+        <span />
+      )}
+      {detail ? (
+        <span className="col-span-2 col-start-2 line-clamp-2 min-w-0 text-[13px] leading-[18px] text-muted-foreground">
           {detail}
         </span>
       ) : null}

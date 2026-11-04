@@ -605,9 +605,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             </Tooltip>
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 self-start">
           {/* A fixed column for the row's age, so every title has the same width whether
-              or not the row is selected. Hover controls take the column's place. */}
+              or not the row is selected. Hover controls take the column's place. It sits on
+              the title's first line, so two-line titles keep it at the top. */}
           <div className="flex w-6 justify-end max-sm:w-20">
             {isConfirmingArchive ? (
               <button
@@ -677,7 +678,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
                 ) : (
-                  <span className="text-xs text-tertiary-foreground tabular-nums">
+                  <span className="text-[11px] text-tertiary-foreground leading-[18px] tabular-nums">
                     {formatCompactRelativeTime(lastActivityAt)}
                   </span>
                 )}
@@ -2057,12 +2058,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // The subtitle shows the source (the Onshape logo, or a file format) and kind; the model's own name (an Onshape element such
   // as "Part Studio 1", or the local file's path) moves to the subtitle's tooltip.
   const source = describeProjectSource(project);
+  // When the model was last imported, so the row says how fresh the CAD the agent sees is.
+  const syncedAt = currentCadRoots.length === 1 ? currentCadRoots[0]!.current!.createdAt : null;
+  const syncedAge = syncedAt ? formatCompactRelativeTime(syncedAt) : "";
   const subtitle = (
     <>
       {source.logo === "onshape" ? (
         <img src="/onshape.svg" alt="Onshape" className="size-3 shrink-0 object-contain" />
       ) : null}
-      <span className="truncate">{source.label}</span>
+      <span className="truncate">
+        {source.label}
+        {syncedAge ? ` · synced ${syncedAge}` : null}
+      </span>
     </>
   );
   const modelName = project.localCadSource?.filePath ?? singleCadModelName(project.cad);
