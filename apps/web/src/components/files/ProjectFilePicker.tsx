@@ -53,7 +53,7 @@ function EmptyProjectFilePicker() {
   return (
     <CommandPaletteContent
       aria-label="File picker"
-      escapeLabel="Back"
+      escapeLabel="Close"
       footerActionLabel="Open file"
       inputProps={{ disabled: true, placeholder: "Search files…" }}
       mode="none"

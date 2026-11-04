@@ -7,7 +7,6 @@ import type {
   ScopedThreadRef,
 } from "@cadsense/contracts";
 import {
-  ArrowRightIcon,
   WarningCircleIcon as CircleAlertIcon,
   ChatIcon as MessageSquareIcon,
   PartDrawingIcon,
@@ -155,6 +154,9 @@ export function describeCadCommentsHeading(card: CadCommentsPublishedCard): stri
 
 /** The frame every agent artifact in the chat shares: part drawings and review comments. */
 const ARTIFACT_CARD = "rounded-lg border border-border bg-card px-2.5 py-2";
+/** The one action an artifact card offers, at the right of its header row. */
+const ARTIFACT_ACTION =
+  "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
@@ -171,12 +173,21 @@ export function CadPublishedComments({
   // A card of its own, so the review's result reads as the main outcome of the turn rather
   // than more narration. It shares the artifact card frame with part drawings (ARTIFACT_CARD).
   return (
-    <section aria-label={heading} className={`${ARTIFACT_CARD} pb-0 text-[0.9333rem]`}>
+    <section aria-label={heading} className={`${ARTIFACT_CARD} text-[0.9333rem]`}>
       <div className="flex min-h-7 items-center gap-1.5 px-0.5">
         <span className="flex size-6 shrink-0 items-center justify-center text-(--accent-text)">
           <MessageSquareIcon className="size-4 shrink-0" aria-hidden />
         </span>
         <h3 className="min-w-0 flex-1 truncate font-semibold text-foreground text-sm">{heading}</h3>
+        {count > 0 || card.proposed.length > 0 ? (
+          <button
+            type="button"
+            className={ARTIFACT_ACTION}
+            onClick={() => openCadComments(threadRef)}
+          >
+            {unlisted > 0 ? `Show all ${count} in CAD` : "Open in CAD"}
+          </button>
+        ) : null}
       </div>
       <div className="mt-0.5 flex flex-col gap-0.5">
         {listed.map((comment) =>
@@ -204,17 +215,6 @@ export function CadPublishedComments({
           }),
         )}
       </div>
-      {count > 0 || card.proposed.length > 0 ? (
-        // The card's footer row, divided off rather than boxed, so no border sits in a border.
-        <button
-          type="button"
-          className="-mx-2.5 mt-2 flex h-9 w-[calc(100%+1.25rem)] cursor-pointer items-center justify-center gap-1.5 rounded-b-lg border-t border-border font-medium text-[13px] text-foreground/90 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-          onClick={() => openCadComments(threadRef)}
-        >
-          {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}
-          <ArrowRightIcon className="size-3.5" aria-hidden />
-        </button>
-      ) : null}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}
@@ -323,11 +323,7 @@ export function CadPartDrawings({
             ? `Part drawing: ${card.title}`
             : `${card.sheets.length} part drawings: ${card.title}`}
         </span>
-        <button
-          type="button"
-          className="flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-          onClick={open}
-        >
+        <button type="button" className={ARTIFACT_ACTION} onClick={open}>
           Open drawing
         </button>
       </div>

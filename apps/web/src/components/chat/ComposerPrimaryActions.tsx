@@ -1,6 +1,6 @@
 import { memo, type PointerEventHandler } from "react";
 import {
-  ArrowElbowDownLeftIcon,
+  ArrowUpIcon,
   CaretDownIcon as ChevronDownIcon,
   CaretLeftIcon as ChevronLeftIcon,
   StopIcon,
@@ -245,7 +245,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       {isConnecting || isSendBusy ? (
         <Spinner aria-hidden="true" />
       ) : (
-        <ArrowElbowDownLeftIcon aria-hidden="true" />
+        // An up arrow reads as "send"; the return glyph read as a keyboard hint.
+        <ArrowUpIcon aria-hidden="true" weight="bold" />
       )}
     </button>
   );

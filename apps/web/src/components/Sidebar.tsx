@@ -588,8 +588,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    // Two lines, so similar CAD chats stay distinct at the default sidebar width.
-                    className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-[18px]"
+                    className="min-w-0 flex-1 truncate text-[13px] leading-[18px]"
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {resolveSidebarThreadTitle(thread.title, projectName)}
@@ -605,10 +604,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             </Tooltip>
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5 self-start">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* A fixed column for the row's age, so every title has the same width whether
-              or not the row is selected. Hover controls take the column's place. It sits on
-              the title's first line, so two-line titles keep it at the top. */}
+              or not the row is selected. Hover controls take the column's place. */}
           <div className="flex w-6 justify-end max-sm:w-20">
             {isConfirmingArchive ? (
               <button

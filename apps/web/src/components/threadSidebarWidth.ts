@@ -1,7 +1,7 @@
 export const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
-// 240px at 1440 wide leaves 440px for chat and 760px for CAD, and gives one-line thread
-// titles about 160px before they truncate.
-export const THREAD_SIDEBAR_DEFAULT_WIDTH = 15 * 16;
+// 264px at 1440 wide still leaves 480px for chat beside the CAD panel, and gives one-line
+// chat titles about 185px before they truncate.
+export const THREAD_SIDEBAR_DEFAULT_WIDTH = 16.5 * 16;
 export const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 export const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 

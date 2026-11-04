@@ -320,7 +320,6 @@ function EnvironmentProviderSettings({
               // Labeled and framed like the General page's Restore defaults, so the page's one
               // action reads as a control rather than a stray glyph.
               <Button
-                size="xs"
                 variant="outline"
                 disabled={isRefreshingProviders}
                 onClick={() => void refreshProviders()}

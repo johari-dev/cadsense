@@ -69,6 +69,7 @@ export const OpenInExplorerButton = memo(function OpenInExplorerButton({
             size="icon-sm"
             variant="ghost"
             data-toolbar-control=""
+            data-header-icon-button=""
           />
         }
       >

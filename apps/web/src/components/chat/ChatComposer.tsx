@@ -266,7 +266,7 @@ import {
   WarningCircleIcon as CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
-  ArrowElbowDownLeftIcon,
+  ArrowUpIcon,
   PlayIcon,
   type Icon as LucideIcon,
   LockSimpleIcon as LockIcon,
@@ -2715,7 +2715,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     submitComposer();
                   }}
                 >
-                  <ArrowElbowDownLeftIcon aria-hidden="true" />
+                  <ArrowUpIcon aria-hidden="true" weight="bold" />
                 </button>
               </div>
             ) : null}

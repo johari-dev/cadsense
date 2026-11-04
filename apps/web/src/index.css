@@ -1681,9 +1681,9 @@ code {
    22px line in full foreground, 24px above and 8px below, so a long review breaks into
    sections instead of reading as one wall of prose. */
 .chat-markdown p[data-markdown-lead] {
-  margin-top: 1.6rem;
-  margin-bottom: 0.5333rem;
-  font-size: 1rem;
+  margin-top: 1.8667rem;
+  margin-bottom: 0.6667rem;
+  font-size: 1.0667rem;
   line-height: 1.4667;
   color: var(--contrast-foreground);
 }
@@ -1994,8 +1994,8 @@ code {
   display: inline-flex;
   align-items: center;
   border-radius: 4px;
-  padding: 0.0625rem 0.4375rem;
-  font-size: 0.6875rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.125rem;
   text-transform: capitalize;
@@ -2263,4 +2263,15 @@ code {
    highlight and full-strength text, with no extra bar beside the tree's guide line. */
 [data-settings-nav] [data-sidebar="menu-button"][data-active="true"] {
   color: var(--contrast-sidebar-foreground);
+}
+
+/* Icon-only header actions are ghost buttons: no fill or border at rest, a light fill on hover,
+   so none looks pressed beside the labeled action. */
+:root [data-chat-header] [data-header-icon-button] {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+:root [data-chat-header] [data-header-icon-button]:is(:hover, [data-pressed]) {
+  background-color: var(--toolbar-control-hover);
 }

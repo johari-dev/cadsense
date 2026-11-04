@@ -311,7 +311,7 @@ export const ChatHeader = memo(function ChatHeader({
             labeled button rather than only the layout toggle's icon. */}
         {onOpenCad && !rightPanelOpen && !isDraftHero ? (
           <Button size="sm" variant="outline" onClick={onOpenCad}>
-            <CubeIcon className="size-4" />
+            <CubeIcon className="size-4 text-(--accent-text)" />
             Open CAD
           </Button>
         ) : null}
