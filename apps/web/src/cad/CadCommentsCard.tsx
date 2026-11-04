@@ -1027,7 +1027,7 @@ export function CadCommentsCard({
               {entry.label}
             </span>
           ))}
-          {hasLetteredPins ? <span>· Same number, same comment</span> : null}
+          {hasLetteredPins ? <span>· Pin numbers match the comments in chat</span> : null}
         </div>
       )}
       {/* Docked, the card stays in its column while the column closes, then unmounts. */}

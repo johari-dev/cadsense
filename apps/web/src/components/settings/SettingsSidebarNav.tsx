@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -53,15 +54,26 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/archived": ArchiveIcon,
 };
 
-export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
+/**
+ * The navigation's groups, in order. CAD work gets its own group, ahead of the agents, so the
+ * page reads as a CAD tool's settings rather than a generic app's.
+ */
+const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[]).map((to) => ({
-  to,
-  label: SETTINGS_SECTION_LABELS[to],
-  icon: SETTINGS_SECTION_ICONS[to],
-}));
+  paths: ReadonlyArray<SettingsPath>;
+}> = [
+  {
+    label: "App",
+    paths: [
+      "/settings/general",
+      "/settings/appearance",
+      "/settings/keybindings",
+      "/settings/archived",
+    ],
+  },
+  { label: "CAD", paths: ["/settings/integrations", "/settings/cad-storage"] },
+  { label: "Agents", paths: ["/settings/providers"] },
+];
 
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
@@ -265,21 +277,31 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))
-              : SETTINGS_NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+              : SETTINGS_NAV_GROUPS.map((group) => (
+                  <Fragment key={group.label}>
+                    <li
+                      aria-hidden="true"
+                      className="px-2 pt-3 pb-1 font-semibold text-[11px] text-sidebar-muted-foreground uppercase tracking-[0.08em] first:pt-1 group-data-[collapsible=icon]:hidden"
+                    >
+                      {group.label}
+                    </li>
+                    {group.paths.map((to) => {
+                      const Icon = SETTINGS_SECTION_ICONS[to];
+                      const isActive = pathname === to || pathname.startsWith(`${to}/`);
+                      return (
+                        <SidebarMenuItem key={to}>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            onClick={() => handleSectionClick(to)}
+                          >
+                            <Icon />
+                            <span className="truncate">{SETTINGS_SECTION_LABELS[to]}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </Fragment>
+                ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

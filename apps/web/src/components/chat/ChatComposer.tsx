@@ -3190,7 +3190,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </Tooltip>
                     </>
                   ) : null}
-                  {isComposerFooterCompact ? null : props.modelContext}
+                  {props.modelContext}
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
                       runtimeMode={runtimeMode}

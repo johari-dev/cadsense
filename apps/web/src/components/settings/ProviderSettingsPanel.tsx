@@ -467,9 +467,10 @@ function ProviderRow({
             </Button>
           ) : null}
           {visibleAction === "signOut" ? (
+            // A quiet account action: ghost, so the row's one prominent control is its switch.
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               disabled={pendingSetup === "signOut"}
               onClick={() => onSetup("signOut")}
             >

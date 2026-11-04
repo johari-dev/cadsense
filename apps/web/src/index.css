@@ -73,6 +73,9 @@
   --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.45);
   --shadow-xl: 0 20px 40px -10px rgb(0 0 0 / 0.65), 0 8px 12px -6px rgb(0 0 0 / 0.45);
+  /* IBM Plex Sans is variable, so "medium" sits a touch under 500: labels and buttons stay
+     clearly below semibold titles and headings instead of reading as bold. */
+  --font-weight-medium: 470;
   /* IBM Plex Sans ships with the app, so every platform renders the same engineering face. */
   --font-sans:
     "IBM Plex Sans Variable", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -1171,7 +1174,8 @@
   --app-theme-blueprint-hover: #4580f2;
   --app-theme-accent-text: #7aa9ff;
   /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
-     for selected parts and rows. Switches and other "on" states use the blueprint accent. */
+     for selected parts and rows. Switches are neutral: white when on, so blue stays for the
+     brand, focus, links, and the one primary action. */
   --app-theme-selection: #7dbbff;
   /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
   --app-theme-control-off: #2c2c2f;
@@ -2000,8 +2004,10 @@ code {
   font-weight: 600;
   line-height: 1.125rem;
   text-transform: capitalize;
-  color: #a1a1aa;
-  background-color: rgb(161 161 170 / 12%);
+  color: #d4d4d8;
+  background-color: rgb(255 255 255 / 8%);
+  /* A hairline in the pill's own hue, so every pill, neutral ones too, holds its edge. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
 }
 
 .cad-severity-pill[data-severity="blocker"] {
@@ -2294,4 +2300,9 @@ code {
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 6%),
     0 1px 2px rgb(0 0 0 / 45%);
+}
+
+/* In a compact composer footer the model context keeps its cube and drops the file name. */
+[data-chat-composer-footer-compact="true"] [data-composer-cad-name] {
+  display: none;
 }
