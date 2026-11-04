@@ -146,7 +146,7 @@ export function SettingsSection({
       <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
         {/* The page's first section title is the page title; later sections are groups
             within it and take a smaller heading. */}
-        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.02em] text-foreground [section+section_&]:text-[11px] [section+section_&]:uppercase [section+section_&]:tracking-[0.08em] [section+section_&]:text-muted-foreground">
+        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.02em] text-foreground [section+section_&]:text-base [section+section_&]:tracking-normal">
           {icon}
           {title}
         </h2>

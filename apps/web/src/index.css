@@ -1197,7 +1197,7 @@
      them below the secondary tier. */
   --app-theme-text: #f5f5f6;
   --app-theme-text-muted: rgb(245 245 246 / 66%);
-  --app-theme-text-tertiary: rgb(245 245 246 / 44%);
+  --app-theme-text-tertiary: rgb(245 245 246 / 52%);
   /* One hairline for every divider (sidebar edge, headers, the chat and CAD split). */
   --app-theme-border: rgb(255 255 255 / 7%);
   --app-theme-input: rgb(255 255 255 / 11%);
@@ -1209,7 +1209,7 @@
   --app-theme-secondary-foreground: #f5f5f6;
   --app-theme-muted: rgb(255 255 255 / 3%);
   --app-theme-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-placeholder: rgb(245 245 246 / 46%);
+  --app-theme-placeholder: rgb(245 245 246 / 54%);
   --app-theme-secondary-label: var(--app-theme-text-muted);
   --app-theme-icon-muted: rgb(245 245 246 / 66%);
   --app-theme-error: oklch(0.734642 0.162647 21.864);

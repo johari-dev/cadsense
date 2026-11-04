@@ -277,6 +277,8 @@ export function CadCommentsCard({
    * label: `ch` for the tabular digits and `em` for the word (in the surface's own font).
    */
   const toggleText = `${openCount} comment${openCount === 1 ? "" : "s"}`;
+  // Pins number like the chat's list; a letter marks each spot of a comment with several.
+  const hasLetteredPins = lists.open.some((c) => c.targets.length > 1);
   const toggleWidth = openCount
     ? `calc(48px + ${String(openCount).length}ch + ${openCount === 1 ? 4.3 : 4.8}em)`
     : "var(--cad-overlay-control)";
@@ -1010,6 +1012,24 @@ export function CadCommentsCard({
           <Button size="compact" variant="outline" className="shrink-0" onClick={back}>
             Back to current
           </Button>
+        </div>
+      )}
+      {/* Collapsed, a key under the chip says what the pins' colors and letters mean, so the
+          model reads without opening the list. */}
+      {!open && !settling && openCount > 0 && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute right-3 top-[calc(0.75rem+var(--cad-overlay-control)+0.375rem)] flex flex-col items-end gap-1 rounded-md border bg-popover/92 px-2 py-1.5 text-[11px] text-muted-foreground"
+        >
+          <div className="flex items-center gap-2.5">
+            {legend.map((entry) => (
+              <span key={entry.severity} className="flex items-center gap-1">
+                <span className={cn("size-2 rounded-full border", SEVERITY_FILL[entry.severity])} />
+                {entry.label}
+              </span>
+            ))}
+          </div>
+          {hasLetteredPins ? <span>1a, 1b: one comment, several spots</span> : null}
         </div>
       )}
       {/* Docked, the card stays in its column while the column closes, then unmounts. */}
