@@ -139,14 +139,15 @@ export function CadViewChanges({
         belowRevisionNotice ? "top-14" : "top-3",
       )}
     >
-      <div className="pointer-events-auto flex h-8 shrink-0 items-center rounded-[8px] border border-input bg-popover text-[13px] font-medium shadow-sm">
+      {/* Same chip as the comments toggle across the viewer (CadCommentsCard): border, shadow,
+          and full-strength label, so the two corners read as one set. */}
+      <div className="pointer-events-auto flex h-8 shrink-0 items-center rounded-[8px] border bg-popover text-[13px] font-medium shadow-lg">
         <button
           type="button"
           aria-expanded={open}
           aria-label={changeCount ? `View changes: ${summary.join(", ")}` : "Parts"}
           className={cn(
-            "flex h-full cursor-pointer items-center gap-2 rounded-[7px] px-3 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:text-foreground",
-            !changeCount && "text-foreground/75",
+            "flex h-full cursor-pointer items-center gap-2 rounded-[7px] px-3 text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
           )}
           onClick={toggle}
         >

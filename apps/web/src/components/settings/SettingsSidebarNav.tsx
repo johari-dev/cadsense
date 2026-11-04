@@ -178,8 +178,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
-          {/* Search needs the full sidebar; on the icon rail only the section icons show. */}
-          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden">
+          {/* Search needs the full sidebar; on the icon rail only the section icons show. It is
+              framed like a field so it never reads as one of the pages below it. */}
+          <div className="mb-1 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-control-surface px-2 py-1.5 text-sm text-sidebar-muted-foreground focus-within:border-ring group-data-[collapsible=icon]:hidden">
             <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
             <Input
               ref={searchInputRef}
