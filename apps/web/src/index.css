@@ -2079,7 +2079,7 @@ code {
    composer and everything attached to it use --chat-composer-radius, and the picker panel
    uses the theme's --radius. */
 :root {
-  --chat-composer-radius: 1.2rem;
+  --chat-composer-radius: 0.75rem;
 }
 :root .chat-composer-glass-shell {
   background: var(--chat-composer-glass-surface);

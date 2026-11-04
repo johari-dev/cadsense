@@ -1168,7 +1168,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message px-3.5 py-2.5 text-message-foreground">
+      {/* The sender's corner is squared, so a request reads as pointing back at its author. */}
+      <div className="relative max-w-[80%] rounded-xl rounded-tr-[3px] border border-border bg-message px-3.5 py-2.5 text-message-foreground">
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (
