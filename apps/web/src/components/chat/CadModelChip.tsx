@@ -54,7 +54,7 @@ export function CadModelChip({
 /**
  * The model the agent works on, in the composer's footer: the CAD file a message is about. It
  * is a label, not a control; the header's CadModelChip opens the model. A compact footer (the
- * chat beside the CAD panel) shortens the name (index.css).
+ * chat beside the CAD panel) shows a middle-cut name that keeps the extension (index.css).
  */
 export function ComposerCadContext({ project }: { readonly project: Project }) {
   const name =
@@ -66,9 +66,21 @@ export function ComposerCadContext({ project }: { readonly project: Project }) {
       className="flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md border border-border bg-foreground/[0.04] px-2 font-medium text-muted-foreground text-xs"
     >
       <CubeIcon aria-hidden="true" className="size-3.5 shrink-0 text-(--accent-text)" />
-      <span data-composer-cad-name="" className="truncate">
+      <span data-composer-cad-name="full" className="truncate">
         {name}
+      </span>
+      {/* The compact footer keeps the start and the extension: "bracket-asse….step". */}
+      <span data-composer-cad-name="short" className="hidden">
+        {shortenMiddle(name)}
       </span>
     </span>
   );
+}
+
+/** A file name cut in the middle so its extension stays: "bracket-assembly.step" -> "bracket-asse….step". */
+function shortenMiddle(name: string): string {
+  const dot = name.lastIndexOf(".");
+  const extension = dot > 0 ? name.slice(dot) : "";
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  return stem.length > 12 ? `${stem.slice(0, 12)}…${extension}` : name;
 }

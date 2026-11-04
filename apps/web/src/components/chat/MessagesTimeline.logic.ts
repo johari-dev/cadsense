@@ -250,6 +250,8 @@ export type MessagesTimelineRow =
       createdAt: string;
       turnId: TurnId;
       label: string;
+      /** How many tool steps the fold hides, shown after the label ("· 24 steps"). */
+      stepCount: number;
       expanded: boolean;
     }
   | {
@@ -548,6 +550,7 @@ interface TurnFold {
   createdAt: string;
   hiddenEntryIds: ReadonlySet<string>;
   label: string;
+  stepCount: number;
 }
 
 /**
@@ -737,6 +740,9 @@ function deriveTurnFolds(input: {
       createdAt: firstHiddenEntry.createdAt,
       hiddenEntryIds,
       label,
+      stepCount: group.entries.filter(
+        (entry) => entry.kind === "work" && hiddenEntryIds.has(entry.id),
+      ).length,
     });
   }
   return foldsByAnchorEntryId;
@@ -983,6 +989,7 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: anchoredTurnFold.createdAt,
         turnId: anchoredTurnFold.turnId,
         label: anchoredTurnFold.label,
+        stepCount: anchoredTurnFold.stepCount,
         expanded: input.expandedTurnIds?.has(anchoredTurnFold.turnId) ?? false,
       });
     }

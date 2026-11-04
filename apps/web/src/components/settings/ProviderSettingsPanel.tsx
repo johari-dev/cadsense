@@ -471,6 +471,7 @@ function ProviderRow({
             <Button
               size="sm"
               variant="ghost"
+              className="border-border text-muted-foreground hover:text-foreground"
               disabled={pendingSetup === "signOut"}
               onClick={() => onSetup("signOut")}
             >

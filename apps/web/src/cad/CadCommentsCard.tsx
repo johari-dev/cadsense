@@ -1012,12 +1012,13 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
-      {/* Collapsed, a one-line key under the chip says what the pins' colors mean, so the
-          model reads without opening the list: a small pill like the viewer's other chips. */}
+      {/* Collapsed, a key beside the chip says what the pins' colors mean, so the model reads
+          without opening the list: a chip in the same row, not a second stacked panel. */}
       {!open && !settling && openCount > 0 && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute right-3 top-[calc(0.75rem+var(--cad-overlay-control)+0.5rem)] flex h-7 items-center gap-3 rounded-md border bg-popover/90 px-2.5 text-foreground/75 text-xs"
+          style={{ right: `calc(0.75rem + ${toggleWidth} + 0.5rem)` }}
+          className="pointer-events-none absolute top-3 flex h-(--cad-overlay-control) items-center gap-3 rounded-[8px] border bg-popover/90 px-2.5 text-foreground/75 text-xs"
         >
           {legend.map((entry) => (
             <span key={entry.severity} className="flex items-center gap-1">

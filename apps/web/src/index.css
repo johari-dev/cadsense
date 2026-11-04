@@ -1896,8 +1896,9 @@ code {
   border-bottom: 1px solid var(--contrast-border);
   background-color: color-mix(in srgb, var(--contrast-foreground) 3.5%, transparent);
   padding-block: 0.5rem;
-  color: var(--contrast-foreground);
-  font-weight: 600;
+  color: var(--contrast-muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -2302,7 +2303,11 @@ code {
     0 1px 2px rgb(0 0 0 / 45%);
 }
 
-/* In a compact composer footer the model context keeps its shape with a shorter name. */
-[data-chat-composer-footer-compact="true"] [data-composer-cad-name] {
-  max-width: 6.5rem;
+/* In a compact composer footer the model context keeps its shape with a middle-cut name. */
+[data-chat-composer-footer-compact="true"] [data-composer-cad-name="full"] {
+  display: none;
+}
+
+[data-chat-composer-footer-compact="true"] [data-composer-cad-name="short"] {
+  display: inline;
 }
