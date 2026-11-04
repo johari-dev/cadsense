@@ -28,7 +28,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** Prompts the hero offers as one-click starts. */
+/** Prompts the hero offers as one-click starts. The first is the suggested one. */
 const STARTING_TASKS = [
   {
     label: "Review the design",
@@ -161,12 +161,12 @@ export function DraftHeroHeadline({
       </p>
       {activeProjectTitle ? (
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          {STARTING_TASKS.map(({ label, icon: Icon, prompt }) => (
+          {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
             <Button
               key={label}
-              // One 36px size and one bordered style for all three, so the composer's send
-              // button stays the only solid action on the page.
-              variant="outline"
+              // One 36px size for all three. The first is the suggested start, so it takes a
+              // quiet fill; the others stay bordered. Neither competes with the blue send.
+              variant={index === 0 ? "secondary" : "outline"}
               size="lg"
               onClick={() => onChooseTask(prompt)}
               className="pointer-events-auto"

@@ -141,11 +141,11 @@ export type IconProps = Omit<ComponentProps<"svg">, "ref" | "stroke"> & {
 };
 export type Icon = (props: IconProps) => ReactElement;
 
-// Tabler's default stroke (2) is the regular weight.
+// Regular is 1.75, a touch under Tabler's default 2, so line icons sit with IBM Plex Sans.
 const STROKE_BY_WEIGHT: Record<IconWeight, number> = {
   thin: 1.25,
   light: 1.5,
-  regular: 2,
+  regular: 1.75,
   bold: 2.5,
   fill: 2,
   duotone: 2,

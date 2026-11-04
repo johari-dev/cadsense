@@ -202,9 +202,7 @@ export function SettingsRow({
             </span>
           </div>
           {description ? (
-            <p className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground">
-              {description}
-            </p>
+            <p className="max-w-xl text-[13px] leading-5 text-muted-foreground">{description}</p>
           ) : null}
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>

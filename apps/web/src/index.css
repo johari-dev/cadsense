@@ -2117,3 +2117,59 @@ code {
     corner-shape: squircle;
   }
 }
+
+/* Chats hang off their project on a guide line, like a feature tree in a CAD app, and the open
+   chat marks its place on the line in blueprint blue. The line sits under the project's caret. */
+[data-app-sidebar] [data-sidebar="menu-sub"] {
+  position: relative;
+}
+
+[data-app-sidebar] [data-sidebar="menu-sub"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0.25rem;
+  left: 0.5625rem;
+  width: 1px;
+  background-color: var(--contrast-sidebar-border);
+  pointer-events: none;
+}
+
+/* The row's button clips its overflow, so the mark hangs off the list item. */
+[data-app-sidebar]
+  [data-sidebar="menu-sub-item"]:has([data-sidebar="menu-sub-button"][data-active="true"])::before {
+  content: "";
+  position: absolute;
+  top: 0.375rem;
+  bottom: 0.375rem;
+  left: calc(-0.5625rem - 1px);
+  width: 3px;
+  border-radius: 999px;
+  background-color: var(--app-theme-blueprint);
+  pointer-events: none;
+}
+
+/* The workspace is an inset sheet on the darker window chrome, with the sidebar sitting on the
+   chrome itself. Phones keep the full-bleed layout. */
+@media (min-width: 768px) {
+  [data-slot="sidebar-wrapper"] {
+    background-color: var(--app-theme-sidebar);
+  }
+
+  [data-slot="sidebar-wrapper"] > [data-slot="sidebar-inset"] {
+    height: calc(100dvh - 0.75rem);
+    margin: 0.375rem 0.375rem 0.375rem 0;
+    overflow: hidden;
+    border: 1px solid var(--app-theme-border);
+    border-radius: 0.625rem;
+  }
+
+  [data-slot="sidebar-wrapper"]:has(> [data-state="collapsed"]) > [data-slot="sidebar-inset"] {
+    margin-left: 0.375rem;
+  }
+
+  /* The sheet's own border is the edge, so the sidebar drops its divider. */
+  :root [data-app-sidebar] {
+    border-color: transparent;
+  }
+}

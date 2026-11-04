@@ -161,7 +161,7 @@ export function AddProjectDialog() {
         setOpen(next);
       }}
     >
-      <DialogPopup aria-label="Add project" className="p-0">
+      <DialogPopup aria-label="Add project" className="p-0 sm:max-w-[32.5rem]">
         <DialogTitle className="px-5 pt-5">Add project</DialogTitle>
         {environments.length > 1 && (
           <label className="mx-5 mt-4 block text-sm">

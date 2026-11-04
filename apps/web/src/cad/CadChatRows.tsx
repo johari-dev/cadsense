@@ -189,9 +189,7 @@ export function CadPublishedComments({
             title: comment.title,
             severity: comment.severity,
             onOpen: () => openCadComments(threadRef, comment.commentId),
-            detail: comment.location ? (
-              <span className="min-w-0 truncate">{comment.location}</span>
-            ) : null,
+            detail: comment.location ?? null,
           }),
         )}
         {unlisted > 0 ? (
@@ -274,15 +272,13 @@ function commentRow({
       </span>
       <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
       {severity || detail ? (
-        <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-[0.8rem] leading-5 text-muted-foreground">
+        <span className="col-start-2 line-clamp-2 min-w-0 text-[0.8rem] leading-5 text-muted-foreground">
           {/* The word for the pin's color, so the legend is on every row. */}
           {severity ? (
-            <span className={`shrink-0 font-medium capitalize ${SEVERITY_TEXT[severity]}`}>
-              {severity}
-            </span>
+            <span className={`font-medium capitalize ${SEVERITY_TEXT[severity]}`}>{severity}</span>
           ) : null}
-          {severity && detail ? <span aria-hidden="true">·</span> : null}
-          {detail ? <span className="flex min-w-0 items-center gap-1.5">{detail}</span> : null}
+          {severity && detail ? <span aria-hidden="true"> · </span> : null}
+          {detail}
         </span>
       ) : null}
     </button>
