@@ -318,10 +318,15 @@ export function CadPartDrawings({
   }, [id]);
   const listed = card.sheets.slice(0, MAX_LISTED_COMMENTS);
   return (
-    <div className="text-sm leading-relaxed" data-testid="cad-part-drawing-card">
-      <div className="flex min-h-6 items-center gap-1.5 px-0.5">
-        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-          <PartDrawingIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+    // A drawing is an artifact the agent made, so it sits in a bounded sheet like the
+    // review comments card rather than reading as tool history.
+    <div
+      className="rounded-lg border border-border bg-card px-2.5 py-2 text-sm leading-relaxed"
+      data-testid="cad-part-drawing-card"
+    >
+      <div className="flex min-h-7 items-center gap-1.5 px-0.5">
+        <span className="flex size-6 shrink-0 items-center justify-center text-(--accent-text)">
+          <PartDrawingIcon className="size-4 shrink-0" aria-hidden />
         </span>
         <span className="min-w-0 flex-1 truncate font-medium text-foreground">
           {card.sheets.length === 1
@@ -330,7 +335,7 @@ export function CadPartDrawings({
         </span>
         <button
           type="button"
-          className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
+          className="flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
           onClick={open}
         >
           Open drawing

@@ -57,7 +57,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "text-generation-model",
-    title: "Thread title model",
+    title: "Chat title model",
     to: "/settings/general",
   },
   { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
@@ -105,7 +105,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/integrations",
     targetId: "browser",
   },
-  { id: "archive", title: "Archived threads", to: "/settings/archived" },
+  { id: "archive", title: "Archived chats", to: "/settings/archived" },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];

@@ -171,7 +171,7 @@ export function DraftHeroHeadline({
               onClick={() => onChooseTask(prompt)}
               className={
                 index === 0
-                  ? "pointer-events-auto border-foreground/22 bg-foreground/10 font-semibold"
+                  ? "pointer-events-auto border-foreground/30 font-semibold dark:bg-foreground/12 dark:[:hover,[data-pressed]]:bg-foreground/16"
                   : "pointer-events-auto"
               }
             >

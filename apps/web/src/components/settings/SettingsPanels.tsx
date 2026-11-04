@@ -344,7 +344,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit
         ? ["Quit confirmation"]
         : []),
-      ...(isTextGenerationModelDirty ? ["Thread title model"] : []),
+      ...(isTextGenerationModelDirty ? ["Chat title model"] : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -993,7 +993,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("archive-confirmation")}
-          description="Ask before archiving a thread."
+          description="Ask before archiving a chat."
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
@@ -1019,7 +1019,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("delete-confirmation")}
-          description="Ask before deleting a thread and its chat history."
+          description="Ask before deleting a chat and its history."
           resetAction={
             settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
               <SettingResetButton
@@ -1069,7 +1069,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("text-generation-model")}
-          description="Model that writes and regenerates thread titles."
+          description="Model that writes and regenerates chat titles."
           resetAction={
             isTextGenerationModelDirty ? (
               <SettingResetButton
@@ -1277,7 +1277,7 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to unarchive thread",
+              title: "Failed to unarchive chat",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -1294,7 +1294,7 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to delete thread",
+              title: "Failed to delete chat",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -1320,16 +1320,16 @@ export function ArchivedThreadsPanel() {
                   <ArchiveIcon className="size-3.5 text-muted-foreground" />
                 )}
                 {isLoadingArchive
-                  ? "Loading archived threads"
+                  ? "Loading archived chats"
                   : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
+                    ? "Could not load archived chats"
+                    : "No archived chats"}
               </span>
             }
             description={
               isLoadingArchive
                 ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
+                : (archiveError ?? "Archived chats will appear here.")
             }
           />
         </SettingsSection>
@@ -1367,7 +1367,7 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Archived thread action failed",
+                          title: "Archived chat action failed",
                           description:
                             error instanceof Error ? error.message : "An error occurred.",
                         }),
@@ -1402,7 +1402,7 @@ export function ArchivedThreadsPanel() {
                           toastManager.add(
                             stackedThreadToast({
                               type: "error",
-                              title: "Failed to unarchive thread",
+                              title: "Failed to unarchive chat",
                               description:
                                 error instanceof Error ? error.message : "An error occurred.",
                             }),
