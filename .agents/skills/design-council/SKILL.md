@@ -70,6 +70,15 @@ Call `orchestrator_capabilities` and pick the latest model in each family. Do no
 - **Bring in the next seat early when the fast seat plateaus.** A second provider's findings break
   the loop of one model's taste.
 
+- **Watch for a seat that misreads the screens.** Muse repeatedly reported pane widths 100px
+  or more off and asked for things already on screen. Weigh such a seat's findings by whether
+  they match the images, and say so in the ledger rather than chasing them.
+- **Seats contradict each other and themselves** (keycaps vs plain shortcuts, filled vs ghost
+  buttons, blue vs white switches). When a finding reverses an earlier round's fix, pick the
+  version two seats agree on, or the one with a concrete reason, and note the split.
+- **Stop and ask when the tells become product decisions.** A brand mark, new settings, or new
+  data in the UI are the user's call, not a styling round.
+
 ## Fixture pitfalls
 
 - Title generation can fail on a test machine, leaving raw prompts as chat titles. That makes
