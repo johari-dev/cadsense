@@ -277,8 +277,6 @@ export function CadCommentsCard({
    * label: `ch` for the tabular digits and `em` for the word (in the surface's own font).
    */
   const toggleText = `${openCount} comment${openCount === 1 ? "" : "s"}`;
-  // Pins number like the chat's list; a letter marks each spot of a comment with several.
-  const hasLetteredPins = lists.open.some((c) => c.targets.length > 1);
   const toggleWidth = openCount
     ? `calc(48px + ${String(openCount).length}ch + ${openCount === 1 ? 4.3 : 4.8}em)`
     : "var(--cad-overlay-control)";
@@ -1014,8 +1012,8 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
-      {/* Collapsed, a one-line key under the chip says what the pins' colors and letters
-          mean, so the model reads without opening the list. A caption, not another panel. */}
+      {/* Collapsed, a one-line key under the chip says what the pins' colors mean, so the
+          model reads without opening the list. A caption, not another panel. */}
       {!open && !settling && openCount > 0 && (
         <div
           aria-hidden="true"
@@ -1027,7 +1025,6 @@ export function CadCommentsCard({
               {entry.label}
             </span>
           ))}
-          {hasLetteredPins ? <span>· Pin numbers match the comments in chat</span> : null}
         </div>
       )}
       {/* Docked, the card stays in its column while the column closes, then unmounts. */}

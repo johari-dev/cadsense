@@ -2651,11 +2651,13 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           <Tooltip>
             <TooltipTrigger
               render={
+                // Ghost at rest, so it never competes with the open chat's raised row and never
+                // reads as a field like the settings search.
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   aria-label={newThreadTarget.label}
-                  className="group/new-chat mb-3 w-full justify-start gap-2 bg-foreground/[0.07] px-2.5 font-medium shadow-[inset_0_1px_0_rgb(255_255_255/5%)] [:hover,[data-pressed]]:bg-foreground/[0.1]"
+                  className="group/new-chat mb-3 w-full justify-start gap-2 px-2.5 font-medium"
                   onClick={newThreadTarget.start}
                 />
               }

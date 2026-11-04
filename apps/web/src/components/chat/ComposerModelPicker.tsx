@@ -253,9 +253,10 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             </>
           ) : null}
           {props.traits?.label ? (
-            // The reasoning level always follows the model name as its own quiet pill, in every
-            // composer, so "Claude Opus 5.5" and "Medium" never read as one long name.
-            <span className="shrink-0 rounded-md bg-foreground/[0.09] px-1.5 py-px text-[0.75rem] leading-4 text-foreground/80">
+            // The reasoning level follows the model name as one phrase, "Sonnet 5.5 · High", with
+            // the level a step quieter so the two never read as one long name.
+            <span className="shrink-0 text-muted-foreground">
+              <span aria-hidden="true">· </span>
               {props.traits.label}
             </span>
           ) : null}
@@ -275,7 +276,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         align="end"
         side="bottom"
         sideOffset={8}
-        className="composer-model-panel w-[min(20rem,92vw)]"
+        className="composer-model-panel w-[min(22rem,92vw)]"
         onKeyDownCapture={(event) => {
           // Tab walks the provider tabs instead of leaving (and closing) the menu.
           if (event.key === "Tab") {
@@ -302,17 +303,18 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         {/* -m-1 bleeds over the popup body padding so the dividers run edge to edge.
             data-model-picker-content tells the sidebar to yield mod+1...9 (modelPickerVisibility.ts). */}
         <div data-model-picker-content className="-m-1 flex flex-col">
-          {/* Only the open tab shows its name; the rest are 28px icons with tooltips, so the
-              header fits at any provider count. The tab strip clips rather than scrolls if it
-              ever runs out of room, and "Add provider" stays pinned at the end. */}
+          {/* A segmented control: every source is a labeled, equal-width segment, and the open
+              one is a raised tile. Labels truncate if many providers share the row, and "Add
+              provider" stays pinned at the end. */}
           <div className="flex shrink-0 items-center gap-1 border-b border-border px-1.5 pt-1.5 pb-[7px]">
             <div
               role="tablist"
               aria-label="Model sources"
-              className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+              className="grid min-w-0 flex-1 auto-cols-fr grid-flow-col gap-0.5 overflow-hidden rounded-lg bg-foreground/[0.05] p-0.5"
             >
               <PickerTabButton
                 label="Favorites"
+                labeled
                 active={openTab === STARRED_TAB}
                 onSelect={() => {
                   setTab(STARRED_TAB);
@@ -501,8 +503,8 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
 });
 
 /**
- * One source tab: an icon and, for providers, the provider's name. The open tab sits on a filled
- * pill. Favorites is a star alone, and its tooltip names it.
+ * One segment of the source control: an icon and the source's name. The open segment is a
+ * raised tile on the control's recessed track.
  */
 function PickerTabButton(props: {
   label: string;
@@ -525,8 +527,10 @@ function PickerTabButton(props: {
       aria-disabled={props.unavailableReason !== undefined}
       className={cn(
         TAB_CLASS_NAME,
-        props.active && "bg-foreground/[0.1] text-foreground",
-        showsLabel ? "min-w-0 shrink" : "px-0",
+        "h-6.5 rounded-md",
+        props.active &&
+          "bg-surface-raised text-foreground shadow-[inset_0_1px_0_rgb(255_255_255/6%),0_1px_2px_rgb(0_0_0/45%)] hover:bg-surface-raised",
+        showsLabel ? "min-w-0" : "px-0",
       )}
       onClick={() => {
         if (props.unavailableReason === undefined) props.onSelect();

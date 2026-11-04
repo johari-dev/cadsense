@@ -1,12 +1,13 @@
-import { CubeIcon, SidebarIcon } from "~/lib/icons";
+import { CubeIcon } from "~/lib/icons";
 import { singleCadModelName } from "~/cad/cadModelName";
 import { useModelThumbnail } from "~/cad/modelThumbnails";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import type { Project } from "~/types";
 
 /**
- * The chat's CAD model in the header while the CAD panel is closed: its thumbnail and file name
- * on one line, with how long ago it was imported in the tooltip. Clicking it opens the panel. The chat is about this model,
+ * The chat's CAD model in the header while the CAD panel is closed: its thumbnail, file name, and
+ * "Open model" on one line, with how long ago it was imported in the tooltip. Clicking it opens
+ * the panel. The chat is about this model,
  * so the header names it rather than offering a generic "Open" button.
  */
 export function CadModelChip({
@@ -45,8 +46,7 @@ export function CadModelChip({
         )}
       </span>
       <span className="truncate font-medium text-foreground text-xs">{name}</span>
-      {/* The right-panel glyph says where the click goes: the model opens beside the chat. */}
-      <SidebarIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 text-muted-foreground text-xs">Open model</span>
     </button>
   );
 }
@@ -54,7 +54,7 @@ export function CadModelChip({
 /**
  * The model the agent works on, in the composer's footer: the CAD file a message is about. It
  * is a label, not a control; the header's CadModelChip opens the model. A compact footer (the
- * chat beside the CAD panel) keeps only the cube, with the name in the tooltip (index.css).
+ * chat beside the CAD panel) shortens the name (index.css).
  */
 export function ComposerCadContext({ project }: { readonly project: Project }) {
   const name =
