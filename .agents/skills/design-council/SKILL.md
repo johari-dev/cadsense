@@ -60,6 +60,22 @@ Call `orchestrator_capabilities` and pick the latest model in each family. Do no
 - **Do not tell reviewers the target score** or that a bar exists. Knowing it inflates scores.
 - Treat findings as hypotheses. Fix what you agree with. Decline the rest with a reason in the
   ledger. Don't chase one reviewer's taste if it breaks another's top finding.
+- **A finding that comes back is not a matter of taste.** If a seat repeats a declined finding in
+  a later round, take it or change the screen so it no longer applies.
+- **Scores move about ±0.3 between identical runs**, and the peer apps' scores drift with ours.
+  Read the Cadsense-minus-peer gap, not the raw number. When two rounds land within noise, small
+  polish has stopped paying: make a structural change next.
+- **Bring in the next seat early when the fast seat plateaus.** A second provider's findings break
+  the loop of one model's taste.
+
+## Fixture pitfalls
+
+- Title generation can fail on a test machine, leaving raw prompts as chat titles. That makes
+  the sidebar look worse than the product is. `seed` renames chats to short titles.
+- An agent turn can leave the CAD view isolated or zoomed. `shoot` resets to isometric, shows
+  every part, and fits before the CAD screens.
+- Page scripts in `design-capture.ts` are strings because the server package type-checks
+  without the DOM library.
 
 ## Reviewer brief
 
