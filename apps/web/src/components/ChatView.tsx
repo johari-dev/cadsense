@@ -221,6 +221,7 @@ import {
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useCadOperationComposerState } from "../cad/CadOperationComposerBanner";
 import { hasAvailableClaudeCompactionProvider } from "./chat/ContextWindowMeter.logic";
 import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
@@ -904,6 +905,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const cadOperationComposer = useCadOperationComposerState(activeProject);
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -2547,10 +2549,11 @@ function ChatViewContent(props: ChatViewProps) {
     const calmSystemItems = systemComposerBannerItems.filter((item) => !isUrgentSystemItem(item));
     return [
       ...urgentSystemItems,
+      ...(cadOperationComposer.bannerItem === null ? [] : [cadOperationComposer.bannerItem]),
       ...(backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem]),
       ...calmSystemItems,
     ];
-  }, [backgroundLivenessBannerItem, systemComposerBannerItems]);
+  }, [backgroundLivenessBannerItem, cadOperationComposer.bannerItem, systemComposerBannerItems]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -4148,7 +4151,16 @@ function ChatViewContent(props: ChatViewProps) {
                 ref={attachDraftHeroTransitionGroupRef}
                 className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
               >
-                <div className="group/composer-stack pointer-events-auto relative z-10">
+                {/* The composer's width, which its attached drawers (banners, the sync pill) inset
+                    from so they line up with it in either layout. */}
+                <div
+                  className={cn(
+                    "group/composer-stack pointer-events-auto relative z-10",
+                    isDraftHeroState
+                      ? "[--chat-composer-max-width:42.5rem]"
+                      : "[--chat-composer-max-width:50rem]",
+                  )}
+                >
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div className="pb-8 group-has-[.chat-composer-shoulder-tab]/composer-stack:pb-4">
@@ -4173,7 +4185,7 @@ function ChatViewContent(props: ChatViewProps) {
                     <div
                       className={cn(
                         "chat-composer-glass-shell relative mx-auto w-full",
-                        isDraftHeroState ? "max-w-[42.5rem]" : "max-w-[50rem]",
+                        "max-w-(--chat-composer-max-width)",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >
@@ -4203,7 +4215,7 @@ function ChatViewContent(props: ChatViewProps) {
                                 ? "Sending feedback"
                                 : threadDetailLoading
                                   ? "Messages loading"
-                                  : null
+                                  : cadOperationComposer.sendDisabledReason
                             }
                             externalDrawerAttached={externalComposerDrawerAttached}
                             environmentUnavailable={activeEnvironmentUnavailableState}
