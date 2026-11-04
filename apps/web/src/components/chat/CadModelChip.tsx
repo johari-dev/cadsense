@@ -54,7 +54,7 @@ export function CadModelChip({
 /**
  * The model the agent works on, in the composer's footer: the CAD file a message is about. It
  * is a label, not a control; the header's CadModelChip opens the model. A compact footer (the
- * chat beside the CAD panel) shows a middle-cut name that keeps the extension (index.css).
+ * chat beside the CAD panel) shows only the file type, since the panel names the file (index.css).
  */
 export function ComposerCadContext({ project }: { readonly project: Project }) {
   const name =
@@ -69,18 +69,17 @@ export function ComposerCadContext({ project }: { readonly project: Project }) {
       <span data-composer-cad-name="full" className="truncate">
         {name}
       </span>
-      {/* The compact footer keeps the start and the extension: "bracket-asse….step". */}
+      {/* The compact footer sits beside the CAD panel, whose header already shows the path,
+          so it keeps only the file type: "STEP". */}
       <span data-composer-cad-name="short" className="hidden">
-        {shortenMiddle(name)}
+        {fileTypeLabel(name)}
       </span>
     </span>
   );
 }
 
-/** A file name cut in the middle so its extension stays: "bracket-assembly.step" -> "bracket-asse….step". */
-function shortenMiddle(name: string): string {
+/** The file type from a name, as engineers say it: "bracket-assembly.step" -> "STEP". */
+function fileTypeLabel(name: string): string {
   const dot = name.lastIndexOf(".");
-  const extension = dot > 0 ? name.slice(dot) : "";
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  return stem.length > 12 ? `${stem.slice(0, 12)}…${extension}` : name;
+  return dot > 0 ? name.slice(dot + 1).toUpperCase() : name;
 }
