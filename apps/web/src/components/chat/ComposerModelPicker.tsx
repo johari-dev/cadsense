@@ -252,14 +252,19 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
           {props.traits?.label ? (
             // The reasoning level always follows the model name as its own quiet pill, in every
             // composer, so "Claude Opus 5.5" and "Medium" never read as one long name.
-            <span className="shrink-0 rounded-md bg-foreground/[0.07] px-1.5 py-px text-[0.75rem] leading-4 text-muted-foreground">
+            <span className="shrink-0 rounded-md bg-foreground/[0.09] px-1.5 py-px text-[0.75rem] leading-4 text-foreground/80">
               {props.traits.label}
             </span>
           ) : null}
+          {/* A chevron, so the control reads as a picker rather than a label. A compact
+              footer keeps the room for the model's name. */}
+          {props.compact ? null : (
+            <CaretDownIcon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+          )}
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
-      {/* Opens from the trigger: 8px above it and aligned to its end. The positioner shifts
+      {/* Opens from the trigger: 8px from it and aligned to its end. The positioner shifts
           or flips it to stay on screen in narrow columns and on the home hero. */}
       {/* Below the trigger where there is room (the new-chat hero), so the list never covers the
           composer; a docked composer has none below, and the popup flips above it. */}
@@ -431,9 +436,14 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     {getDisplayModelName(row.model)}
                     {row.model.isUnavailable ? " (Unavailable)" : ""}
                   </span>
-                  <kbd className="w-11 shrink-0 text-right font-sans text-[0.8rem] tabular-nums text-muted-foreground">
-                    {hint}
-                  </kbd>
+                  {/* Shortcuts are keycaps, like the file picker's footer hints. */}
+                  <span className="flex w-12 shrink-0 justify-end">
+                    {hint ? (
+                      <kbd className="rounded border border-foreground/10 bg-foreground/[0.04] px-1.5 font-sans text-[11px] text-muted-foreground leading-[18px] tabular-nums">
+                        {hint}
+                      </kbd>
+                    ) : null}
+                  </span>
                   <button
                     type="button"
                     aria-label={`${row.starred ? "Unstar" : "Star"} ${row.model.name}`}

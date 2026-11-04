@@ -204,6 +204,7 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ComposerCadContext } from "./chat/CadModelChip";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -4243,6 +4244,11 @@ function ChatViewContent(props: ChatViewProps) {
                             runtimeMode={runtimeMode}
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
+                            modelContext={
+                              cadAvailable && activeProject ? (
+                                <ComposerCadContext project={activeProject} />
+                              ) : null
+                            }
                             activeProjectDefaultModelSelection={
                               activeProject?.defaultModelSelection
                             }

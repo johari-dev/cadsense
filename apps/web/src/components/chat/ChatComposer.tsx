@@ -590,6 +590,8 @@ export interface ChatComposerProps {
   lockedProvider: ProviderDriverKind | null;
   providerStatuses: ServerProvider[];
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
+  /** Shown after the attach button: the CAD model the chat is about, for CAD projects. */
+  modelContext?: ReactNode;
   activeThreadModelSelection: ModelSelection | null | undefined;
 
   // Context window
@@ -3188,6 +3190,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </Tooltip>
                     </>
                   ) : null}
+                  {isComposerFooterCompact ? null : props.modelContext}
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
                       runtimeMode={runtimeMode}

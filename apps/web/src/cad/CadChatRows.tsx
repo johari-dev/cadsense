@@ -7,6 +7,7 @@ import type {
   ScopedThreadRef,
 } from "@cadsense/contracts";
 import {
+  CubeIcon,
   WarningCircleIcon as CircleAlertIcon,
   ChatIcon as MessageSquareIcon,
   PartDrawingIcon,
@@ -159,7 +160,7 @@ export function describeCadCommentsHeading(card: CadCommentsPublishedCard): stri
 const ARTIFACT_CARD = "mx-1 rounded-lg border border-border bg-card px-2.5 py-2";
 /** The one action an artifact card offers, at the right of its header row. */
 const ARTIFACT_ACTION =
-  "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
+  "flex h-6.5 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
@@ -188,6 +189,7 @@ export function CadPublishedComments({
             className={ARTIFACT_ACTION}
             onClick={() => openCadComments(threadRef)}
           >
+            <CubeIcon aria-hidden className="size-3.5 text-(--accent-text)" />
             {unlisted > 0 ? `Show all ${count} in CAD` : "Open in CAD"}
           </button>
         ) : null}

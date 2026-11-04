@@ -49,3 +49,22 @@ export function CadModelChip({
     </button>
   );
 }
+
+/**
+ * The model the agent works on, in the composer's footer: the CAD file a message is about. It
+ * is a label, not a control; the header's CadModelChip opens the model.
+ */
+export function ComposerCadContext({ project }: { readonly project: Project }) {
+  const name =
+    project.localCadSource?.filePath.split(/[\\/]/).at(-1) ?? singleCadModelName(project.cad);
+  if (!name) return null;
+  return (
+    <span
+      title={`Messages here are about ${name}`}
+      className="flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md border border-border bg-foreground/[0.04] px-2 font-medium text-muted-foreground text-xs"
+    >
+      <CubeIcon aria-hidden="true" className="size-3.5 shrink-0 text-(--accent-text)" />
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}

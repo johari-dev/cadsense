@@ -605,10 +605,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {/* A fixed column for the row's age, so every title has the same width whether
-              or not the row is selected. Hover controls take the column's place. The open chat
-              folds the column away so its title has the room. */}
-          <div className={cn("flex justify-end max-sm:w-20", isActive ? "w-0" : "w-6")}>
+          {/* Every row has one shape: the title takes the row, and its age lives in the row's
+              tooltip ("Active 1h ago"). The column opens only for jump-shortcut hints; hover
+              controls sit over the row's end. */}
+          <div className={cn("flex justify-end max-sm:w-20", jumpLabel ? "w-6" : "w-0")}>
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -676,11 +676,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
-                ) : isActive ? null : (
-                  <span className="text-[11px] text-tertiary-foreground leading-[18px] tabular-nums">
-                    {formatCompactRelativeTime(lastActivityAt)}
-                  </span>
-                )}
+                ) : null}
               </span>
             </span>
           </div>

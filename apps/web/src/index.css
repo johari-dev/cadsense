@@ -1841,6 +1841,7 @@ code {
    characters and defeat the overflow — restore word-boundary wrapping so the
    min column width is the longest word. */
 .chat-markdown table {
+  font-variant-numeric: tabular-nums;
   width: 100%;
   min-width: max-content;
   border-collapse: separate;
