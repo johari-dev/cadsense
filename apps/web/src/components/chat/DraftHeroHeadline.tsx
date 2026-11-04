@@ -166,10 +166,14 @@ export function DraftHeroHeadline({
               key={label}
               // One 36px size for all three. The first is the suggested start, so it takes a
               // quiet fill; the others stay bordered. Neither competes with the blue send.
-              variant={index === 0 ? "secondary" : "outline"}
+              variant="outline"
               size="lg"
               onClick={() => onChooseTask(prompt)}
-              className="pointer-events-auto"
+              className={
+                index === 0
+                  ? "pointer-events-auto border-foreground/22 bg-foreground/10 font-semibold"
+                  : "pointer-events-auto"
+              }
             >
               <Icon className="size-4" />
               {label}

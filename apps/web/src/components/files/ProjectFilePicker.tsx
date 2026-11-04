@@ -136,7 +136,8 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
         groups={
           items.length > 0 ? [{ value: "project-files", label: target.projectName, items }] : []
         }
-        highlightedItemValue={highlightedItemValue}
+        // Until the pointer or arrows move, Enter opens the first result, so show it as active.
+        highlightedItemValue={highlightedItemValue ?? items[0]?.value ?? null}
         isActionsOnly={false}
         keybindings={keybindings}
         onExecuteItem={(item) => {

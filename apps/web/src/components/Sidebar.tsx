@@ -2178,7 +2178,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               }
             />
             <TooltipPopup side="top">
-              {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+              {newThreadShortcutLabel ? `New chat (${newThreadShortcutLabel})` : "New chat"}
             </TooltipPopup>
           </Tooltip>
         </div>

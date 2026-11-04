@@ -1907,18 +1907,62 @@ code {
   overflow-wrap: anywhere;
 }
 
-/* Beside the CAD panel the chat column is narrow. Rather than scroll a wide table sideways and
-   hide its last columns, let every column wrap at word boundaries. */
+/* Beside the CAD panel the chat column is narrow. Rather than squeeze every column, each row
+   becomes a block: the first cell leads in semibold, and the other cells follow with their
+   column header (data-label, set by MarkdownTable) as a small caption. */
 @container (max-width: 36rem) {
-  .chat-markdown table {
+  .chat-markdown .chat-markdown-table-container table,
+  .chat-markdown .chat-markdown-table-container tbody,
+  .chat-markdown .chat-markdown-table-container tr {
+    display: block;
     min-width: 0;
   }
 
-  .chat-markdown .chat-markdown-table-container[data-expanded] th,
+  .chat-markdown .chat-markdown-table-container thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--contrast-border);
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr:last-child {
+    border-bottom: 0;
+  }
+
   .chat-markdown .chat-markdown-table-container[data-expanded] td {
+    display: block;
     max-width: none;
+    padding: 0;
+    border: 0;
     overflow-wrap: normal;
     white-space: normal;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody td:first-child {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody td + td {
+    margin-top: 0.375rem;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody td + td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.125rem;
+    color: var(--contrast-tertiary-foreground);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 }
 

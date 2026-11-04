@@ -29,6 +29,7 @@ import React, {
   useCallback,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -448,6 +449,24 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
     },
     [],
   );
+
+  // Each body cell carries its column's header as data-label. A narrow chat column stacks the
+  // rows into blocks (see index.css) and shows these labels so no column loses its header.
+  // Runs after every render because streaming can add rows and cells.
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const headers = Array.from(
+      table.querySelectorAll("thead th"),
+      (th) => th.textContent?.trim() ?? "",
+    );
+    for (const row of table.querySelectorAll("tbody tr")) {
+      Array.from(row.children).forEach((cell, index) => {
+        const label = headers[index];
+        if (label) cell.setAttribute("data-label", label);
+      });
+    }
+  });
 
   return (
     <div ref={containerRef} className="chat-markdown-table-container" data-expanded="true">

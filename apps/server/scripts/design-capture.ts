@@ -99,6 +99,20 @@ const ask = async (prompt: string) => {
   return page.url();
 };
 
+/**
+ * Renames the chat at `threadUrl` from the sidebar, like a user double-clicking its row. Seeds
+ * use this for the short titles the server generates, since title generation can fail on a
+ * test machine and leave the raw prompt as the title.
+ */
+const setTitle = async (threadUrl: string, title: string) => {
+  const threadId = threadUrl.split("/").at(-1)!;
+  await page.getByTestId(`thread-title-${threadId}`).dblclick();
+  const input = page.locator(`[data-testid="thread-row-${threadId}"] input`);
+  await input.fill(title);
+  await input.press("Enter");
+  await page.getByTestId(`thread-title-${threadId}`).getByText(title).waitFor();
+};
+
 const newThread = async () => {
   await page
     .getByRole("button", { name: /^New thread in / })
@@ -145,20 +159,37 @@ const seed = async () => {
     "Review this bracket assembly for manufacturability. List each fastener with its size, " +
       "check the hole clearances against the bolts, and end with a short table of risks.",
   );
+  await setTitle(reviewThreadUrl, "Bracket manufacturability review");
   console.log("review chat", reviewThreadUrl);
   const otherThreadUrls: string[] = [];
-  for (const prompt of [
-    "What material and thickness would you pick for this bracket if it holds a 2 kg intake?",
-    "Write a short checklist for torquing the three bolts on this bracket.",
-  ]) {
+  for (const [prompt, title] of [
+    [
+      "What material and thickness would you pick for this bracket if it holds a 2 kg intake?",
+      "Bracket material and thickness",
+    ],
+    [
+      "Write a short checklist for torquing the three bolts on this bracket.",
+      "Bolt torque checklist",
+    ],
+  ] as const) {
     await newThread();
-    otherThreadUrls.push(await ask(prompt));
-    console.log("chat", otherThreadUrls.at(-1));
+    const threadUrl = await ask(prompt);
+    await setTitle(threadUrl, title);
+    otherThreadUrls.push(threadUrl);
+    console.log("chat", threadUrl);
   }
   const fixture: Fixture = { projectName, reviewThreadUrl, otherThreadUrls };
   NodeFS.writeFileSync(fixtureFile, `${JSON.stringify(fixture, null, 2)}\n`);
   console.log(`Seeded. Fixture in ${fixtureFile}`);
 };
+
+/** Scrolls the chat timeline's nearest scrolling ancestor to the top. Runs in the page. */
+const SCROLL_TIMELINE_TO_TOP = `(() => {
+  let element = document.querySelector('[data-timeline-root="true"]');
+  while (element && !(element.scrollHeight > element.clientHeight + 1 &&
+    /auto|scroll/.test(getComputedStyle(element).overflowY))) element = element.parentElement;
+  element?.scrollTo({ top: 0 });
+})()`;
 
 const shoot = async () => {
   if (!values.out) throw new Error("shoot needs --out <dir>");
@@ -171,7 +202,8 @@ const shoot = async () => {
   const screen = async (name: string, shows: string, arrange: (page: Page) => Promise<void>) => {
     await arrange(page);
     // Let fonts, transitions, and the CAD scene settle so rounds compare like for like.
-    await page.evaluate(() => document.fonts.ready);
+    // Page scripts are strings: this package type-checks without the DOM library.
+    await page.evaluate("document.fonts.ready.then(() => true)");
     await page.mouse.move(0, 899);
     await page.waitForTimeout(1200);
     const file = `${String(++index).padStart(2, "0")}-${name}.png`;
@@ -218,18 +250,7 @@ const shoot = async () => {
     async () => {
       // The timeline is virtualized, so scroll its scroller to the top a few times as rows mount.
       for (let pass = 0; pass < 4; pass++) {
-        await page.locator('[data-timeline-root="true"]').first().evaluate((root) => {
-          let element: HTMLElement | null = root;
-          while (
-            element &&
-            !(
-              element.scrollHeight > element.clientHeight + 1 &&
-              /auto|scroll/.test(getComputedStyle(element).overflowY)
-            )
-          )
-            element = element.parentElement;
-          element?.scrollTo({ top: 0 });
-        });
+        await page.evaluate(SCROLL_TIMELINE_TO_TOP);
         await page.waitForTimeout(400);
       }
     },
