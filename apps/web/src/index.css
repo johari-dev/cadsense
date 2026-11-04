@@ -2275,3 +2275,10 @@ code {
 :root [data-chat-header] [data-header-icon-button]:is(:hover, [data-pressed]) {
   background-color: var(--toolbar-control-hover);
 }
+
+/* Bold lead-ins in list items ("Spacing:") sit a weight below run-in headings, so the headings
+   still lead a long answer. */
+.chat-markdown li > strong:first-child,
+.chat-markdown li > p:first-child > strong:first-child {
+  font-weight: 550;
+}

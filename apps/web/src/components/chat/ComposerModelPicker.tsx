@@ -261,9 +261,11 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
       </Tooltip>
       {/* Opens from the trigger: 8px above it and aligned to its end. The positioner shifts
           or flips it to stay on screen in narrow columns and on the home hero. */}
+      {/* Below the trigger where there is room (the new-chat hero), so the list never covers the
+          composer; a docked composer has none below, and the popup flips above it. */}
       <MenuPopup
         align="end"
-        side="top"
+        side="bottom"
         sideOffset={8}
         className="composer-model-panel w-[min(20rem,92vw)]"
         onKeyDownCapture={(event) => {

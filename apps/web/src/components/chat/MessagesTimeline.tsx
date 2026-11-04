@@ -1325,7 +1325,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   return (
     // No divider under the fold: the turn's result (often the review card, which has its own
     // border) follows directly, and a second line above it read as a double rule.
-    <div className="pb-2 pt-1">
+    <div className="px-1 pb-2 pt-1">
       <button
         type="button"
         aria-expanded={row.expanded}

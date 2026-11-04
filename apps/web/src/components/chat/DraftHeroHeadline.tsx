@@ -30,7 +30,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** Prompts the hero offers as one-click starts. The first is the suggested one. */
+/** Prompts the hero offers as one-click starts. */
 const STARTING_TASKS = [
   {
     label: "Review the design",
@@ -164,20 +164,15 @@ export function DraftHeroHeadline({
       </p>
       {activeProjectTitle ? (
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
+          {STARTING_TASKS.map(({ label, icon: Icon, prompt }) => (
             <Button
               key={label}
-              // One 36px size for all three. The first is the suggested start, so it takes a
-              // light fill and a brighter border; the others stay plain. Solid fills are kept
-              // for send.
+              // One 36px size and one bordered style for all three: they are equal starting
+              // points, and solid fills are kept for send.
               variant="outline"
               size="lg"
               onClick={() => onChooseTask(prompt)}
-              className={
-                index === 0
-                  ? "pointer-events-auto border-foreground/25 font-semibold dark:bg-foreground/[0.14] dark:[:hover,[data-pressed]]:bg-foreground/[0.18]"
-                  : "pointer-events-auto"
-              }
+              className="pointer-events-auto"
             >
               <Icon className="size-4" />
               {label}

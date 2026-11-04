@@ -152,8 +152,11 @@ export function describeCadCommentsHeading(card: CadCommentsPublishedCard): stri
     : describeCadCommentsPublished(card);
 }
 
-/** The frame every agent artifact in the chat shares: part drawings and review comments. */
-const ARTIFACT_CARD = "rounded-lg border border-border bg-card px-2.5 py-2";
+/**
+ * The frame every agent artifact in the chat shares: part drawings and review comments. The
+ * 4px side margin puts its edge on the prose column's text edge (assistant rows inset 4px).
+ */
+const ARTIFACT_CARD = "mx-1 rounded-lg border border-border bg-card px-2.5 py-2";
 /** The one action an artifact card offers, at the right of its header row. */
 const ARTIFACT_ACTION =
   "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";

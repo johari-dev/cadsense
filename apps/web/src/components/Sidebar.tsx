@@ -66,7 +66,7 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
 import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
-import { isMacPlatform } from "../lib/utils";
+import { cn, isMacPlatform } from "../lib/utils";
 import {
   readThreadShell,
   useProjects,
@@ -606,8 +606,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* A fixed column for the row's age, so every title has the same width whether
-              or not the row is selected. Hover controls take the column's place. */}
-          <div className="flex w-6 justify-end max-sm:w-20">
+              or not the row is selected. Hover controls take the column's place. The open chat
+              folds the column away so its title has the room. */}
+          <div className={cn("flex justify-end max-sm:w-20", isActive ? "w-0" : "w-6")}>
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -675,7 +676,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
-                ) : (
+                ) : isActive ? null : (
                   <span className="text-[11px] text-tertiary-foreground leading-[18px] tabular-nums">
                     {formatCompactRelativeTime(lastActivityAt)}
                   </span>
@@ -2658,7 +2659,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   variant="outline"
                   size="sm"
                   aria-label={newThreadTarget.label}
-                  className="mb-3 w-full justify-start gap-2 px-2.5 font-medium"
+                  className="group/new-chat mb-3 w-full justify-start gap-2 px-2.5 font-medium"
                   onClick={newThreadTarget.start}
                 />
               }
@@ -2666,7 +2667,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               <SquarePenIcon className="size-4" />
               <span aria-hidden="true">New chat</span>
               {newThreadShortcutLabel ? (
-                <kbd className="ml-auto font-sans text-[11px] text-tertiary-foreground">
+                // The shortcut appears on hover, as a keycap, so the button rests quiet.
+                <kbd className="ml-auto hidden rounded border border-foreground/10 bg-foreground/[0.04] px-1.5 font-sans text-[11px] text-foreground/60 leading-[18px] group-hover/new-chat:inline group-focus-visible/new-chat:inline">
                   {newThreadShortcutLabel}
                 </kbd>
               ) : null}

@@ -117,7 +117,7 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
     <CommandPaletteContent
       aria-label="File picker"
       autoHighlight="always"
-      escapeLabel="Back"
+      escapeLabel="Close"
       footerActionLabel="Open file"
       inputProps={{ placeholder: "Search files…" }}
       mode="none"
