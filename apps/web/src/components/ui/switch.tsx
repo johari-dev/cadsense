@@ -12,7 +12,7 @@ function Switch({ className, ...props }: SwitchPrimitive.Root.Props) {
   return (
     <SwitchPrimitive.Root
       className={cn(
-        "inline-flex h-[calc(var(--thumb-size)+4px)] w-[calc(var(--thumb-size)*2+4px)] shrink-0 cursor-pointer items-center rounded-full p-[2px] outline-none transition-[background-color,box-shadow] duration-200 [--thumb-size:--spacing(5)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-checked:bg-foreground data-unchecked:bg-control-off data-unchecked:shadow-[inset_0_0_0_1px_var(--control-off-border)] data-disabled:cursor-not-allowed data-disabled:opacity-50 sm:[--thumb-size:--spacing(4)]",
+        "inline-flex h-[calc(var(--thumb-size)+4px)] w-[calc(var(--thumb-size)*2+4px)] shrink-0 cursor-pointer items-center rounded-full p-[2px] outline-none transition-[background-color,box-shadow] duration-200 [--thumb-size:--spacing(5)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-checked:bg-foreground/85 data-unchecked:bg-control-off data-unchecked:shadow-[inset_0_0_0_1px_var(--control-off-border)] data-disabled:cursor-not-allowed data-disabled:opacity-50 sm:[--thumb-size:--spacing(4)]",
         className,
       )}
       data-slot="switch"

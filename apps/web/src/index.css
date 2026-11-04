@@ -1687,7 +1687,7 @@ code {
 .chat-markdown p[data-markdown-lead] {
   margin-top: 1.8667rem;
   margin-bottom: 0.6667rem;
-  font-size: 1.0667rem;
+  font-size: 1.2rem;
   line-height: 1.4667;
   color: var(--contrast-foreground);
 }

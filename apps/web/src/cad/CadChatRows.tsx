@@ -161,9 +161,13 @@ export function describeCadCommentsHeading(card: CadCommentsPublishedCard): stri
  */
 const ARTIFACT_CARD =
   "mx-1 rounded-[10px] bg-surface-raised px-3 py-2.5 shadow-[inset_0_1px_0_rgb(255_255_255/4%)]";
-/** The one action an artifact card offers, at the right of its header row: a ghost button. */
+/**
+ * The one action an artifact card offers, at the right of its header row: a tonal button (a
+ * light fill, no stroke) with a leading icon, so it reads as clickable without a border inside
+ * the card.
+ */
 const ARTIFACT_ACTION =
-  "flex h-6.5 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 font-medium text-foreground/85 text-xs transition-colors hover:bg-foreground/[0.07] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
+  "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.06] px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-foreground/[0.1] focus-visible:outline-2 focus-visible:outline-ring";
 
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
@@ -332,6 +336,7 @@ export function CadPartDrawings({
             : `${card.sheets.length} part drawings: ${card.title}`}
         </span>
         <button type="button" className={ARTIFACT_ACTION} onClick={open}>
+          <PartDrawingIcon aria-hidden className="size-3.5 text-(--accent-text)" />
           Open drawing
         </button>
       </div>

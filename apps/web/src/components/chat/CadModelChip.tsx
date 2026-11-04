@@ -36,7 +36,7 @@ export function CadModelChip({
           ? `Open ${name} in the CAD panel · synced ${synced}`
           : `Open ${name} in the CAD panel`
       }
-      className="flex h-7 max-w-72 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+      className="flex h-7.5 max-w-80 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
     >
       <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
         {thumbnail ? (
@@ -45,8 +45,8 @@ export function CadModelChip({
           <CubeIcon className="size-3 text-(--accent-text)" />
         )}
       </span>
-      <span className="truncate font-medium text-foreground text-xs">{name}</span>
-      <span className="shrink-0 text-muted-foreground text-xs">Open model</span>
+      <span className="truncate font-medium text-[13px] text-foreground">{name}</span>
+      <span className="shrink-0 text-foreground/80 text-xs">Open model</span>
     </button>
   );
 }

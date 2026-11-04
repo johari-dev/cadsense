@@ -1013,11 +1013,11 @@ export function CadCommentsCard({
         </div>
       )}
       {/* Collapsed, a one-line key under the chip says what the pins' colors mean, so the
-          model reads without opening the list. A caption, not another panel. */}
+          model reads without opening the list: a small pill like the viewer's other chips. */}
       {!open && !settling && openCount > 0 && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute right-3.5 top-[calc(0.75rem+var(--cad-overlay-control)+0.5rem)] flex items-center gap-2.5 text-muted-foreground text-xs [text-shadow:0_1px_2px_rgb(0_0_0/85%)]"
+          className="pointer-events-none absolute right-3 top-[calc(0.75rem+var(--cad-overlay-control)+0.5rem)] flex h-7 items-center gap-3 rounded-md border bg-popover/90 px-2.5 text-foreground/75 text-xs"
         >
           {legend.map((entry) => (
             <span key={entry.severity} className="flex items-center gap-1">

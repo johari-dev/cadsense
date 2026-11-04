@@ -13,18 +13,18 @@ import { holdInspection } from "./sidebarInspection";
 import { THREAD_SIDEBAR_DEFAULT_WIDTH } from "./threadSidebarWidth";
 
 /** Chat column width the CAD panel's default leaves beside the default sidebar. */
-const CAD_PANEL_DEFAULT_CHAT_WIDTH = 480;
+const CAD_PANEL_DEFAULT_CHAT_WIDTH = 520;
 
 /**
  * Initial CAD panel width before the user resizes it, for `defaultWidth`. It leaves a
- * readable chat column (480px beside the default sidebar, so 696px of CAD at 1440 wide,
- * enough for review tables) and never takes less than 48% of the window, so the model stays
- * the dominant column.
+ * readable chat column (520px beside the default sidebar, so 656px of CAD at 1440 wide,
+ * enough for review answers) and never takes less than 45% of the window, so the model stays
+ * the widest column.
  */
 export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
   return Math.round(
     Math.max(
-      viewportWidth * 0.48,
+      viewportWidth * 0.45,
       viewportWidth - THREAD_SIDEBAR_DEFAULT_WIDTH - CAD_PANEL_DEFAULT_CHAT_WIDTH,
     ),
   );
