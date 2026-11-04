@@ -240,10 +240,10 @@ const openRightPanel = async (page: Page) => {
   if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
 };
 // A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
-// message is how a user gets there; the turn is stopped as soon as it starts. A message can't
-// start a turn while the project's first import runs, so like a user, keep sending until it does.
-// A failed first send gives the draft a new thread id, and panel state is kept per thread id, so
-// the panel closes. The prompt going away only means a thread started if the panel stayed open.
+// message is how a user gets there; the turn is stopped as soon as it starts. Send stays disabled
+// while the project's first import runs (its label is then the reason), so like a user, wait for it.
+// A failed send gives the draft a new thread id, and panel state is kept per thread id, so the panel
+// closes. The prompt going away only means a thread started if the panel stayed open.
 const startThread = async (page: Page) => {
   const placeholder = page.getByText("Start a thread to open its CAD view.");
   const composer = page
@@ -264,7 +264,9 @@ const startThread = async (page: Page) => {
       await composer.click();
       await page.keyboard.type("Open the CAD view.");
     }
-    await page.getByRole("button", { name: "Send message" }).click();
+    await page
+      .getByRole("button", { name: "Send message" })
+      .click({ timeout: Math.max(1_000, deadline - Date.now()) });
     const promptGone = await placeholder.waitFor({ state: "detached", timeout: 5_000 }).then(
       () => true,
       () => false,
@@ -276,11 +278,11 @@ const startThread = async (page: Page) => {
     if (promptGone && panelOpen) break;
     if (Date.now() > deadline) throw new Error("Sending never started a thread");
   }
-  // Stops the turn if it is still running. A turn that ends by itself first is just as good.
-  await page
-    .getByRole("button", { name: "Stop generation" })
-    .click({ timeout: 15_000 })
-    .catch(() => {});
+  // Stops the turn if it is still running. A turn that ends by itself first is just as good. The
+  // server refuses CAD work until the stop lands, so wait for the turn to end before going on.
+  const stop = page.getByRole("button", { name: "Stop generation" });
+  await stop.click({ timeout: 15_000 }).catch(() => {});
+  await stop.waitFor({ state: "detached", timeout: 60_000 });
 };
 const manifestDir = NodePath.join(out, "home/userdata/cad/manifests");
 const manifests = () => NodeFS.readdirSync(manifestDir).filter((name) => name.endsWith(".json"));

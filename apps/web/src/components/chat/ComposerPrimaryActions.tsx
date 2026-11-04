@@ -9,6 +9,7 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PendingActionState {
   questionIndex: number;
@@ -246,7 +247,16 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   );
 
   if (!isRunning) {
-    return sendButton;
+    if (!sendDisabledReason) return sendButton;
+    // A disabled button gets no pointer events, so the span carries the tooltip.
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+          {sendButton}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{sendDisabledReason}</TooltipPopup>
+      </Tooltip>
+    );
   }
 
   return (

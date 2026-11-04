@@ -668,7 +668,11 @@
   .chat-composer-top-drawer {
     --chat-composer-attachment-overlap: calc(1rem + 1px);
     width: calc(100% - var(--chat-composer-drawer-inset) - var(--chat-composer-drawer-inset));
-    max-width: calc(48rem - var(--chat-composer-drawer-inset) - var(--chat-composer-drawer-inset));
+    /* Inset from the composer's own width, which ChatView sets for the hero and docked layouts. */
+    max-width: calc(
+      var(--chat-composer-max-width, 48rem) - var(--chat-composer-drawer-inset) -
+        var(--chat-composer-drawer-inset)
+    );
     margin-inline: auto;
     margin-bottom: calc(-1 * var(--chat-composer-attachment-overlap));
   }
