@@ -250,8 +250,11 @@ export type MessagesTimelineRow =
       createdAt: string;
       turnId: TurnId;
       label: string;
-      /** How many tool steps the fold hides, shown after the label ("· 24 steps"). */
-      stepCount: number;
+      /**
+       * What the folded work did, shown after the label: the CAD tools it ran ("6 measurements ·
+       * 16 views · 2 checks"), or its step count when it ran none. Null when it hid no tool calls.
+       */
+      summary: string | null;
       expanded: boolean;
     }
   | {
@@ -550,7 +553,42 @@ interface TurnFold {
   createdAt: string;
   hiddenEntryIds: ReadonlySet<string>;
   label: string;
-  stepCount: number;
+  summary: string | null;
+}
+
+/** CAD tools a turn fold counts, in display order, with their noun forms. */
+const CAD_FOLD_ACTIVITY: ReadonlyArray<readonly [tool: string, one: string, many: string]> = [
+  ["cad_measure", "measurement", "measurements"],
+  ["cad_capture", "view", "views"],
+  ["cad_checks", "check", "checks"],
+  ["cad_part_drawing", "drawing", "drawings"],
+];
+
+/**
+ * A fold's summary from the work entries it hides: up to three CAD tool counts, or the number of
+ * tool calls when none were CAD tools. Each tool call counts once, though its start and finish can
+ * be separate entries.
+ */
+function summarizeFoldedWork(
+  entries: ReadonlyArray<TimelineEntry>,
+  hiddenEntryIds: ReadonlySet<string>,
+): string | null {
+  const toolByCall = new Map<string, string | undefined>();
+  for (const entry of entries) {
+    if (entry.kind !== "work" || !hiddenEntryIds.has(entry.id)) continue;
+    const call = entry.entry.toolCallId ?? entry.id;
+    const name = entry.entry.toolCall?.name?.split("__").at(-1);
+    if (!toolByCall.has(call) || name) toolByCall.set(call, name);
+  }
+  if (toolByCall.size === 0) return null;
+  const counts = new Map<string, number>();
+  for (const name of toolByCall.values()) if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const cad = CAD_FOLD_ACTIVITY.flatMap(([tool, one, many]) => {
+    const count = counts.get(tool) ?? 0;
+    return count > 0 ? [`${count} ${count === 1 ? one : many}`] : [];
+  }).slice(0, 3);
+  if (cad.length > 0) return cad.join(" · ");
+  return `${toolByCall.size} ${toolByCall.size === 1 ? "step" : "steps"}`;
 }
 
 /**
@@ -740,9 +778,7 @@ function deriveTurnFolds(input: {
       createdAt: firstHiddenEntry.createdAt,
       hiddenEntryIds,
       label,
-      stepCount: group.entries.filter(
-        (entry) => entry.kind === "work" && hiddenEntryIds.has(entry.id),
-      ).length,
+      summary: summarizeFoldedWork(group.entries, hiddenEntryIds),
     });
   }
   return foldsByAnchorEntryId;
@@ -989,7 +1025,7 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: anchoredTurnFold.createdAt,
         turnId: anchoredTurnFold.turnId,
         label: anchoredTurnFold.label,
-        stepCount: anchoredTurnFold.stepCount,
+        summary: anchoredTurnFold.summary,
         expanded: input.expandedTurnIds?.has(anchoredTurnFold.turnId) ?? false,
       });
     }

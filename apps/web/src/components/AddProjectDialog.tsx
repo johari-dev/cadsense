@@ -272,7 +272,7 @@ export function AddProjectDialog() {
             <SourceOption
               icon={<CubeIcon className="size-5" />}
               label="Local CAD file"
-              description="Import a STEP or SolidWorks file. Re-syncs on export."
+              description="Import a STEP or SolidWorks file. Sync it again after you re-export."
               disabled={busy || !environment || environment.connection.phase !== "connected"}
               onClick={() => setKind("local-cad")}
             />

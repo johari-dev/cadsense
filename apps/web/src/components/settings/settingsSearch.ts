@@ -60,6 +60,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Chat title model",
     to: "/settings/general",
   },
+  { id: "drawing-units", title: "Drawing units", to: "/settings/general" },
+  { id: "drawing-tap-depth", title: "Tap depth limit", to: "/settings/general" },
   { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
   {

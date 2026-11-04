@@ -1336,11 +1336,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
       >
         <PulseIcon className="size-3.5 text-(--accent-text)" aria-hidden="true" />
         <span>{row.label}</span>
-        {row.stepCount > 0 ? (
-          <span className="text-tertiary-foreground">
-            · {row.stepCount} {row.stepCount === 1 ? "step" : "steps"}
-          </span>
-        ) : null}
+        {row.summary ? <span className="text-tertiary-foreground">· {row.summary}</span> : null}
         <Icon className="size-3.5" />
       </button>
     </div>

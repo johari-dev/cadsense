@@ -86,6 +86,11 @@ export const DrawingMaxTapDepth = Schema.Number.check(
 export type DrawingMaxTapDepth = typeof DrawingMaxTapDepth.Type;
 export const DEFAULT_DRAWING_MAX_TAP_DEPTH: DrawingMaxTapDepth = 0.5;
 
+/** The units part drawings open in. The drawing panel's own units switch changes this too. */
+export const DrawingUnits = Schema.Literals(["in", "mm"]);
+export type DrawingUnits = typeof DrawingUnits.Type;
+export const DEFAULT_DRAWING_UNITS: DrawingUnits = "in";
+
 export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill", "none"]);
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
 export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
@@ -136,6 +141,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   drawingMaxTapDepth: DrawingMaxTapDepth.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_DRAWING_MAX_TAP_DEPTH)),
+  ),
+  drawingUnits: DrawingUnits.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DRAWING_UNITS)),
   ),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE)),
@@ -651,6 +659,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   confirmThreadUnpin: Schema.optionalKey(Schema.Boolean),
   drawingMaxTapDepth: Schema.optionalKey(DrawingMaxTapDepth),
+  drawingUnits: Schema.optionalKey(DrawingUnits),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),

@@ -23,8 +23,10 @@ import {
 } from "@cadsense/client-runtime/state/runtime";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  MAX_DRAWING_MAX_TAP_DEPTH,
   MAX_INTERFACE_FONT_SIZE,
   MAX_PROMPT_FONT_SIZE,
+  MIN_DRAWING_MAX_TAP_DEPTH,
   MIN_INTERFACE_FONT_SIZE,
   MIN_PROMPT_FONT_SIZE,
 } from "@cadsense/contracts/settings";
@@ -345,6 +347,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Quit confirmation"]
         : []),
       ...(isTextGenerationModelDirty ? ["Chat title model"] : []),
+      ...(settings.drawingUnits !== DEFAULT_UNIFIED_SETTINGS.drawingUnits ? ["Drawing units"] : []),
+      ...(settings.drawingMaxTapDepth !== DEFAULT_UNIFIED_SETTINGS.drawingMaxTapDepth
+        ? ["Tap depth limit"]
+        : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -363,6 +369,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmQuit,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.drawingMaxTapDepth,
+      settings.drawingUnits,
       settings.enableAgentBrowserAccess,
       settings.enableUsageAnalytics,
       settings.streamAssistantText,
@@ -397,6 +405,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+      drawingUnits: DEFAULT_UNIFIED_SETTINGS.drawingUnits,
+      drawingMaxTapDepth: DEFAULT_UNIFIED_SETTINGS.drawingMaxTapDepth,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -854,6 +864,94 @@ function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void
 }
 
 /** General settings. `onRestored` runs after Restore defaults so the route can remount it. */
+/**
+ * How part drawings come out: the units they open in and the shop's tap depth cap. Both are
+ * client settings the drawing panel also reads and edits; the cap is stored in inches and shown
+ * in the chosen units.
+ */
+function CadSettingsSection() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const units = settings.drawingUnits;
+  const perInch = units === "mm" ? 25.4 : 1;
+  const shownTapDepth = String(
+    +(settings.drawingMaxTapDepth * perInch).toFixed(units === "mm" ? 1 : 3),
+  );
+  return (
+    <SettingsSection title="CAD">
+      <SettingsRow
+        {...searchableSetting("drawing-units")}
+        description="Units that part drawings open in."
+        resetAction={
+          units !== DEFAULT_UNIFIED_SETTINGS.drawingUnits ? (
+            <SettingResetButton
+              label="drawing units"
+              onClick={() =>
+                updateSettings({ drawingUnits: DEFAULT_UNIFIED_SETTINGS.drawingUnits })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={units}
+            onValueChange={(value) =>
+              updateSettings({ drawingUnits: value === "mm" ? "mm" : "in" })
+            }
+          >
+            <SelectTrigger className="w-full sm:w-40" aria-label="Drawing units">
+              <SelectValue>{units === "mm" ? "Millimeters" : "Inches"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="in">
+                Inches
+              </SelectItem>
+              <SelectItem hideIndicator value="mm">
+                Millimeters
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+      <SettingsRow
+        {...searchableSetting("drawing-tap-depth")}
+        description="How deep drawings call out a tap from each end of a hole. Through holes are drilled THRU and tapped to this depth."
+        resetAction={
+          settings.drawingMaxTapDepth !== DEFAULT_UNIFIED_SETTINGS.drawingMaxTapDepth ? (
+            <SettingResetButton
+              label="tap depth limit"
+              onClick={() =>
+                updateSettings({ drawingMaxTapDepth: DEFAULT_UNIFIED_SETTINGS.drawingMaxTapDepth })
+              }
+            />
+          ) : null
+        }
+        control={
+          <div className="flex items-center gap-2">
+            <DraftInput
+              className="w-24"
+              inputMode="decimal"
+              aria-label={`Tap depth limit in ${units === "mm" ? "millimeters" : "inches"}`}
+              value={shownTapDepth}
+              onCommit={(next) => {
+                // Rounded so 76.2 mm lands on 3 in, not just past it.
+                const inches = +(Number(next) / perInch).toFixed(6);
+                if (
+                  next.trim() !== "" &&
+                  inches >= MIN_DRAWING_MAX_TAP_DEPTH &&
+                  inches <= MAX_DRAWING_MAX_TAP_DEPTH
+                )
+                  updateSettings({ drawingMaxTapDepth: inches });
+              }}
+            />
+            <span className="text-muted-foreground text-sm">{units}</span>
+          </div>
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () => void }) {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -1167,6 +1265,8 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
           }
         />
       </SettingsSection>
+
+      <CadSettingsSection />
 
       <SettingsSection title="About">
         {isElectron ? (

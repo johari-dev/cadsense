@@ -84,13 +84,13 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       <img
         alt=""
         aria-hidden="true"
-        className="size-5 shrink-0 rounded-[5px] shadow-xs"
+        className="size-5.5 shrink-0 rounded-[6px] shadow-xs ring-1 ring-white/12"
         draggable={false}
         src="/app-icon.png"
       />
       <span
         className={cn(
-          "truncate text-base font-semibold tracking-tight",
+          "truncate font-semibold text-[15px] tracking-[-0.01em]",
           onBackdrop ? "text-white" : "text-foreground",
         )}
       >

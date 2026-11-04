@@ -153,10 +153,13 @@ export function CadDrawingPanel({
   const [manifest, setManifest] = useState<CadSnapshotManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
-  const [units, setUnits] = useState<Units>("in");
   // Inches, saved with the client settings so every drawing uses the shop's cap.
   const tapDepthIn = useClientSettings((settings) => settings.drawingMaxTapDepth);
   const updateClientSettings = useUpdateClientSettings();
+  // Saved with the client settings (Settings > General > CAD), so drawings open in the shop's
+  // units and switching here sticks for the next drawing.
+  const units: Units = useClientSettings((settings) => settings.drawingUnits);
+  const setUnits = (next: Units) => updateClientSettings({ drawingUnits: next });
   const settingsHydrated = useClientSettingsHydrated();
   // The cap in the sheet's units, as the field shows it.
   const perInch = units === "mm" ? 25.4 : 1;
