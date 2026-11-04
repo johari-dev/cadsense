@@ -436,14 +436,10 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     {getDisplayModelName(row.model)}
                     {row.model.isUnavailable ? " (Unavailable)" : ""}
                   </span>
-                  {/* Shortcuts are keycaps, like the file picker's footer hints. */}
-                  <span className="flex w-12 shrink-0 justify-end">
-                    {hint ? (
-                      <kbd className="rounded border border-foreground/10 bg-foreground/[0.04] px-1.5 font-sans text-[11px] text-muted-foreground leading-[18px] tabular-nums">
-                        {hint}
-                      </kbd>
-                    ) : null}
-                  </span>
+                  {/* Shortcuts stay quiet so model names lead; the highlighted row shows its own. */}
+                  <kbd className="w-12 shrink-0 text-right font-sans text-[11px] text-tertiary-foreground tabular-nums group-data-highlighted:text-muted-foreground">
+                    {hint}
+                  </kbd>
                   <button
                     type="button"
                     aria-label={`${row.starred ? "Unstar" : "Star"} ${row.model.name}`}

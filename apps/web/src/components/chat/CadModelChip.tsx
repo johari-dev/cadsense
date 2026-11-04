@@ -5,8 +5,8 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import type { Project } from "~/types";
 
 /**
- * The chat's CAD model in the header while the CAD panel is closed: its thumbnail, file name,
- * and how long ago it was imported. Clicking it opens the panel. The chat is about this model,
+ * The chat's CAD model in the header while the CAD panel is closed: its thumbnail and file name
+ * on one line, with how long ago it was imported in the tooltip. Clicking it opens the panel. The chat is about this model,
  * so the header names it rather than offering a generic "Open" button.
  */
 export function CadModelChip({
@@ -30,22 +30,22 @@ export function CadModelChip({
       type="button"
       onClick={onOpen}
       aria-label="Open CAD"
-      title={`Open ${name} in the CAD panel`}
-      className="flex h-8 max-w-64 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+      title={
+        synced
+          ? `Open ${name} in the CAD panel · synced ${synced}`
+          : `Open ${name} in the CAD panel`
+      }
+      className="flex h-7 max-w-72 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
     >
-      <span className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-[5px] border border-border bg-(--cad-viewport-background)">
+      <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
         {thumbnail ? (
           <img src={thumbnail} alt="" className="size-full object-contain" />
         ) : (
-          <CubeIcon className="size-3.5 text-(--accent-text)" />
+          <CubeIcon className="size-3 text-(--accent-text)" />
         )}
       </span>
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate font-medium text-[12.5px] text-foreground leading-4">{name}</span>
-        <span className="truncate text-[11px] text-muted-foreground leading-3.5">
-          {synced ? `Open CAD · synced ${synced}` : "Open CAD"}
-        </span>
-      </span>
+      <span className="truncate font-medium text-foreground text-xs">{name}</span>
+      <span className="shrink-0 text-muted-foreground text-xs">Open</span>
     </button>
   );
 }

@@ -1014,22 +1014,20 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
-      {/* Collapsed, a key under the chip says what the pins' colors and letters mean, so the
-          model reads without opening the list. */}
+      {/* Collapsed, a one-line key under the chip says what the pins' colors and letters
+          mean, so the model reads without opening the list. A caption, not another panel. */}
       {!open && !settling && openCount > 0 && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute right-3 top-[calc(0.75rem+var(--cad-overlay-control)+0.375rem)] flex flex-col items-end gap-1 rounded-md border bg-popover/92 px-2 py-1.5 text-xs text-muted-foreground"
+          className="pointer-events-none absolute right-3.5 top-[calc(0.75rem+var(--cad-overlay-control)+0.5rem)] flex items-center gap-2.5 text-muted-foreground text-xs [text-shadow:0_1px_2px_rgb(0_0_0/85%)]"
         >
-          <div className="flex items-center gap-2.5">
-            {legend.map((entry) => (
-              <span key={entry.severity} className="flex items-center gap-1">
-                <span className={cn("size-2 rounded-full border", SEVERITY_FILL[entry.severity])} />
-                {entry.label}
-              </span>
-            ))}
-          </div>
-          {hasLetteredPins ? <span>Letters mark locations of the same comment</span> : null}
+          {legend.map((entry) => (
+            <span key={entry.severity} className="flex items-center gap-1">
+              <span className={cn("size-2 rounded-full border", SEVERITY_FILL[entry.severity])} />
+              {entry.label}
+            </span>
+          ))}
+          {hasLetteredPins ? <span>· Same number, same comment</span> : null}
         </div>
       )}
       {/* Docked, the card stays in its column while the column closes, then unmounts. */}

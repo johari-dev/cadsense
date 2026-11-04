@@ -4146,12 +4146,12 @@ function ChatViewContent(props: ChatViewProps) {
               }
             >
               {/* Docked, the composer sits on a solid backing down to the window edge so the
-                  transcript never shows through below or beside it; the top 2rem fades in, so
+                  transcript never shows through below or beside it; the top 1.5rem fades in, so
                   text scrolling under it softens rather than being cut. */}
               {isDraftHeroState ? null : (
                 <div
                   aria-hidden
-                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_2rem)]"
+                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_1.5rem)]"
                 />
               )}
               <div

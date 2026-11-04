@@ -281,7 +281,9 @@ export const ChatHeader = memo(function ChatHeader({
         {/* The project follows the thread title as a quiet 12px chip, set apart by a wider
             gap, so the two never read as one long title. It hides while the CAD panel is
             open or the draft hero shows, because their headings already name the project. */}
-        {activeProjectName && !projectShownInRightPanel && !isDraftHero ? (
+        {/* A CAD project's header names its model instead (CadModelChip), so the project
+            would be said twice. */}
+        {activeProjectName && !projectShownInRightPanel && !isDraftHero && !cad ? (
           <WorkspaceBreadcrumbItem className="ps-1">
             <Tooltip>
               <TooltipTrigger

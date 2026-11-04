@@ -2652,10 +2652,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             <TooltipTrigger
               render={
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   aria-label={newThreadTarget.label}
-                  className="group/new-chat mb-3 w-full justify-start gap-2 px-2.5 font-medium"
+                  className="group/new-chat mb-3 w-full justify-start gap-2 bg-foreground/[0.07] px-2.5 font-medium shadow-[inset_0_1px_0_rgb(255_255_255/5%)] [:hover,[data-pressed]]:bg-foreground/[0.1]"
                   onClick={newThreadTarget.start}
                 />
               }
