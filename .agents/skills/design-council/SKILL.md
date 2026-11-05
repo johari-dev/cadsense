@@ -45,12 +45,12 @@ shots yourself, then convene the council.
 
 Call `orchestrator_capabilities` and pick the latest model in each family. Do not hardcode IDs.
 
-| Seat | Model family | Route |
-| --- | --- | --- |
-| Fast | GPT Sol (Codex) | `codex` provider |
-| Strict | Claude Opus | `claudeAgent` provider |
-| Third opinion (advisory) | Muse Wonder | `cursor` provider |
-| Jester | Gemini Argon | `cursor` provider, if available |
+| Seat                     | Model family    | Route                           |
+| ------------------------ | --------------- | ------------------------------- |
+| Fast                     | GPT Sol (Codex) | `codex` provider                |
+| Strict                   | Claude Opus     | `claudeAgent` provider          |
+| Third opinion (advisory) | Muse Wonder     | `cursor` provider               |
+| Jester                   | Gemini Argon    | `cursor` provider, if available |
 
 - Start each reviewer with `delegate_task` (`role: "review"`, `mode: "async"`), one per seat,
   a fresh task every round. Reviewers are read-only and start no subagents.

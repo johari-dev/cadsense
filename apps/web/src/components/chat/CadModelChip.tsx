@@ -2,6 +2,7 @@ import { CubeIcon } from "~/lib/icons";
 import { singleCadModelName } from "~/cad/cadModelName";
 import { useModelThumbnail } from "~/cad/modelThumbnails";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import type { Project } from "~/types";
 
 /**
@@ -27,26 +28,32 @@ export function CadModelChip({
   const synced = snapshot ? formatRelativeTimeLabel(snapshot.createdAt) : "";
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label="Open CAD"
-      title={
-        synced
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onOpen}
+            aria-label="Open CAD"
+            className="flex h-7.5 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+          />
+        }
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
+          {thumbnail ? (
+            <img src={thumbnail} alt="" className="size-full object-contain" />
+          ) : (
+            <CubeIcon className="size-3 text-(--accent-text)" />
+          )}
+        </span>
+        <span className="font-medium text-[13px] text-foreground">Open model</span>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        {synced
           ? `Open ${name} in the CAD panel · synced ${synced}`
-          : `Open ${name} in the CAD panel`
-      }
-      className="flex h-7.5 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-    >
-      <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
-        {thumbnail ? (
-          <img src={thumbnail} alt="" className="size-full object-contain" />
-        ) : (
-          <CubeIcon className="size-3 text-(--accent-text)" />
-        )}
-      </span>
-      <span className="font-medium text-[13px] text-foreground">Open model</span>
-    </button>
+          : `Open ${name} in the CAD panel`}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -67,23 +74,27 @@ export function ComposerCadContext({ project }: { readonly project: Project }) {
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const extension = dot > 0 ? name.slice(dot) : "";
   return (
-    <span
-      title={`Messages here are about ${name}`}
-      className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs"
-    >
-      <span className="flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
-        {thumbnail ? (
-          <img src={thumbnail} alt="" className="size-full object-contain" />
-        ) : (
-          <CubeIcon aria-hidden="true" className="size-3 text-(--accent-text)" />
-        )}
-      </span>
-      {/* When space runs out the stem truncates and the extension stays: "bracket-assem….step". */}
-      <span className="flex min-w-0 font-medium text-foreground/85">
-        <span className="truncate">{stem}</span>
-        <span className="shrink-0">{extension}</span>
-      </span>
-      {synced ? <span className="shrink-0 text-tertiary-foreground">· synced {synced}</span> : null}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs" />}
+      >
+        <span className="flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
+          {thumbnail ? (
+            <img src={thumbnail} alt="" className="size-full object-contain" />
+          ) : (
+            <CubeIcon aria-hidden="true" className="size-3 text-(--accent-text)" />
+          )}
+        </span>
+        {/* When space runs out the stem truncates and the extension stays: "bracket-assem….step". */}
+        <span className="flex min-w-0 font-medium text-foreground/85">
+          <span className="truncate">{stem}</span>
+          <span className="shrink-0">{extension}</span>
+        </span>
+        {synced ? (
+          <span className="shrink-0 text-tertiary-foreground">· synced {synced}</span>
+        ) : null}
+      </TooltipTrigger>
+      <TooltipPopup side="top">Messages here are about {name}</TooltipPopup>
+    </Tooltip>
   );
 }
