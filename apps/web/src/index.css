@@ -1174,8 +1174,7 @@
   --app-theme-blueprint-hover: #4580f2;
   --app-theme-accent-text: #7aa9ff;
   /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
-     for selected parts and rows. Switches are neutral: white when on, so blue stays for the
-     brand, focus, links, and the one primary action. */
+     for selected parts and rows. "On" switches use the blueprint accent with a white knob. */
   --app-theme-selection: #7dbbff;
   /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
   --app-theme-control-off: #2c2c2f;
@@ -2303,7 +2302,7 @@ code {
     0 1px 2px rgb(0 0 0 / 45%);
 }
 
-/* In a compact composer footer the model context keeps its shape and shows only the file type. */
+/* In a compact composer footer the model context keeps its shape with a middle-cut name. */
 [data-chat-composer-footer-compact="true"] [data-composer-cad-name="full"] {
   display: none;
 }
