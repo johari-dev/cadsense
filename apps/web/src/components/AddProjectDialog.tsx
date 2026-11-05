@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
@@ -161,7 +161,7 @@ export function AddProjectDialog() {
         setOpen(next);
       }}
     >
-      <DialogPopup aria-label="Add project" className="p-0">
+      <DialogPopup aria-label="Add project" className="p-0 sm:max-w-[32.5rem]">
         <DialogTitle className="px-5 pt-5">Add project</DialogTitle>
         {environments.length > 1 && (
           <label className="mx-5 mt-4 block text-sm">
@@ -261,34 +261,28 @@ export function AddProjectDialog() {
             }}
           />
         ) : (
-          <div className="grid gap-3 p-5">
-            <Button
-              variant="outline"
-              className="h-auto justify-start gap-3 px-4 py-4"
+          <div className="grid gap-2 p-5 pt-4">
+            <SourceOption
+              icon={<FolderPlusIcon className="size-5" />}
+              label="Folder project"
+              description="A folder of CAD files and notes on this computer."
               disabled={busy || !canPickNatively}
               onClick={() => void addFolder()}
-            >
-              <FolderPlusIcon className="size-5" />
-              Folder project
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto justify-start gap-3 px-4 py-4"
+            />
+            <SourceOption
+              icon={<CubeIcon className="size-5" />}
+              label="Local CAD file"
+              description="STEP or SolidWorks files. Sync after re-export."
               disabled={busy || !environment || environment.connection.phase !== "connected"}
               onClick={() => setKind("local-cad")}
-            >
-              <CubeIcon className="size-5" />
-              Local CAD file
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto justify-start gap-3 px-4 py-4"
+            />
+            <SourceOption
+              icon={<img src="/onshape.svg" alt="" className="size-5" />}
+              label="Onshape project"
+              description="A document link. Needs a read-only Onshape API key."
               disabled={busy || !environment || environment.connection.phase !== "connected"}
               onClick={() => setKind("onshape")}
-            >
-              <img src="/onshape.svg" alt="" className="size-5" />
-              Onshape project
-            </Button>
+            />
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -298,5 +292,47 @@ export function AddProjectDialog() {
         )}
       </DialogPopup>
     </Dialog>
+  );
+}
+
+/** One way to add a project: an icon tile, the source's name, and what it needs. */
+function SourceOption({
+  icon,
+  label,
+  description,
+  disabled,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  description: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const id = useId();
+  return (
+    <Button
+      variant="outline"
+      className="h-auto justify-start gap-3.5 px-3.5 py-3 text-left sm:h-auto"
+      aria-labelledby={`${id}-label`}
+      aria-describedby={`${id}-description`}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span id={`${id}-label`} className="font-medium text-sm text-foreground">
+          {label}
+        </span>
+        <span
+          id={`${id}-description`}
+          className="whitespace-normal font-normal text-[13px] text-muted-foreground leading-[18px]"
+        >
+          {description}
+        </span>
+      </span>
+    </Button>
   );
 }

@@ -50,6 +50,23 @@ export function getDisplayModelName(
   return stripLeadingQualifier(name, model.subProvider);
 }
 
+/**
+ * A readable name for a model id the catalog does not know (for example while a provider's
+ * model list is still loading or failed): "gpt-5.6-sol" becomes "GPT-5.6 Sol". Callers fall
+ * back to this instead of showing the raw id.
+ */
+export function formatModelSlug(slug: string): string {
+  const [first, ...rest] = slug.split("-").filter(Boolean);
+  if (!first) return slug;
+  const words = rest.map((part) =>
+    /^\d/.test(part) ? part : part[0]!.toUpperCase() + part.slice(1),
+  );
+  if (first.toLowerCase() === "gpt" && words[0] && /^\d/.test(words[0])) {
+    return [`GPT-${words[0]}`, ...words.slice(1)].join(" ");
+  }
+  return [first[0]!.toUpperCase() + first.slice(1), ...words].join(" ");
+}
+
 export function getTriggerDisplayModelName(model: ModelEsque): string {
   return getDisplayModelName(model, { preferShortName: true });
 }

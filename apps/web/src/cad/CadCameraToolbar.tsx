@@ -18,7 +18,7 @@ import { CadViewCube } from "./CadViewCube";
     bar's container is 16px narrower) buttons drop their labels to 32px squares, so the bar keeps
     clear of the view cube. */
 const toolbarControl =
-  "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[13px] text-foreground/75 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40 @max-[592px]:w-8 @max-[592px]:px-0 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
+  "flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-[13px] text-foreground/85 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40 @max-[592px]:w-8 @max-[592px]:px-0 aria-expanded:bg-accent aria-expanded:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary/90 [&_svg]:size-4 [&_svg]:shrink-0";
 const sectionField =
   "h-7 w-full rounded-md border border-input bg-background px-2 text-[13px] text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24 disabled:opacity-60";
 
@@ -202,14 +202,14 @@ export function CadCameraToolbar({
               <ToolbarDivider />
               <Tooltip>
                 <TooltipTrigger
-                  aria-label="Click to draw"
+                  aria-label="Draw part"
                   aria-pressed={picking}
                   disabled={disabled}
                   className={toolbarControl}
                   onClick={onTogglePicking}
                 >
                   <CursorClickIcon aria-hidden="true" />
-                  <span className="@max-[592px]:sr-only">Click to draw</span>
+                  <span className="@max-[592px]:sr-only">Draw part</span>
                 </TooltipTrigger>
                 <TooltipPopup>
                   {picking ? "Stop picking parts" : "Click a part in the model to make its drawing"}

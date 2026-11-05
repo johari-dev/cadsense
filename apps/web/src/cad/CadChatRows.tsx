@@ -7,16 +7,18 @@ import type {
   ScopedThreadRef,
 } from "@cadsense/contracts";
 import {
-  ArrowRightIcon,
+  CubeIcon,
   WarningCircleIcon as CircleAlertIcon,
   ChatIcon as MessageSquareIcon,
   PartDrawingIcon,
 } from "~/lib/icons";
+import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
-import { Button } from "../components/ui/button";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
-import { useRightPanelStore } from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
+import { cadPanelEnvironment } from "../state/cadPanel";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { CommentBadge } from "./CadCommentsCard";
 
@@ -154,6 +156,76 @@ export function describeCadCommentsHeading(card: CadCommentsPublishedCard): stri
     : describeCadCommentsPublished(card);
 }
 
+/**
+ * The frame every agent artifact in the chat shares: part drawings and review comments. A raised
+ * fill with a faint top highlight rather than an outline, so cards and their buttons are not
+ * strokes inside strokes. The 4px side margin puts its edge on the prose column's text edge
+ * (assistant rows inset 4px).
+ */
+const ARTIFACT_CARD =
+  "mx-1 rounded-[10px] bg-surface-raised px-3 py-2.5 shadow-[inset_0_1px_0_rgb(255_255_255/4%)]";
+/**
+ * The one action an artifact card offers, at the right of its header row: a tonal button (a
+ * light fill, no stroke) with a leading icon, so it reads as clickable without a border inside
+ * the card.
+ */
+const ARTIFACT_ACTION =
+  "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.06] px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-foreground/[0.1] focus-visible:outline-2 focus-visible:outline-ring";
+
+/**
+ * " · 3 locations" after a chat comment's first location when the comment marks several, so
+ * the row matches the lettered pins on the model (1a, 1b, 1c). Reads the thread's live comments,
+ * the same subscription the CAD panel uses; renders nothing until they load.
+ */
+function CommentLocationCount({
+  threadRef,
+  commentId,
+}: {
+  threadRef: ScopedThreadRef;
+  commentId: string;
+}) {
+  const state = useAtomValue(
+    cadPanelEnvironment.comments({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
+  const targets = AsyncResult.isSuccess(state)
+    ? state.value.comments.find((comment) => comment.id === commentId)?.targets
+    : undefined;
+  if (!targets || targets.length < 2) return null;
+  const kind = targets.every((target) => target.kind === "part") ? "parts" : "locations";
+  // A no-break space keeps "3 locations" together when the line wraps.
+  return <> · {`${targets.length}\u00a0${kind}`}</>;
+}
+
+/**
+ * The comments card's header action: opens the review in the CAD panel. With the model already
+ * on screen it says so ("Show on model") instead of offering to open CAD.
+ */
+function CommentsCardAction({
+  threadRef,
+  count,
+  unlisted,
+}: {
+  threadRef: ScopedThreadRef;
+  count: number;
+  unlisted: number;
+}) {
+  const cadShown = useRightPanelStore((state) => {
+    const panel = selectThreadRightPanelState(state.byThreadKey, threadRef);
+    // No picked section falls back to the first available one, which is CAD on a CAD project.
+    return panel.isOpen && (panel.section === null || panel.section === "cad");
+  });
+  const where = cadShown ? "on model" : "in CAD";
+  return (
+    <button type="button" className={ARTIFACT_ACTION} onClick={() => openCadComments(threadRef)}>
+      <CubeIcon aria-hidden className="size-3.5 text-(--accent-text)" />
+      {unlisted > 0 ? `Show all ${count} ${where}` : cadShown ? "Show on model" : "Open in CAD"}
+    </button>
+  );
+}
+
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
   card,
@@ -167,19 +239,17 @@ export function CadPublishedComments({
   const unlisted = count - listed.length;
   const heading = describeCadCommentsHeading(card);
   // A card of its own, so the review's result reads as the main outcome of the turn rather
-  // than more narration. Its action is outlined: the composer's send keeps the only fill.
+  // than more narration. It shares the artifact card frame with part drawings (ARTIFACT_CARD).
   return (
-    <section
-      aria-label={heading}
-      className="rounded-xl border border-border bg-muted p-3 pt-2 text-[0.9333rem]"
-    >
-      <div className="flex min-h-8 items-center gap-1.5 px-1">
-        <span className="flex size-6 shrink-0 items-center justify-center text-foreground/70">
-          <MessageSquareIcon className="size-4 shrink-0 stroke-[1.8]" aria-hidden />
+    <section aria-label={heading} className={`${ARTIFACT_CARD} text-[0.9333rem]`}>
+      <div className="flex min-h-7 items-center gap-1.5 px-0.5">
+        <span className="flex size-6 shrink-0 items-center justify-center text-(--accent-text)">
+          <MessageSquareIcon className="size-4 shrink-0" aria-hidden />
         </span>
-        <h3 className="min-w-0 flex-1 truncate text-[1.0667rem] font-semibold text-foreground">
-          {heading}
-        </h3>
+        <h3 className="min-w-0 flex-1 truncate font-semibold text-foreground text-sm">{heading}</h3>
+        {count > 0 || card.proposed.length > 0 ? (
+          <CommentsCardAction threadRef={threadRef} count={count} unlisted={unlisted} />
+        ) : null}
       </div>
       <div className="mt-0.5 flex flex-col gap-0.5">
         {listed.map((comment) =>
@@ -189,9 +259,12 @@ export function CadPublishedComments({
             title: comment.title,
             severity: comment.severity,
             onOpen: () => openCadComments(threadRef, comment.commentId),
-            detail: comment.location ? (
-              <span className="min-w-0 truncate">{comment.location}</span>
-            ) : null,
+            detail: (
+              <>
+                {comment.location}
+                <CommentLocationCount threadRef={threadRef} commentId={comment.commentId} />
+              </>
+            ),
           }),
         )}
         {unlisted > 0 ? (
@@ -209,16 +282,6 @@ export function CadPublishedComments({
           }),
         )}
       </div>
-      {count > 0 || card.proposed.length > 0 ? (
-        <Button
-          variant="outline"
-          className="mt-3 h-8.5 w-full bg-transparent text-[0.8667rem] dark:bg-transparent sm:h-8.5 sm:text-[0.8667rem]"
-          onClick={() => openCadComments(threadRef)}
-        >
-          {unlisted > 0 ? `Show all ${count} in CAD` : "Open comments in CAD"}
-          <ArrowRightIcon aria-hidden />
-        </Button>
-      ) : null}
       {card.rejected.map((rejection) => (
         <p
           key={rejection.publicationKey}
@@ -233,8 +296,8 @@ export function CadPublishedComments({
 }
 
 /**
- * One comment in the chat list: its severity-colored number and full title on the first line,
- * then the secondary detail (the part, or the proposal state) on a second, quieter line.
+ * One comment in the chat list: its severity-colored number, full title, and severity pill on the
+ * first line, then the secondary detail (the part, or the proposal state) on a second, quieter line.
  * The badge sits in the header icon's column so titles line up with the header text.
  * A plain function, not a component, so each row stays a `<button>` in the element tree.
  */
@@ -257,18 +320,24 @@ function commentRow({
     <button
       key={key}
       type="button"
-      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] gap-x-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+      className="grid w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
       onClick={onOpen}
     >
       <span className="flex h-5 items-center justify-center">
         <CommentBadge number={number} severity={severity} />
       </span>
-      <span className="line-clamp-2 leading-5 text-foreground">
-        {severity ? <span className="sr-only">{`${severity}: `}</span> : null}
-        {title}
-      </span>
+      <span className="line-clamp-2 leading-5 text-foreground">{title}</span>
+      {/* The pin's color as a labeled pill at the title row's end, so the legend is on every
+          row and the detail below keeps a clean left edge. */}
+      {severity ? (
+        <span className="cad-severity-pill mt-px self-start" data-severity={severity}>
+          {severity}
+        </span>
+      ) : (
+        <span />
+      )}
       {detail ? (
-        <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-[0.8rem] leading-5 text-muted-foreground">
+        <span className="col-span-2 col-start-2 line-clamp-2 min-w-0 text-[13px] leading-[18px] text-muted-foreground">
           {detail}
         </span>
       ) : null}
@@ -309,21 +378,20 @@ export function CadPartDrawings({
   }, [id]);
   const listed = card.sheets.slice(0, MAX_LISTED_COMMENTS);
   return (
-    <div className="text-sm leading-relaxed" data-testid="cad-part-drawing-card">
-      <div className="flex min-h-6 items-center gap-1.5 px-0.5">
-        <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
-          <PartDrawingIcon className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+    // A drawing is an artifact the agent made, so it shares the review comments card's frame
+    // rather than reading as tool history.
+    <div className={`${ARTIFACT_CARD} text-sm leading-relaxed`} data-testid="cad-part-drawing-card">
+      <div className="flex min-h-7 items-center gap-1.5 px-0.5">
+        <span className="flex size-6 shrink-0 items-center justify-center text-(--accent-text)">
+          <PartDrawingIcon className="size-4 shrink-0" aria-hidden />
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+        <span className="min-w-0 flex-1 truncate font-semibold text-foreground">
           {card.sheets.length === 1
             ? `Part drawing: ${card.title}`
             : `${card.sheets.length} part drawings: ${card.title}`}
         </span>
-        <button
-          type="button"
-          className="shrink-0 text-xs text-secondary-label underline-offset-2 hover:text-foreground hover:underline"
-          onClick={open}
-        >
+        <button type="button" className={ARTIFACT_ACTION} onClick={open}>
+          <PartDrawingIcon aria-hidden className="size-3.5 text-(--accent-text)" />
           Open drawing
         </button>
       </div>

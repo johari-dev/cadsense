@@ -1,6 +1,6 @@
 import { memo, type PointerEventHandler } from "react";
 import {
-  ArrowElbowDownLeftIcon,
+  ArrowUpIcon,
   CaretDownIcon as ChevronDownIcon,
   CaretLeftIcon as ChevronLeftIcon,
   StopIcon,
@@ -61,6 +61,10 @@ export const formatPendingPrimaryActionLabel = (input: {
  * Send and stop are quiet icon buttons like the composer's attach button: no fill until
  * hovered, so the composer footer reads as one row of controls.
  */
+/** Send: the composer's one solid action. With nothing to send it rests as a quiet neutral tile. */
+const COMPOSER_SEND_CLASS_NAME =
+  "relative flex size-7.5 shrink-0 items-center justify-center rounded-[var(--control-radius)] bg-primary text-primary-foreground shadow-xs transition-colors duration-150 enabled:cursor-pointer hover:bg-primary/88 disabled:pointer-events-none disabled:bg-foreground/6 disabled:text-muted-foreground disabled:shadow-none pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
+
 export const COMPOSER_ICON_ACTION_CLASS_NAME =
   "relative flex size-7.5 shrink-0 items-center justify-center rounded-[var(--control-radius)] text-muted-foreground transition-colors duration-150 enabled:cursor-pointer hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
 
@@ -217,7 +221,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const sendButton = (
     <button
       type="submit"
-      className={COMPOSER_ICON_ACTION_CLASS_NAME}
+      className={COMPOSER_SEND_CLASS_NAME}
       {...pointerFocusProps}
       disabled={
         isSendBusy ||
@@ -241,7 +245,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       {isConnecting || isSendBusy ? (
         <Spinner aria-hidden="true" />
       ) : (
-        <ArrowElbowDownLeftIcon aria-hidden="true" />
+        // An up arrow reads as "send"; the return glyph read as a keyboard hint.
+        <ArrowUpIcon aria-hidden="true" weight="bold" />
       )}
     </button>
   );

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/ibm-plex-sans";
 @import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark, .dark *));
@@ -72,7 +73,13 @@
   --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.45);
   --shadow-xl: 0 20px 40px -10px rgb(0 0 0 / 0.65), 0 8px 12px -6px rgb(0 0 0 / 0.45);
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* IBM Plex Sans is variable, so "medium" sits a touch under 500: labels and buttons stay
+     clearly below semibold titles and headings instead of reading as bold. */
+  --font-weight-medium: 470;
+  /* IBM Plex Sans ships with the app, so every platform renders the same engineering face. */
+  --font-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    system-ui, sans-serif;
   --font-mono:
     "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Consolas,
     "Liberation Mono", Menlo, monospace;
@@ -270,14 +277,11 @@
   }
 }
 
+/* A dark scrim with a slight blur, so a dialog stands out while the chat behind it stays legible. */
 @utility dialog-backdrop {
-  background: color-mix(in srgb, var(--background) 60%, transparent);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-
-  @variant dark {
-    background: color-mix(in srgb, var(--background) 64%, transparent);
-  }
+  background: rgb(0 0 0 / 55%);
+  -webkit-backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1.5px);
 }
 
 @keyframes live-activity-focus {
@@ -1161,53 +1165,56 @@
 }
 
 :root {
-  /* Default dark theme: a near-black palette with an orange accent for focus and accent
-     text. */
+  /* Default dark theme: neutral near-black surfaces with white text, and blueprint blue (the
+     Cadsense mark's color) for primary actions, focus, links, and selection. The sidebar sits
+     one step darker than the workspace so the two panes read apart without a heavy border. */
   color-scheme: dark;
-  --radius: 0.625rem;
-  --app-theme-accent-text: rgb(245 128 86);
+  --radius: 0.5rem;
+  --app-theme-blueprint: #2f6fed;
+  --app-theme-blueprint-hover: #4580f2;
+  --app-theme-accent-text: #7aa9ff;
   /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
-     for "on" and "selected" control states. */
+     for selected parts and rows. "On" switches use the blueprint accent with a white knob. */
   --app-theme-selection: #7dbbff;
   /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
-  --app-theme-control-off: #2e2e2e;
-  --app-theme-control-off-border: #4a4a4a;
-  --app-theme-canvas: #111111;
-  --app-theme-chrome: #101010;
-  --app-theme-toolbar: #111111;
-  --app-theme-toolbar-foreground: #fcfcfc;
-  --app-theme-toolbar-border: rgb(252 252 252 / 8%);
-  --app-theme-toolbar-control: rgb(252 252 252 / 2.6%);
-  --app-theme-toolbar-control-foreground: rgb(252 252 252 / 72.2%);
-  --app-theme-toolbar-control-hover: rgb(252 252 252 / 3.9%);
-  --app-theme-surface: #131313;
-  --app-theme-surface-raised: #171717;
-  /* Lighter than both the chrome (#101010 to #131313) and the CAD viewport (#171717), so
-     floating panels read as lifted from either. */
-  --app-theme-surface-overlay: #1c1c1c;
-  --app-theme-popover-border: rgb(252 252 252 / 12%);
+  --app-theme-control-off: #2c2c2f;
+  --app-theme-control-off-border: #46464b;
+  --app-theme-canvas: #111113;
+  --app-theme-chrome: #0c0c0d;
+  --app-theme-toolbar: #111113;
+  --app-theme-toolbar-foreground: #f5f5f6;
+  --app-theme-toolbar-border: rgb(255 255 255 / 7%);
+  --app-theme-toolbar-control: rgb(255 255 255 / 3%);
+  --app-theme-toolbar-control-foreground: rgb(245 245 246 / 74%);
+  --app-theme-toolbar-control-hover: rgb(255 255 255 / 6%);
+  --app-theme-surface: #151517;
+  --app-theme-surface-raised: #19191c;
+  /* Lighter than the workspace (#111113), the sidebar (#0c0c0d), and the CAD viewport, so
+     floating panels read as lifted from any of them. */
+  --app-theme-surface-overlay: #1d1d20;
+  --app-theme-popover-border: rgb(255 255 255 / 11%);
   /* Text tiers: primary (--app-theme-text), secondary (muted-foreground) for
      descriptions, subtitles, and inactive labels, and tertiary for timestamps,
      counts, and hints. Placeholders sit just above tertiary so an empty input
      still reads as empty. Disabled controls drop to 50% opacity, which keeps
      them below the secondary tier. */
-  --app-theme-text: #fcfcfc;
-  --app-theme-text-muted: rgb(252 252 252 / 68%);
-  --app-theme-text-tertiary: rgb(252 252 252 / 46%);
-  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split), matching
-     the sidebar edge's 8%. */
-  --app-theme-border: rgb(252 252 252 / 8%);
-  --app-theme-input: rgb(252 252 252 / 11.8%);
-  --app-theme-focus: rgb(245 128 86 / 63%);
-  --app-theme-accent: #fcfcfc;
-  --app-theme-accent-foreground: #111111;
-  --app-theme-secondary: rgb(252 252 252 / 2.6%);
-  --app-theme-secondary-foreground: #fcfcfc;
-  --app-theme-muted: rgb(252 252 252 / 2.6%);
+  --app-theme-text: #f5f5f6;
+  --app-theme-text-muted: rgb(245 245 246 / 66%);
+  --app-theme-text-tertiary: rgb(245 245 246 / 52%);
+  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split). */
+  --app-theme-border: rgb(255 255 255 / 7%);
+  --app-theme-input: rgb(255 255 255 / 11%);
+  --app-theme-focus: rgb(77 136 245 / 70%);
+  /* Solid "act now" controls: send, primary buttons, switches, sliders. */
+  --app-theme-accent: var(--app-theme-blueprint);
+  --app-theme-accent-foreground: #ffffff;
+  --app-theme-secondary: rgb(255 255 255 / 4%);
+  --app-theme-secondary-foreground: #f5f5f6;
+  --app-theme-muted: rgb(255 255 255 / 3%);
   --app-theme-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-placeholder: rgb(252 252 252 / 48%);
+  --app-theme-placeholder: rgb(245 245 246 / 54%);
   --app-theme-secondary-label: var(--app-theme-text-muted);
-  --app-theme-icon-muted: rgb(252 252 252 / 62%);
+  --app-theme-icon-muted: rgb(245 245 246 / 66%);
   --app-theme-error: oklch(0.734642 0.162647 21.864);
   --app-theme-error-foreground: oklch(0.702184 0.189226 22.228);
   --app-theme-error-surface: oklch(0.265257 0.046957 17.692);
@@ -1217,23 +1224,23 @@
   --app-theme-update: oklch(0.854514 0 0);
   --app-theme-update-foreground: oklch(0.854514 0 0);
   --app-theme-update-surface: oklch(0.430694 0 0);
-  --app-theme-accent-surface: rgb(252 252 252 / 3.9%);
-  --app-theme-accent-surface-foreground: #fcfcfc;
-  --app-theme-message-surface: rgb(252 252 252 / 2.6%);
-  --app-theme-message-foreground: #fcfcfc;
-  --app-theme-message-action: #fcfcfc;
-  --app-theme-message-action-foreground: #111111;
-  --app-theme-message-action-hover: #ffffff;
-  --app-theme-code-background: rgb(252 252 252 / 2.6%);
-  --app-theme-code-foreground: #fcfcfc;
-  --app-theme-sidebar: #111111;
-  --app-theme-sidebar-foreground: #fcfcfc;
+  --app-theme-accent-surface: rgb(255 255 255 / 5%);
+  --app-theme-accent-surface-foreground: #f5f5f6;
+  --app-theme-message-surface: #1b1b1e;
+  --app-theme-message-foreground: #f5f5f6;
+  --app-theme-message-action: var(--app-theme-blueprint);
+  --app-theme-message-action-foreground: #ffffff;
+  --app-theme-message-action-hover: var(--app-theme-blueprint-hover);
+  --app-theme-code-background: rgb(255 255 255 / 3.5%);
+  --app-theme-code-foreground: #f5f5f6;
+  --app-theme-sidebar: #0c0c0d;
+  --app-theme-sidebar-foreground: #f5f5f6;
   --app-theme-sidebar-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-sidebar-control-surface: rgb(252 252 252 / 2.6%);
-  --app-theme-sidebar-row-hover: rgb(252 252 252 / 3.9%);
-  --app-theme-sidebar-row-active: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-row-selected: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-border: rgb(252 252 252 / 8%);
+  --app-theme-sidebar-control-surface: rgb(255 255 255 / 3%);
+  --app-theme-sidebar-row-hover: rgb(255 255 255 / 4%);
+  --app-theme-sidebar-row-active: rgb(255 255 255 / 6.5%);
+  --app-theme-sidebar-row-selected: rgb(255 255 255 / 6.5%);
+  --app-theme-sidebar-border: rgb(255 255 255 / 6%);
 }
 
 /* Map the permanent application palette onto the semantic surface tokens. */
@@ -1610,11 +1617,13 @@ code {
 }
 
 .chat-markdown h2 {
-  font-size: 1.125rem;
+  margin-top: 1.75rem;
+  font-size: 1.2rem;
 }
 
 .chat-markdown h3 {
-  font-size: 1rem;
+  margin-top: 1.5rem;
+  font-size: 1.0667rem;
 }
 
 .chat-markdown h4,
@@ -1675,9 +1684,9 @@ code {
    22px line in full foreground, 24px above and 8px below, so a long review breaks into
    sections instead of reading as one wall of prose. */
 .chat-markdown p[data-markdown-lead] {
-  margin-top: 1.6rem;
-  margin-bottom: 0.5333rem;
-  font-size: 1rem;
+  margin-top: 1.8667rem;
+  margin-bottom: 0.6667rem;
+  font-size: 1.2rem;
   line-height: 1.4667;
   color: var(--contrast-foreground);
 }
@@ -1835,29 +1844,74 @@ code {
    characters and defeat the overflow — restore word-boundary wrapping so the
    min column width is the longest word. */
 .chat-markdown table {
+  font-variant-numeric: tabular-nums;
   width: 100%;
   min-width: max-content;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   overflow-wrap: normal;
   word-break: normal;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+/* Tables sit in a framed sheet, like a title block: a hairline frame, a tinted header row,
+   and body text one step below primary so headers lead. */
+.chat-markdown .chat-markdown-table-container {
+  position: relative;
+  container-type: inline-size;
+}
+
+/* The copy menu sits in the table's top-right corner and shows on hover or focus, instead of
+   floating alone under the table. */
+.chat-markdown .chat-markdown-table-container > :last-child {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  margin: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background-color: var(--app-theme-surface-raised);
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.chat-markdown .chat-markdown-table-container:is(:hover, :focus-within) > :last-child {
+  opacity: 1;
+}
+
+.chat-markdown .chat-markdown-table-container > :first-child {
+  border: 1px solid var(--contrast-border);
+  border-radius: var(--radius);
 }
 
 .chat-markdown th,
 .chat-markdown td {
-  padding: 0.45rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   text-align: left;
+  vertical-align: top;
 }
 
 .chat-markdown thead th {
-  border-bottom: 1px solid color-mix(in srgb, var(--contrast-border) 60%, transparent);
-  padding-block: 0.55rem;
-  font-weight: 600;
+  border-bottom: 1px solid var(--contrast-border);
+  background-color: color-mix(in srgb, var(--contrast-foreground) 3.5%, transparent);
+  padding-block: 0.5rem;
+  color: var(--contrast-muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .chat-markdown tbody td {
-  border-bottom: 1px solid color-mix(in srgb, var(--contrast-border) 60%, transparent);
+  border-bottom: 1px solid var(--contrast-border);
+  color: color-mix(in srgb, var(--contrast-foreground) 82%, transparent);
+}
+
+.chat-markdown tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.chat-markdown tbody td:first-child {
+  color: var(--contrast-foreground);
 }
 
 /* Collapsed (default): single-line cells truncate so arbitrary chat content
@@ -1873,6 +1927,102 @@ code {
 .chat-markdown .chat-markdown-table-container[data-expanded="true"] td {
   max-width: 24rem;
   overflow-wrap: anywhere;
+}
+
+/* Beside the CAD panel the chat column is narrow. Rather than squeeze every column, each row
+   becomes a block: the first cell leads in semibold, a severity pill sits at the right of that
+   line, and the other cells follow in the quieter body color. */
+@container (max-width: 36rem) {
+  .chat-markdown .chat-markdown-table-container table,
+  .chat-markdown .chat-markdown-table-container tbody,
+  .chat-markdown .chat-markdown-table-container tr {
+    display: block;
+    min-width: 0;
+  }
+
+  .chat-markdown .chat-markdown-table-container thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--contrast-border);
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .chat-markdown .chat-markdown-table-container[data-expanded] td {
+    display: block;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    overflow-wrap: normal;
+    white-space: normal;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody td:first-child {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody td + td {
+    margin-top: 0.375rem;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr {
+    position: relative;
+  }
+
+  .chat-markdown .chat-markdown-table-container tbody tr:has(.cad-severity-pill) td:first-child {
+    padding-right: 5.5rem;
+  }
+
+  .chat-markdown .chat-markdown-table-container[data-expanded] td:has(> .cad-severity-pill) {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    margin: 0;
+  }
+}
+
+/* A CAD comment severity as a tinted pill: the word in the pin's hue on a 12-14% wash of it.
+   Used by agent review tables (ChatMarkdown's td) and the chat's comment rows. "check" and
+   "nit" stay neutral. Text plus hue, so color is never the only cue. */
+.cad-severity-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.125rem;
+  text-transform: capitalize;
+  color: #d4d4d8;
+  background-color: rgb(255 255 255 / 8%);
+  /* A hairline in the pill's own hue, so every pill, neutral ones too, holds its edge. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.cad-severity-pill[data-severity="blocker"] {
+  color: var(--color-red-300);
+  background-color: color-mix(in srgb, var(--color-red-400) 14%, transparent);
+}
+
+.cad-severity-pill[data-severity="concern"] {
+  color: var(--color-amber-200);
+  background-color: color-mix(in srgb, var(--color-amber-300) 12%, transparent);
+}
+
+.cad-severity-pill[data-severity="question"] {
+  color: var(--color-violet-300);
+  background-color: color-mix(in srgb, var(--color-violet-400) 14%, transparent);
 }
 
 @keyframes ultrathink-rainbow {
@@ -1975,7 +2125,7 @@ code {
    composer and everything attached to it use --chat-composer-radius, and the picker panel
    uses the theme's --radius. */
 :root {
-  --chat-composer-radius: 1.2rem;
+  --chat-composer-radius: 0.75rem;
 }
 :root .chat-composer-glass-shell {
   background: var(--chat-composer-glass-surface);
@@ -2069,4 +2219,85 @@ code {
   [data-chat-composer-surface="true"] {
     corner-shape: squircle;
   }
+}
+
+/* Chats hang off their project on a guide line, like a feature tree in a CAD app. The line
+   sits under the project's caret. */
+[data-app-sidebar] [data-sidebar="menu-sub"] {
+  position: relative;
+}
+
+[data-app-sidebar] [data-sidebar="menu-sub"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0.25rem;
+  left: 0.5625rem;
+  width: 1px;
+  background-color: var(--contrast-sidebar-border);
+  pointer-events: none;
+}
+
+/* The workspace is an inset sheet on the darker window chrome, with the sidebar sitting on the
+   chrome itself. Phones keep the full-bleed layout. */
+@media (min-width: 768px) {
+  [data-slot="sidebar-wrapper"] {
+    background-color: var(--app-theme-sidebar);
+  }
+
+  [data-slot="sidebar-wrapper"] > [data-slot="sidebar-inset"] {
+    height: calc(100dvh - 0.75rem);
+    margin: 0.375rem;
+    overflow: hidden;
+    border: 1px solid var(--app-theme-border);
+    border-radius: 0.625rem;
+    /* Lifted off the window chrome: a faint top highlight and a soft drop shadow. */
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 4%),
+      0 10px 28px -14px rgb(0 0 0 / 85%);
+  }
+
+  /* The sheet has an even 6px gutter. It starts 6px down, so its top bar is 12px shorter: its title then centers on the
+     same line as the sidebar's brand row. Native window controls overlays (.wco) keep the full
+     height so the controls never hang below the bar. */
+  :root:not(.wco) [data-slot="sidebar-wrapper"] > [data-slot="sidebar-inset"] {
+    --workspace-topbar-height: calc(52px - 0.75rem);
+  }
+
+  /* The sheet's own border is the edge, so the sidebar drops its divider. */
+  :root [data-app-sidebar] {
+    border-color: transparent;
+  }
+}
+
+/* Settings navigation marks its open page the way the chat list marks the open chat: the
+   highlight and full-strength text, with no extra bar beside the tree's guide line. */
+[data-settings-nav] [data-sidebar="menu-button"][data-active="true"] {
+  color: var(--contrast-sidebar-foreground);
+}
+
+/* Icon-only header actions are ghost buttons: no fill or border at rest, a light fill on hover,
+   so none looks pressed beside the labeled action. */
+:root [data-chat-header] [data-header-icon-button] {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+:root [data-chat-header] [data-header-icon-button]:is(:hover, [data-pressed]) {
+  background-color: var(--toolbar-control-hover);
+}
+
+/* Bold lead-ins in list items ("Spacing:") sit a weight below run-in headings, so the headings
+   still lead a long answer. */
+.chat-markdown li > strong:first-child,
+.chat-markdown li > p:first-child > strong:first-child {
+  font-weight: 550;
+}
+
+/* The open chat's row is a small raised card, like the sheet beside it. */
+[data-app-sidebar] [data-sidebar="menu-sub-button"][data-active="true"] {
+  background-image: linear-gradient(rgb(255 255 255 / 3%), transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    0 1px 2px rgb(0 0 0 / 45%);
 }

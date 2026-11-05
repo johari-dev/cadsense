@@ -1,4 +1,4 @@
-import { FileIcon, FolderIcon } from "~/lib/icons";
+import { CubeIcon, FileIcon, FolderIcon } from "~/lib/icons";
 import { memo, useInsertionEffect, useMemo } from "react";
 
 import { ensurePierreIconSprite, resolvePierreIconForEntry } from "../../pierre-icons";
@@ -58,16 +58,24 @@ const ICON_COLORS: Record<string, string> = {
   zip: "#ffa359",
 };
 
+const CAD_FILE_PATTERN = /\.(step|stp|sldasm|sldprt|iges|igs|x_t|x_b|3mf|stl)$/i;
+
 export const PierreEntryIcon = memo(function PierreEntryIcon(props: {
   pathValue: string;
   kind: "file" | "directory";
   className?: string;
 }) {
   useInsertionEffect(ensurePierreIconSprite, []);
+  const isCadFile = props.kind === "file" && CAD_FILE_PATTERN.test(props.pathValue);
   const icon = useMemo(
     () => resolvePierreIconForEntry(props.pathValue, props.kind),
     [props.kind, props.pathValue],
   );
+
+  // CAD files are the files Cadsense is for, so they get the model cube in blueprint blue.
+  if (isCadFile) {
+    return <CubeIcon className={cn("size-4 shrink-0 text-(--accent-text)", props.className)} />;
+  }
 
   if (!icon) {
     return props.kind === "directory" ? (

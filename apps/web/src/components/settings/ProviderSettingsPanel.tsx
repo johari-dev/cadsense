@@ -317,18 +317,20 @@ function EnvironmentProviderSettings({
         <Tooltip>
           <TooltipTrigger
             render={
+              // Labeled and framed like the General page's Restore defaults, so the page's one
+              // action reads as a control rather than a stray glyph.
               <Button
-                size="icon-micro"
-                variant="ghost-muted"
+                variant="outline"
                 disabled={isRefreshingProviders}
                 onClick={() => void refreshProviders()}
                 aria-label="Refresh provider status"
               >
                 {isRefreshingProviders ? (
-                  <LoaderIcon className="size-3 animate-spin" />
+                  <LoaderIcon className="size-3.5 animate-spin" />
                 ) : (
-                  <RefreshCwIcon className="size-3" />
+                  <RefreshCwIcon className="size-3.5" />
                 )}
+                Check again
               </Button>
             }
           />
@@ -465,22 +467,30 @@ function ProviderRow({
             </Button>
           ) : null}
           {visibleAction === "signOut" ? (
+            // A quiet account action: ghost, so the row's one prominent control is its switch.
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
+              className="border-border text-muted-foreground hover:text-foreground"
               disabled={pendingSetup === "signOut"}
               onClick={() => onSetup("signOut")}
             >
               {pendingSetup === "signOut" ? "Signing out…" : "Sign out"}
             </Button>
           ) : null}
-          {/* A provider can only be turned on once its CLI is installed. */}
-          <Switch
-            checked={enabled && installed}
-            disabled={onEnabledChange === undefined || !installed}
-            onCheckedChange={(checked) => onEnabledChange?.(Boolean(checked))}
-            aria-label={`Enable ${option.label}`}
-          />
+          {/* A provider can only be turned on once its CLI is installed. The visible label and
+              the gap keep the switch from reading as a pair with the account action. */}
+          <span className="ms-2 flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted-foreground text-xs">
+              Enabled
+            </span>
+            <Switch
+              checked={enabled && installed}
+              disabled={onEnabledChange === undefined || !installed}
+              onCheckedChange={(checked) => onEnabledChange?.(Boolean(checked))}
+              aria-label={`Enable ${option.label}`}
+            />
+          </span>
         </>
       }
     />
@@ -502,8 +512,9 @@ function ProviderStatusLine({
   if (pendingSetup === "signIn") return <>Finish signing in to {label} in your browser.</>;
   if (pendingSetup === "signOut") return <>Signing out of {label}.</>;
   if (liveProvider === undefined) return <>Checking status</>;
-  if (!liveProvider.installed) return <>The {label} CLI is not installed.</>;
-  if (!enabled) return <>Disabled</>;
+  if (!liveProvider.installed)
+    return <StatusText tone="off">The {label} CLI is not installed.</StatusText>;
+  if (!enabled) return <StatusText tone="off">Disabled</StatusText>;
 
   const version = getProviderVersionLabel(liveProvider.version);
   const auth = liveProvider.auth;
@@ -512,6 +523,7 @@ function ProviderStatusLine({
     const email = auth.email?.trim();
     return (
       <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+        <StatusDot tone="ok" />
         <span>Signed in</span>
         {email ? (
           <>
@@ -525,18 +537,60 @@ function ProviderStatusLine({
             />
           </>
         ) : null}
-        {plan ? <span>· {plan}</span> : null}
-        {version ? <span>· {version}</span> : null}
+        {plan ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{plan}</span>
+          </>
+        ) : null}
+        {version ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="text-tertiary-foreground">{version}</span>
+          </>
+        ) : null}
       </span>
     );
   }
-  if (auth.status === "unauthenticated") return <>Not signed in.</>;
+  if (auth.status === "unauthenticated") return <StatusText tone="warn">Not signed in.</StatusText>;
 
   const summary = getProviderSummary(liveProvider);
   return (
-    <span className={cn("[overflow-wrap:anywhere]")}>
-      {summary.headline}
-      {summary.detail ? ` · ${summary.detail}` : null}
+    <StatusText tone="warn">
+      <span className="[overflow-wrap:anywhere]">
+        {summary.headline}
+        {summary.detail ? ` · ${summary.detail}` : null}
+      </span>
+    </StatusText>
+  );
+}
+
+type StatusTone = "ok" | "warn" | "off";
+
+const STATUS_DOT_CLASS: Record<StatusTone, string> = {
+  ok: "bg-emerald-400",
+  warn: "bg-amber-300",
+  off: "bg-muted-foreground/50",
+};
+
+/** A provider's state at a glance: green when signed in, amber when unverified, gray when off. */
+function StatusDot({ tone }: { readonly tone: StatusTone }) {
+  return (
+    <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT_CLASS[tone])} />
+  );
+}
+
+function StatusText({
+  tone,
+  children,
+}: {
+  readonly tone: StatusTone;
+  readonly children: ReactNode;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-x-1.5">
+      <StatusDot tone={tone} />
+      {children}
     </span>
   );
 }

@@ -30,6 +30,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
+  formatModelSlug,
   getDisplayModelName,
   getTriggerDisplayModelName,
   type ModelEsque,
@@ -204,7 +205,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
     setQuery("");
   };
 
-  const modelName = activeModel ? getTriggerDisplayModelName(activeModel) : props.model;
+  const modelName = activeModel
+    ? getTriggerDisplayModelName(activeModel)
+    : formatModelSlug(props.model);
   const unavailable = activeModel?.isUnavailable ?? false;
   const triggerTitle = [modelName, unavailable ? "Unavailable" : null, props.traits?.label]
     .filter(Boolean)
@@ -250,22 +253,28 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
             </>
           ) : null}
           {props.traits?.label ? (
-            // The reasoning level always follows the model name as its own quiet pill, in every
-            // composer, so "Claude Opus 5.5" and "Medium" never read as one long name.
-            <span className="shrink-0 rounded-md bg-foreground/[0.07] px-1.5 py-px text-[0.75rem] leading-4 text-muted-foreground">
+            // The reasoning level follows the model name as one phrase, "Sonnet 5.5 · High", with
+            // the level a step quieter so the two never read as one long name.
+            <span className="shrink-0 text-muted-foreground">
+              <span aria-hidden="true">· </span>
               {props.traits.label}
             </span>
           ) : null}
+          {/* A chevron, so the control reads as a picker rather than a label. A compact footer
+              keeps it too and truncates the model's name instead. */}
+          <CaretDownIcon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
-      {/* Opens from the trigger: 8px above it and aligned to its end. The positioner shifts
+      {/* Opens from the trigger: 8px from it and aligned to its end. The positioner shifts
           or flips it to stay on screen in narrow columns and on the home hero. */}
+      {/* Below the trigger where there is room (the new-chat hero), so the list never covers the
+          composer; a docked composer has none below, and the popup flips above it. */}
       <MenuPopup
         align="end"
-        side="top"
+        side="bottom"
         sideOffset={8}
-        className="composer-model-panel w-[min(20rem,92vw)]"
+        className="composer-model-panel w-[min(22rem,92vw)]"
         onKeyDownCapture={(event) => {
           // Tab walks the provider tabs instead of leaving (and closing) the menu.
           if (event.key === "Tab") {
@@ -292,17 +301,18 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
         {/* -m-1 bleeds over the popup body padding so the dividers run edge to edge.
             data-model-picker-content tells the sidebar to yield mod+1...9 (modelPickerVisibility.ts). */}
         <div data-model-picker-content className="-m-1 flex flex-col">
-          {/* Only the open tab shows its name; the rest are 28px icons with tooltips, so the
-              header fits at any provider count. The tab strip clips rather than scrolls if it
-              ever runs out of room, and "Add provider" stays pinned at the end. */}
+          {/* A segmented control: every source is a labeled, equal-width segment, and the open
+              one is a raised tile. Labels truncate if many providers share the row, and "Add
+              provider" stays pinned at the end. */}
           <div className="flex shrink-0 items-center gap-1 border-b border-border px-1.5 pt-1.5 pb-[7px]">
             <div
               role="tablist"
               aria-label="Model sources"
-              className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+              className="grid min-w-0 flex-1 auto-cols-fr grid-flow-col gap-0.5 overflow-hidden rounded-lg bg-foreground/[0.05] p-0.5"
             >
               <PickerTabButton
                 label="Favorites"
+                labeled
                 active={openTab === STARRED_TAB}
                 onSelect={() => {
                   setTab(STARRED_TAB);
@@ -317,6 +327,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   <PickerTabButton
                     key={entry.instanceId}
                     label={entry.displayName}
+                    labeled
                     {...(ready ? {} : { unavailableReason: `${entry.displayName} is unavailable` })}
                     active={openTab === entry.instanceId}
                     onSelect={() => {
@@ -428,7 +439,8 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                     {getDisplayModelName(row.model)}
                     {row.model.isUnavailable ? " (Unavailable)" : ""}
                   </span>
-                  <kbd className="w-11 shrink-0 text-right font-sans text-[0.8rem] tabular-nums text-muted-foreground">
+                  {/* Shortcuts stay quiet so model names lead; the highlighted row shows its own. */}
+                  <kbd className="w-12 shrink-0 text-right font-sans text-[11px] text-tertiary-foreground tabular-nums group-data-highlighted:text-muted-foreground">
                     {hint}
                   </kbd>
                   <button
@@ -489,18 +501,21 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
 });
 
 /**
- * One source tab. The open tab shows its icon and name on a filled pill; the others are 28px
- * icons whose tooltip names them.
+ * One segment of the source control: an icon and the source's name. The open segment is a
+ * raised tile on the control's recessed track.
  */
 function PickerTabButton(props: {
   label: string;
+  /** Shows the name beside the icon even when the tab is not open. */
+  labeled?: boolean;
   /** Set when the source cannot be picked right now; shown as the tooltip. */
   unavailableReason?: string;
   active: boolean;
   onSelect: () => void;
   children: ReactNode;
 }) {
-  const tooltip = props.unavailableReason ?? (props.active ? null : props.label);
+  const showsLabel = props.active || props.labeled === true;
+  const tooltip = props.unavailableReason ?? (showsLabel ? null : props.label);
   const tab = (
     <button
       type="button"
@@ -510,14 +525,17 @@ function PickerTabButton(props: {
       aria-disabled={props.unavailableReason !== undefined}
       className={cn(
         TAB_CLASS_NAME,
-        props.active ? "min-w-0 shrink bg-foreground/[0.1] text-foreground" : "px-0",
+        "h-6.5 rounded-md",
+        props.active &&
+          "bg-surface-raised text-foreground shadow-[inset_0_1px_0_rgb(255_255_255/6%),0_1px_2px_rgb(0_0_0/45%)] hover:bg-surface-raised",
+        showsLabel ? "min-w-0" : "px-0",
       )}
       onClick={() => {
         if (props.unavailableReason === undefined) props.onSelect();
       }}
     >
       {props.children}
-      {props.active ? <span className="truncate">{props.label}</span> : null}
+      {showsLabel ? <span className="truncate">{props.label}</span> : null}
     </button>
   );
   if (tooltip === null) return tab;

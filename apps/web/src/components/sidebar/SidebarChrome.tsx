@@ -1,5 +1,4 @@
 import { ArrowLeftIcon, GearSixIcon as SettingsIcon } from "~/lib/icons";
-import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
@@ -22,7 +21,6 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -77,14 +75,22 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     <Link
       aria-label="Go to design workspace"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex group-data-[collapsible=icon]:md:hidden",
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex group-data-[collapsible=icon]:md:hidden",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
     >
+      {/* The blueprint CS mark, the same artwork as the app icon and the boot screen. */}
+      <img
+        alt=""
+        aria-hidden="true"
+        className="size-5.5 shrink-0 rounded-[6px] shadow-xs ring-1 ring-white/12"
+        draggable={false}
+        src="/app-icon.png"
+      />
       <span
         className={cn(
-          "truncate text-base font-semibold tracking-tight",
+          "truncate font-semibold text-[15px] tracking-[-0.01em]",
           onBackdrop ? "text-white" : "text-foreground",
         )}
       >
@@ -94,34 +100,34 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-function SidebarUtilityItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
+/**
+ * Leaves a settings page: back through history when there is any, else home. Settings shows it
+ * at the top of its nav (SettingsSidebarNav); the project settings page shows it in the footer.
+ */
+export function SidebarBackButton() {
+  const navigate = useNavigate();
+  const canGoBack = useCanGoBack();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleBackClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    if (canGoBack) {
+      window.history.back();
+      return;
+    }
+    void navigate({ to: "/" });
+  }, [canGoBack, isMobile, navigate, setOpenMobile]);
   return (
-    <SidebarMenuItem className="shrink-0">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
-              {icon}
-            </SidebarMenuButton>
-          }
-        />
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
+    <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+      <SidebarMenuButton onClick={handleBackClick}>
+        <ArrowLeftIcon />
+        <span>Back</span>
+      </SidebarMenuButton>
     </SidebarMenuItem>
   );
 }
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
   const currentFooterPage = useLocation({
     select: (location) =>
@@ -141,33 +147,20 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/settings" });
   }, [closeMobileSidebar, navigate]);
 
-  const handleBackClick = useCallback(() => {
-    closeMobileSidebar();
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, closeMobileSidebar, navigate]);
-
   return (
     // On the icon rail only the Back or Settings icon shows, centered under the toggle.
     <SidebarMenu className="flex-row items-center group-data-[collapsible=icon]:justify-center">
-      {currentFooterPage ? (
+      {/* Settings has Back at the top of its nav instead (SettingsSidebarNav). */}
+      {currentFooterPage === "settings" ? null : currentFooterPage ? (
+        <SidebarBackButton />
+      ) : (
+        // Labeled like Back, so the footer reads as navigation rather than a stray icon.
         <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
+          <SidebarMenuButton aria-label="Settings" onClick={handleSettingsClick}>
+            <SettingsIcon />
+            <span>Settings</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-        </>
       )}
       <SidebarUpdatePill />
     </SidebarMenu>
@@ -176,7 +169,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
-    <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+    <SidebarFooter className="border-sidebar-border border-t p-[var(--sidebar-content-inset)]">
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />
     </SidebarFooter>

@@ -46,11 +46,13 @@ export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: 
 
 /**
  * Shell for the preview panel. In inline mode the panel is user-resizable
- * via a drag handle on the left edge; width persists per browser. In
- * sheet/sidebar modes the parent owns the size.
+ * via a drag handle on the edge facing the chat (the left edge, or the right edge when `side`
+ * is "left"); width persists per browser. In sheet/sidebar modes the parent owns the size.
  */
 export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
+  /** Which side of the chat an inline panel sits on. Defaults to "right". */
+  side?: "left" | "right";
   maximized?: boolean;
   open?: boolean;
   onExited?: () => void;
@@ -126,7 +128,7 @@ export function PreviewPanelShell(props: {
     defaultWidth: props.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH,
     minWidth: PREVIEW_PANEL_MIN_WIDTH,
     maxWidth,
-    edge: "left",
+    edge: props.side === "left" ? "right" : "left",
   });
   // While the user drags the edge the panel follows the pointer directly; otherwise width
   // changes (the app sidebar folding or expanding) animate.
@@ -153,9 +155,10 @@ export function PreviewPanelShell(props: {
       className={cn(
         "relative flex h-full min-h-0 min-w-0 max-w-full flex-col self-stretch bg-background",
         isInline
-          ? props.maximized
-            ? "flex-1 border-l border-border"
-            : "shrink-0 border-l border-border"
+          ? cn(
+              props.maximized ? "flex-1" : "shrink-0",
+              props.side === "left" ? "border-r border-border" : "border-l border-border",
+            )
           : "w-full",
         // The same duration and easing as the app sidebar's fold (ui/sidebar.tsx): the panel
         // takes back exactly the width the rail frees, so the chat column slides as one piece.
@@ -174,10 +177,18 @@ export function PreviewPanelShell(props: {
       data-preview-panel-maximized={props.maximized ? "true" : "false"}
       inert={!open}
     >
-      {isInline && !props.maximized ? <RightPanelResizeHandle handlers={resizeHandlers} /> : null}
+      {isInline && !props.maximized ? (
+        <RightPanelResizeHandle
+          handlers={resizeHandlers}
+          {...(props.side === "left" ? { className: "-right-1 left-auto" } : {})}
+        />
+      ) : null}
       <div
         ref={contentRef}
-        className="flex h-full min-h-0 w-full shrink-0 flex-col"
+        className={cn(
+          "flex h-full min-h-0 w-full shrink-0 flex-col",
+          props.side === "left" && "self-end",
+        )}
         data-panel-slide-content
       >
         {useDragRegion ? <div className="electron-drag-region h-0 w-full" aria-hidden /> : null}

@@ -38,12 +38,21 @@ export function CadScenePicker({
       {documentUrl ? (
         <img src="/onshape.svg" alt="Onshape" className="size-3.5 shrink-0 object-contain" />
       ) : null}
-      <span className="truncate">{label}</span>
+      {/* The file name leads; its folder is a quiet prefix. Together they are the full path,
+          so the control's name stays the path. */}
+      <span className="truncate">
+        {label.includes("/") ? (
+          <span className="font-normal text-muted-foreground text-xs">
+            {label.slice(0, label.lastIndexOf("/") + 1)}
+          </span>
+        ) : null}
+        {label.slice(label.lastIndexOf("/") + 1)}
+      </span>
       <ArrowSquareOutIcon aria-hidden className="size-3 shrink-0 opacity-70" />
     </>
   );
   const linkClassName =
-    "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
+    "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] font-medium text-foreground/85 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
   const heading = documentUrl ? (
     <a
       href={documentUrl}

@@ -14,7 +14,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import type { Project } from "~/types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { CadModelChip } from "./CadModelChip";
 import { toastManager } from "../ui/toast";
 import { OpenInExplorerButton } from "./OpenInExplorerButton";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
@@ -34,11 +36,22 @@ interface ChatHeaderProps {
   activeProjectOnshapeSource?: OnshapeProjectSource | undefined;
   openInCwd: string | null;
   rightPanelOpen: boolean;
+  /**
+   * Which of the title bar's fixed layout controls sit over this header's right end, so the
+   * actions keep clear of them: the panel toggle while the panel is closed, the toggle and
+   * maximize while a CAD-first panel sits to the left, none while a panel on the right owns them.
+   */
+  titlebarControlsOverHeader: "none" | "toggle" | "toggle-and-maximize";
   /** The open CAD panel already names the project in its header, so the chip would repeat it. */
   projectShownInRightPanel: boolean;
   /** The draft hero's large heading already names the project. */
   isDraftHero: boolean;
   onNewThreadInProject: () => void;
+  /**
+   * The CAD project and how to open its panel. Set only for CAD projects; while the panel is
+   * closed the header shows the model as a chip that opens it.
+   */
+  cad?: { readonly project: Project; readonly onOpen: () => void } | undefined;
 }
 
 /**
@@ -73,9 +86,11 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectOnshapeSource,
   openInCwd,
   rightPanelOpen,
+  titlebarControlsOverHeader,
   projectShownInRightPanel,
   isDraftHero,
   onNewThreadInProject,
+  cad,
 }: ChatHeaderProps) {
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
@@ -273,14 +288,16 @@ export const ChatHeader = memo(function ChatHeader({
         {/* The project follows the thread title as a quiet 12px chip, set apart by a wider
             gap, so the two never read as one long title. It hides while the CAD panel is
             open or the draft hero shows, because their headings already name the project. */}
-        {activeProjectName && !projectShownInRightPanel && !isDraftHero ? (
+        {/* A CAD project's header names its model instead (CadModelChip), so the project
+            would be said twice. */}
+        {activeProjectName && !projectShownInRightPanel && !isDraftHero && !cad ? (
           <WorkspaceBreadcrumbItem className="ps-1">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label={`New thread in ${activeProjectName}`}
+                    aria-label={`New chat in ${activeProjectName}`}
                     onClick={onNewThreadInProject}
                     className="min-w-0 max-w-40 cursor-pointer truncate rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-[0.8rem] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
@@ -288,7 +305,7 @@ export const ChatHeader = memo(function ChatHeader({
               >
                 {activeProjectName}
               </TooltipTrigger>
-              <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+              <TooltipPopup side="top">New chat in {activeProjectName}</TooltipPopup>
             </Tooltip>
           </WorkspaceBreadcrumbItem>
         ) : null}
@@ -297,11 +314,18 @@ export const ChatHeader = memo(function ChatHeader({
         data-chat-header-actions
         className={cn(
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
-          rightPanelOpen
+          titlebarControlsOverHeader === "none"
             ? "pr-0"
-            : "pr-[calc(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap))]",
+            : titlebarControlsOverHeader === "toggle"
+              ? "pr-[calc(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap))]"
+              : "pr-[calc(2*(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap)))]",
         )}
       >
+        {/* The model is the point of a CAD chat, so with the panel closed the header names it,
+            and the name is the way back to the panel. */}
+        {cad && !rightPanelOpen && !isDraftHero ? (
+          <CadModelChip project={cad.project} onOpen={cad.onOpen} />
+        ) : null}
         {activeProjectName && !activeProjectOnshapeSource && (
           <OpenInExplorerButton environmentId={activeThreadEnvironmentId} path={openInCwd} />
         )}

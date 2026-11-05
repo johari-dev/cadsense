@@ -1012,6 +1012,24 @@ export function CadCommentsCard({
           </Button>
         </div>
       )}
+      {/* Collapsed, a key beside the chip says what the pins' colors mean, so the model reads
+          without opening the list: a chip in the same row, not a second stacked panel. */}
+      {!open && !settling && openCount > 0 && (
+        <div
+          aria-hidden="true"
+          style={{ right: `calc(0.75rem + ${toggleWidth} + 0.5rem)` }}
+          // 13px like the chip, so `toggleWidth`'s `ch`/`em` resolve to the chip's own width and
+          // the 0.5rem gap holds; the entries set their own 12px text.
+          className="pointer-events-none absolute top-3 flex h-(--cad-overlay-control) items-center gap-3 rounded-[8px] border bg-popover/90 px-2.5 text-[13px] text-foreground/75"
+        >
+          {legend.map((entry) => (
+            <span key={entry.severity} className="flex items-center gap-1 text-xs">
+              <span className={cn("size-2 rounded-full border", SEVERITY_FILL[entry.severity])} />
+              {entry.label}
+            </span>
+          ))}
+        </div>
+      )}
       {/* Docked, the card stays in its column while the column closes, then unmounts. */}
       {docked && (open || settling) && createPortal(panel, dock)}
       {/* Docked, the surface is only ever the chip; it fades out while the column is open. */}

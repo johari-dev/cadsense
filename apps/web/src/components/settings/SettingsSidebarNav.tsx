@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -10,6 +11,7 @@ import {
 import {
   ArchiveIcon,
   HardDriveIcon,
+  PartDrawingIcon,
   ShapesIcon as BlocksIcon,
   RobotIcon as BotIcon,
   KeyboardIcon,
@@ -22,7 +24,6 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Kbd } from "../ui/kbd";
 import {
   SidebarContent,
   SidebarFooter,
@@ -32,7 +33,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "../ui/sidebar";
-import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
+import { SidebarBackButton, SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
@@ -50,18 +51,33 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
   "/settings/cad-storage": HardDriveIcon,
+  "/settings/drawings": PartDrawingIcon,
   "/settings/archived": ArchiveIcon,
 };
 
-export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
+/**
+ * The navigation's groups, in order. CAD work gets its own group, ahead of the agents, so the
+ * page reads as a CAD tool's settings rather than a generic app's.
+ */
+const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[]).map((to) => ({
-  to,
-  label: SETTINGS_SECTION_LABELS[to],
-  icon: SETTINGS_SECTION_ICONS[to],
-}));
+  paths: ReadonlyArray<SettingsPath>;
+}> = [
+  {
+    label: "App",
+    paths: [
+      "/settings/general",
+      "/settings/appearance",
+      "/settings/keybindings",
+      "/settings/archived",
+    ],
+  },
+  {
+    label: "CAD",
+    paths: ["/settings/integrations", "/settings/drawings", "/settings/cad-storage"],
+  },
+  { label: "Agents", paths: ["/settings/providers"] },
+];
 
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
@@ -178,8 +194,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
-          {/* Search needs the full sidebar; on the icon rail only the section icons show. */}
-          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden">
+          {/* The way out leads the nav, above search, rather than sitting in the footer. */}
+          <SidebarMenu>
+            <SidebarBackButton />
+          </SidebarMenu>
+          {/* Search needs the full sidebar; on the icon rail only the section icons show. It is
+              framed like a field so it never reads as one of the pages below it. */}
+          <div className="mb-1 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-control-surface px-2 py-1.5 text-sm text-sidebar-muted-foreground focus-within:border-ring group-data-[collapsible=icon]:hidden">
             <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
             <Input
               ref={searchInputRef}
@@ -219,9 +240,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               >
                 <XIcon className="size-3" />
               </Button>
-            ) : (
-              <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">/</Kbd>
-            )}
+            ) : null}
           </div>
           {isSearching && results.length === 0 ? (
             <p
@@ -232,6 +251,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             </p>
           ) : null}
           <SidebarMenu
+            data-settings-nav=""
             className="ps-px group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:ps-0"
             id={isSearching && hasResults ? "settings-search-results" : undefined}
             role={isSearching && hasResults ? "listbox" : undefined}
@@ -263,21 +283,31 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))
-              : SETTINGS_NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname === item.to || pathname.startsWith(`${item.to}/`);
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+              : SETTINGS_NAV_GROUPS.map((group) => (
+                  <Fragment key={group.label}>
+                    <li
+                      aria-hidden="true"
+                      className="px-2 pt-3 pb-1 font-semibold text-[11px] text-sidebar-muted-foreground uppercase tracking-[0.08em] first:pt-1 group-data-[collapsible=icon]:hidden"
+                    >
+                      {group.label}
+                    </li>
+                    {group.paths.map((to) => {
+                      const Icon = SETTINGS_SECTION_ICONS[to];
+                      const isActive = pathname === to || pathname.startsWith(`${to}/`);
+                      return (
+                        <SidebarMenuItem key={to}>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            onClick={() => handleSectionClick(to)}
+                          >
+                            <Icon />
+                            <span className="truncate">{SETTINGS_SECTION_LABELS[to]}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </Fragment>
+                ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

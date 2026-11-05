@@ -204,6 +204,7 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ComposerCadContext } from "./chat/CadModelChip";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -885,7 +886,6 @@ function ChatViewContent(props: ChatViewProps) {
     rightPanelPresence.present &&
     !shouldUseRightPanelSheet &&
     maximizedRightPanelThreadKey === routeThreadKey;
-  const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
     if (!activeThreadRef) return;
@@ -1100,6 +1100,14 @@ function ChatViewContent(props: ChatViewProps) {
   );
   // Every project offers CAD unless it is turned off. Without a linked file, the panel asks for one.
   const cadAvailable = !!activeProject && activeProject.cad?.enabled !== false;
+  // The CAD-first layout (a client setting, on by default): on CAD projects the inline panel
+  // leads the row and the chat sits to its right. It holds through the close animation, so the
+  // panel slides out on the side it came in.
+  const cadFirstLayoutEnabled = useClientSettings((settings) => settings.cadFirstLayout);
+  const cadFirst = cadFirstLayoutEnabled && !shouldUseRightPanelSheet && cadAvailable;
+  // Whoever sits at the right end owns the title bar's controls there.
+  const inlineRightPanelOwnsTitleBar =
+    rightPanelOpen && !shouldUseRightPanelSheet && (!cadFirst || rightPanelMaximized);
   const cadLinked = cadAvailable && hasCadSource(activeProject);
   // The browser page Browser shows: the one last opened in the panel, else the
   // thread's active page, else any page. Null when the thread has no pages.
@@ -3067,7 +3075,7 @@ function ChatViewContent(props: ChatViewProps) {
       } else if (composerElementContextsSnapshot.length > 0) {
         titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
       } else {
-        titleSeed = "New thread";
+        titleSeed = "New chat";
       }
     }
     const title = truncate(titleSeed);
@@ -3994,7 +4002,12 @@ function ChatViewContent(props: ChatViewProps) {
     composerBannerItems.length > 0 || Boolean(threadSyncPhase && !activeEnvironmentUnavailable);
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <div
+      className={cn(
+        "relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background",
+        cadFirst && "flex-row-reverse",
+      )}
+    >
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -4019,9 +4032,21 @@ function ChatViewContent(props: ChatViewProps) {
             activeProjectOnshapeSource={activeProject?.onshapeSource}
             openInCwd={activeProject?.workspaceRoot ?? null}
             rightPanelOpen={rightPanelOpen}
+            titlebarControlsOverHeader={
+              !rightPanelOpen || shouldUseRightPanelSheet
+                ? "toggle"
+                : inlineRightPanelOwnsTitleBar
+                  ? "none"
+                  : "toggle-and-maximize"
+            }
             projectShownInRightPanel={rightPanelOpen && rightPanelSection === "cad"}
             isDraftHero={isDraftHeroState}
             onNewThreadInProject={handleNewThreadInActiveProject}
+            cad={
+              cadAvailable && activeProject
+                ? { project: activeProject, onOpen: toggleRightPanel }
+                : undefined
+            }
           />
         </WorkspacePageHeader>
 
@@ -4136,11 +4161,12 @@ function ChatViewContent(props: ChatViewProps) {
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center pt-56"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-5"
               }
             >
               {/* Docked, the composer sits on a solid backing down to the window edge so the
-                  transcript never shows through below or beside it; the top 1rem fades in. */}
+                  transcript never shows through below or beside it; the top 1rem fades in, so
+                  text scrolling under it softens rather than being cut. */}
               {isDraftHeroState ? null : (
                 <div
                   aria-hidden
@@ -4149,16 +4175,18 @@ function ChatViewContent(props: ChatViewProps) {
               )}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
-                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
+                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem)]"
               >
                 {/* The composer's width, which its attached drawers (banners, the sync pill) inset
-                    from so they line up with it in either layout. */}
+                    from so they line up with it in either layout. In a chat it matches the message
+                    column (48rem inside the timeline's 0.75rem/1.25rem padding), so their outer
+                    edges line up. */}
                 <div
                   className={cn(
                     "group/composer-stack pointer-events-auto relative z-10",
                     isDraftHeroState
                       ? "[--chat-composer-max-width:42.5rem]"
-                      : "[--chat-composer-max-width:50rem]",
+                      : "[--chat-composer-max-width:48rem]",
                   )}
                 >
                   {isDraftHeroState ? (
@@ -4235,6 +4263,11 @@ function ChatViewContent(props: ChatViewProps) {
                             runtimeMode={runtimeMode}
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
+                            modelContext={
+                              cadAvailable && activeProject ? (
+                                <ComposerCadContext project={activeProject} />
+                              ) : null
+                            }
                             activeProjectDefaultModelSelection={
                               activeProject?.defaultModelSelection
                             }
@@ -4320,6 +4353,7 @@ function ChatViewContent(props: ChatViewProps) {
           open={rightPanelOpen}
           onExited={rightPanelPresence.onExited}
           mode="inline"
+          side={cadFirst ? "left" : "right"}
           {...(cadAvailable
             ? {
                 widthStorageKey: "cadsense:design-viewport-width",

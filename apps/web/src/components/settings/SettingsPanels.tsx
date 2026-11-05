@@ -15,6 +15,7 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
+import { DrawingCalloutPreview } from "./DrawingCalloutPreview";
 import { scopeThreadRef } from "@cadsense/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -23,8 +24,10 @@ import {
 } from "@cadsense/client-runtime/state/runtime";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  MAX_DRAWING_MAX_TAP_DEPTH,
   MAX_INTERFACE_FONT_SIZE,
   MAX_PROMPT_FONT_SIZE,
+  MIN_DRAWING_MAX_TAP_DEPTH,
   MIN_INTERFACE_FONT_SIZE,
   MIN_PROMPT_FONT_SIZE,
 } from "@cadsense/contracts/settings";
@@ -344,7 +347,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit
         ? ["Quit confirmation"]
         : []),
-      ...(isTextGenerationModelDirty ? ["Thread title model"] : []),
+      ...(isTextGenerationModelDirty ? ["Chat title model"] : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -448,6 +451,17 @@ export function AppearanceSettingsPanel() {
                 updateSettings({ showContextWindowIndicator: Boolean(checked) })
               }
               aria-label="Show context window indicator"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("cad-first-layout")}
+          description="While the CAD panel is open, the model sits on the left with the chat beside it, and the sidebar folds to icons. Both return when the panel closes."
+          control={
+            <Switch
+              checked={settings.cadFirstLayout}
+              onCheckedChange={(checked) => updateSettings({ cadFirstLayout: Boolean(checked) })}
+              aria-label="CAD-first layout"
             />
           }
         />
@@ -854,6 +868,101 @@ function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void
 }
 
 /** General settings. `onRestored` runs after Restore defaults so the route can remount it. */
+/**
+ * Settings > CAD > Drawings: how part drawings come out, the units they open in and the shop's
+ * tap depth cap. Both are client settings the drawing panel also reads and edits; the cap is
+ * stored in inches and shown in the chosen units. A preview shows the callout they produce.
+ */
+export function DrawingsSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const units = settings.drawingUnits;
+  const perInch = units === "mm" ? 25.4 : 1;
+  const shownTapDepth = String(
+    +(settings.drawingMaxTapDepth * perInch).toFixed(units === "mm" ? 1 : 3),
+  );
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Drawings">
+        <SettingsRow
+          {...searchableSetting("drawing-units")}
+          description="Units that part drawings open in."
+          resetAction={
+            units !== DEFAULT_UNIFIED_SETTINGS.drawingUnits ? (
+              <SettingResetButton
+                label="drawing units"
+                onClick={() =>
+                  updateSettings({ drawingUnits: DEFAULT_UNIFIED_SETTINGS.drawingUnits })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={units}
+              onValueChange={(value) =>
+                updateSettings({ drawingUnits: value === "mm" ? "mm" : "in" })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Drawing units">
+                <SelectValue>{units === "mm" ? "Millimeters" : "Inches"}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="in">
+                  Inches
+                </SelectItem>
+                <SelectItem hideIndicator value="mm">
+                  Millimeters
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("drawing-tap-depth")}
+          description="How deep drawings call out a tap from each end of a hole. Through holes are drilled THRU and tapped to this depth."
+          resetAction={
+            settings.drawingMaxTapDepth !== DEFAULT_UNIFIED_SETTINGS.drawingMaxTapDepth ? (
+              <SettingResetButton
+                label="tap depth limit"
+                onClick={() =>
+                  updateSettings({
+                    drawingMaxTapDepth: DEFAULT_UNIFIED_SETTINGS.drawingMaxTapDepth,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex items-center gap-2">
+              <DraftInput
+                className="w-24"
+                inputMode="decimal"
+                aria-label={`Tap depth limit in ${units === "mm" ? "millimeters" : "inches"}`}
+                value={shownTapDepth}
+                onCommit={(next) => {
+                  // Rounded so 76.2 mm lands on 3 in, not just past it.
+                  const inches = +(Number(next) / perInch).toFixed(6);
+                  if (
+                    next.trim() !== "" &&
+                    inches >= MIN_DRAWING_MAX_TAP_DEPTH &&
+                    inches <= MAX_DRAWING_MAX_TAP_DEPTH
+                  )
+                    updateSettings({ drawingMaxTapDepth: inches });
+                }}
+              />
+              <span className="text-muted-foreground text-sm">{units}</span>
+            </div>
+          }
+        />
+      </SettingsSection>
+      <SettingsSection title="Preview">
+        <DrawingCalloutPreview units={units} tapDepthIn={settings.drawingMaxTapDepth} />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
 export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () => void }) {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -993,7 +1102,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("archive-confirmation")}
-          description="Ask before archiving a thread."
+          description="Ask before archiving a chat."
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
@@ -1019,7 +1128,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("delete-confirmation")}
-          description="Ask before deleting a thread and its chat history."
+          description="Ask before deleting a chat and its history."
           resetAction={
             settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
               <SettingResetButton
@@ -1069,7 +1178,7 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
 
         <SettingsRow
           {...searchableSetting("text-generation-model")}
-          description="Model that writes and regenerates thread titles."
+          description="Model that writes and regenerates chat titles."
           resetAction={
             isTextGenerationModelDirty ? (
               <SettingResetButton
@@ -1277,7 +1386,7 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to unarchive thread",
+              title: "Failed to unarchive chat",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -1294,7 +1403,7 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to delete thread",
+              title: "Failed to delete chat",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -1320,16 +1429,16 @@ export function ArchivedThreadsPanel() {
                   <ArchiveIcon className="size-3.5 text-muted-foreground" />
                 )}
                 {isLoadingArchive
-                  ? "Loading archived threads"
+                  ? "Loading archived chats"
                   : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
+                    ? "Could not load archived chats"
+                    : "No archived chats"}
               </span>
             }
             description={
               isLoadingArchive
                 ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
+                : (archiveError ?? "Archived chats will appear here.")
             }
           />
         </SettingsSection>
@@ -1367,7 +1476,7 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Archived thread action failed",
+                          title: "Archived chat action failed",
                           description:
                             error instanceof Error ? error.message : "An error occurred.",
                         }),
@@ -1402,7 +1511,7 @@ export function ArchivedThreadsPanel() {
                           toastManager.add(
                             stackedThreadToast({
                               type: "error",
-                              title: "Failed to unarchive thread",
+                              title: "Failed to unarchive chat",
                               description:
                                 error instanceof Error ? error.message : "An error occurred.",
                             }),

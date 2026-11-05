@@ -65,17 +65,15 @@ export const OpenInExplorerButton = memo(function OpenInExplorerButton({
             aria-label="Open in Explorer"
             disabled={!path}
             onClick={() => void onOpen()}
-            size="xs"
-            variant="outline"
-            className="w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+            // Icon-only at every width, so it never reads as a twin of the labeled Open CAD.
+            size="icon-sm"
+            variant="ghost"
             data-toolbar-control=""
+            data-header-icon-button=""
           />
         }
       >
-        <FolderOpenIcon className="size-3.5" />
-        <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-          Open
-        </span>
+        <FolderOpenIcon className="size-4" />
       </TooltipTrigger>
       <TooltipPopup>Open in Explorer</TooltipPopup>
     </Tooltip>

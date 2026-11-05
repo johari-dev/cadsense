@@ -12,6 +12,8 @@ import { useCallback, useMemo } from "react";
 
 import { Button } from "../ui/button";
 import { singleCadModelName } from "~/cad/cadModelName";
+import { formatRelativeTimeLabel } from "~/timestampFormat";
+import { describeProjectSource } from "../Sidebar.logic";
 import { useModelThumbnail } from "~/cad/modelThumbnails";
 import type { Project } from "~/types";
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -28,7 +30,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** Prompts the hero offers as one-click starts. The first is the suggested one. */
+/** Prompts the hero offers as one-click starts. */
 const STARTING_TASKS = [
   {
     label: "Review the design",
@@ -157,16 +159,17 @@ export function DraftHeroHeadline({
         )}
       </h1>
       <p className="mt-3 text-sm text-muted-foreground">
-        Review the model, inspect parts, or plan a change.
+        {(activeProject && describeModelFacts(activeProject)) ??
+          "Review the model, inspect parts, or plan a change."}
       </p>
       {activeProjectTitle ? (
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          {STARTING_TASKS.map(({ label, icon: Icon, prompt }, index) => (
+          {STARTING_TASKS.map(({ label, icon: Icon, prompt }) => (
             <Button
               key={label}
-              // One 36px size for all three. The first task is the suggested start; the
-              // others sit beside it as bordered secondary actions.
-              variant={index === 0 ? "default" : "outline"}
+              // One 36px size and one bordered style for all three: they are equal starting
+              // points, and solid fills are kept for send.
+              variant="outline"
               size="lg"
               onClick={() => onChooseTask(prompt)}
               className="pointer-events-auto"
@@ -181,6 +184,23 @@ export function DraftHeroHeadline({
       )}
     </div>
   );
+}
+
+/**
+ * The model the chat will be about, in one line: its format, file or model name, and how long
+ * ago it was imported ("STEP file · bracket-assembly.step · synced 1h ago"). Null until the
+ * project has one imported model, so the hero falls back to its generic line.
+ */
+function describeModelFacts(project: Project): string | null {
+  const current = project.cad?.roots.filter((root) => root.current) ?? [];
+  const only = current.length === 1 ? current[0]!.current : null;
+  if (!only) return null;
+  const name =
+    project.localCadSource?.filePath.split(/[\\/]/).at(-1) ?? singleCadModelName(project.cad);
+  const synced = formatRelativeTimeLabel(only.createdAt);
+  return [describeProjectSource(project).label, name, synced ? `synced ${synced}` : null]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /**

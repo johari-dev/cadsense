@@ -71,6 +71,7 @@ import {
   CursorClickIcon as MousePointerClickIcon,
   PaintBrushIcon as PaintbrushIcon,
   PlayIcon,
+  PulseIcon,
   MagnifyingGlassIcon as SearchIcon,
   NotePencilIcon as SquarePenIcon,
   TerminalWindowIcon as TerminalIcon,
@@ -169,14 +170,14 @@ interface TimelineRowActivityState {
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
-// As tall as the list's 2.125rem top fade, so the first row is never faded at rest.
-const TIMELINE_LIST_HEADER = <div className="h-8.5" />;
-// The fade under the chat header's divider: the first 0.8rem (12px) is fully masked, so no
-// glyph fragment shows against the divider, then a ramp that stays faint until about 24px and
-// is clear by 2.125rem (32px), so a line passing through reads as gone rather than ghosted.
+// As tall as the list's 1.25rem top fade, so the first row is never faded at rest.
+const TIMELINE_LIST_HEADER = <div className="h-5" />;
+// The fade under the chat header's divider: the first 0.375rem (6px) is fully masked, so no
+// glyph fragment shows against the divider, then a short ramp that is clear by 1.25rem (20px),
+// so a line passing through goes quickly instead of staying ghosted in readable space.
 // The second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
 const TIMELINE_TOP_FADE_CLASS_NAME =
-  "[mask-image:linear-gradient(to_bottom,transparent_0.8rem,rgb(0_0_0/0.08)_1.4rem,rgb(0_0_0/0.45)_1.8rem,black_2.125rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
+  "[mask-image:linear-gradient(to_bottom,transparent_0.375rem,rgb(0_0_0/0.35)_0.8rem,black_1.25rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
 
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
@@ -1168,7 +1169,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl bg-message px-3.5 py-2.5 text-message-foreground">
+      {/* The sender's corner is squared, so a request reads as pointing back at its author. */}
+      <div className="relative max-w-[80%] rounded-xl rounded-tr-[3px] border border-border bg-message px-3.5 py-2.5 text-message-foreground">
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
             {regularImages.map((image) => (
@@ -1323,15 +1325,18 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   return (
     // No divider under the fold: the turn's result (often the review card, which has its own
     // border) follows directly, and a second line above it read as a double rule.
-    <div className="pb-2 pt-1">
+    <div className="px-1 pb-2 pt-1">
       <button
         type="button"
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
         onClick={() => ctx.onToggleTurnFold(row.turnId)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        // A quiet row that opens the agent's work: the activity mark, the duration, a chevron.
+        className="inline-flex h-6 cursor-pointer select-none items-center gap-1.5 rounded-md text-xs font-medium text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
+        <PulseIcon className="size-3.5 text-(--accent-text)" aria-hidden="true" />
         <span>{row.label}</span>
+        {row.summary ? <span className="text-tertiary-foreground">· {row.summary}</span> : null}
         <Icon className="size-3.5" />
       </button>
     </div>

@@ -407,6 +407,9 @@ function extractCodeBlock(
   };
 }
 
+/** CAD comment severities, plus "check", the word agents use for a low-stakes item. */
+const TABLE_SEVERITIES = new Set(["blocker", "concern", "question", "nit", "check"]);
+
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -1840,6 +1843,18 @@ function ChatMarkdown({
       table({ node: _node, ...props }) {
         return <MarkdownTable {...props} />;
       },
+      td({ node: _node, children, ...props }) {
+        // A cell that is exactly a CAD comment severity renders as the comment card's pill.
+        const severity = nodeToPlainText(children).trim().toLowerCase();
+        if (!TABLE_SEVERITIES.has(severity)) return <td {...props}>{children}</td>;
+        return (
+          <td {...props}>
+            <span className="cad-severity-pill" data-severity={severity}>
+              {children}
+            </span>
+          </td>
+        );
+      },
       details({ node: _node, children, open: detailsOpen }) {
         return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
       },
@@ -1889,7 +1904,7 @@ function ChatMarkdown({
         // Tuned for long reviews in the chat column: 14px on a 21px line, and semibold
         // (not bold) emphasis so run-in headings like "**Quick cleanup:**" lead their
         // section without outshining the body text. Block spacing lives in index.css.
-        "chat-markdown w-full min-w-0 text-[0.9333rem] leading-[1.5] text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word] [&_strong]:font-semibold",
+        "chat-markdown w-full min-w-0 text-[0.9333rem] leading-[1.5] text-foreground/88 [overflow-wrap:anywhere] [word-break:break-word] [&_strong]:font-semibold",
         className,
       )}
       onCopy={handleCopy}

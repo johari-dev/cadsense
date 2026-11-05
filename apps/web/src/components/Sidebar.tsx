@@ -66,7 +66,7 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
 import { releaseProjectDraftUploads } from "../lib/composerDraftUploads";
-import { isMacPlatform } from "../lib/utils";
+import { cn, isMacPlatform } from "../lib/utils";
 import {
   readThreadShell,
   useProjects,
@@ -104,7 +104,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { formatRelativeTime, formatRelativeTimeLabel } from "../timestampFormat";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -208,13 +208,6 @@ const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
  */
 const SIDEBAR_PROJECT_ICON_CLASS =
   "size-7 rounded-md border border-sidebar-border bg-sidebar-control-surface p-1 [&[src='/onshape.svg']]:opacity-70 [&[src='/onshape.svg']]:grayscale";
-
-/** The thread row's timestamp: the relative value without its "ago" suffix. */
-function formatCompactRelativeTime(isoDate: string): string {
-  const relative = formatRelativeTime(isoDate);
-  if (!relative) return "";
-  return relative.suffix === null ? "now" : relative.value;
-}
 
 function SidebarThreadDetailPrewarmer({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
   useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
@@ -588,7 +581,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-[13px]"
+                    className="min-w-0 flex-1 truncate text-[13px] leading-[18px]"
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {resolveSidebarThreadTitle(thread.title, projectName)}
@@ -605,9 +598,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {/* A fixed column for the row's age, so every title has the same width whether
-              or not the row is selected. Hover controls take the column's place. */}
-          <div className="flex w-6 justify-end max-sm:w-20">
+          {/* Every row has one shape: the title takes the row, and its age lives in the row's
+              tooltip ("Active 1h ago"). The column opens only for jump-shortcut hints; hover
+              controls sit over the row's end. */}
+          <div className={cn("flex justify-end max-sm:w-20", jumpLabel ? "w-6" : "w-0")}>
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -675,11 +669,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
-                ) : (
-                  <span className="text-xs text-tertiary-foreground tabular-nums">
-                    {formatCompactRelativeTime(lastActivityAt)}
-                  </span>
-                )}
+                ) : null}
               </span>
             </span>
           </div>
@@ -2056,12 +2046,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // The subtitle shows the source (the Onshape logo, or a file format) and kind; the model's own name (an Onshape element such
   // as "Part Studio 1", or the local file's path) moves to the subtitle's tooltip.
   const source = describeProjectSource(project);
+  // When the model was last imported, so the row says how fresh the CAD the agent sees is.
+  const syncedAt = currentCadRoots.length === 1 ? currentCadRoots[0]!.current!.createdAt : null;
+  const syncedAge = syncedAt ? formatRelativeTimeLabel(syncedAt) : "";
   const subtitle = (
     <>
       {source.logo === "onshape" ? (
         <img src="/onshape.svg" alt="Onshape" className="size-3 shrink-0 object-contain" />
       ) : null}
-      <span className="truncate">{source.label}</span>
+      <span className="truncate">
+        {source.label}
+        {syncedAge ? ` · synced ${syncedAge}` : null}
+      </span>
     </>
   );
   const modelName = project.localCadSource?.filePath ?? singleCadModelName(project.cad);
@@ -2178,7 +2174,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               }
             />
             <TooltipPopup side="top">
-              {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+              {newThreadShortcutLabel ? `New chat (${newThreadShortcutLabel})` : "New chat"}
             </TooltipPopup>
           </Tooltip>
         </div>
@@ -2396,7 +2392,7 @@ function ProjectSortMenu({
             <MenuTrigger className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-icon-muted transition-colors hover:bg-accent hover:text-foreground" />
           }
         >
-          <ArrowUpDownIcon className="size-3.5" />
+          <ArrowUpDownIcon className="size-4" />
         </TooltipTrigger>
         <TooltipPopup side="right">Sidebar options</TooltipPopup>
       </Tooltip>
@@ -2643,31 +2639,39 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       ) : null}
       <LocalSecondaryStatus />
       <SidebarGroup className="px-2 py-2">
+        {/* The sidebar's one labeled action: starting a chat is the main thing people do here. */}
+        {newThreadTarget ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                // Ghost at rest, so it never competes with the open chat's raised row and never
+                // reads as a field like the settings search.
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={newThreadTarget.label}
+                  className="group/new-chat mb-3 w-full justify-start gap-2 px-2.5 font-medium"
+                  onClick={newThreadTarget.start}
+                />
+              }
+            >
+              <SquarePenIcon className="size-4" />
+              <span aria-hidden="true">New chat</span>
+              {newThreadShortcutLabel ? (
+                // The shortcut appears on hover, as a keycap, so the button rests quiet.
+                <kbd className="ml-auto hidden rounded border border-foreground/10 bg-foreground/[0.04] px-1.5 font-sans text-[11px] text-foreground/60 leading-[18px] group-hover/new-chat:inline group-focus-visible/new-chat:inline">
+                  {newThreadShortcutLabel}
+                </kbd>
+              ) : null}
+            </TooltipTrigger>
+            <TooltipPopup side="right">{newThreadTarget.label}</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
-          <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
+          <span className="font-semibold text-[11px] text-sidebar-muted-foreground uppercase tracking-[0.08em]">
+            Projects
+          </span>
           <div className="flex items-center gap-0.5">
-            {newThreadTarget ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      aria-label={newThreadTarget.label}
-                      className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
-                      onClick={newThreadTarget.start}
-                    />
-                  }
-                >
-                  <SquarePenIcon className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipPopup side="right">
-                  {newThreadShortcutLabel
-                    ? `${newThreadTarget.label} (${newThreadShortcutLabel})`
-                    : newThreadTarget.label}
-                </TooltipPopup>
-              </Tooltip>
-            ) : null}
             <ProjectSortMenu
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
@@ -2689,7 +2693,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   />
                 }
               >
-                <FolderPlusIcon className="size-3.5" />
+                <FolderPlusIcon className="size-4" />
               </TooltipTrigger>
               <TooltipPopup side="right">Add project</TooltipPopup>
             </Tooltip>
@@ -2833,7 +2837,7 @@ function SidebarIconRail({
     >
       {threadProject ? (
         <SidebarRailButton
-          label={`New thread in ${threadProject.displayName}`}
+          label={`New chat in ${threadProject.displayName}`}
           onClick={() => onCreateThread(threadProject)}
         >
           <SquarePenIcon className="size-4" />
@@ -3496,7 +3500,7 @@ export default function ThreadSidebar() {
     () =>
       newThreadProject
         ? {
-            label: `New thread in ${newThreadProject.displayName}`,
+            label: `New chat in ${newThreadProject.displayName}`,
             start: () => createThreadInProject(newThreadProject),
           }
         : null,

@@ -7,6 +7,7 @@ export type SettingsPath =
   | "/settings/providers"
   | "/settings/integrations"
   | "/settings/cad-storage"
+  | "/settings/drawings"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -24,6 +25,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
   "/settings/cad-storage": "CAD storage",
+  "/settings/drawings": "Drawings",
   "/settings/archived": "Archive",
 };
 
@@ -43,6 +45,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "cad-first-layout",
+    title: "CAD-first layout",
+    to: "/settings/appearance",
+  },
+  {
     id: "add-project-starts-in",
     title: "Default project folder",
     to: "/settings/general",
@@ -57,9 +64,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "text-generation-model",
-    title: "Thread title model",
+    title: "Chat title model",
     to: "/settings/general",
   },
+  { id: "drawing-units", title: "Drawing units", to: "/settings/drawings" },
+  { id: "drawing-tap-depth", title: "Tap depth limit", to: "/settings/drawings" },
   { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
   { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
   {
@@ -105,7 +114,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/integrations",
     targetId: "browser",
   },
-  { id: "archive", title: "Archived threads", to: "/settings/archived" },
+  { id: "archive", title: "Archived chats", to: "/settings/archived" },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];

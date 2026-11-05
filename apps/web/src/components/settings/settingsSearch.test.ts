@@ -82,7 +82,7 @@ describe("searchSettings", () => {
       id: "show-permission-settings",
       title: "Show permission settings",
     });
-    expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
+    expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived chats" });
   });
 
   it("routes appearance settings to their current section", () => {

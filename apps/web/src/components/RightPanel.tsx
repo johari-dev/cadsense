@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, XIcon as X } from "~/lib/icons";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 
 import { isElectron } from "~/env";
 import type { RightPanelSection } from "~/rightPanelStore";
@@ -13,17 +13,18 @@ import { holdInspection } from "./sidebarInspection";
 import { THREAD_SIDEBAR_DEFAULT_WIDTH } from "./threadSidebarWidth";
 
 /** Chat column width the CAD panel's default leaves beside the default sidebar. */
-const CAD_PANEL_DEFAULT_CHAT_WIDTH = 440;
+const CAD_PANEL_DEFAULT_CHAT_WIDTH = 520;
 
 /**
  * Initial CAD panel width before the user resizes it, for `defaultWidth`. It leaves a
- * readable chat column (440px beside the default sidebar, so 760px of CAD at 1440 wide)
- * and never takes less than half the window, so the model stays the dominant column.
+ * readable chat column (520px beside the default sidebar, so 656px of CAD at 1440 wide,
+ * enough for review answers) and never takes less than 45% of the window, so the model stays
+ * the widest column.
  */
 export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
   return Math.round(
     Math.max(
-      viewportWidth * 0.5,
+      viewportWidth * 0.45,
       viewportWidth - THREAD_SIDEBAR_DEFAULT_WIDTH - CAD_PANEL_DEFAULT_CHAT_WIDTH,
     ),
   );
@@ -31,6 +32,12 @@ export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
 
 interface RightPanelProps {
   mode: PreviewPanelMode;
+  /**
+   * Where the inline panel sits. "left" is the CAD-first layout (ChatView decides it): the
+   * panel leads the row, the chat sits to its right and owns the title bar's right end, and the
+   * app sidebar folds to its rail. Defaults to "right".
+   */
+  side?: "left" | "right";
   open?: boolean;
   onExited?: () => void;
   maximized?: boolean;
@@ -77,7 +84,11 @@ const SECTION_LABEL = {
  * row offers a way back home.
  */
 export function RightPanel(props: RightPanelProps) {
-  const ownsDesktopTitleBar = isElectron && props.mode === "inline";
+  const leftSide = props.mode === "inline" && props.side === "left";
+  // The title bar's right end (layout controls, native window controls) sits over this panel's
+  // title row unless the panel is on the left with the chat beside it.
+  const ownsDesktopTitleBar =
+    isElectron && props.mode === "inline" && (!leftSide || props.maximized === true);
   const atHome = props.section !== null && props.section === props.home;
   // A maximized inline panel is an inspection: the app sidebar folds to its icon rail.
   const holdsInspection = props.mode === "inline" && props.maximized === true;
@@ -85,10 +96,20 @@ export function RightPanel(props: RightPanelProps) {
     () => (holdsInspection ? holdInspection("panel-maximized") : undefined),
     [holdsInspection],
   );
+  // So is the CAD-first layout while the panel is open. The width the rail frees goes to the
+  // model (PreviewPanelShell), not the chat. `open` goes false as the close animation starts,
+  // so the sidebar expands while the panel slides out. A layout effect, so the fold starts in
+  // the same frame the panel opens.
+  const holdsCadInspection = leftSide && props.open !== false;
+  useLayoutEffect(
+    () => (holdsCadInspection ? holdInspection("cad-panel-open") : undefined),
+    [holdsCadInspection],
+  );
 
   return (
     <PreviewPanelShell
       mode={props.mode}
+      side={leftSide ? "left" : "right"}
       {...(props.open !== undefined ? { open: props.open } : {})}
       {...(props.onExited !== undefined ? { onExited: props.onExited } : {})}
       {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
@@ -101,7 +122,9 @@ export function RightPanel(props: RightPanelProps) {
           // The sheet overlays from the viewport top, so its title row keeps
           // the titlebar's height: a compact row re-centers the layout
           // controls a few pixels higher and the cluster jumps on open.
-          props.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
+          props.mode === "inline" && !props.layoutControls && (!leftSide || props.maximized)
+            ? "pr-28"
+            : "pr-3",
           ownsDesktopTitleBar && "wco:pr-[calc(var(--workspace-native-controls-inset)+6rem)]",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
