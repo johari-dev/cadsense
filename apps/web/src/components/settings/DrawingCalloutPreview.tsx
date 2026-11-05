@@ -1,8 +1,11 @@
 import { METERS_PER_INCH, type HoleGroup } from "~/cad/drawing/analysis";
 import { formatLength, holeCallout, holeReadings, type Units } from "~/cad/drawing/shopKnowledge";
 
-/** A 10-32 tap drill (.159) through a 1 in plate: the hole the preview calls out. */
-const PLATE_IN = 1;
+/**
+ * A 10-32 tap drill (.159) through a 1.5 in plate: the hole the preview calls out. Thick enough
+ * that the default .50 tap from each end leaves an untapped band, so the limit shows.
+ */
+const PLATE_IN = 1.5;
 const SAMPLE_HOLE: HoleGroup = {
   key: "preview",
   diameter: 0.159 * METERS_PER_INCH,
@@ -15,7 +18,7 @@ const SAMPLE_HOLE: HoleGroup = {
   bothEnds: false,
 };
 
-// Section geometry in SVG units: the plate is 96 tall, so 96 units per inch of thickness.
+// Section geometry in SVG units: the plate is 96 tall, so 64 units per inch of thickness.
 const TOP = 12;
 const PLATE = 96;
 const HOLE_X = 84;
@@ -40,7 +43,7 @@ export function DrawingCalloutPreview({
   const callout = holeCallout(SAMPLE_HOLE, reading, units, tapDepth);
   // Past half the plate the two threads meet; the picture stops there.
   const thread = (Math.min(tapDepthIn, PLATE_IN / 2) / PLATE_IN) * PLATE;
-  const plate = units === "mm" ? "25.4 mm" : "1 in";
+  const plate = units === "mm" ? "38.1 mm" : "1.5 in";
   const depthLabel = formatLength(tapDepth, units, 2);
   // The tapped length at each end: the callout taps BOTH ENDS.
   const threadSpans = [TOP, TOP + PLATE - thread];
@@ -61,7 +64,7 @@ export function DrawingCalloutPreview({
             patternUnits="userSpaceOnUse"
             patternTransform="rotate(45)"
           >
-            <line x1="0" y1="0" x2="0" y2="6" stroke="currentColor" strokeOpacity="0.35" />
+            <line x1="0" y1="0" x2="0" y2="6" stroke="currentColor" strokeOpacity="0.5" />
           </pattern>
         </defs>
         {/* The plate in section, cut by the drilled hole. */}

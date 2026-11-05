@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
-import { useRightPanelStore } from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { CommentBadge } from "./CadCommentsCard";
 
@@ -169,6 +169,33 @@ const ARTIFACT_CARD =
 const ARTIFACT_ACTION =
   "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.06] px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-foreground/[0.1] focus-visible:outline-2 focus-visible:outline-ring";
 
+/**
+ * The comments card's header action: opens the review in the CAD panel. With the model already
+ * on screen it says so ("Show on model") instead of offering to open CAD.
+ */
+function CommentsCardAction({
+  threadRef,
+  count,
+  unlisted,
+}: {
+  threadRef: ScopedThreadRef;
+  count: number;
+  unlisted: number;
+}) {
+  const cadShown = useRightPanelStore((state) => {
+    const panel = selectThreadRightPanelState(state.byThreadKey, threadRef);
+    // No picked section falls back to the first available one, which is CAD on a CAD project.
+    return panel.isOpen && (panel.section === null || panel.section === "cad");
+  });
+  const where = cadShown ? "on model" : "in CAD";
+  return (
+    <button type="button" className={ARTIFACT_ACTION} onClick={() => openCadComments(threadRef)}>
+      <CubeIcon aria-hidden className="size-3.5 text-(--accent-text)" />
+      {unlisted > 0 ? `Show all ${count} ${where}` : cadShown ? "Show on model" : "Open in CAD"}
+    </button>
+  );
+}
+
 /** Comments one turn published or proposed to resolve, each opening its location in the CAD panel. */
 export function CadPublishedComments({
   card,
@@ -191,14 +218,7 @@ export function CadPublishedComments({
         </span>
         <h3 className="min-w-0 flex-1 truncate font-semibold text-foreground text-sm">{heading}</h3>
         {count > 0 || card.proposed.length > 0 ? (
-          <button
-            type="button"
-            className={ARTIFACT_ACTION}
-            onClick={() => openCadComments(threadRef)}
-          >
-            <CubeIcon aria-hidden className="size-3.5 text-(--accent-text)" />
-            {unlisted > 0 ? `Show all ${count} in CAD` : "Open in CAD"}
-          </button>
+          <CommentsCardAction threadRef={threadRef} count={count} unlisted={unlisted} />
         ) : null}
       </div>
       <div className="mt-0.5 flex flex-col gap-0.5">
