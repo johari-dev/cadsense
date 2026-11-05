@@ -53,8 +53,7 @@ export function CadModelChip({
 /**
  * The composer's top row for a CAD project: the model the next message is about, with its
  * thumbnail, file name, and how long ago it was imported. A label, not a control; the header's
- * CadModelChip opens the model. A compact composer (beside the CAD panel) cuts the name in the
- * middle (index.css).
+ * CadModelChip opens the model.
  */
 export function ComposerCadContext({ project }: { readonly project: Project }) {
   const current = project.cad?.roots.filter((root) => root.current) ?? [];
@@ -64,6 +63,9 @@ export function ComposerCadContext({ project }: { readonly project: Project }) {
     project.localCadSource?.filePath.split(/[\\/]/).at(-1) ?? singleCadModelName(project.cad);
   if (!name) return null;
   const synced = snapshot ? formatRelativeTimeLabel(snapshot.createdAt) : "";
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const extension = dot > 0 ? name.slice(dot) : "";
   return (
     <span
       title={`Messages here are about ${name}`}
@@ -76,21 +78,12 @@ export function ComposerCadContext({ project }: { readonly project: Project }) {
           <CubeIcon aria-hidden="true" className="size-3 text-(--accent-text)" />
         )}
       </span>
-      <span data-composer-cad-name="full" className="truncate font-medium text-foreground/85">
-        {name}
-      </span>
-      <span data-composer-cad-name="short" className="hidden font-medium text-foreground/85">
-        {shortenMiddle(name)}
+      {/* When space runs out the stem truncates and the extension stays: "bracket-assem….step". */}
+      <span className="flex min-w-0 font-medium text-foreground/85">
+        <span className="truncate">{stem}</span>
+        <span className="shrink-0">{extension}</span>
       </span>
       {synced ? <span className="shrink-0 text-tertiary-foreground">· synced {synced}</span> : null}
     </span>
   );
-}
-
-/** A file name cut in the middle: "bracket-assembly.step" -> "bracket-a…y.step". */
-function shortenMiddle(name: string): string {
-  const dot = name.lastIndexOf(".");
-  const extension = dot > 0 ? name.slice(dot) : "";
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  return stem.length > 12 ? `${stem.slice(0, 9)}…${stem.slice(-1)}${extension}` : name;
 }

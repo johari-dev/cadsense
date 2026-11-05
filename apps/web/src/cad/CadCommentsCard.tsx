@@ -1018,10 +1018,12 @@ export function CadCommentsCard({
         <div
           aria-hidden="true"
           style={{ right: `calc(0.75rem + ${toggleWidth} + 0.5rem)` }}
-          className="pointer-events-none absolute top-3 flex h-(--cad-overlay-control) items-center gap-3 rounded-[8px] border bg-popover/90 px-2.5 text-foreground/75 text-xs"
+          // 13px like the chip, so `toggleWidth`'s `ch`/`em` resolve to the chip's own width and
+          // the 0.5rem gap holds; the entries set their own 12px text.
+          className="pointer-events-none absolute top-3 flex h-(--cad-overlay-control) items-center gap-3 rounded-[8px] border bg-popover/90 px-2.5 text-[13px] text-foreground/75"
         >
           {legend.map((entry) => (
-            <span key={entry.severity} className="flex items-center gap-1">
+            <span key={entry.severity} className="flex items-center gap-1 text-xs">
               <span className={cn("size-2 rounded-full border", SEVERITY_FILL[entry.severity])} />
               {entry.label}
             </span>

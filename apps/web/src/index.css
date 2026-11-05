@@ -2301,14 +2301,3 @@ code {
     inset 0 1px 0 rgb(255 255 255 / 6%),
     0 1px 2px rgb(0 0 0 / 45%);
 }
-
-/* In a compact composer (beside the CAD panel) the context row keeps a middle-cut name. */
-[data-chat-composer-surface]:has([data-chat-composer-footer-compact="true"])
-  [data-composer-cad-name="full"] {
-  display: none;
-}
-
-[data-chat-composer-surface]:has([data-chat-composer-footer-compact="true"])
-  [data-composer-cad-name="short"] {
-  display: inline;
-}

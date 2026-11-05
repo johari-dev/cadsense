@@ -1,5 +1,5 @@
 import { METERS_PER_INCH, type HoleGroup } from "~/cad/drawing/analysis";
-import { holeCallout, holeReadings, type Units } from "~/cad/drawing/shopKnowledge";
+import { formatLength, holeCallout, holeReadings, type Units } from "~/cad/drawing/shopKnowledge";
 
 /** A 10-32 tap drill (.159) through a 1 in plate: the hole the preview calls out. */
 const PLATE_IN = 1;
@@ -15,10 +15,13 @@ const SAMPLE_HOLE: HoleGroup = {
   bothEnds: false,
 };
 
-// Section geometry in SVG units: the plate is 80 tall, so 80 units per inch of thickness.
+// Section geometry in SVG units: the plate is 96 tall, so 96 units per inch of thickness.
 const TOP = 12;
-const PLATE = 80;
-const HOLE_X = 76;
+const PLATE = 96;
+const HOLE_X = 84;
+const DRILL = 7;
+const MAJOR = 10;
+const DIM_X = 170;
 
 /**
  * Settings > Drawings preview: a section through a tapped hole and the callout a part drawing
@@ -33,18 +36,22 @@ export function DrawingCalloutPreview({
   readonly tapDepthIn: number;
 }) {
   const reading = holeReadings(SAMPLE_HOLE, units)[0]!;
-  const callout = holeCallout(SAMPLE_HOLE, reading, units, tapDepthIn * METERS_PER_INCH);
+  const tapDepth = tapDepthIn * METERS_PER_INCH;
+  const callout = holeCallout(SAMPLE_HOLE, reading, units, tapDepth);
   // Past half the plate the two threads meet; the picture stops there.
   const thread = (Math.min(tapDepthIn, PLATE_IN / 2) / PLATE_IN) * PLATE;
   const plate = units === "mm" ? "25.4 mm" : "1 in";
+  const depthLabel = formatLength(tapDepth, units, 2);
+  // The tapped length at each end: the callout taps BOTH ENDS.
+  const threadSpans = [TOP, TOP + PLATE - thread];
 
   return (
     <div className="flex flex-col gap-4 px-3 py-4 sm:flex-row sm:items-center sm:gap-8 sm:px-4">
       <svg
-        viewBox="0 0 152 104"
-        className="h-26 w-38 shrink-0 text-muted-foreground"
+        viewBox="0 0 224 120"
+        className="h-[150px] w-[280px] max-w-full shrink-0 text-muted-foreground"
         role="img"
-        aria-label={`Section through a 10-32 tapped hole in a ${plate} plate`}
+        aria-label={`Section through a 10-32 hole tapped ${depthLabel} from both ends of a ${plate} plate`}
       >
         <defs>
           <pattern
@@ -59,8 +66,8 @@ export function DrawingCalloutPreview({
         </defs>
         {/* The plate in section, cut by the drilled hole. */}
         {[
-          [4, HOLE_X - 6 - 4],
-          [HOLE_X + 6, 148 - HOLE_X - 6],
+          [8, HOLE_X - DRILL - 8],
+          [HOLE_X + DRILL, 160 - HOLE_X - DRILL],
         ].map(([x, width]) => (
           <rect
             key={x}
@@ -70,30 +77,48 @@ export function DrawingCalloutPreview({
             height={PLATE}
             fill="url(#drawing-preview-hatch)"
             stroke="currentColor"
-            strokeOpacity="0.7"
+            strokeOpacity="0.8"
           />
         ))}
-        {/* Threads at the major diameter, tapped in from each end. */}
-        <g className="text-(--accent-text)" stroke="currentColor" strokeWidth="1.5">
-          {[TOP, TOP + PLATE - thread].map((y) =>
-            [HOLE_X - 8, HOLE_X + 8].map((x) => (
-              <line key={`${x}-${y}`} x1={x} y1={y} x2={x} y2={y + thread} strokeDasharray="3 2" />
-            )),
-          )}
-          {/* The tap depth, dimensioned on the top thread. */}
-          <line x1="116" y1={TOP} x2="116" y2={TOP + thread} strokeWidth="1" />
-          <line x1="112" y1={TOP} x2="120" y2={TOP} strokeWidth="1" />
-          <line x1="112" y1={TOP + thread} x2="120" y2={TOP + thread} strokeWidth="1" />
-        </g>
         <line
           x1={HOLE_X}
           y1="4"
           x2={HOLE_X}
-          y2="100"
+          y2={TOP + PLATE + 8}
           stroke="currentColor"
           strokeOpacity="0.5"
           strokeDasharray="8 2 2 2"
         />
+        <g className="text-(--accent-text)" stroke="currentColor" fill="none">
+          {threadSpans.map((y) => (
+            <g key={y}>
+              {/* Major diameter dashed, tapped in from this end. */}
+              {[HOLE_X - MAJOR, HOLE_X + MAJOR].map((x) => (
+                <line key={x} x1={x} y1={y} x2={x} y2={y + thread} strokeDasharray="3 2" />
+              ))}
+              {/* The tapped length, dimensioned beside the plate. */}
+              <line x1={DIM_X} y1={y} x2={DIM_X} y2={y + thread} strokeWidth="0.75" />
+              <line x1={DIM_X - 5} y1={y} x2={DIM_X + 5} y2={y} strokeWidth="0.75" />
+              <line
+                x1={DIM_X - 5}
+                y1={y + thread}
+                x2={DIM_X + 5}
+                y2={y + thread}
+                strokeWidth="0.75"
+              />
+              <text
+                x={DIM_X + 8}
+                y={y + thread / 2 + 3.5}
+                fill="currentColor"
+                stroke="none"
+                className="font-mono"
+                fontSize="10"
+              >
+                {depthLabel}
+              </text>
+            </g>
+          ))}
+        </g>
       </svg>
       <div className="min-w-0 space-y-2">
         <p className="text-[13px] text-muted-foreground">
