@@ -76,6 +76,17 @@ Call `orchestrator_capabilities` and pick the latest model in each family. Do no
 - **Seats contradict each other and themselves** (keycaps vs plain shortcuts, filled vs ghost
   buttons, blue vs white switches). When a finding reverses an earlier round's fix, pick the
   version two seats agree on, or the one with a concrete reason, and note the split.
+- **Read a seat's fix, not just its verdict.** When a seat's remaining fixes all require
+  things the user already ruled out (a brand mark they kept, a background they rejected, part
+  colors they chose), the seat cannot reach NO inside the user's constraints. Say so with the
+  record and let the user decide where to finish; do not keep polishing for that seat.
+- **Structural changes move the fork check; polish does not.** In the Cadsense climb, putting
+  the model first (CAD-first layout) flipped two seats to NO in one round, after many polish
+  rounds moved within noise.
+- **Check for an existing mechanism before adding state.** A "default open" panel state was
+  built and reverted because an auto-open rule already did it (CadAutoPreview).
+- **Completions may not wake the thread.** If a reviewer seems slow, read its task status once
+  before assuming it is still running.
 - **Stop and ask when the tells become product decisions.** A brand mark, new settings, or new
   data in the UI are the user's call, not a styling round.
 
