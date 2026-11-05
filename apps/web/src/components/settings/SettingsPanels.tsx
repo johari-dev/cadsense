@@ -455,15 +455,13 @@ export function AppearanceSettingsPanel() {
           }
         />
         <SettingsRow
-          {...searchableSetting("fold-sidebar-with-cad")}
-          description="Fold the sidebar to icons while the CAD panel is open, so the model gets the width. It expands again when the panel closes."
+          {...searchableSetting("cad-first-layout")}
+          description="While the CAD panel is open, the model sits on the left with the chat beside it, and the sidebar folds to icons. Both return when the panel closes."
           control={
             <Switch
-              checked={settings.foldSidebarWithCad}
-              onCheckedChange={(checked) =>
-                updateSettings({ foldSidebarWithCad: Boolean(checked) })
-              }
-              aria-label="Fold sidebar while CAD is open"
+              checked={settings.cadFirstLayout}
+              onCheckedChange={(checked) => updateSettings({ cadFirstLayout: Boolean(checked) })}
+              aria-label="CAD-first layout"
             />
           }
         />

@@ -45,8 +45,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
-    id: "fold-sidebar-with-cad",
-    title: "Fold sidebar while CAD is open",
+    id: "cad-first-layout",
+    title: "CAD-first layout",
     to: "/settings/appearance",
   },
   {

@@ -36,6 +36,12 @@ interface ChatHeaderProps {
   activeProjectOnshapeSource?: OnshapeProjectSource | undefined;
   openInCwd: string | null;
   rightPanelOpen: boolean;
+  /**
+   * Which of the title bar's fixed layout controls sit over this header's right end, so the
+   * actions keep clear of them: the panel toggle while the panel is closed, the toggle and
+   * maximize while a CAD-first panel sits to the left, none while a panel on the right owns them.
+   */
+  titlebarControlsOverHeader: "none" | "toggle" | "toggle-and-maximize";
   /** The open CAD panel already names the project in its header, so the chip would repeat it. */
   projectShownInRightPanel: boolean;
   /** The draft hero's large heading already names the project. */
@@ -80,6 +86,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectOnshapeSource,
   openInCwd,
   rightPanelOpen,
+  titlebarControlsOverHeader,
   projectShownInRightPanel,
   isDraftHero,
   onNewThreadInProject,
@@ -307,9 +314,11 @@ export const ChatHeader = memo(function ChatHeader({
         data-chat-header-actions
         className={cn(
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
-          rightPanelOpen
+          titlebarControlsOverHeader === "none"
             ? "pr-0"
-            : "pr-[calc(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap))]",
+            : titlebarControlsOverHeader === "toggle"
+              ? "pr-[calc(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap))]"
+              : "pr-[calc(2*(var(--workspace-titlebar-control-size)+var(--workspace-titlebar-control-gap)))]",
         )}
       >
         {/* The model is the point of a CAD chat, so with the panel closed the header names it,

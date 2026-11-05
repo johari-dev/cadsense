@@ -202,8 +202,11 @@ export const ClientSettingsSchema = Schema.Struct({
   showContextWindowIndicator: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
-  /** Fold the app sidebar to its icon rail while the CAD panel is open beside the chat. */
-  foldSidebarWithCad: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * While the CAD panel is open, the model leads: the app sidebar folds to its icon rail and the
+   * panel moves to the left of the chat.
+   */
+  cadFirstLayout: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -697,6 +700,6 @@ export const ClientSettingsPatch = Schema.Struct({
   wordWrap: Schema.optionalKey(Schema.Boolean),
   showPermissionSettings: Schema.optionalKey(Schema.Boolean),
   showContextWindowIndicator: Schema.optionalKey(Schema.Boolean),
-  foldSidebarWithCad: Schema.optionalKey(Schema.Boolean),
+  cadFirstLayout: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
