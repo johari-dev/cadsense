@@ -12,10 +12,13 @@ import {
   ChatIcon as MessageSquareIcon,
   PartDrawingIcon,
 } from "~/lib/icons";
+import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useAssetUrls } from "../assets/assetUrls";
 import type { ExpandedImagePreview } from "../components/chat/ExpandedImagePreview";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
+import { cadPanelEnvironment } from "../state/cadPanel";
 import { useCadCommentReviewStore } from "./cadCommentReviewStore";
 import { CommentBadge } from "./CadCommentsCard";
 
@@ -170,6 +173,33 @@ const ARTIFACT_ACTION =
   "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/[0.06] px-2.5 font-medium text-foreground text-xs transition-colors hover:bg-foreground/[0.1] focus-visible:outline-2 focus-visible:outline-ring";
 
 /**
+ * " · 3 locations" after a chat comment's first location when the comment marks several, so
+ * the row matches the lettered pins on the model (1a, 1b, 1c). Reads the thread's live comments,
+ * the same subscription the CAD panel uses; renders nothing until they load.
+ */
+function CommentLocationCount({
+  threadRef,
+  commentId,
+}: {
+  threadRef: ScopedThreadRef;
+  commentId: string;
+}) {
+  const state = useAtomValue(
+    cadPanelEnvironment.comments({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  );
+  const targets = AsyncResult.isSuccess(state)
+    ? state.value.comments.find((comment) => comment.id === commentId)?.targets
+    : undefined;
+  if (!targets || targets.length < 2) return null;
+  const kind = targets.every((target) => target.kind === "part") ? "parts" : "locations";
+  // A no-break space keeps "3 locations" together when the line wraps.
+  return <> · {`${targets.length}\u00a0${kind}`}</>;
+}
+
+/**
  * The comments card's header action: opens the review in the CAD panel. With the model already
  * on screen it says so ("Show on model") instead of offering to open CAD.
  */
@@ -229,7 +259,12 @@ export function CadPublishedComments({
             title: comment.title,
             severity: comment.severity,
             onOpen: () => openCadComments(threadRef, comment.commentId),
-            detail: comment.location ?? null,
+            detail: (
+              <>
+                {comment.location}
+                <CommentLocationCount threadRef={threadRef} commentId={comment.commentId} />
+              </>
+            ),
           }),
         )}
         {unlisted > 0 ? (
