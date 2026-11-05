@@ -24,7 +24,6 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Kbd } from "../ui/kbd";
 import {
   SidebarContent,
   SidebarFooter,
@@ -34,7 +33,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "../ui/sidebar";
-import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
+import { SidebarBackButton, SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
@@ -195,6 +194,10 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
+          {/* The way out leads the nav, above search, rather than sitting in the footer. */}
+          <SidebarMenu>
+            <SidebarBackButton />
+          </SidebarMenu>
           {/* Search needs the full sidebar; on the icon rail only the section icons show. It is
               framed like a field so it never reads as one of the pages below it. */}
           <div className="mb-1 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-control-surface px-2 py-1.5 text-sm text-sidebar-muted-foreground focus-within:border-ring group-data-[collapsible=icon]:hidden">
@@ -237,9 +240,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               >
                 <XIcon className="size-3" />
               </Button>
-            ) : (
-              <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">/</Kbd>
-            )}
+            ) : null}
           </div>
           {isSearching && results.length === 0 ? (
             <p

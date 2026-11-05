@@ -100,9 +100,34 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+/**
+ * Leaves a settings page: back through history when there is any, else home. Settings shows it
+ * at the top of its nav (SettingsSidebarNav); the project settings page shows it in the footer.
+ */
+export function SidebarBackButton() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleBackClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    if (canGoBack) {
+      window.history.back();
+      return;
+    }
+    void navigate({ to: "/" });
+  }, [canGoBack, isMobile, navigate, setOpenMobile]);
+  return (
+    <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+      <SidebarMenuButton onClick={handleBackClick}>
+        <ArrowLeftIcon />
+        <span>Back</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+  const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const currentFooterPage = useLocation({
     select: (location) =>
@@ -122,25 +147,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/settings" });
   }, [closeMobileSidebar, navigate]);
 
-  const handleBackClick = useCallback(() => {
-    closeMobileSidebar();
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, closeMobileSidebar, navigate]);
-
   return (
     // On the icon rail only the Back or Settings icon shows, centered under the toggle.
     <SidebarMenu className="flex-row items-center group-data-[collapsible=icon]:justify-center">
-      {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+      {/* Settings has Back at the top of its nav instead (SettingsSidebarNav). */}
+      {currentFooterPage === "settings" ? null : currentFooterPage ? (
+        <SidebarBackButton />
       ) : (
         // Labeled like Back, so the footer reads as navigation rather than a stray icon.
         <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
