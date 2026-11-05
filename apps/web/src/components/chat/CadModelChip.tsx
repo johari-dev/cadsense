@@ -52,28 +52,38 @@ export function CadModelChip({
 }
 
 /**
- * The model the agent works on, in the composer's footer: the CAD file a message is about. It
- * is a label, not a control; the header's CadModelChip opens the model. A compact footer (the
- * chat beside the CAD panel) shows a middle-cut name (index.css).
+ * The composer's top row for a CAD project: the model the next message is about, with its
+ * thumbnail, file name, and how long ago it was imported. A label, not a control; the header's
+ * CadModelChip opens the model. A compact composer (beside the CAD panel) cuts the name in the
+ * middle (index.css).
  */
 export function ComposerCadContext({ project }: { readonly project: Project }) {
+  const current = project.cad?.roots.filter((root) => root.current) ?? [];
+  const snapshot = current.length === 1 ? current[0]!.current : null;
+  const thumbnail = useModelThumbnail(project.environmentId, snapshot?.snapshotId).url;
   const name =
     project.localCadSource?.filePath.split(/[\\/]/).at(-1) ?? singleCadModelName(project.cad);
   if (!name) return null;
+  const synced = snapshot ? formatRelativeTimeLabel(snapshot.createdAt) : "";
   return (
     <span
       title={`Messages here are about ${name}`}
-      className="flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md border border-border bg-foreground/[0.04] px-2 font-medium text-muted-foreground text-xs"
+      className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs"
     >
-      <CubeIcon aria-hidden="true" className="size-3.5 shrink-0 text-(--accent-text)" />
-      <span data-composer-cad-name="full" className="truncate">
+      <span className="flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
+        {thumbnail ? (
+          <img src={thumbnail} alt="" className="size-full object-contain" />
+        ) : (
+          <CubeIcon aria-hidden="true" className="size-3 text-(--accent-text)" />
+        )}
+      </span>
+      <span data-composer-cad-name="full" className="truncate font-medium text-foreground/85">
         {name}
       </span>
-      {/* The compact footer cuts the name in the middle, keeping its start, last letter, and
-          extension: "bracket-a…y.step". */}
-      <span data-composer-cad-name="short" className="hidden">
+      <span data-composer-cad-name="short" className="hidden font-medium text-foreground/85">
         {shortenMiddle(name)}
       </span>
+      {synced ? <span className="shrink-0 text-tertiary-foreground">· synced {synced}</span> : null}
     </span>
   );
 }

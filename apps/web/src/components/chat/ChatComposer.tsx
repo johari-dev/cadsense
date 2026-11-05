@@ -590,7 +590,7 @@ export interface ChatComposerProps {
   lockedProvider: ProviderDriverKind | null;
   providerStatuses: ServerProvider[];
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
-  /** Shown after the attach button: the CAD model the chat is about, for CAD projects. */
+  /** The composer's top row: the CAD model the chat is about, for CAD projects. */
   modelContext?: ReactNode;
   activeThreadModelSelection: ModelSelection | null | undefined;
 
@@ -2683,6 +2683,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               composerProviderState.composerSurfaceClassName,
             )}
           >
+            {/* The model the message is about, as the composer's first row, so the composer
+                reads as writing to that model rather than a generic chat box. */}
+            {props.modelContext && !showCollapsedMobilePromptRow ? (
+              <div
+                data-composer-context-strip=""
+                className="flex min-w-0 items-center border-border border-b px-3.5 py-1.5"
+              >
+                {props.modelContext}
+              </div>
+            ) : null}
             {showCollapsedMobilePromptRow ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <button
@@ -3190,7 +3200,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </Tooltip>
                     </>
                   ) : null}
-                  {props.modelContext}
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
                       runtimeMode={runtimeMode}
