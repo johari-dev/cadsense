@@ -260,11 +260,9 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               {props.traits.label}
             </span>
           ) : null}
-          {/* A chevron, so the control reads as a picker rather than a label. A compact
-              footer keeps the room for the model's name. */}
-          {props.compact ? null : (
-            <CaretDownIcon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
-          )}
+          {/* A chevron, so the control reads as a picker rather than a label. A compact footer
+              keeps it too and truncates the model's name instead. */}
+          <CaretDownIcon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}
       </Tooltip>
