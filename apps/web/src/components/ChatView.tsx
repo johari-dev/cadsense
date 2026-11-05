@@ -4161,16 +4161,16 @@ function ChatViewContent(props: ChatViewProps) {
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center pt-56"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-8"
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-5"
               }
             >
               {/* Docked, the composer sits on a solid backing down to the window edge so the
-                  transcript never shows through below or beside it; the top 1.5rem fades in, so
+                  transcript never shows through below or beside it; the top 1rem fades in, so
                   text scrolling under it softens rather than being cut. */}
               {isDraftHeroState ? null : (
                 <div
                   aria-hidden
-                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_1.5rem)]"
+                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_1rem)]"
                 />
               )}
               <div
