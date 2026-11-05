@@ -34,6 +34,33 @@ node apps/desktop/scripts/onshape-browser-prototype.mjs --url 'https://cad.onsha
 
 Use `--skip-build` when the current server and desktop bundles are already built.
 
+## Replay a browser-driven CAD sync
+
+```sh
+vp run prototype:onshape-browser-sync
+```
+
+This mode starts an existing local CAD project with the repository's offline plate fixture. The
+fixture is an explicit baseline, not an earlier revision of the public Onshape document. Its first
+ordinary Sync must reuse the same snapshot.
+
+The prototype then intercepts one click on the existing Sync button. That click opens Onshape in
+the app's browser, exports STEP, and saves the download to a staging file. The existing linked STEP
+and CAD snapshot remain intact until the download passes validation. An atomic rename replaces the
+linked file, then the ordinary CAD Sync handler imports it.
+
+The report verifies that the project ID, linked file, and CAD root stay the same. The snapshot must
+advance, and the old snapshot must remain available for rollback. A final ordinary Sync of the
+unchanged downloaded file must reuse the new snapshot. This final check makes no new browser export.
+
+Evidence is under `.cadsense/onshape-browser-sync-*`. `cadsense-browser-sync-proof.mp4` records the
+full app. `baseline-cad.png` and `unchanged-sync.png` show the baseline and final unchanged sync.
+`report.json` includes the before and after CAD state and both unchanged results.
+
+The Sync click binding exists only in this runner's renderer session. A production Onshape project
+still uses its existing API sync. This proof exercises browser acquisition followed by the existing
+local CAD sync; it does not reproduce Onshape's native occurrence IDs or parametric history.
+
 ## What the prototype changes
 
 All download handling lives in the script. It attaches an Electron `will-download` listener to the

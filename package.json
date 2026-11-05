@@ -26,6 +26,7 @@
     "test:resource-monitor": "cargo test --locked --manifest-path native/resource-monitor/Cargo.toml",
     "test:desktop-smoke": "vp run --filter @cadsense/desktop smoke-test",
     "prototype:onshape-browser": "node apps/desktop/scripts/onshape-browser-prototype.mjs",
+    "prototype:onshape-browser-sync": "node apps/desktop/scripts/onshape-browser-prototype.mjs --sync",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "build:contracts": "vp run --filter @cadsense/contracts build",

@@ -1,5 +1,5 @@
 // Throwaway proof: export a real public Onshape document through CADsense's browser,
-// capture the download without API keys, and import the STEP through the normal UI.
+// capture the download without API keys, and import or sync STEP through the normal UI.
 import * as NodeAssert from "node:assert/strict";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -17,18 +17,43 @@ import electronExecutable from "electron";
 const hostPlatform = NodeOS.platform();
 const root = NodeURL.fileURLToPath(new URL("../../../", import.meta.url));
 const { values } = NodeUtil.parseArgs({
-  options: { url: { type: "string" }, "skip-build": { type: "boolean" } },
+  options: {
+    url: { type: "string" },
+    sync: { type: "boolean" },
+    "skip-build": { type: "boolean" },
+  },
 });
+const syncPrototype = values.sync === true;
 const sourceUrl =
   values.url ??
   "https://cad.onshape.com/documents/e5fd6dd412a8653a52ad3252/w/1cc3344ea68c679223cb7558/e/e46921a75b1bb6cff79888e0";
 NodeAssert.equal(new URL(sourceUrl).origin, "https://cad.onshape.com");
 await NodeFSP.mkdir(NodePath.join(root, ".cadsense"), { recursive: true });
-const output = await NodeFSP.mkdtemp(NodePath.join(root, ".cadsense/onshape-browser-export-"));
-const projectFolder = NodePath.join(output, "Onshape browser export");
+const output = await NodeFSP.mkdtemp(
+  NodePath.join(root, `.cadsense/onshape-browser-${syncPrototype ? "sync" : "export"}-`),
+);
+const projectFolder = NodePath.join(
+  output,
+  syncPrototype ? "Onshape browser sync" : "Onshape browser export",
+);
 await NodeFSP.mkdir(projectFolder);
 await NodeFSP.mkdir(NodePath.join(output, "frames"));
-const report = { sourceUrl, output, steps: [], downloads: [], success: false };
+const stableCadPath = NodePath.join(projectFolder, "onshape-browser-proof.step");
+if (syncPrototype) {
+  // An explicit offline baseline proves a geometry update without editing the public document.
+  await NodeFSP.copyFile(
+    NodePath.join(root, "packages/featurescript/corpus/bolt-circle/plate.step"),
+    stableCadPath,
+  );
+}
+const report = {
+  sourceUrl,
+  output,
+  mode: syncPrototype ? "sync" : "import",
+  steps: [],
+  downloads: [],
+  success: false,
+};
 const note = (step, detail = {}) => {
   const entry = { step, at: new Date().toISOString(), ...detail };
   report.steps.push(entry);
@@ -139,6 +164,40 @@ try {
   await page.getByTestId("sidebar-add-project-trigger").click();
   await page.getByRole("button", { name: "Folder project", exact: true }).click();
   await page.getByRole("button", { name: "Toggle right panel", exact: true }).waitFor();
+  capturing = true;
+  captureLoop = (async () => {
+    // oxlint-disable-next-line no-unmodified-loop-condition -- The main flow stops capture after the import or sync.
+    while (capturing) {
+      const file = NodePath.join(output, "frames", `${String(frames.length).padStart(6, "0")}.jpg`);
+      const at = Date.now();
+      try {
+        await page.screenshot({ path: file, type: "jpeg", quality: 80 });
+        frames.push({ path: file, at });
+      } catch (error) {
+        note("screenshot skipped during navigation", { error: String(error) });
+      }
+      await delay(1_000);
+    }
+  })();
+  const readProject = () =>
+    page.evaluate(async (folder) => {
+      const { appAtomRegistry } = await import("/src/rpc/atomRegistry.ts");
+      const { environmentProjects } = await import("/src/state/projects.ts");
+      const project = appAtomRegistry
+        .get(environmentProjects.projectsAtom)
+        .find((project) => project.workspaceRoot === folder);
+      if (!project) throw new Error("Prototype project not found");
+      return { projectId: project.id, localCadSource: project.localCadSource, cad: project.cad };
+    }, projectFolder);
+  const waitForSync = (previousOperation) =>
+    until(async () => {
+      const project = await readProject();
+      const outcome = project.cad?.lastOutcome;
+      if (!outcome || outcome.operationId === previousOperation || project.cad.operation)
+        return null;
+      NodeAssert.equal(outcome.status, "succeeded", outcome.reason ?? "CAD sync failed");
+      return project;
+    }, 300_000);
   await page.evaluate(async () => {
     (await import("/src/components/preview/previewActionBus.ts")).dispatchPreviewAction(
       "toggle-panel",
@@ -156,6 +215,54 @@ try {
     ).available;
   });
   await page.getByRole("button", { name: "Maximize panel", exact: true }).click();
+  let baseline;
+  if (syncPrototype) {
+    await page.getByRole("button", { name: "Back to CAD", exact: true }).click();
+    await page.getByRole("button", { name: "Pick a file", exact: true }).waitFor();
+    await application.evaluate(({ dialog }, file) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+    }, stableCadPath);
+    await page.getByRole("button", { name: "Pick a file", exact: true }).click();
+    baseline = await waitForSync(null);
+    await page.getByRole("toolbar", { name: "CAD camera views", exact: true }).waitFor();
+    report.baseline = baseline;
+    await page.screenshot({ path: NodePath.join(output, "baseline-cad.png") });
+    note("existing CAD project seeded from offline plate fixture", {
+      projectId: baseline.projectId,
+      snapshotId: baseline.cad.roots[0].current.snapshotId,
+    });
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    const unchanged = await waitForSync(baseline.cad.lastOutcome.operationId);
+    NodeAssert.deepEqual(unchanged.cad.roots[0].current, baseline.cad.roots[0].current);
+    report.unchangedBaseline = unchanged;
+    note("unchanged baseline sync reused its existing snapshot");
+    // Prototype-only binding: intercept one real Sync click, then let the normal Sync handler
+    // import the validated browser download. No production components are changed.
+    let requested;
+    const syncRequested = new Promise((resolve) => {
+      requested = resolve;
+    });
+    await page.exposeFunction("__onshapePrototypeSyncRequested", () => requested());
+    await page.evaluate(() => {
+      const handler = (event) => {
+        const button = event.target.closest("button");
+        if (button?.textContent.trim() !== "Sync" || button.disabled) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        document.removeEventListener("click", handler, true);
+        void window.__onshapePrototypeSyncRequested();
+      };
+      document.addEventListener("click", handler, true);
+    });
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    await syncRequested;
+    note("Sync click requested acquisition through the browser");
+    await page.evaluate(async () => {
+      (await import("/src/components/preview/previewActionBus.ts")).dispatchPreviewAction(
+        "toggle-panel",
+      );
+    });
+  }
   const urlInput = page.getByPlaceholder("Search or enter URL");
   await urlInput.fill(sourceUrl);
   await urlInput.press("Enter");
@@ -181,42 +288,30 @@ try {
   );
   note("anonymous Onshape document ready", guestState);
   NodeAssert.equal(guestState.signInVisible, true, "The proof must use an unsigned-in browser");
-  await application.evaluate(({ webContents }, folder) => {
-    globalThis.__onshapePrototypeDownloads = [];
-    const guest = webContents
-      .getAllWebContents()
-      .find((contents) => contents.getType() === "webview");
-    guest.session.on("will-download", (_event, item) => {
-      const fileName = item.getFilename().replace(/[^a-zA-Z0-9._ -]/g, "_");
-      const record = {
-        fileName,
-        path: `${folder}/${fileName}`,
-        state: "started",
-        receivedBytes: 0,
-      };
-      globalThis.__onshapePrototypeDownloads.push(record);
-      item.setSavePath(record.path);
-      item.once("done", (_event, state) => {
-        record.state = state;
-        record.receivedBytes = item.getReceivedBytes();
+  await application.evaluate(
+    ({ webContents }, { folder, stage }) => {
+      globalThis.__onshapePrototypeDownloads = [];
+      const guest = webContents
+        .getAllWebContents()
+        .find((contents) => contents.getType() === "webview");
+      guest.session.on("will-download", (_event, item) => {
+        const fileName = item.getFilename().replace(/[^a-zA-Z0-9._ -]/g, "_");
+        const record = {
+          fileName,
+          path: stage ? `${folder}/.${fileName}.download` : `${folder}/${fileName}`,
+          state: "started",
+          receivedBytes: 0,
+        };
+        globalThis.__onshapePrototypeDownloads.push(record);
+        item.setSavePath(record.path);
+        item.once("done", (_event, state) => {
+          record.state = state;
+          record.receivedBytes = item.getReceivedBytes();
+        });
       });
-    });
-  }, projectFolder);
-  capturing = true;
-  captureLoop = (async () => {
-    // oxlint-disable-next-line no-unmodified-loop-condition -- The main flow stops capture after the import.
-    while (capturing) {
-      const file = NodePath.join(output, "frames", `${String(frames.length).padStart(6, "0")}.jpg`);
-      const at = Date.now();
-      try {
-        await page.screenshot({ path: file, type: "jpeg", quality: 80 });
-        frames.push({ path: file, at });
-      } catch (error) {
-        note("screenshot skipped during navigation", { error: String(error) });
-      }
-      await delay(1_000);
-    }
-  })();
+    },
+    { folder: projectFolder, stage: syncPrototype },
+  );
   await page.evaluate(
     async (tab) => (await import("/src/browser/browserRecording.ts")).startBrowserRecording(tab),
     runtimeTabId,
@@ -266,6 +361,19 @@ try {
   NodeAssert.ok(bytes.subarray(0, 100).toString().includes("ISO-10303-21;"));
   NodeAssert.ok(bytes.subarray(-100).toString().includes("END-ISO-10303-21;"));
   NodeAssert.equal(bytes.byteLength, download.receivedBytes);
+  if (syncPrototype) {
+    NodeAssert.deepEqual((await readProject()).cad.roots[0].current, baseline.cad.roots[0].current);
+    NodeAssert.deepEqual(
+      await NodeFSP.readFile(stableCadPath),
+      await NodeFSP.readFile(
+        NodePath.join(root, "packages/featurescript/corpus/bolt-circle/plate.step"),
+      ),
+    );
+    download.stagedPath = download.path;
+    await NodeFSP.rename(download.path, stableCadPath);
+    download.path = stableCadPath;
+    note("validated browser export atomically replaced the linked STEP");
+  }
   report.downloads.push({
     ...download,
     sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex"),
@@ -277,8 +385,11 @@ try {
   );
   browserRecording = false;
   await NodeFSP.copyFile(recording.path, NodePath.join(output, "onshape-browser-recording.mp4"));
-  await page.getByRole("button", { name: "Back to CAD", exact: true }).click();
-  await page.getByRole("button", { name: "Pick a file", exact: true }).waitFor();
+  // Once CAD is linked, the header's Back button names that file instead of "CAD".
+  await page.getByRole("button", { name: /^Back to / }).click();
+  await page
+    .getByRole("button", { name: syncPrototype ? "Sync" : "Pick a file", exact: true })
+    .waitFor();
   // Close the completed website tab so its WebGL scene does not compete with tessellation.
   await page.evaluate(async () => {
     (await import("/src/components/preview/previewActionBus.ts")).dispatchPreviewAction(
@@ -286,17 +397,48 @@ try {
     );
   });
   await page.getByRole("button", { name: "Close browser page", exact: true }).click();
-  await application.evaluate(({ dialog }, file) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
-  }, download.path);
-  await page.getByRole("button", { name: "Pick a file", exact: true }).click();
-  note("import submitted through local CAD UI");
+  if (syncPrototype) {
+    const before = await readProject();
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    note("existing CAD sync submitted with browser-acquired STEP");
+    const synced = await waitForSync(before.cad.lastOutcome.operationId);
+    NodeAssert.equal(synced.projectId, baseline.projectId);
+    NodeAssert.deepEqual(synced.localCadSource, baseline.localCadSource);
+    NodeAssert.equal(synced.cad.roots[0].rootId, baseline.cad.roots[0].rootId);
+    NodeAssert.notEqual(
+      synced.cad.roots[0].current.snapshotId,
+      baseline.cad.roots[0].current.snapshotId,
+    );
+    NodeAssert.equal(
+      synced.cad.roots[0].rollback.snapshotId,
+      baseline.cad.roots[0].current.snapshotId,
+    );
+    report.synced = synced;
+    note("same project and root advanced to the browser snapshot", {
+      projectId: synced.projectId,
+      snapshotId: synced.cad.roots[0].current.snapshotId,
+    });
+  } else {
+    await application.evaluate(({ dialog }, file) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+    }, download.path);
+    await page.getByRole("button", { name: "Pick a file", exact: true }).click();
+    note("import submitted through local CAD UI");
+  }
   await page
     .getByRole("toolbar", { name: "CAD camera views", exact: true })
-    .waitFor({ timeout: 180_000 });
+    .waitFor({ timeout: 300_000 });
   await page.getByRole("button", { name: "Reset view to isometric", exact: true }).click();
   await delay(3_000);
   await page.screenshot({ path: NodePath.join(output, "imported-cad.png") });
+  if (syncPrototype) {
+    await page.getByRole("button", { name: "Sync", exact: true }).click();
+    const unchanged = await waitForSync(report.synced.cad.lastOutcome.operationId);
+    NodeAssert.deepEqual(unchanged.cad.roots[0].current, report.synced.cad.roots[0].current);
+    report.unchangedSynced = unchanged;
+    note("unchanged browser-acquired CAD reused the synced snapshot");
+    await page.screenshot({ path: NodePath.join(output, "unchanged-sync.png") });
+  }
   report.finalUi = await page.locator("body").innerText();
   note("CAD model displayed in CADsense");
   report.success = true;
@@ -366,7 +508,7 @@ try {
       "yuv420p",
       "-movflags",
       "+faststart",
-      NodePath.join(output, "cadsense-browser-export-proof.mp4"),
+      NodePath.join(output, `cadsense-browser-${syncPrototype ? "sync" : "export"}-proof.mp4`),
     ]);
   }
   console.log(`Evidence: ${output}`);
