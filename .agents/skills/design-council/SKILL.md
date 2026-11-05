@@ -49,7 +49,7 @@ Call `orchestrator_capabilities` and pick the latest model in each family. Do no
 | --- | --- | --- |
 | Fast | GPT Sol (Codex) | `codex` provider |
 | Strict | Claude Opus | `claudeAgent` provider |
-| Third opinion | Muse Wonder | `cursor` provider |
+| Third opinion (advisory) | Muse Wonder | `cursor` provider |
 | Jester | Gemini Argon | `cursor` provider, if available |
 
 - Start each reviewer with `delegate_task` (`role: "review"`, `mode: "async"`), one per seat,
@@ -70,6 +70,10 @@ Call `orchestrator_capabilities` and pick the latest model in each family. Do no
 - **Bring in the next seat early when the fast seat plateaus.** A second provider's findings break
   the loop of one model's taste.
 
+- **Muse is advisory.** In the Cadsense climb it answered the fork check YES in 16 of 17 rounds,
+  misread pane widths by 100px or more most rounds, and in the end asked only for things the user
+  had ruled out. The user closed the climb on Sol and Opus both answering NO (r26). Run Muse for
+  its findings; do not hold the done rule on its fork check.
 - **Watch for a seat that misreads the screens.** Muse repeatedly reported pane widths 100px
   or more off and asked for things already on screen. Weigh such a seat's findings by whether
   they match the images, and say so in the ledger rather than chasing them.
@@ -159,5 +163,6 @@ round table into the PR description (no jester scores).
 
 Done when, in the same round, every active seat rates every category at or above the bar the
 user set (default 9), Cadsense current scores at or above every peer app on average, and every
-seat answers NO to the fork check for the current screens.
+non-advisory seat answers NO to the fork check for the current screens. The user can close the
+climb earlier; record why in the ledger.
 Report the rounds, the cost if the tools expose it, and what a person should still eyeball.
