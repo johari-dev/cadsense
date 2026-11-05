@@ -5,10 +5,10 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import type { Project } from "~/types";
 
 /**
- * The chat's CAD model in the header while the CAD panel is closed: its thumbnail, file name, and
- * "Open model" on one line, with how long ago it was imported in the tooltip. Clicking it opens
- * the panel. The chat is about this model,
- * so the header names it rather than offering a generic "Open" button.
+ * The chat's CAD model in the header while the CAD panel is closed: its thumbnail and "Open
+ * model", with the file name and how long ago it was imported in the tooltip. Clicking it opens
+ * the panel. The composer's first row (ComposerCadContext) names the file, so the header does
+ * not repeat it.
  */
 export function CadModelChip({
   project,
@@ -36,7 +36,7 @@ export function CadModelChip({
           ? `Open ${name} in the CAD panel · synced ${synced}`
           : `Open ${name} in the CAD panel`
       }
-      className="flex h-7.5 max-w-80 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+      className="flex h-7.5 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card ps-1 pe-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
     >
       <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-[4px] border border-border bg-(--cad-viewport-background)">
         {thumbnail ? (
@@ -45,8 +45,7 @@ export function CadModelChip({
           <CubeIcon className="size-3 text-(--accent-text)" />
         )}
       </span>
-      <span className="truncate font-medium text-[13px] text-foreground">{name}</span>
-      <span className="shrink-0 text-foreground/80 text-xs">Open model</span>
+      <span className="font-medium text-[13px] text-foreground">Open model</span>
     </button>
   );
 }

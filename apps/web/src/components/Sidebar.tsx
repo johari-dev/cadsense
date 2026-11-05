@@ -104,7 +104,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { formatRelativeTime, formatRelativeTimeLabel } from "../timestampFormat";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -208,13 +208,6 @@ const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
  */
 const SIDEBAR_PROJECT_ICON_CLASS =
   "size-7 rounded-md border border-sidebar-border bg-sidebar-control-surface p-1 [&[src='/onshape.svg']]:opacity-70 [&[src='/onshape.svg']]:grayscale";
-
-/** The thread row's timestamp: the relative value without its "ago" suffix. */
-function formatCompactRelativeTime(isoDate: string): string {
-  const relative = formatRelativeTime(isoDate);
-  if (!relative) return "";
-  return relative.suffix === null ? "now" : relative.value;
-}
 
 function SidebarThreadDetailPrewarmer({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
   useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
@@ -2055,7 +2048,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const source = describeProjectSource(project);
   // When the model was last imported, so the row says how fresh the CAD the agent sees is.
   const syncedAt = currentCadRoots.length === 1 ? currentCadRoots[0]!.current!.createdAt : null;
-  const syncedAge = syncedAt ? formatCompactRelativeTime(syncedAt) : "";
+  const syncedAge = syncedAt ? formatRelativeTimeLabel(syncedAt) : "";
   const subtitle = (
     <>
       {source.logo === "onshape" ? (

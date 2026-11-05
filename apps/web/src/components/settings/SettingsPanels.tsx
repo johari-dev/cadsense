@@ -15,6 +15,7 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
+import { DrawingCalloutPreview } from "./DrawingCalloutPreview";
 import { scopeThreadRef } from "@cadsense/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -872,7 +873,7 @@ function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void
 /**
  * Settings > CAD > Drawings: how part drawings come out, the units they open in and the shop's
  * tap depth cap. Both are client settings the drawing panel also reads and edits; the cap is
- * stored in inches and shown in the chosen units.
+ * stored in inches and shown in the chosen units. A preview shows the callout they produce.
  */
 export function DrawingsSettingsPanel() {
   const settings = usePrimarySettings();
@@ -956,6 +957,9 @@ export function DrawingsSettingsPanel() {
             </div>
           }
         />
+      </SettingsSection>
+      <SettingsSection title="Preview">
+        <DrawingCalloutPreview units={units} tapDepthIn={settings.drawingMaxTapDepth} />
       </SettingsSection>
     </SettingsPageContainer>
   );
