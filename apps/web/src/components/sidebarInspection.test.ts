@@ -64,7 +64,7 @@ describe("reduceSidebarInspection and resolveSidebarOpen", () => {
 describe("inspection triggers", () => {
   afterEach(() => {
     useInspectionTriggersStore.setState({
-      holds: { "panel-maximized": 0, "cad-comments-docked": 0 },
+      holds: { "cad-panel-open": 0, "panel-maximized": 0, "cad-comments-docked": 0 },
     });
   });
 

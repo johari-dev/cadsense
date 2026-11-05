@@ -1,7 +1,8 @@
 import { ArrowLeftIcon, XIcon as X } from "~/lib/icons";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 
 import { isElectron } from "~/env";
+import { useClientSettings } from "~/hooks/useSettings";
 import type { RightPanelSection } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
@@ -85,6 +86,17 @@ export function RightPanel(props: RightPanelProps) {
   useEffect(
     () => (holdsInspection ? holdInspection("panel-maximized") : undefined),
     [holdsInspection],
+  );
+  // So is an open inline panel on a CAD project, unless the user turned that off. The width the
+  // rail frees goes to the model (PreviewPanelShell), not the chat. `open` goes false as the
+  // close animation starts, so the sidebar expands while the panel slides out. A layout effect,
+  // so the fold starts in the same frame the panel opens.
+  const foldSidebarWithCad = useClientSettings((settings) => settings.foldSidebarWithCad);
+  const holdsCadInspection =
+    foldSidebarWithCad && props.mode === "inline" && props.open !== false && props.home === "cad";
+  useLayoutEffect(
+    () => (holdsCadInspection ? holdInspection("cad-panel-open") : undefined),
+    [holdsCadInspection],
   );
 
   return (

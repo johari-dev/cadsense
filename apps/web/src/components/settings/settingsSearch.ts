@@ -45,6 +45,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "fold-sidebar-with-cad",
+    title: "Fold sidebar while CAD is open",
+    to: "/settings/appearance",
+  },
+  {
     id: "add-project-starts-in",
     title: "Default project folder",
     to: "/settings/general",

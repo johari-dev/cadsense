@@ -2,14 +2,15 @@ import { create } from "zustand";
 
 /**
  * On desktop the app sidebar is either expanded or folded to its icon rail; collapsing never
- * hides it. Inspection mode (the right panel is maximized, or CAD comments are docked beside
- * the model) folds an expanded sidebar to the rail so the model gets the width. The user can
+ * hides it. Inspection mode (the CAD panel is open, the right panel is maximized, or CAD
+ * comments are docked beside the model) folds an expanded sidebar to the rail so the model
+ * gets the width. The user can
  * still expand it; that choice holds until inspection ends, and then their own state comes
  * back. Mobile uses a sheet with its own open state and ignores all of this.
  */
 
 /** What can put the workspace into inspection mode. */
-export type InspectionTrigger = "panel-maximized" | "cad-comments-docked";
+export type InspectionTrigger = "cad-panel-open" | "panel-maximized" | "cad-comments-docked";
 
 /**
  * Counted holds per trigger, so two mounted panels cannot clear each other's signal. Panels
@@ -17,7 +18,7 @@ export type InspectionTrigger = "panel-maximized" | "cad-comments-docked";
  */
 export const useInspectionTriggersStore = create<{
   holds: Readonly<Record<InspectionTrigger, number>>;
-}>(() => ({ holds: { "panel-maximized": 0, "cad-comments-docked": 0 } }));
+}>(() => ({ holds: { "cad-panel-open": 0, "panel-maximized": 0, "cad-comments-docked": 0 } }));
 
 /** Starts holding `trigger`. Returns the release; calling it more than once is a no-op. */
 export function holdInspection(trigger: InspectionTrigger): () => void {
@@ -37,7 +38,7 @@ export function holdInspection(trigger: InspectionTrigger): () => void {
 export function isInspecting(state: {
   readonly holds: Readonly<Record<InspectionTrigger, number>>;
 }): boolean {
-  return state.holds["panel-maximized"] > 0 || state.holds["cad-comments-docked"] > 0;
+  return Object.values(state.holds).some((count) => count > 0);
 }
 
 export interface SidebarInspectionState {

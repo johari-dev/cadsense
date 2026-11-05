@@ -35,6 +35,7 @@ const clientSettings: ClientSettings = {
   fontSmoothing: true,
   showPermissionSettings: false,
   showContextWindowIndicator: false,
+  foldSidebarWithCad: true,
   sidebarProjectSortOrder: "updated_at",
   sidebarThreadPreviewCount: 5,
   sidebarThreadSortOrder: "updated_at",
