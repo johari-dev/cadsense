@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ArrowSquareOutIcon, CaretDownIcon as ChevronDown } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../components/ui/button";
@@ -19,6 +20,7 @@ export function CadScenePicker({
   onSelect,
   documentUrl,
   openFile,
+  trailing,
 }: {
   scenes: ReadonlyArray<{ id: string; label: string }>;
   selectedId: string | null;
@@ -27,6 +29,8 @@ export function CadScenePicker({
   documentUrl?: string | undefined;
   /** A local CAD file's counterpart to the Onshape link: opens the shown file in its own app. */
   openFile?: { action: string; onOpen: () => void } | undefined;
+  /** Controls that follow the name and scene select in the same row, such as Sync. */
+  trailing?: ReactNode;
 }) {
   const onlyScene = scenes.length === 1 ? scenes[0] : undefined;
   const selected = scenes.find((scene) => scene.id === selectedId);
@@ -70,11 +74,13 @@ export function CadScenePicker({
       {linkContent}
     </button>
   ) : (
-    <h2 className="min-w-0 flex-1 truncate py-2 text-xs font-normal text-muted-foreground">
-      {label}
-    </h2>
+    <h2 className="min-w-0 truncate py-2 text-xs font-normal text-muted-foreground">{label}</h2>
   );
   const action = documentUrl ? "Open in Onshape" : openFile?.action;
+  // Sits 4px after the item before it, closer than the row's gap, so it reads as part of the name.
+  const trailingSlot = trailing ? (
+    <div className="-ml-2 flex shrink-0 items-center">{trailing}</div>
+  ) : null;
   if (scenes.length === 0 || onlyScene) {
     return (
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -92,6 +98,7 @@ export function CadScenePicker({
             View CAD
           </Button>
         )}
+        {trailingSlot}
       </div>
     );
   }
@@ -131,6 +138,7 @@ export function CadScenePicker({
           ))}
         </SelectPopup>
       </Select>
+      {trailingSlot}
     </div>
   );
 }

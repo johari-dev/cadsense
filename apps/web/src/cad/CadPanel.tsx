@@ -869,7 +869,7 @@ export function CadPanel({
   const shownFile = project.localCadSource
     ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
     : undefined;
-  // The header row: the scene picker and the Sync button for the shown root.
+  // The header row: the scene picker, with the Sync button for the shown root after it.
   const scenePicker = !compact && (
     <>
       <CadScenePicker
@@ -923,11 +923,13 @@ export function CadPanel({
               explosion: 0,
             });
         }}
-      />
-      <CadSyncButton
-        project={project}
-        rootId={shownRootId}
-        disabled={!!data?.agentControlling || !!historicalView}
+        trailing={
+          <CadSyncButton
+            project={project}
+            rootId={shownRootId}
+            disabled={!!data?.agentControlling || !!historicalView}
+          />
+        }
       />
     </>
   );
