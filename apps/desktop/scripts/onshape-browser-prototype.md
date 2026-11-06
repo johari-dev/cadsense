@@ -79,3 +79,17 @@ establish that every public document permits anonymous export.
 
 On Linux, this run uses SwiftShader because the verification environment has no usable hardware
 WebGL adapter. The video demonstrates functionality, not graphics performance.
+
+## Onboarding and the first import
+
+Run `vp run prototype:onshape-browser-onboarding`. The runner starts an isolated Electron backend and serves the normal web frontend. Open the access URL it prints. The `/prototype/onshape-browser` route opens Step 2 directly, with the real AI reviewer status, so CAD setup can be tried without signing into an AI account.
+
+Choose **I can't make an API key**, enter a public `cad.onshape.com` link and robot name, then click **Open browser and sync**. An owned Electron browser window opens the document and uses Onshape's export dialog. After the completed STEP passes validation, the existing local CAD create command adds the project and starts its first import. No API connection or baseline CAD file is required. If export fails, the form retains the link and name and no project is created.
+
+The runner keeps the source URL beside its isolated state. The project's ordinary **Sync** button exports through that browser again, atomically replaces the validated linked STEP, then invokes the existing local CAD sync. The server continues to own snapshots and rollback retention. This preview supports export-enabled public documents; it does not promise access to documents whose website blocks export.
+
+Use **Sync** in the CAD panel for website updates. The separate project-settings Sync imports the saved STEP and does not trigger a website export in this prototype.
+
+The no-key integration and its transport are available only on this prototype host. The regular app does not install the prototype flag or expose the helper endpoints. The browser runs on the host machine; the CAD viewport renders in the visiting web browser. The access link authenticates HTTP and WebSocket traffic to the isolated backend without sending its Electron credential to the visiting browser.
+
+Each website export writes an export-dialog screenshot and a JSON report with the downloaded byte count and SHA-256 under the printed evidence directory. To retain state across restarts, pass `--home-dir <that directory>`. The runner closes only its own Electron application and dev-server process group when stopped.

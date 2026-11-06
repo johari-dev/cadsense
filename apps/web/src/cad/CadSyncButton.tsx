@@ -14,6 +14,11 @@ import { useEffect, useState } from "react";
 import { ArrowsClockwiseIcon } from "~/lib/icons";
 
 import { Button } from "../components/ui/button";
+import {
+  acquireOnshapeBrowserCad,
+  isOnshapeBrowserPrototype,
+  readOnshapeBrowserSource,
+} from "../components/onboarding/onshapeBrowserPrototype";
 import { toastManager } from "../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useThreadShells } from "../state/entities";
@@ -103,6 +108,34 @@ export function CadSyncButton({
     reportFailure: false,
   });
   const threads = useThreadShells();
+  const browserPrototype = isOnshapeBrowserPrototype() && project.localCadSource !== undefined;
+  const [browserSource, setBrowserSource] = useState<{
+    workspaceRoot: string;
+    url: string | null;
+    error?: string;
+  } | null>(null);
+  const [acquiring, setAcquiring] = useState(false);
+  const [browserProgress, setBrowserProgress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!browserPrototype) return;
+    let active = true;
+    void readOnshapeBrowserSource(project.workspaceRoot).then(
+      (url) => {
+        if (active) setBrowserSource({ workspaceRoot: project.workspaceRoot, url });
+      },
+      () => {
+        if (active)
+          setBrowserSource({
+            workspaceRoot: project.workspaceRoot,
+            url: null,
+            error: "Could not check the browser connection. Reload and try again.",
+          });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [browserPrototype, project.workspaceRoot]);
   // The operation this button started, until the server records its outcome.
   const [started, setStarted] = useState<
     | {
@@ -160,6 +193,31 @@ export function CadSyncButton({
       setStarted({ kind: "discover", operationId: result.value.operationId });
     else refused("CAD", result);
   };
+  const startSync = async () => {
+    if (acquiring) return;
+    if (browserPrototype && browserSource?.url) {
+      setAcquiring(true);
+      setBrowserProgress("Opening Onshape…");
+      try {
+        await acquireOnshapeBrowserCad(
+          { workspaceRoot: project.workspaceRoot },
+          setBrowserProgress,
+        );
+        if (root) await sync(root);
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not sync CAD through the browser",
+          description: error instanceof Error ? error.message : "The export failed. Try again.",
+        });
+      } finally {
+        setAcquiring(false);
+        setBrowserProgress(null);
+      }
+      return;
+    }
+    await (root ? sync(root) : discover());
+  };
   useEffect(() => {
     if (!started || !outcome || outcome.operationId !== started.operationId) return;
     setStarted(null);
@@ -214,21 +272,34 @@ export function CadSyncButton({
         <Button
           size="xs"
           variant="outline"
-          disabled={disabled || blocker !== null}
-          onClick={() => void (root ? sync(root) : discover())}
+          disabled={
+            disabled ||
+            blocker !== null ||
+            acquiring ||
+            (browserPrototype &&
+              (browserSource?.workspaceRoot !== project.workspaceRoot || !!browserSource.error))
+          }
+          onClick={() => void startSync()}
         >
           <ArrowsClockwiseIcon />
-          {syncing
-            ? project.localCadSource
-              ? solidWorks
-                ? "Converting…"
-                : "Importing…"
-              : "Syncing…"
-            : "Sync"}
+          {acquiring
+            ? "Exporting…"
+            : syncing
+              ? project.localCadSource
+                ? solidWorks
+                  ? "Converting…"
+                  : "Importing…"
+                : "Syncing…"
+              : "Sync"}
         </Button>
       </TooltipTrigger>
       <TooltipPopup>
-        {blocker ??
+        {browserProgress ??
+          browserSource?.error ??
+          blocker ??
+          (browserPrototype && browserSource?.url
+            ? "Export the latest CAD through the Onshape browser"
+            : null) ??
           (!project.localCadSource
             ? `Download ${name} from Onshape${root && currentVersion(root) ? " again" : ""}`
             : solidWorks
