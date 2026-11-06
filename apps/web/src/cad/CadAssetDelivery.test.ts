@@ -1,7 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeZlib from "node:zlib";
-import { CAD_TRANSFER_BROTLI_CONTENT_TYPE } from "@cadsense/shared/cadTransfer";
+import {
+  CAD_TRANSFER_BROTLI_CONTENT_TYPE,
+  encodeCadTransferSelection,
+} from "@cadsense/shared/cadTransfer";
 import { afterEach, expect, it, vi } from "vite-plus/test";
+import { cadAssetCacheKey } from "./CadAssetCache";
 import { loadCadAssetDelivery } from "./CadAssetDelivery";
 
 vi.mock("brotli-dec-wasm/web/bg.wasm?url", async () => ({
@@ -69,6 +73,14 @@ vi.mock("./CadAssetRangeCache", async (original) => {
         return async (start: number, end: number) => new Response(new Uint8Array(end - start + 1));
       return actual.createCachedCadAssetRangeRequest(options);
     },
+  };
+});
+// The content-addressed asset cache shares the same in-memory storage.
+vi.mock("./CadAssetCache", async (original) => {
+  const actual = await original<typeof import("./CadAssetCache")>();
+  return {
+    ...actual,
+    getSharedCadAssetCache: () => actual.createCadAssetCache({ backend: cache.backend }),
   };
 });
 afterEach(() => {
@@ -289,7 +301,102 @@ it("decodes Brotli ranges a plain-http page could not negotiate, and caches the 
   expect(published).toEqual([body]);
   expect(request).toHaveBeenCalledTimes(2);
   await vi.waitFor(() => expect(cache.backend.entries.size).toBe(1));
-  expect(new Uint8Array([...cache.backend.entries.values()][0]!.bytes)).toEqual(body);
+  expect(new Uint8Array(cache.backend.entries.get(cadAssetCacheKey(hash))!.bytes)).toEqual(body);
+});
+
+it("loads geometry this browser already holds without any transfer request", async () => {
+  const { hash, assets } = await fixture();
+  cache.backend.entries.set(cadAssetCacheKey(hash), {
+    bytes: body.buffer.slice(0),
+    range: "asset",
+    byteLength: body.length,
+    lastAccessed: 0,
+  });
+  const request = vi.fn(async () => new Response(body));
+  const published: Uint8Array[] = [];
+  const onProgress = vi.fn();
+  await loadCadAssetDelivery({
+    assets,
+    namespace,
+    signal: new AbortController().signal,
+    request,
+    load: async (reader) => {
+      published.push(new Uint8Array(await reader(hash)));
+    },
+    onProgress,
+  });
+  expect(published).toEqual([body]);
+  expect(request).not.toHaveBeenCalled();
+  expect(onProgress).toHaveBeenLastCalledWith(body.length, body.length);
+});
+
+it("transfers only the assets this browser is missing, then keeps them for the next snapshot", async () => {
+  const { hash, assets, envelope } = await fixture();
+  const kept = new TextEncoder().encode("unchanged part");
+  const keptHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", kept))]
+    .map((n) => n.toString(16).padStart(2, "0"))
+    .join("");
+  cache.backend.entries.set(cadAssetCacheKey(keptHash), {
+    bytes: kept.buffer.slice(0),
+    range: "asset",
+    byteLength: kept.length,
+    lastAccessed: 0,
+  });
+  const manifestAssets = [{ sha256: keptHash, byteLength: kept.length }, ...assets];
+  const selection = encodeCadTransferSelection(manifestAssets, new Set([hash]));
+  const request = vi.fn(async (path: string) =>
+    path.startsWith("transfer-index") ? Response.json(envelope) : new Response(body),
+  );
+  const published: Uint8Array[] = [];
+  await loadCadAssetDelivery({
+    assets: manifestAssets,
+    namespace,
+    signal: new AbortController().signal,
+    request,
+    load: async (reader) => {
+      for (const asset of manifestAssets)
+        published.push(new Uint8Array(await reader(asset.sha256)));
+    },
+    onProgress: () => {},
+  });
+  expect(published).toEqual([kept, body]);
+  expect(request.mock.calls.map(([path]) => path)).toEqual([
+    `transfer-index?assets=${selection}`,
+    `transfer?identity=${"a".repeat(64)}&start=0&end=9&decode=br&assets=${selection}`,
+  ]);
+  await vi.waitFor(() => expect(cache.backend.entries.has(cadAssetCacheKey(hash))).toBe(true));
+});
+
+it("transfers everything again when a cached asset turns out to be corrupt", async () => {
+  const { hash, assets, envelope } = await fixture();
+  cache.backend.entries.set(cadAssetCacheKey(hash), {
+    bytes: new Uint8Array(body.length).buffer,
+    range: "asset",
+    byteLength: body.length,
+    lastAccessed: 0,
+  });
+  const request = vi.fn(async (path: string) =>
+    path.startsWith("transfer-index") ? Response.json(envelope) : new Response(body),
+  );
+  const published: Uint8Array[] = [];
+  await loadCadAssetDelivery({
+    assets,
+    namespace,
+    signal: new AbortController().signal,
+    request,
+    load: async (reader) => {
+      published.push(new Uint8Array(await reader(hash)));
+    },
+    onProgress: () => {},
+  });
+  expect(published).toEqual([body]);
+  expect(request.mock.calls.map(([path]) => path)).toEqual([
+    "transfer-index",
+    `transfer?identity=${"a".repeat(64)}&start=0&end=9&decode=br`,
+  ]);
+  await vi.waitFor(() =>
+    expect(new Uint8Array(cache.backend.entries.get(cadAssetCacheKey(hash))!.bytes)).toEqual(body),
+  );
 });
 
 it("falls back to the original bundle when a client-decoded Brotli range is corrupt", async () => {
@@ -318,7 +425,7 @@ it("falls back to the original bundle when a client-decoded Brotli range is corr
   expect(request.mock.calls.at(-1)?.[0]).toBe("bundle?start=0&end=9");
 });
 
-it("falls back to the original bundle and invalidates corrupt optimized bytes", async () => {
+it("falls back to the original bundle without keeping corrupt optimized bytes", async () => {
   const { hash, assets, envelope } = await fixture();
   const broken = body.slice();
   broken[9] = 0;
@@ -340,7 +447,7 @@ it("falls back to the original bundle and invalidates corrupt optimized bytes", 
   });
   expect(read).toHaveBeenCalledTimes(2);
   expect(request.mock.calls.at(-1)?.[0]).toBe("bundle?start=0&end=9");
-  expect(cache.invalidate).toHaveBeenCalledTimes(1);
+  expect(cache.backend.entries.has(cadAssetCacheKey(hash))).toBe(false);
 });
 
 it("reuses an existing complete original cache without preparing another format", async () => {

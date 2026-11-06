@@ -1,7 +1,8 @@
-import { CadPanelSceneTicket } from "@cadsense/contracts";
+import { CadPanelSceneTicket, type CadGeometryAsset } from "@cadsense/contracts";
 import {
   CAD_TRANSFER_BROTLI_CONTENT_TYPE,
   CAD_TRANSFER_VERSION,
+  selectCadTransferAssets,
 } from "@cadsense/shared/cadTransfer";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -43,14 +44,22 @@ const handle = Effect.gen(function* () {
     const artifacts = cadTransferArtifacts(config.value.stateDir);
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(runtimeContext);
-    artifacts.retain(scene.manifest.assets, scene, () =>
-      runPromise(Deferred.await(scene.released)),
-    );
+    // A browser that already holds some geometry names the rest; the scene still authorizes it.
+    const selection = url.value.searchParams.get("assets");
+    const selected =
+      selection === null
+        ? Option.some<readonly CadGeometryAsset[]>(scene.manifest.assets)
+        : yield* Effect.option(
+            Effect.try(() => selectCadTransferAssets(scene.manifest.assets, selection)),
+          );
+    if (Option.isNone(selected)) return HttpServerResponse.empty({ status: 400, headers });
+    const assets = selected.value;
+    artifacts.retain(assets, scene, () => runPromise(Deferred.await(scene.released)));
     if (hash === "transfer-index") {
       const store = yield* Effect.serviceOption(CadSnapshotStore);
       if (Option.isNone(store)) return HttpServerResponse.empty({ status: 503, headers });
       return yield* Effect.tryPromise(() =>
-        artifacts.get(scene.manifest.assets, (sha256) => runPromise(scene.readAsset(sha256)), {
+        artifacts.get(assets, (sha256) => runPromise(scene.readAsset(sha256)), {
           withSource: (use) =>
             runPromise(
               store.value
@@ -83,8 +92,7 @@ const handle = Effect.gen(function* () {
     // Plain-http pages cannot negotiate br, so they may take the prepared bytes and decode them.
     const clientDecodes = !brotli && url.value.searchParams.get("decode") === "br";
     return yield* Effect.tryPromise({
-      try: () =>
-        artifacts.range(scene.manifest.assets, identity, start, end, brotli || clientDecodes),
+      try: () => artifacts.range(assets, identity, start, end, brotli || clientDecodes),
       catch: (error) =>
         new CadTransferHttpError({ status: error instanceof RangeError ? 416 : 404 }),
     }).pipe(
