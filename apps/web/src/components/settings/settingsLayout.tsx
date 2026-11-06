@@ -151,12 +151,9 @@ export function SettingsSection({
       tabIndex={sectionProps.id ? -1 : sectionProps.tabIndex}
       className={cn("pt-6 first:pt-4", className)}
     >
-      <div
-        className={cn(
-          "flex items-center justify-between gap-4 px-3 sm:px-4",
-          (!repeatsTabLabel || headerAction) && "min-h-8 pb-1",
-        )}
-      >
+      {/* One fixed height whether the bar holds a title, an action, or nothing, so every
+          page's first row starts on the same line and switching tabs does not jump. */}
+      <div className="flex h-9 items-center justify-between gap-4 px-3 sm:px-4">
         <h2
           className={cn(
             "flex items-center gap-2 text-xs font-medium tracking-[0.06em] text-muted-foreground uppercase",
