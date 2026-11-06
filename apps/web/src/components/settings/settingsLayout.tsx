@@ -12,9 +12,9 @@ import {
 } from "react";
 
 import { cn } from "../../lib/utils";
-import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SETTINGS_SECTION_LABELS } from "./settingsSearch";
 
 interface SettingsSearchTargetContextValue {
   readonly targetId: string | null;
@@ -135,24 +135,39 @@ export function SettingsSection({
   children: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLElement>(sectionProps.id);
+  // The active tab already names the page, so a group titled the same keeps its heading for
+  // screen readers only and shows just its action.
+  const repeatsTabLabel = useLocation({
+    select: (location) =>
+      (SETTINGS_SECTION_LABELS as Readonly<Record<string, string>>)[location.pathname] === title,
+  });
 
   return (
+    // A group: its title and any header action on one line, then its rows. Rows draw the
+    // hairlines between themselves; other content (lists, notices) brings its own framing.
     <section
       {...sectionProps}
       ref={targetRef}
       tabIndex={sectionProps.id ? -1 : sectionProps.tabIndex}
-      className={cn("space-y-3", className)}
+      className={cn("pt-6 first:pt-4", className)}
     >
-      <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
-        {/* The page's first section title is the page title; later sections are groups
-            within it and take a smaller heading. */}
-        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.025em] text-foreground [section+section_&]:text-base [section+section_&]:tracking-normal">
+      {/* One fixed height whether the bar holds a title, an action, or nothing, so every
+          page's first row starts on the same line and switching tabs does not jump. */}
+      <div className="flex h-9 items-center justify-between gap-4 px-3 sm:px-4">
+        <h2
+          className={cn(
+            "flex items-center gap-2 text-xs font-medium tracking-[0.06em] text-muted-foreground uppercase",
+            repeatsTabLabel && "sr-only",
+          )}
+        >
           {icon}
           {title}
         </h2>
-        <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
+        {headerAction ? (
+          <div className="ml-auto flex items-center gap-1">{headerAction}</div>
+        ) : null}
       </div>
-      <div className="relative space-y-1 overflow-visible text-foreground">{children}</div>
+      <div className="relative min-w-0 text-foreground">{children}</div>
     </section>
   );
 }
@@ -183,9 +198,9 @@ export function SettingsRow({
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       data-settings-row=""
       className={cn(
-        // A hairline sits between consecutive rows, inset to the text edge and centered in
-        // the section's row gap. Other section content (cards, lists) never gets one.
-        "relative rounded-xl px-3 sm:px-4 [[data-settings-row]+&]:before:pointer-events-none [[data-settings-row]+&]:before:absolute [[data-settings-row]+&]:before:inset-x-3 [[data-settings-row]+&]:before:-top-0.5 [[data-settings-row]+&]:before:h-px [[data-settings-row]+&]:before:bg-border sm:[[data-settings-row]+&]:before:inset-x-4",
+        // A hairline sits between consecutive rows, inset to the text edge. Other content in
+        // a group (lists, notices) never gets one.
+        "relative px-3 sm:px-4 [[data-settings-row]+&]:before:pointer-events-none [[data-settings-row]+&]:before:absolute [[data-settings-row]+&]:before:inset-x-3 [[data-settings-row]+&]:before:top-0 [[data-settings-row]+&]:before:h-px [[data-settings-row]+&]:before:bg-border sm:[[data-settings-row]+&]:before:inset-x-4",
         children ? "pt-3.5 pb-1.5" : "py-3.5",
         className,
       )}
@@ -248,15 +263,8 @@ export function SettingResetButton({
   );
 }
 
-export function SettingsPageContainer({
-  children,
-  className,
-  width = "readable",
-}: {
-  children: ReactNode;
-  className?: string;
-  width?: WorkspacePageWidth;
-}) {
+/** Scrolling body of a settings page inside the settings modal. */
+export function SettingsPageContainer({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const targetId = hash.replace(/^#/, "") || null;
@@ -264,21 +272,12 @@ export function SettingsPageContainer({
     void navigate({ hash: "", replace: true, resetScroll: false, hashScrollIntoView: false });
   }, [navigate]);
 
+  // Pages pad 12px so a row's 16px inset puts text on the same 28px edge as the modal title
+  // and tabs; framed blocks (cards, notices) sit on the 12px edge and inset their own rows.
   return (
     <SettingsSearchTargetProvider targetId={targetId} onTargetHandled={clearTargetHash}>
-      <div
-        className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
-        data-settings-page-scroll
-      >
-        {/* Pages center in the area right of the settings nav. Readable pages cap the form
-            at 720px so each label stays close to its control; wider pages (diagnostics,
-            tables) opt out through `width`. */}
-        <WorkspacePageContainer
-          width={width}
-          className={cn("gap-8", width === "readable" && "max-w-[calc(45rem+3rem)]", className)}
-        >
-          {children}
-        </WorkspacePageContainer>
+      <div className="flex-1 overflow-y-auto px-3 pb-8" data-settings-page-scroll>
+        {children}
       </div>
     </SettingsSearchTargetProvider>
   );

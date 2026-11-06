@@ -159,7 +159,7 @@ export function ProviderSettingsPanel() {
     ) : null;
 
   return (
-    <SettingsPageContainer className="gap-8">
+    <SettingsPageContainer>
       {options.length === 0 ? (
         <SettingsSection title="Providers">
           <SettingsRow
