@@ -14,6 +14,7 @@ import {
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SETTINGS_SECTION_LABELS } from "./settingsSearch";
 
 interface SettingsSearchTargetContextValue {
   readonly targetId: string | null;
@@ -134,29 +135,42 @@ export function SettingsSection({
   children: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLElement>(sectionProps.id);
+  // The active tab already names the page, so a group titled the same keeps its heading for
+  // screen readers only and shows just its action.
+  const repeatsTabLabel = useLocation({
+    select: (location) =>
+      (SETTINGS_SECTION_LABELS as Readonly<Record<string, string>>)[location.pathname] === title,
+  });
 
   return (
-    // Group title (and any header action) on the left, the group's rows in one card on the
-    // right. The card draws the dividers between rows; other content in it gets padding.
+    // A group: its title and any header action on one line, then its rows. Rows draw the
+    // hairlines between themselves; other content (lists, notices) brings its own framing.
     <section
       {...sectionProps}
       ref={targetRef}
       tabIndex={sectionProps.id ? -1 : sectionProps.tabIndex}
-      className={cn(
-        "grid gap-3 border-b border-border py-5 last:border-b-0 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8",
-        className,
-      )}
+      className={cn("pt-6 first:pt-4", className)}
     >
-      <div className="flex flex-col items-start gap-2">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+      <div
+        className={cn(
+          "flex items-center justify-between gap-4 px-3 sm:px-4",
+          (!repeatsTabLabel || headerAction) && "min-h-8 pb-1",
+        )}
+      >
+        <h2
+          className={cn(
+            "flex items-center gap-2 text-xs font-medium tracking-[0.06em] text-muted-foreground uppercase",
+            repeatsTabLabel && "sr-only",
+          )}
+        >
           {icon}
           {title}
         </h2>
-        {headerAction}
+        {headerAction ? (
+          <div className="ml-auto flex items-center gap-1">{headerAction}</div>
+        ) : null}
       </div>
-      <div className="relative min-w-0 divide-y divide-border overflow-visible rounded-xl border border-border bg-background text-foreground [&>*:not([data-settings-row])]:p-4">
-        {children}
-      </div>
+      <div className="relative min-w-0 text-foreground">{children}</div>
     </section>
   );
 }
@@ -186,7 +200,13 @@ export function SettingsRow({
       ref={targetRef}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       data-settings-row=""
-      className={cn("relative px-4", children ? "pt-3 pb-1.5" : "py-3", className)}
+      className={cn(
+        // A hairline sits between consecutive rows, inset to the text edge. Other content in
+        // a group (lists, notices) never gets one.
+        "relative px-3 sm:px-4 [[data-settings-row]+&]:before:pointer-events-none [[data-settings-row]+&]:before:absolute [[data-settings-row]+&]:before:inset-x-3 [[data-settings-row]+&]:before:top-0 [[data-settings-row]+&]:before:h-px [[data-settings-row]+&]:before:bg-border sm:[[data-settings-row]+&]:before:inset-x-4",
+        children ? "pt-3.5 pb-1.5" : "py-3.5",
+        className,
+      )}
     >
       <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8">
         <div className="min-w-0 flex-1 space-y-1">
@@ -255,9 +275,11 @@ export function SettingsPageContainer({ children }: { children: ReactNode }) {
     void navigate({ hash: "", replace: true, resetScroll: false, hashScrollIntoView: false });
   }, [navigate]);
 
+  // Pages pad 12px so a row's 16px inset puts text on the same 28px edge as the modal title
+  // and tabs; framed blocks (cards, notices) sit on the 12px edge and inset their own rows.
   return (
     <SettingsSearchTargetProvider targetId={targetId} onTargetHandled={clearTargetHash}>
-      <div className="flex-1 overflow-y-auto px-7 pb-6" data-settings-page-scroll>
+      <div className="flex-1 overflow-y-auto px-3 pb-8" data-settings-page-scroll>
         {children}
       </div>
     </SettingsSearchTargetProvider>

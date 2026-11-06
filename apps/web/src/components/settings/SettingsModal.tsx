@@ -42,7 +42,7 @@ export function SettingsModal({ children, onClose }: { children: ReactNode; onCl
         aria-label="Settings"
         className="fixed top-1/2 left-1/2 z-40 flex h-[min(720px,calc(100dvh-2rem))] w-[min(960px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-popover-border bg-card text-foreground shadow-xl"
       >
-        <div className="flex items-center gap-3 px-5 pt-4 pb-3">
+        <div className="flex items-center gap-3 pt-4 pr-4 pb-3 pl-7">
           <h1 className="text-base font-semibold">Settings</h1>
           <div className="flex-1" />
           <SettingsSearch pathname={pathname} />
@@ -52,7 +52,7 @@ export function SettingsModal({ children, onClose }: { children: ReactNode; onCl
         </div>
         <nav
           aria-label="Settings pages"
-          className="flex gap-1 overflow-x-auto border-b border-border px-4"
+          className="flex gap-1 overflow-x-auto border-b border-border px-[1.125rem]"
         >
           {SETTINGS_TABS.map(([to, label]) => {
             const isActive = pathname === to || pathname.startsWith(`${to}/`);
