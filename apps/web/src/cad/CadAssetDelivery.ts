@@ -8,6 +8,7 @@ import {
 } from "./CadAssetRangeCache";
 import { readCadAssetBundle } from "./CadAssetBundle";
 import { readCadTransferAssets } from "./CadTransferReader";
+import { decodeCadTransferResponse } from "./CadTransferBrotli";
 import { CadAssetIntegrityError, verifyCadAssetBytes } from "./CadAssetIntegrity";
 
 export interface CadAssetDeliveryOptions {
@@ -140,8 +141,15 @@ export async function loadCadAssetDelivery(options: CadAssetDeliveryOptions) {
         namespace: derivedNamespace,
         expectedTotalBytes: index.byteLength,
         signal: attempt.signal,
-        request: (start, end) =>
-          request(`transfer?identity=${identity}&start=${start}&end=${end}`, attempt.signal),
+        // Opt in to prepared Brotli bodies when the browser could not negotiate br itself.
+        request: async (start, end) =>
+          decodeCadTransferResponse(
+            await request(
+              `transfer?identity=${identity}&start=${start}&end=${end}&decode=br`,
+              attempt.signal,
+            ),
+            end - start + 1,
+          ),
       }),
       attempt.signal,
       onBytes,

@@ -1,5 +1,8 @@
 import { CadPanelSceneTicket } from "@cadsense/contracts";
-import { CAD_TRANSFER_VERSION } from "@cadsense/shared/cadTransfer";
+import {
+  CAD_TRANSFER_BROTLI_CONTENT_TYPE,
+  CAD_TRANSFER_VERSION,
+} from "@cadsense/shared/cadTransfer";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
@@ -77,8 +80,11 @@ const handle = Effect.gen(function* () {
     const start = Number(startValue);
     const end = Number(endValue);
     const brotli = acceptsPreparedCadEncoding(request.headers["accept-encoding"]);
+    // Plain-http pages cannot negotiate br, so they may take the prepared bytes and decode them.
+    const clientDecodes = !brotli && url.value.searchParams.get("decode") === "br";
     return yield* Effect.tryPromise({
-      try: () => artifacts.range(scene.manifest.assets, identity, start, end, brotli),
+      try: () =>
+        artifacts.range(scene.manifest.assets, identity, start, end, brotli || clientDecodes),
       catch: (error) =>
         new CadTransferHttpError({ status: error instanceof RangeError ? 416 : 404 }),
     }).pipe(
@@ -92,7 +98,9 @@ const handle = Effect.gen(function* () {
             vary: "Accept-Encoding",
             "x-cad-bundle-range": `bytes ${start}-${end}/${byteLength}`,
           },
-          contentType: "application/vnd.cadsense.geometry-bundle",
+          contentType: clientDecodes
+            ? CAD_TRANSFER_BROTLI_CONTENT_TYPE
+            : "application/vnd.cadsense.geometry-bundle",
         }),
       ),
       Effect.catch((error) =>
