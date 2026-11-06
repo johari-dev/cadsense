@@ -211,9 +211,12 @@ export function CadSyncButton({
     <Tooltip>
       {/* A disabled button gets no pointer events, so the span carries the tooltip. */}
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+        {/* A muted icon beside the model name, like the header's other controls. It shows a
+            label only while it runs. */}
         <Button
-          size="xs"
-          variant="outline"
+          size={syncing ? "xs" : "icon-xs"}
+          variant="ghost-muted"
+          aria-label={syncing ? undefined : "Sync"}
           disabled={disabled || blocker !== null}
           onClick={() => void (root ? sync(root) : discover())}
         >
@@ -224,7 +227,7 @@ export function CadSyncButton({
                 ? "Converting…"
                 : "Importing…"
               : "Syncing…"
-            : "Sync"}
+            : null}
         </Button>
       </TooltipTrigger>
       <TooltipPopup>
