@@ -21,6 +21,7 @@ import { Route as SettingsCadStorageRouteImport } from './routes/settings.cad-st
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
+import { Route as ChatPrototypeOnshapeBrowserRouteImport } from './routes/_chat.prototype.onshape-browser'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -83,6 +84,12 @@ const ProjectsProjectKeyRoute = ProjectsProjectKeyRouteImport.update({
   path: '/projects/$projectKey',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChatPrototypeOnshapeBrowserRoute =
+  ChatPrototypeOnshapeBrowserRouteImport.update({
+    id: '/prototype/onshape-browser',
+    path: '/prototype/onshape-browser',
+    getParentRoute: () => ChatRoute,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -109,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/settings/providers': typeof SettingsProvidersRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/prototype/onshape-browser': typeof ChatPrototypeOnshapeBrowserRoute
 }
 export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
@@ -124,6 +132,7 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/prototype/onshape-browser': typeof ChatPrototypeOnshapeBrowserRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -141,6 +150,7 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/_chat/prototype/onshape-browser': typeof ChatPrototypeOnshapeBrowserRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -158,6 +168,7 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/prototype/onshape-browser'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/settings'
@@ -173,6 +184,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/prototype/onshape-browser'
   id:
     | '__root__'
     | '/_chat'
@@ -189,6 +201,7 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/_chat/prototype/onshape-browser'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -283,6 +296,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_chat/prototype/onshape-browser': {
+      id: '/_chat/prototype/onshape-browser'
+      path: '/prototype/onshape-browser'
+      fullPath: '/prototype/onshape-browser'
+      preLoaderRoute: typeof ChatPrototypeOnshapeBrowserRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -304,12 +324,14 @@ interface ChatRouteChildren {
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
+  ChatPrototypeOnshapeBrowserRoute: typeof ChatPrototypeOnshapeBrowserRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,
+  ChatPrototypeOnshapeBrowserRoute: ChatPrototypeOnshapeBrowserRoute,
 }
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
