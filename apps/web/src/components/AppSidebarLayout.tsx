@@ -18,13 +18,10 @@ import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
 import ThreadSidebar from "./Sidebar";
-import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
   resolveSidebarStageFocusRingOffsetClass,
   useSidebarStageBackdropVariant,
 } from "./SidebarStageBackdrop";
-import { useProjects } from "../state/entities";
 import {
   INITIAL_SIDEBAR_INSPECTION,
   isInspecting,
@@ -136,20 +133,9 @@ function SidebarControl() {
   );
 }
 
-// Settings swaps the thread sidebar out of the tree. Keep the lightweight
-// project projection subscribed so returning to a draft never renders the
-// zero-project state while the environment snapshot reconnects.
-function ProjectProjectionRetention() {
-  useProjects();
-  return null;
-}
-
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  // Settings routes show the settings nav in place of whichever thread
-  // sidebar is active.
   const pathname = useLocation({ select: (location) => location.pathname });
-  const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
@@ -247,7 +233,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       collapsedLayout="icon"
       style={sidebarProviderStyle}
     >
-      <ProjectProjectionRetention />
       <Sidebar
         side="left"
         // Collapsing on desktop always folds to the icon rail; it never hides the sidebar.
@@ -264,14 +249,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           onResize: setSidebarWidth,
         }}
       >
-        {isOnSettings ? (
-          <>
-            <SidebarChromeHeader isElectron={isElectron} />
-            <SettingsSidebarNav pathname={pathname} />
-          </>
-        ) : (
-          <ThreadSidebar />
-        )}
+        <ThreadSidebar />
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
       {children}

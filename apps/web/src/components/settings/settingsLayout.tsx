@@ -12,7 +12,6 @@ import {
 } from "react";
 
 import { cn } from "../../lib/utils";
-import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -137,22 +136,27 @@ export function SettingsSection({
   const targetRef = useSettingsSearchTarget<HTMLElement>(sectionProps.id);
 
   return (
+    // Group title (and any header action) on the left, the group's rows in one card on the
+    // right. The card draws the dividers between rows; other content in it gets padding.
     <section
       {...sectionProps}
       ref={targetRef}
       tabIndex={sectionProps.id ? -1 : sectionProps.tabIndex}
-      className={cn("space-y-3", className)}
+      className={cn(
+        "grid gap-3 border-b border-border py-5 last:border-b-0 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8",
+        className,
+      )}
     >
-      <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
-        {/* The page's first section title is the page title; later sections are groups
-            within it and take a smaller heading. */}
-        <h2 className="flex items-center gap-2 text-xl font-semibold tracking-[-0.025em] text-foreground [section+section_&]:text-base [section+section_&]:tracking-normal">
+      <div className="flex flex-col items-start gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           {icon}
           {title}
         </h2>
-        <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
+        {headerAction}
       </div>
-      <div className="relative space-y-1 overflow-visible text-foreground">{children}</div>
+      <div className="relative min-w-0 divide-y divide-border overflow-visible rounded-xl border border-border bg-background text-foreground [&>*:not([data-settings-row])]:p-4">
+        {children}
+      </div>
     </section>
   );
 }
@@ -182,13 +186,7 @@ export function SettingsRow({
       ref={targetRef}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       data-settings-row=""
-      className={cn(
-        // A hairline sits between consecutive rows, inset to the text edge and centered in
-        // the section's row gap. Other section content (cards, lists) never gets one.
-        "relative rounded-xl px-3 sm:px-4 [[data-settings-row]+&]:before:pointer-events-none [[data-settings-row]+&]:before:absolute [[data-settings-row]+&]:before:inset-x-3 [[data-settings-row]+&]:before:-top-0.5 [[data-settings-row]+&]:before:h-px [[data-settings-row]+&]:before:bg-border sm:[[data-settings-row]+&]:before:inset-x-4",
-        children ? "pt-3.5 pb-1.5" : "py-3.5",
-        className,
-      )}
+      className={cn("relative px-4", children ? "pt-3 pb-1.5" : "py-3", className)}
     >
       <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8">
         <div className="min-w-0 flex-1 space-y-1">
@@ -248,15 +246,8 @@ export function SettingResetButton({
   );
 }
 
-export function SettingsPageContainer({
-  children,
-  className,
-  width = "readable",
-}: {
-  children: ReactNode;
-  className?: string;
-  width?: WorkspacePageWidth;
-}) {
+/** Scrolling body of a settings page inside the settings modal. */
+export function SettingsPageContainer({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const targetId = hash.replace(/^#/, "") || null;
@@ -266,19 +257,8 @@ export function SettingsPageContainer({
 
   return (
     <SettingsSearchTargetProvider targetId={targetId} onTargetHandled={clearTargetHash}>
-      <div
-        className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
-        data-settings-page-scroll
-      >
-        {/* Pages center in the area right of the settings nav. Readable pages cap the form
-            at 720px so each label stays close to its control; wider pages (diagnostics,
-            tables) opt out through `width`. */}
-        <WorkspacePageContainer
-          width={width}
-          className={cn("gap-8", width === "readable" && "max-w-[calc(45rem+3rem)]", className)}
-        >
-          {children}
-        </WorkspacePageContainer>
+      <div className="flex-1 overflow-y-auto px-7 pb-6" data-settings-page-scroll>
+        {children}
       </div>
     </SettingsSearchTargetProvider>
   );
