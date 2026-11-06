@@ -1,5 +1,14 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeZlib from "node:zlib";
+import { CAD_TRANSFER_BROTLI_CONTENT_TYPE } from "@cadsense/shared/cadTransfer";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 import { loadCadAssetDelivery } from "./CadAssetDelivery";
+
+vi.mock("brotli-dec-wasm/web/bg.wasm?url", async () => ({
+  default: (await import("node:fs")).readFileSync(
+    new URL("../../node_modules/brotli-dec-wasm/pkg/brotli_dec_wasm_bg.wasm", import.meta.url),
+  ),
+}));
 import { createCadAssetRangeCacheKey } from "./CadAssetRangeCache";
 
 const cache = vi.hoisted(() => {
@@ -247,9 +256,66 @@ it("uses the optimized representation and verifies reconstructed bytes", async (
   });
   expect(request.mock.calls.map(([path]) => path)).toEqual([
     "transfer-index",
-    `transfer?identity=${"a".repeat(64)}&start=0&end=9`,
+    `transfer?identity=${"a".repeat(64)}&start=0&end=9&decode=br`,
   ]);
   expect(read).toHaveBeenCalledTimes(1);
+});
+
+const brotliRange = (bytes: Uint8Array) =>
+  new Response(NodeZlib.brotliCompressSync(bytes), {
+    headers: {
+      "content-type": CAD_TRANSFER_BROTLI_CONTENT_TYPE,
+      "x-cad-bundle-range": `bytes 0-${bytes.length - 1}/${bytes.length}`,
+    },
+  });
+
+it("decodes Brotli ranges a plain-http page could not negotiate, and caches the decoded bytes", async () => {
+  const { hash, assets, envelope } = await fixture();
+  cache.useBackend = true;
+  const request = vi.fn(async (path: string) =>
+    path === "transfer-index" ? Response.json(envelope) : brotliRange(body),
+  );
+  const published: Uint8Array[] = [];
+  await loadCadAssetDelivery({
+    assets,
+    namespace,
+    signal: new AbortController().signal,
+    request,
+    load: async (reader) => {
+      published.push(new Uint8Array(await reader(hash)));
+    },
+    onProgress: () => {},
+  });
+  expect(published).toEqual([body]);
+  expect(request).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(cache.backend.entries.size).toBe(1));
+  expect(new Uint8Array([...cache.backend.entries.values()][0]!.bytes)).toEqual(body);
+});
+
+it("falls back to the original bundle when a client-decoded Brotli range is corrupt", async () => {
+  const { hash, assets, envelope } = await fixture();
+  const request = vi.fn(async (path: string) =>
+    path === "transfer-index"
+      ? Response.json(envelope)
+      : path.startsWith("transfer?")
+        ? new Response(new Uint8Array([1, 2, 3]), {
+            headers: { "content-type": CAD_TRANSFER_BROTLI_CONTENT_TYPE },
+          })
+        : new Response(body),
+  );
+  const published: Uint8Array[] = [];
+  await loadCadAssetDelivery({
+    assets,
+    namespace,
+    signal: new AbortController().signal,
+    request,
+    load: async (reader) => {
+      published.push(new Uint8Array(await reader(hash)));
+    },
+    onProgress: () => {},
+  });
+  expect(published).toEqual([body]);
+  expect(request.mock.calls.at(-1)?.[0]).toBe("bundle?start=0&end=9");
 });
 
 it("falls back to the original bundle and invalidates corrupt optimized bytes", async () => {

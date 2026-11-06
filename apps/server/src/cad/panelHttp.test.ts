@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { CadViewError, type CadSnapshotManifest } from "@cadsense/contracts";
+import { CAD_TRANSFER_BROTLI_CONTENT_TYPE } from "@cadsense/shared/cadTransfer";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
@@ -283,6 +284,21 @@ describe("CAD panel binary route", () => {
       const fallback = await request(range, true, "gzip");
       expect(fallback.headers.get("content-encoding")).toBe("gzip");
       expect(NodeZlib.gunzipSync(await fallback.arrayBuffer()).equals(payload)).toBe(true);
+      // A plain-http page cannot negotiate br, so it asks for the prepared bytes as they are.
+      const clientDecoded = await request(`${range}&decode=br`, true, "gzip, deflate");
+      expect(clientDecoded.status).toBe(200);
+      expect(clientDecoded.headers.get("content-encoding")).toBeNull();
+      expect(clientDecoded.headers.get("content-type")).toBe(CAD_TRANSFER_BROTLI_CONTENT_TYPE);
+      expect(clientDecoded.headers.get("x-cad-bundle-range")).toBe(
+        `bytes 0-${payload.byteLength - 1}/${payload.byteLength}`,
+      );
+      expect(NodeZlib.brotliDecompressSync(await clientDecoded.arrayBuffer()).equals(payload)).toBe(
+        true,
+      );
+      // A browser that negotiated br keeps the native decoder even when it also opted in.
+      const negotiated = await request(`${range}&decode=br`);
+      expect(negotiated.headers.get("content-encoding")).toBe("br");
+      expect(negotiated.headers.get("content-type")).not.toBe(CAD_TRANSFER_BROTLI_CONTENT_TYPE);
       expect((await request(`transfer?identity=${artifact.identity}&start=1&end=2`)).status).toBe(
         416,
       );

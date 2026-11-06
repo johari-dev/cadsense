@@ -1,6 +1,11 @@
 import { CAD_SCENE_LIMITS } from "./cadSceneBudget.ts";
 
 export const CAD_TRANSFER_VERSION = "meshopt-bin-v1" as const;
+/** A transfer range body that is still Brotli-compressed, for the client to decode itself.
+ * Browsers only advertise `br` over HTTPS or localhost, so a page opened at a plain-http
+ * address (a tailnet or LAN IP) opts in with `decode=br` instead. */
+export const CAD_TRANSFER_BROTLI_CONTENT_TYPE =
+  "application/vnd.cadsense.geometry-bundle+br" as const;
 export interface CadTransferSlice {
   readonly offset: number;
   readonly byteLength: number;
