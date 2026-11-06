@@ -32,6 +32,45 @@ export interface CadTransferIndex {
   readonly assets: readonly CadTransferAsset[];
   readonly bins: readonly CadTransferBin[];
 }
+type CadTransferSource = { readonly sha256: string };
+const distinct = <T extends CadTransferSource>(assets: readonly T[]): T[] => {
+  const seen = new Set<string>();
+  return assets.filter((asset) => !seen.has(asset.sha256) && seen.add(asset.sha256));
+};
+/**
+ * Names a subset of a manifest's distinct assets (first-seen order) as a hex bitmap, one bit per
+ * asset, least significant bit first. A browser sends it as `assets=` so the server prepares a
+ * transfer of only the geometry the browser does not already hold.
+ */
+export function encodeCadTransferSelection(
+  assets: readonly CadTransferSource[],
+  selected: ReadonlySet<string>,
+): string {
+  const unique = distinct(assets);
+  const bits = new Uint8Array(Math.ceil(unique.length / 8));
+  unique.forEach((asset, index) => {
+    if (selected.has(asset.sha256)) bits[index >> 3]! |= 1 << (index & 7);
+  });
+  return [...bits].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+/** The manifest's distinct assets a selection names, in manifest order. Throws unless the
+ * selection was made for this manifest and names at least one asset. */
+export function selectCadTransferAssets<T extends CadTransferSource>(
+  assets: readonly T[],
+  selection: string,
+): T[] {
+  const unique = distinct(assets);
+  const invalid = () => new Error("Invalid CAD transfer selection");
+  if (selection.length !== Math.ceil(unique.length / 8) * 2 || !/^[0-9a-f]*$/.test(selection))
+    throw invalid();
+  const bits = Uint8Array.from(selection.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
+  const tail = unique.length % 8;
+  if (tail !== 0 && bits[bits.length - 1]! >> tail !== 0) throw invalid();
+  const chosen = unique.filter((_, index) => (bits[index >> 3]! >> (index & 7)) & 1);
+  if (chosen.length === 0) throw invalid();
+  return chosen;
+}
+
 const invalid = () => new Error("Invalid CAD transfer index");
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();

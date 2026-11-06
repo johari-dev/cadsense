@@ -2,10 +2,12 @@ const DATABASE_NAME = "cadsense:cad-bundle-ranges";
 const DATABASE_VERSION = 1;
 const RANGE_STORE = "ranges";
 const METADATA_STORE = "metadata";
-const CACHE_KEY_ORIGIN = "https://cad-range-cache.invalid";
+export const CACHE_KEY_ORIGIN = "https://cad-range-cache.invalid";
 const RANGE_HEADER = "x-cad-bundle-range";
 
-export const DEFAULT_CAD_ASSET_RANGE_CACHE_BYTES = 512 * 1024 ** 2;
+// Shared by bundle ranges and content-addressed assets (CadAssetCache), which hold decoded
+// geometry: a full-detail robot is 200-330 MB of it.
+export const DEFAULT_CAD_ASSET_RANGE_CACHE_BYTES = 1024 ** 3;
 export const DEFAULT_CAD_ASSET_RANGE_CACHE_WRITES = 4;
 // Four concurrent 4 MiB reads can exceed 250 ms while the full scene is parsing.
 // Allow disk reuse without letting unavailable storage block loading indefinitely.
@@ -211,7 +213,8 @@ async function readBeforeTimeout(
   }
 }
 
-function queueMutation(backend: CadAssetRangeCacheBackend, operation: () => Promise<void>) {
+/** Serializes writes and deletes per backend, so budget checks see each other's results. */
+export function queueMutation(backend: CadAssetRangeCacheBackend, operation: () => Promise<void>) {
   const previous = mutationQueues.get(backend) ?? Promise.resolve();
   const next = previous.catch(() => {}).then(operation);
   mutationQueues.set(backend, next);
@@ -277,7 +280,8 @@ function createWritePermits(
   };
 }
 
-async function storeWithinBudget(
+/** Stores `entry`, first evicting the least recently used entries of any kind to fit `maxBytes`. */
+export async function storeWithinBudget(
   backend: CadAssetRangeCacheBackend,
   key: string,
   entry: CadAssetRangeCacheEntry,
@@ -553,6 +557,6 @@ export function createIndexedDbCadAssetRangeBackend(
   };
 }
 
-function getSharedIndexedDbBackend() {
+export function getSharedIndexedDbBackend() {
   return (sharedIndexedDbBackend ??= createIndexedDbCadAssetRangeBackend());
 }

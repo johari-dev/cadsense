@@ -7,7 +7,10 @@ import * as NodePath from "node:path";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { CadViewError, type CadSnapshotManifest } from "@cadsense/contracts";
-import { CAD_TRANSFER_BROTLI_CONTENT_TYPE } from "@cadsense/shared/cadTransfer";
+import {
+  CAD_TRANSFER_BROTLI_CONTENT_TYPE,
+  encodeCadTransferSelection,
+} from "@cadsense/shared/cadTransfer";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
@@ -19,6 +22,7 @@ import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { ServerConfig } from "../config.ts";
 import { preparedCadTransfers } from "./CadPreparedTransfer.ts";
 import { routeLayer } from "./panelHttp.ts";
+import { cadTransferIdentity } from "./CadTransferArtifacts.ts";
 
 const sceneId = "00000000-0000-4000-8000-000000000001";
 const token = "00000000-0000-4000-8000-000000000002";
@@ -306,6 +310,103 @@ describe("CAD panel binary route", () => {
       expect((await request("transfer-index")).status).toBe(200);
       expect(reads).toBe(preparedReads);
       expect(sourcePins).toBe(1);
+    } finally {
+      await app.dispose();
+      await removeTestState(stateDir);
+    }
+  });
+
+  it("prepares and serves a transfer of only the assets the client selects", async () => {
+    const stateDir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cad-transfer-http-"));
+    const kept = new Uint8Array(32 * 1024).fill(3);
+    const changed = new Uint8Array(48 * 1024).fill(9);
+    const bytes = new Map(
+      [kept, changed].map((body) => [
+        NodeCrypto.createHash("sha256").update(body).digest("hex"),
+        body,
+      ]),
+    );
+    const [keptHash, changedHash] = [...bytes.keys()] as [string, string];
+    const snapshot = {
+      ...manifest,
+      assets: [...bytes].map(([sha256, body]) => ({
+        ...manifest.assets[0]!,
+        sha256,
+        byteLength: body.byteLength,
+        relativePath: `${sha256}.glb`,
+      })),
+    };
+    const read = (sha256: string) => Effect.succeed(bytes.get(sha256)!);
+    const panel = CadPanel.of({
+      watch: () => Stream.empty,
+      scene: () => Stream.empty,
+      releaseProject: () => Effect.void,
+      read: (ticket) =>
+        Effect.succeed({
+          cancel: undefined as never,
+          released: undefined as never,
+          ticket,
+          manifest: snapshot,
+          readAsset: read,
+        }),
+    });
+    const unused = () => Effect.die("Unexpected store operation");
+    const sourceStore = CadSnapshotStore.of({
+      checkReserve: unused,
+      findGeometry: unused,
+      putAsset: unused,
+      putThumbnail: unused,
+      publish: unused,
+      load: unused,
+      readAsset: unused,
+      list: unused,
+      remove: unused,
+      withAcquisition: (effect) => effect,
+      withPinned: (_id, use) => use(snapshot, read),
+    });
+    const app = HttpRouter.toWebHandler(
+      routeLayer.pipe(
+        Layer.provideMerge(Layer.succeed(CadPanel, panel)),
+        Layer.provideMerge(Layer.succeed(CadSnapshotStore, sourceStore)),
+        Layer.provideMerge(Layer.succeed(ServerConfig, { stateDir } as ServerConfig["Service"])),
+        Layer.provideMerge(NodeHttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
+      ),
+      { disableLogger: true },
+    );
+    const request = (path: string) =>
+      app.handler(
+        new Request(`http://localhost/api/cad-panel/${sceneId}/${path}`, {
+          headers: { "x-cad-panel-token": token, "accept-encoding": "br" },
+        }),
+      );
+    try {
+      const selection = encodeCadTransferSelection(snapshot.assets, new Set([changedHash]));
+      const indexResponse = await request(`transfer-index?assets=${selection}`);
+      expect(indexResponse.status).toBe(200);
+      const artifact = (await indexResponse.json()) as {
+        identity: string;
+        index: { byteLength: number; assets: { sha256: string }[] };
+      };
+      expect(artifact.index.assets.map((asset) => asset.sha256)).toEqual([changedHash]);
+      expect(artifact.identity).toBe(cadTransferIdentity([snapshot.assets[1]!]));
+      const range = `transfer?identity=${artifact.identity}&start=0&end=${artifact.index.byteLength - 1}`;
+      const selected = await request(`${range}&assets=${selection}`);
+      expect(selected.status).toBe(200);
+      expect(selected.headers.get("x-cad-bundle-range")).toBe(
+        `bytes 0-${artifact.index.byteLength - 1}/${artifact.index.byteLength}`,
+      );
+      // The range is checked against the assets it names; without the selection it is unknown.
+      expect((await request(range)).status).toBe(404);
+      // The full transfer is a different artifact that still holds every asset.
+      const full = (await (await request("transfer-index")).json()) as {
+        identity: string;
+        index: { assets: { sha256: string }[] };
+      };
+      expect(full.identity).not.toBe(artifact.identity);
+      expect(full.index.assets.map((asset) => asset.sha256)).toEqual([keptHash, changedHash]);
+      for (const invalid of ["zz", "00", "0f", `${selection}00`])
+        expect((await request(`transfer-index?assets=${invalid}`)).status).toBe(400);
+      expect((await request(`${range}&assets=00`)).status).toBe(400);
     } finally {
       await app.dispose();
       await removeTestState(stateDir);
