@@ -264,15 +264,20 @@ const OnshapeLayerLive = OnshapeProjects.layer.pipe(
 
 const CadSnapshotStoreLayerLive = CadSnapshotStore.layer.pipe(Layer.provide(PersistenceLayerLive));
 
+// One instance server-wide, shared by reference: it holds the only SolidWorks bridge slot.
+const LocalCadImportLayerLive = LocalCadImport.layer.pipe(
+  Layer.provide(WorkspacePaths.layer),
+  Layer.provide(SolidWorksBridge.layer),
+  Layer.provide(CadSnapshotStoreLayerLive),
+);
 const CadAcquisitionLayerLive = Layer.mergeAll(
   OnshapeSnapshotAcquisition.layer,
-  LocalCadImport.layer.pipe(
-    Layer.provide(WorkspacePaths.layer),
-    Layer.provide(SolidWorksBridge.layer),
-  ),
+  LocalCadImportLayerLive,
 ).pipe(Layer.provideMerge(CadSnapshotStoreLayerLive), Layer.provideMerge(OnshapeCadRoots.layer));
 const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadViewing.layer),
+  // cad_context compares a local file on disk with the model the agent reviews.
+  Layer.provideMerge(LocalCadImportLayerLive),
   Layer.provideMerge(CadDriveCatalog.layer),
   Layer.provideMerge(CadComments.layer),
   Layer.provideMerge(ClaudeCadCapabilities.layer),

@@ -177,6 +177,7 @@ const harness = Effect.fn(function* (options?: {
       // A failed local sync rescans the folder; a missing folder keeps the outcome catalog-free.
       catalog: () => Effect.fail(new LocalCadError({ reason: "folder-not-found" })),
       acquire: () => (options?.localImportFails ? Effect.fail(options.localImportFails) : unused()),
+      sourceStatus: unused,
     }),
     Layer.succeed(CadProjectQuiescence, {
       confirm: () =>

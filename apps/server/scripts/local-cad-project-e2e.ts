@@ -233,6 +233,8 @@ const panel = page.getByRole("region", { name: "CAD panel" });
 // A local file is the only model, so its name is a heading rather than a scene picker, and the
 // heading is a button that opens the file.
 const syncButton = page.getByRole("button", { name: "Sync", exact: true });
+// The same button once the linked file changed on disk since its import.
+const syncChangesButton = page.getByRole("button", { name: "Sync changes", exact: true });
 const sceneTitle = page.getByRole("button", { name: stepName, exact: true });
 // The right panel opens on the CAD view. Opens it unless it is already open.
 const openRightPanel = async (page: Page) => {
@@ -451,17 +453,28 @@ try {
   await run("re-exported-and-synced", async (page) => {
     // A new export of the same model: different bytes, same structure.
     const file = NodePath.join(folder, stepName);
+    // Back from the CAD program: the window regains focus, and the panel checks the file again.
+    // A string, since this script type-checks without the DOM library.
+    const refocus = () => page.evaluate('window.dispatchEvent(new Event("focus"))');
+    await refocus();
+    await page.waitForTimeout(1000);
+    if (await syncChangesButton.isVisible())
+      throw new Error("Sync offered changes before the file changed");
     NodeFS.writeFileSync(
       file,
       NodeFS.readFileSync(file, "utf8").replace("FILE_NAME(", "FILE_NAME( /* re-export */ "),
     );
+    await refocus();
+    await syncChangesButton.waitFor({ timeout: 30_000 });
     const before = new Set(manifests());
-    await syncButton.click();
+    await syncChangesButton.click();
     // The import can finish before "Importing…" renders, so watch the snapshot store instead.
     const created = await waitFor("the re-imported snapshot", () =>
       manifests().find((name) => !before.has(name)),
     );
+    // The new snapshot matches the file, so the prompt goes back to the plain icon.
     await syncButton.waitFor({ timeout: 120_000 });
+    await syncChangesButton.waitFor({ state: "detached", timeout: 30_000 });
     await page.waitForTimeout(5000);
     const revision = (name: string) =>
       (

@@ -8,6 +8,9 @@ import type {
   CadSnapshotPart,
   CadSnapshotRoot,
   LocalCadError,
+  LocalCadSourceStatus,
+  OnshapeWorkspaceId,
+  OrchestrationProjectShell,
   ProjectId,
 } from "@cadsense/contracts";
 import {
@@ -40,6 +43,7 @@ import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import {
   MAX_LOCAL_CAD_FILE_BYTES,
   localCadCatalog,
+  localCadElementId,
   localCadFilesMicroversionId,
   localCadRootIdentity,
   resolveLocalCadFile,
@@ -107,8 +111,26 @@ export class LocalCadImport extends Context.Service<
     readonly acquire: (
       input: LocalCadImportInput,
     ) => Effect.Effect<CadSnapshotManifest, LocalCadImportFailure>;
+    /**
+     * Whether the files behind one root of a local project still hash to its current snapshot's
+     * revision, the way `acquire` hashes them. Read only, so it is safe while an import or agent
+     * runs. The CAD panel asks on open and on focus, and `cad_context` tells the agent.
+     */
+    readonly sourceStatus: (
+      project: LocalCadSourceProject,
+      rootId: string,
+    ) => Effect.Effect<LocalCadSourceStatus>;
   }
 >()("@cadsense/server/localCad/LocalCadImport") {}
+
+/** The parts of a project shell that `sourceStatus` reads. */
+export type LocalCadSourceProject = Pick<
+  OrchestrationProjectShell,
+  "workspaceRoot" | "localCadSource" | "cad"
+>;
+
+/** Revisions remembered per file set, keyed by each file's path, size, and mtime. */
+const MAX_CACHED_REVISIONS = 64;
 
 const toSrgbByte = (linear: number) => {
   const value = Math.min(1, Math.max(0, linear));
@@ -629,7 +651,67 @@ export const make = Effect.gen(function* () {
     return manifest;
   });
 
+  const revisions = new Map<string, OnshapeWorkspaceId>();
+  /**
+   * The revision `acquire` would give the files on disk now. Bytes are hashed again only when a
+   * file's size or mtime moved, so checking on every window focus stays cheap. A rewrite that keeps
+   * both is missed until something else changes them.
+   */
+  const diskRevision = Effect.fn("LocalCadImport.diskRevision")(function* (
+    workspaceRoot: string,
+    filePath: string,
+  ) {
+    const file = yield* withFiles(resolveLocalCadFile({ workspaceRoot, filePath }));
+    const sources = yield* sourceFiles(workspaceRoot, file);
+    const stats = yield* Effect.forEach(sources, (source) =>
+      fileSystem.stat(source.absolutePath).pipe(Effect.mapError(unreadable)),
+    );
+    const key = sources
+      .map(
+        (source, index) =>
+          `${source.absolutePath}\0${stats[index]!.size}\0${
+            Option.getOrNull(stats[index]!.mtime)?.getTime() ?? ""
+          }`,
+      )
+      .join("\n");
+    const cached = revisions.get(key);
+    if (cached) return cached;
+    const byteLength = sources.reduce((total, source) => total + source.byteLength, 0);
+    if (byteLength > MAX_LOCAL_CAD_FILE_BYTES)
+      return yield* new LocalCadImportError({ reason: "too-large" });
+    const files = yield* Effect.forEach(sources, (source) =>
+      fileSystem.readFile(source.absolutePath).pipe(
+        Effect.map((bytes) => ({ path: source.path, bytes })),
+        Effect.mapError(unreadable),
+      ),
+    );
+    const revision = localCadFilesMicroversionId(files);
+    if (revisions.size >= MAX_CACHED_REVISIONS) revisions.delete(revisions.keys().next().value!);
+    revisions.set(key, revision);
+    return revision;
+  });
+
+  const sourceStatus = Effect.fn("LocalCadImport.sourceStatus")(function* (
+    project: LocalCadSourceProject,
+    rootId: string,
+  ) {
+    const root = project.cad?.roots.find((entry) => entry.rootId === rootId);
+    if (!project.localCadSource || !root?.current) return "unavailable" as const;
+    // A local root's element is a hash of its file's path, and the catalog lists every file.
+    const filePath = [
+      project.localCadSource.filePath,
+      ...(project.cad?.catalog?.roots.map((entry) => entry.name) ?? []),
+    ].find((candidate) => localCadElementId(candidate) === root.elementId);
+    if (!filePath) return "unavailable" as const;
+    const revision = yield* diskRevision(project.workspaceRoot, filePath).pipe(Effect.option);
+    if (Option.isNone(revision)) return "unavailable" as const;
+    return revision.value === root.current.microversionId
+      ? ("unchanged" as const)
+      : ("changed" as const);
+  });
+
   return LocalCadImport.of({
+    sourceStatus,
     catalog: ({ workspaceRoot, defaultFilePath }) =>
       withFiles(scanLocalCadFiles(workspaceRoot)).pipe(
         Effect.map(({ files }) => localCadCatalog(files, defaultFilePath)),

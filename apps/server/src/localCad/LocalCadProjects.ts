@@ -6,6 +6,8 @@ import {
   type LocalCadProjectCreateInput,
   type LocalCadProjectCreateResult,
   type LocalCadProjectSetFileInput,
+  type LocalCadSourceCheckInput,
+  type LocalCadSourceCheckResult,
   type ModelSelection,
 } from "@cadsense/contracts";
 import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
@@ -22,6 +24,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
 import { localCadElementId, resolveLocalCadFile, scanLocalCadFiles } from "./LocalCadFiles.ts";
+import { LocalCadImport } from "./LocalCadImport.ts";
 
 export interface LocalCadProjectCreate extends LocalCadProjectCreateInput {
   readonly defaultModelSelection?: ModelSelection | null;
@@ -49,6 +52,13 @@ export class LocalCadProjects extends Context.Service<
     readonly setFile: (
       input: LocalCadProjectSetFileInput,
     ) => Effect.Effect<LocalCadProjectCreateResult, LocalCadError>;
+    /**
+     * Whether a root's file changed on disk since its current snapshot, so the CAD panel can offer
+     * Sync. Never fails: anything it cannot compare is "unavailable".
+     */
+    readonly checkSource: (
+      input: LocalCadSourceCheckInput,
+    ) => Effect.Effect<LocalCadSourceCheckResult>;
   }
 >()("@cadsense/server/localCad/LocalCadProjects") {}
 
@@ -56,6 +66,7 @@ export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const query = yield* ProjectionSnapshotQuery;
   const operations = yield* CadUserOperations;
+  const localImport = yield* LocalCadImport;
   const workspacePaths = yield* WorkspacePaths;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -160,7 +171,17 @@ export const make = Effect.gen(function* () {
     return { projectId: input.projectId };
   });
 
-  return LocalCadProjects.of({ listFiles, create, setFile });
+  const checkSource = Effect.fn("LocalCadProjects.checkSource")(function* (
+    input: LocalCadSourceCheckInput,
+  ) {
+    const project = yield* query
+      .getProjectShellById(input.projectId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    if (Option.isNone(project)) return { status: "unavailable" as const };
+    return { status: yield* localImport.sourceStatus(project.value, input.rootId) };
+  });
+
+  return LocalCadProjects.of({ listFiles, create, setFile, checkSource });
 });
 
 export const layer = Layer.effect(LocalCadProjects, make);

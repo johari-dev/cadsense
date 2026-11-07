@@ -3,6 +3,7 @@ import {
   isSolidWorksFile,
   type CadProjectState,
   type CadUserStartInput,
+  type LocalCadSourceStatus,
 } from "@cadsense/contracts";
 import {
   isAtomCommandInterrupted,
@@ -21,6 +22,7 @@ import { useClientSettings } from "../hooks/useSettings";
 import { cadProgressEnvironment } from "../state/cadProgress";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useThreadShells } from "../state/entities";
+import { localCadProjectEnvironment } from "../state/localCadProjects";
 import { onshapeProjectEnvironment } from "../state/onshapeProjects";
 import { useAtomCommand } from "../state/use-atom-command";
 import type { Project } from "../types";
@@ -117,8 +119,53 @@ function CadSyncProgressToast({
 }
 
 /**
+ * Asks the server whether the local file behind `rootId` changed on disk since its current snapshot.
+ * Checks when the shown snapshot changes and whenever the window comes back into focus, which is
+ * when someone returns from saving in their CAD program. The answer belongs to the snapshot it was
+ * asked about, so a sync never shows the previous snapshot's answer. Null for Onshape projects.
+ */
+function useLocalSourceStatus(
+  project: Project,
+  rootId: string | null,
+): LocalCadSourceStatus | null {
+  const check = useAtomCommand(localCadProjectEnvironment.checkSource, { reportFailure: false });
+  const snapshotId =
+    project.cad?.roots.find((entry) => entry.rootId === rootId)?.current?.snapshotId ?? null;
+  const local = project.localCadSource !== undefined;
+  const [answer, setAnswer] = useState<{
+    snapshotId: string;
+    status: LocalCadSourceStatus;
+  } | null>(null);
+  useEffect(() => {
+    if (!local || !rootId || !snapshotId) return;
+    let stale = false;
+    const run = async () => {
+      const result = await check({
+        environmentId: project.environmentId,
+        input: { projectId: project.id, rootId },
+      });
+      if (!stale && result._tag === "Success")
+        setAnswer({ snapshotId, status: result.value.status });
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void run();
+    };
+    void run();
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stale = true;
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [check, local, project.environmentId, project.id, rootId, snapshotId]);
+  return answer?.snapshotId === snapshotId ? answer.status : null;
+}
+
+/**
  * Syncs the CAD the panel shows with one click: downloads it again from Onshape, or re-imports a
- * local file after it was re-exported (a SolidWorks file converts with SolidWorks again). It is
+ * local file after it was re-exported (a SolidWorks file converts with SolidWorks again). When a
+ * local file changed on disk since its import, the button reads "Sync changes" in the accent color. It is
  * disabled while any chat in the project runs, as the server would refuse the sync, and its tooltip
  * names those chats. While an Onshape sync runs, a loading toast shows its step. Once the server
  * records the outcome of a sync it started, that toast (a new one for a local file) says whether
@@ -145,6 +192,7 @@ export function CadSyncButton({
   });
   const threads = useThreadShells();
   const showApiCalls = useClientSettings((settings) => settings.showOnshapeSyncApiCalls);
+  const sourceStatus = useLocalSourceStatus(project, rootId);
   // The operation this button started, until the server records its outcome.
   const [started, setStarted] = useState<
     | {
@@ -307,6 +355,9 @@ export function CadSyncButton({
   const solidWorks = project.localCadSource !== undefined && isSolidWorksFile(name);
   const syncing = cad?.operation?.kind === "sync" || started?.kind === "discover";
   const blocker = cadSyncBlocker(project, threads);
+  const changed = !syncing && sourceStatus === "changed";
+  // The accent label marks a sync the panel is asking for: the first one, or a changed file.
+  const highlighted = !syncing && (prompted || changed);
   return (
     <>
       {started?.kind === "sync" && started.toastId ? (
@@ -321,16 +372,17 @@ export function CadSyncButton({
         {/* A disabled button gets no pointer events, so the span carries the tooltip. */}
         <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
           {/* A muted icon beside the model name, like the header's other controls. It shows a
-            label while it runs, and an accent "Sync" label while the empty state points at it. */}
+            label while it runs, and an accent label while the empty state points at it ("Sync")
+            or the local file changed on disk ("Sync changes"). */}
           <Button
-            size={syncing || prompted ? "xs" : "icon-xs"}
+            size={syncing || highlighted ? "xs" : "icon-xs"}
             variant="ghost-muted"
             className={
-              prompted && !syncing
+              highlighted
                 ? "[--control-icon-color:currentColor] bg-(--accent-text)/14 text-(--accent-text) [:hover,[data-pressed]]:bg-(--accent-text)/22 [:hover,[data-pressed]]:text-(--accent-text)"
                 : undefined
             }
-            aria-label={syncing || prompted ? undefined : "Sync"}
+            aria-label={syncing || highlighted ? undefined : "Sync"}
             disabled={disabled || blocker !== null}
             onClick={() => void (root ? sync(root) : discover())}
           >
@@ -341,18 +393,22 @@ export function CadSyncButton({
                   ? "Converting…"
                   : "Importing…"
                 : "Syncing…"
-              : prompted
-                ? "Sync"
-                : null}
+              : changed
+                ? "Sync changes"
+                : prompted
+                  ? "Sync"
+                  : null}
           </Button>
         </TooltipTrigger>
         <TooltipPopup>
           {blocker ??
-            (!project.localCadSource
-              ? `Download ${name} from Onshape${root && currentVersion(root) ? " again" : ""}`
-              : solidWorks
-                ? `Convert ${name} with SolidWorks again after saving it`
-                : `Import ${name} again after re-exporting it`)}
+            (changed
+              ? `${name} changed on disk since it was imported. Sync to import the new version.`
+              : !project.localCadSource
+                ? `Download ${name} from Onshape${root && currentVersion(root) ? " again" : ""}`
+                : solidWorks
+                  ? `Convert ${name} with SolidWorks again after saving it`
+                  : `Import ${name} again after re-exporting it`)}
         </TooltipPopup>
       </Tooltip>
     </>

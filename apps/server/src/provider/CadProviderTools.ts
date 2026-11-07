@@ -59,7 +59,7 @@ const descriptions = {
     "Check every result: tool completion does not mean publication succeeded. For invalid-input, correct the fields identified in details and retry; failed items did not publish. Retry identical successful requests with stable publicationKey values. Empty holes alone do not prove screws are required: describe the evidence and uncertainty accurately.",
   ].join(" "),
   cad_context:
-    "Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools.",
+    'Read your private CAD view revision, state, and locally available scene roots. Start CAD reviews here and inspect the downloaded model with the CAD tools. For a local CAD file, localFileStatus "changed" means the file on disk was saved or re-exported after this model was imported: say so before reviewing, and ask the user to press Sync in the CAD panel once you finish, since CAD cannot sync while you run.',
   cad_hierarchy:
     "Read a bounded page of the selected CAD component tree with occurrence visibility. Input: {parentOccurrenceId?, cursor?, limit?}; omit parentOccurrenceId for the top level. Every entry on a page is a direct child of the page's parentOccurrenceId. A page may hold fewer entries than limit to stay small, so follow nextCursor. Part entries include material and massKg when the CAD source records them; a missing massKg means unknown, not zero. Mass is per occurrence, so sum parts yourself and say which have no mass.",
   cad_checks: [

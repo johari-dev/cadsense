@@ -85,6 +85,8 @@ import {
   LocalCadProjectCreateInput,
   LocalCadProjectCreateResult,
   LocalCadProjectSetFileInput,
+  LocalCadSourceCheckInput,
+  LocalCadSourceCheckResult,
 } from "./localCad.ts";
 import {
   ProviderUploadFeedbackError,
@@ -192,6 +194,7 @@ export const WS_METHODS = {
   localCadFilesList: "localCad.files.list",
   localCadProjectsCreate: "localCad.projects.create",
   localCadProjectsSetFile: "localCad.projects.setFile",
+  localCadSourceCheck: "localCad.source.check",
   cadUserStart: "cad.user.start",
   cadUserCancel: "cad.user.cancel",
   cadUserSetEnabled: "cad.user.setEnabled",
@@ -505,6 +508,12 @@ export const WsLocalCadProjectsSetFileRpc = Rpc.make(WS_METHODS.localCadProjects
   error: Schema.Union([LocalCadError, EnvironmentAuthorizationError]),
 });
 
+export const WsLocalCadSourceCheckRpc = Rpc.make(WS_METHODS.localCadSourceCheck, {
+  payload: LocalCadSourceCheckInput,
+  success: LocalCadSourceCheckResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsCadUserStartRpc = Rpc.make(WS_METHODS.cadUserStart, {
   payload: CadUserStartInput,
   success: CadUserStartResult,
@@ -788,6 +797,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsLocalCadFilesListRpc,
   WsLocalCadProjectsCreateRpc,
   WsLocalCadProjectsSetFileRpc,
+  WsLocalCadSourceCheckRpc,
   WsCadUserStartRpc,
   WsCadRenderConnectRpc,
   WsCadPanelWatchRpc,

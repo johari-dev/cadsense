@@ -747,6 +747,58 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
       }).pipe(Effect.scoped),
   );
 
+  it.effect(
+    "says when the linked file changed on disk since its snapshot, until it is synced",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const projects = yield* LocalCadProjects;
+        const root = yield* makeFolder();
+        const projectId = ProjectId.make("local-cad-source-check");
+        yield* projects.create({
+          projectId,
+          title: "Bracket",
+          workspaceRoot: root,
+          filePath: "models/dm1.step",
+        });
+        const imported = yield* settle(projectId);
+        const rootId = imported.cad!.roots[0]!.rootId;
+        const check = () =>
+          projects.checkSource({ projectId, rootId }).pipe(Effect.map((r) => r.status));
+        assert.strictEqual(yield* check(), "unchanged");
+
+        // Saved again with the same bytes: a new mtime alone is not a change.
+        const file = path.join(root, "models/dm1.step");
+        const later = DateTime.toDate(DateTime.add(yield* DateTime.now, { minutes: 1 }));
+        yield* fs.utimes(file, later, later);
+        assert.strictEqual(yield* check(), "unchanged");
+
+        const text = yield* fs.readFileString(file);
+        yield* fs.writeFileString(file, text.replace("FILE_NAME(", "FILE_NAME( /* re-export */ "));
+        assert.strictEqual(yield* check(), "changed");
+
+        // Sync imports the same bytes the check hashed, so the prompt clears.
+        yield* sync(imported, "models/dm1.step");
+        assert.strictEqual(yield* check(), "unchanged");
+
+        // A root with no snapshot, an unknown root, and a missing file have nothing to compare.
+        const broken = yield* sync(yield* settle(projectId), "parts/broken.STP");
+        const brokenRoot = broken.cad!.roots.find((entry) => entry.current === null);
+        assert.isDefined(brokenRoot);
+        assert.strictEqual(
+          (yield* projects.checkSource({ projectId, rootId: brokenRoot!.rootId })).status,
+          "unavailable",
+        );
+        assert.strictEqual(
+          (yield* projects.checkSource({ projectId, rootId: "0".repeat(64) })).status,
+          "unavailable",
+        );
+        yield* fs.remove(file);
+        assert.strictEqual(yield* check(), "unavailable");
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("fails a corrupt or missing file without touching the current snapshot", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

@@ -16,6 +16,7 @@ import { CadHash, CadSnapshotId, CadSnapshotNode } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
 import { OnshapeWorkspaceId } from "./onshape.ts";
+import { LocalCadSourceStatus } from "./localCad.ts";
 
 export const CadHierarchyInput = Schema.Struct({
   parentOccurrenceId: Schema.optionalKey(CadHash),
@@ -206,6 +207,11 @@ export const CadContextResult = Schema.Struct({
       kind: Schema.Literals(["assembly", "part-studio"]),
     }),
   ),
+  /**
+   * For a local CAD file only: whether the file on disk still matches the shown snapshot. When it
+   * is "changed", the model is older than the file and the user has to press Sync to import it.
+   */
+  localFileStatus: Schema.optionalKey(LocalCadSourceStatus),
 });
 export const CadCaptureInput = Schema.Struct({
   expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
