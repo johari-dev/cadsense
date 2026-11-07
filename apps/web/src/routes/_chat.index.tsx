@@ -24,8 +24,11 @@ function ChatIndexRouteView() {
  * recently active project, so the first screen is a prompt instead of a dead
  * end. Shows onboarding (connect an AI reviewer, add CAD, import it)
  * when no project exists yet, or when the only one is still in its first
- * import (`needsOnboarding`). The choice is made once the shells load and then
- * kept, so onboarding stays up after its project exists until the user opens it.
+ * import (`needsOnboarding`). Once this screen has shown that first import
+ * running, onboarding stays up after the import finishes, so the student sees
+ * it done and opens the project themselves. A project that loads already
+ * imported (shells can report bootstrapped a moment before projects arrive)
+ * goes straight to its chat.
  */
 function IndexDraftLanding() {
   const projects = useProjects();
@@ -34,11 +37,11 @@ function IndexDraftLanding() {
   const handleNewThread = useNewThreadHandler();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
-  const [landing, setLanding] = useState<"onboarding" | "draft" | null>(null);
-  // Losing every project (say, removing the last one) returns to onboarding too.
-  if (bootstrapped && (landing === null || (projects.length === 0 && landing === "draft"))) {
-    setLanding(needsOnboarding(projects, threads) ? "onboarding" : "draft");
-  }
+  const needsSetup = bootstrapped && needsOnboarding(projects, threads);
+  // Set when onboarding shows a project whose first import has not finished.
+  const [watchedImport, setWatchedImport] = useState(false);
+  if (needsSetup && projects.length > 0 && !watchedImport) setWatchedImport(true);
+  const landing = !bootstrapped ? null : needsSetup || watchedImport ? "onboarding" : "draft";
 
   const mostRecentProject = useMemo(() => {
     if (!bootstrapped) return null;
