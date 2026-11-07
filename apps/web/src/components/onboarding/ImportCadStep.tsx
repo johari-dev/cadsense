@@ -8,7 +8,7 @@ import {
   type CadUserStartInput,
 } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ElapsedClock } from "../../cad/CadOperationComposerBanner";
 import { refusedDescription } from "../../cad/CadSyncButton";
@@ -115,7 +115,7 @@ export function ImportCadStep({ project }: { readonly project: Project }) {
             {failure}
           </StepRow>
         </div>
-        <StartError message={startError} />
+        <StartError message={startError} retry={stage.kind === "starting" ? retry : null} />
       </>
     );
   }
@@ -177,20 +177,29 @@ export function ImportCadStep({ project }: { readonly project: Project }) {
           }
         />
       ) : null}
-      <StartError message={startError} />
+      <StartError message={startError} retry={stage.kind === "starting" ? retry : null} />
     </>
   );
 }
 
-function StartError({ message }: { readonly message: string | null }) {
+/**
+ * Why the server refused to start the import. `retry` shows when nothing else on screen can start
+ * it again: an automatic start that was refused leaves the step idle, and it starts only once.
+ */
+function StartError({
+  message,
+  retry,
+}: {
+  readonly message: string | null;
+  readonly retry: ReactNode;
+}) {
   return message === null ? null : (
-    <p
-      key={message}
-      role="alert"
-      className="onboarding-swap mt-2 text-destructive-foreground text-xs"
-    >
-      {message}
-    </p>
+    <div key={message} className="onboarding-swap">
+      <p role="alert" className="mt-2 text-destructive-foreground text-xs">
+        {message}
+      </p>
+      {retry}
+    </div>
   );
 }
 
