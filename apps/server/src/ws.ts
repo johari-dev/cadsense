@@ -766,6 +766,20 @@ const makeWsRpcLayer = (
               // provider sessions under the reused thread id.
               yield* threadDeletionReactor.drainThrough(created.sequence);
               createdThread = true;
+              // Carry the draft's CAD view into the thread before the agent's turn can read it.
+              // A stale or rejected view only costs the user their framing, so the turn still runs.
+              const cadUserView = bootstrap.createThread.cadUserView;
+              if (cadUserView)
+                yield* cadViewing
+                  .saveUserView(command.threadId, null, { ...cadUserView, revision: 0 })
+                  .pipe(
+                    Effect.catch((error) =>
+                      Effect.logWarning("bootstrap CAD view was not saved", {
+                        threadId: command.threadId,
+                        reason: error.reason,
+                      }),
+                    ),
+                  );
             }
 
             return yield* dispatchFromClient(finalTurnStartCommand);
@@ -937,7 +951,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.cadReviewLearningRemove]: (input) =>
           observeRpcEffect(WS_METHODS.cadReviewLearningRemove, cadComments.removeLearning(input)),
         [WS_METHODS.cadPanelWatch]: (input) =>
-          observeRpcStream(WS_METHODS.cadPanelWatch, cadPanel.watch(input.threadId)),
+          observeRpcStream(
+            WS_METHODS.cadPanelWatch,
+            cadPanel.watch(input.threadId, input.projectId),
+          ),
         [WS_METHODS.cadStorageWatch]: () =>
           observeRpcStream(WS_METHODS.cadStorageWatch, cadStorage.watch),
         [WS_METHODS.cadStorageRun]: (input) =>
@@ -947,7 +964,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.cadPanelScene]: (input) =>
           observeRpcStream(
             WS_METHODS.cadPanelScene,
-            cadPanel.scene(input.threadId, input.snapshotId),
+            cadPanel.scene(input.threadId, input.snapshotId, input.projectId),
           ),
         [WS_METHODS.featureScriptPreview]: (input) =>
           observeRpcEffect(

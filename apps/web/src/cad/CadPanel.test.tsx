@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  ProjectId,
   ThreadId,
   CadSnapshotManifest,
   type CadViewState,
@@ -81,6 +82,17 @@ vi.mock("./CadCommentsCard", () => ({
 }));
 vi.mock("./CadPanel.css", () => ({}));
 vi.mock("./useCadActivityIndicator", () => ({ useCadActivityIndicator: () => false }));
+vi.mock("./cadDraftViewStore", async (original) => {
+  const actual = await original<typeof import("./cadDraftViewStore")>();
+  const store = actual.useCadDraftViewStore;
+  return {
+    ...actual,
+    useCadDraftViewStore: Object.assign(
+      <T,>(selector: (state: ReturnType<typeof store.getState>) => T) => selector(store.getState()),
+      store,
+    ),
+  };
+});
 vi.mock("./cadCommentReviewStore", async (original) => {
   const actual = await original<typeof import("./cadCommentReviewStore")>();
   const store = actual.useCadCommentReviewStore;
@@ -220,6 +232,7 @@ const harness = (
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   const props: Parameters<typeof CadScene>[0] = {
     threadRef: { environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("thread") },
+    projectId: ProjectId.make("project"),
     view,
     disabled: false,
     cadDimmed: false,

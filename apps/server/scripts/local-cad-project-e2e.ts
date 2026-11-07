@@ -239,27 +239,26 @@ const openRightPanel = async (page: Page) => {
   const toggle = page.getByRole("button", { name: /^Toggle right panel/ });
   if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
 };
-// A new project opens on a draft, and the CAD view loads once the draft is a thread. Sending a
-// message is how a user gets there; the turn is stopped as soon as it starts. Send stays disabled
-// while the project's first import runs (its label is then the reason), so like a user, wait for it.
-// A failed send gives the draft a new thread id, and panel state is kept per thread id, so the panel
-// closes. The prompt going away only means a thread started if the panel stayed open.
+// A new project opens on a draft, and the draft's right panel already shows the project's CAD. It
+// can start closed while the draft loads, so this opens it until the CAD panel shows.
+const openDraftPanel = async (page: Page) => {
+  for (let attempt = 0; !(await panel.isVisible()); attempt++) {
+    if (attempt === 30) throw new Error("The draft's right panel never showed its CAD");
+    await openRightPanel(page);
+    await panel.waitFor({ timeout: 1_000 }).catch(() => {});
+  }
+};
+// Sending a message turns the draft into a chat, and the app moves from the draft's URL to the
+// chat's. The turn is stopped as soon as it starts. Send stays disabled while the project's first
+// import runs (its label is then the reason), so like a user, wait for it. A failed send gives the
+// draft a new thread id, and panel state is kept per thread id, so the panel closes.
 const startThread = async (page: Page) => {
-  const placeholder = page.getByText("Start a thread to open its CAD view.");
   const composer = page
     .locator('[data-chat-composer-form="true"] [contenteditable="true"]')
     .first();
-  // Opens the draft's panel until it asks for a thread. It can start closed while the draft loads.
-  const showPrompt = async () => {
-    for (let attempt = 0; !(await placeholder.isVisible()); attempt++) {
-      if (attempt === 30) throw new Error("The draft's right panel never asked for a thread");
-      await openRightPanel(page);
-      await placeholder.waitFor({ timeout: 1_000 }).catch(() => {});
-    }
-  };
   const deadline = Date.now() + 20 * 60_000;
   for (;;) {
-    await showPrompt();
+    await openDraftPanel(page);
     if (!(await composer.innerText()).trim()) {
       await composer.click();
       await page.keyboard.type("Open the CAD view.");
@@ -267,15 +266,13 @@ const startThread = async (page: Page) => {
     await page
       .getByRole("button", { name: "Send message" })
       .click({ timeout: Math.max(1_000, deadline - Date.now()) });
-    const promptGone = await placeholder.waitFor({ state: "detached", timeout: 5_000 }).then(
-      () => true,
-      () => false,
-    );
-    const panelOpen =
-      (await page
-        .getByRole("button", { name: /^Toggle right panel/ })
-        .getAttribute("aria-pressed")) === "true";
-    if (promptGone && panelOpen) break;
+    const started = await page
+      .waitForURL((next) => !next.pathname.startsWith("/draft/"), { timeout: 5_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (started && (await panel.isVisible())) break;
     if (Date.now() > deadline) throw new Error("Sending never started a thread");
   }
   // Stops the turn if it is still running. A turn that ends by itself first is just as good. The
@@ -283,6 +280,22 @@ const startThread = async (page: Page) => {
   const stop = page.getByRole("button", { name: "Stop generation" });
   await stop.click({ timeout: 15_000 }).catch(() => {});
   await stop.waitFor({ state: "detached", timeout: 60_000 });
+};
+/** The chat's saved CAD view, read from the dev database, or null before it has one. */
+const savedUserView = (threadId: string) => {
+  const db = new NodeSqlite.DatabaseSync(NodePath.join(out, "home/userdata/state.sqlite"), {
+    readOnly: true,
+  });
+  try {
+    const row = db
+      .prepare("SELECT view_json AS view FROM projection_cad_user_views WHERE thread_id = ?")
+      .get(threadId);
+    return typeof row?.view === "string"
+      ? (JSON.parse(row.view) as { snapshotId: string; explosion: number })
+      : null;
+  } finally {
+    db.close();
+  }
 };
 const manifestDir = NodePath.join(out, "home/userdata/cad/manifests");
 const manifests = () => NodeFS.readdirSync(manifestDir).filter((name) => name.endsWith(".json"));
@@ -350,8 +363,9 @@ try {
     await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
     return { url: page.url() };
   });
+  // Everything up to the model is on the draft. No chat exists until the first message.
   await run("cad-panel-import-failed", async (page) => {
-    await startThread(page);
+    await openDraftPanel(page);
     await panel.getByText(/Could not read this CAD file/).waitFor({ timeout: 120_000 });
     return { prompt: (await panel.innerText()).split("\n").filter(Boolean) };
   });
@@ -365,8 +379,35 @@ try {
     await page.getByRole("menuitem", { name: stepName }).click();
     await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
     await page.waitForTimeout(5000);
+    if (!new URL(page.url()).pathname.startsWith("/draft/"))
+      throw new Error("The model loaded somewhere other than the draft");
+    return {
+      url: page.url(),
+      title: (await sceneTitle.innerText()).trim(),
+      components: componentCount(),
+    };
+  });
+  // The draft's view is its own. Exploding the parts on the draft and then sending the first
+  // message gives the new chat that same view, saved by the server before the turn starts.
+  const explode = panel.getByRole("button", { name: "Exploded view" });
+  await run("draft-view-exploded", async (page) => {
+    await explode.click();
+    if ((await explode.getAttribute("aria-pressed")) !== "true")
+      throw new Error("The draft did not take the exploded view");
+    await page.waitForTimeout(3000);
+    return { url: page.url() };
+  });
+  await run("draft-view-carried-over", async (page) => {
+    await startThread(page);
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await page.waitForTimeout(3000);
     threadUrl = page.url();
-    return { title: (await sceneTitle.innerText()).trim(), components: componentCount() };
+    const threadId = new URL(threadUrl).pathname.split("/").at(-1)!;
+    const saved = savedUserView(threadId);
+    if (saved?.explosion !== 1) throw new Error(`The chat saved ${JSON.stringify(saved)}`);
+    if ((await explode.getAttribute("aria-pressed")) !== "true")
+      throw new Error("The chat's panel lost the draft's exploded view");
+    return { url: threadUrl, saved };
   });
   // Like the Onshape link, the heading opens the CAD file it names, here with its default app.
   await run("open-file", async (page) => {

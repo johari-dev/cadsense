@@ -33,10 +33,15 @@ interface Scene {
 export class CadPanel extends Context.Service<
   CadPanel,
   {
-    readonly watch: (threadId: ThreadId) => Stream.Stream<CadPanelState, CadViewError>;
+    /** `draftProjectId` serves a draft thread that has no server row yet. */
+    readonly watch: (
+      threadId: ThreadId,
+      draftProjectId?: ProjectId,
+    ) => Stream.Stream<CadPanelState, CadViewError>;
     readonly scene: (
       threadId: ThreadId,
       snapshotId: string,
+      draftProjectId?: ProjectId,
     ) => Stream.Stream<CadPanelSceneTicket, CadViewError>;
     readonly read: (ticket: CadPanelSceneTicket) => Effect.Effect<Scene, CadViewError>;
     readonly releaseProject: (projectId: ProjectId) => Effect.Effect<void>;
@@ -54,13 +59,19 @@ export const make = Effect.gen(function* () {
   const viewing = yield* CadViewing;
   const scenes = new Map<string, Scene>();
   let sceneCount = 0;
-  const projectFor = Effect.fn("CadPanel.projectFor")(function* (threadId: ThreadId) {
+  // A thread's own project wins. A draft thread has no row yet, so it names its project instead.
+  const projectFor = Effect.fn("CadPanel.projectFor")(function* (
+    threadId: ThreadId,
+    draftProjectId?: ProjectId,
+  ) {
     const rows =
       yield* sql`SELECT project_id FROM projection_threads WHERE thread_id=${threadId} AND deleted_at IS NULL`.pipe(
         Effect.mapError(unavailable),
       );
-    if (!rows[0]) return yield* unavailable();
-    const projectId = yield* decodeProjectId(rows[0].project_id).pipe(Effect.mapError(unavailable));
+    const projectId = rows[0]
+      ? yield* decodeProjectId(rows[0].project_id).pipe(Effect.mapError(unavailable))
+      : draftProjectId;
+    if (!projectId || (draftProjectId && draftProjectId !== projectId)) return yield* unavailable();
     const project = yield* query.getProjectShellById(projectId).pipe(Effect.mapError(unavailable));
     if (
       Option.isNone(project) ||
@@ -72,11 +83,12 @@ export const make = Effect.gen(function* () {
   });
   const state = Effect.fn("CadPanel.state")(function* (
     threadId: ThreadId,
+    draftProjectId?: ProjectId,
   ): Effect.fn.Return<
     Omit<CadPanelState, "agentControlling" | "agentActivityTurnId">,
     CadViewError
   > {
-    const project = yield* projectFor(threadId);
+    const project = yield* projectFor(threadId, draftProjectId);
     const saved = yield* readCadUserView(threadId).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
       Effect.mapError(unavailable),
@@ -115,13 +127,13 @@ export const make = Effect.gen(function* () {
       ...(root && !view ? { unavailableRootId: root.rootId } : {}),
     };
   });
-  const watch = (threadId: ThreadId) =>
+  const watch = (threadId: ThreadId, draftProjectId?: ProjectId) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const subscription = yield* engine.subscribeDomainEvents;
-        const project = yield* projectFor(threadId);
+        const project = yield* projectFor(threadId, draftProjectId);
         return Stream.concat(
-          Stream.fromEffect(state(threadId)),
+          Stream.fromEffect(state(threadId, draftProjectId)),
           Stream.fromSubscription(subscription).pipe(
             Stream.filter(
               (event) =>
@@ -131,7 +143,7 @@ export const make = Effect.gen(function* () {
                     event.type === "thread.cad-presentation-settled")) ||
                 (event.aggregateId === project.id && event.type === "project.cad-state-set"),
             ),
-            Stream.mapEffect(() => state(threadId)),
+            Stream.mapEffect(() => state(threadId, draftProjectId)),
           ),
         ).pipe(
           Stream.zipLatestWith(viewing.watchActivity(threadId), (panel, activity) => ({
@@ -150,10 +162,10 @@ export const make = Effect.gen(function* () {
         );
       }),
     );
-  const scene = (threadId: ThreadId, snapshotId: string) =>
+  const scene = (threadId: ThreadId, snapshotId: string, draftProjectId?: ProjectId) =>
     Stream.unwrap(
       Effect.gen(function* () {
-        const project = yield* projectFor(threadId);
+        const project = yield* projectFor(threadId, draftProjectId);
         const historical = (yield* query
           .getCommandReadModel()
           .pipe(Effect.mapError(unavailable))).cadComments?.some(
@@ -203,7 +215,7 @@ export const make = Effect.gen(function* () {
                     scenes.delete(ticket.sceneId);
                   }),
               );
-              const currentProject = yield* projectFor(threadId);
+              const currentProject = yield* projectFor(threadId, draftProjectId);
               if (currentProject.cad?.operation?.kind === "cleanup") return yield* unavailable();
               yield* Deferred.succeed(ready, ticket);
               return yield* Deferred.await(cancel);

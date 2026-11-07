@@ -188,19 +188,20 @@ const sceneReady = async (page: Page) => {
   await panel.getByRole("progressbar").waitFor({ state: "detached", timeout: 10 * 60_000 });
   await panel.getByText("Preparing CAD…").waitFor({ state: "detached", timeout: 10 * 60_000 });
 };
-// A new project opens on a draft; sending a message makes it a chat with a CAD panel. The turn is
-// stopped as soon as it starts, as in local-cad-project-e2e.ts.
+// A new project opens on a draft whose right panel already shows the project's CAD. Sending a
+// message makes it a chat that keeps the panel, and the app moves from the draft's URL to the
+// chat's. The turn is stopped as soon as it starts, as in local-cad-project-e2e.ts.
 const startThread = async (page: Page) => {
-  const placeholder = page.getByText("Start a thread to open its CAD view.");
+  const panel = panelOf(page);
   const composer = page
     .locator('[data-chat-composer-form="true"] [contenteditable="true"]')
     .first();
   const deadline = Date.now() + 20 * 60_000;
   for (;;) {
-    for (let attempt = 0; !(await placeholder.isVisible()); attempt++) {
-      if (attempt === 30) throw new Error("The draft's right panel never asked for a thread");
+    for (let attempt = 0; !(await panel.isVisible()); attempt++) {
+      if (attempt === 30) throw new Error("The draft's right panel never showed its CAD");
       await openRightPanel(page);
-      await placeholder.waitFor({ timeout: 1_000 }).catch(() => {});
+      await panel.waitFor({ timeout: 1_000 }).catch(() => {});
     }
     if (!(await composer.innerText()).trim()) {
       await composer.click();
@@ -209,10 +210,12 @@ const startThread = async (page: Page) => {
     await page
       .getByRole("button", { name: "Send message" })
       .click({ timeout: Math.max(1_000, deadline - Date.now()) });
-    const started = await placeholder.waitFor({ state: "detached", timeout: 5_000 }).then(
-      () => true,
-      () => false,
-    );
+    const started = await page
+      .waitForURL((next) => !next.pathname.startsWith("/draft/"), { timeout: 5_000 })
+      .then(
+        () => true,
+        () => false,
+      );
     if (started) break;
     if (Date.now() > deadline) throw new Error("Sending never started a thread");
   }
