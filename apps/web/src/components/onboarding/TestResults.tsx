@@ -59,8 +59,8 @@ export function TestResults({ onBack }: { readonly onBack: () => void }) {
         <li>ChatGPT Plus and Claude were close. Claude's comments were the clearest.</li>
       </ul>
       <p className="mt-4 text-tertiary-foreground text-xs">
-        One robot is a small test. Your results will vary. Start free now. Your robot stays
-        connected if you add Claude later, which takes its own sign-in.
+        One robot is a small test. Your results will vary. Start free now. Your CAD stays connected
+        if you add Claude later, which takes its own sign-in.
       </p>
     </div>
   );

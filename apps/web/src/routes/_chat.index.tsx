@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { needsOnboarding } from "../components/onboarding/importCad.logic";
 import { Onboarding } from "../components/onboarding/Onboarding";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -21,8 +22,10 @@ function ChatIndexRouteView() {
 /**
  * Landing on the index route drops straight into a draft thread for the most
  * recently active project, so the first screen is a prompt instead of a dead
- * end. Shows onboarding (connect an AI reviewer, then add a robot) when no
- * project exists yet.
+ * end. Shows onboarding (connect an AI reviewer, add CAD, import it)
+ * when no project exists yet, or when the only one is still in its first
+ * import (`needsOnboarding`). The choice is made once the shells load and then
+ * kept, so onboarding stays up after its project exists until the user opens it.
  */
 function IndexDraftLanding() {
   const projects = useProjects();
@@ -31,6 +34,11 @@ function IndexDraftLanding() {
   const handleNewThread = useNewThreadHandler();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
+  const [landing, setLanding] = useState<"onboarding" | "draft" | null>(null);
+  // Losing every project (say, removing the last one) returns to onboarding too.
+  if (bootstrapped && (landing === null || (projects.length === 0 && landing === "draft"))) {
+    setLanding(needsOnboarding(projects, threads) ? "onboarding" : "draft");
+  }
 
   const mostRecentProject = useMemo(() => {
     if (!bootstrapped) return null;
@@ -52,7 +60,7 @@ function IndexDraftLanding() {
   }, [bootstrapped, projects, threads]);
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
+    if (landing !== "draft" || mostRecentProject === null || startingRef.current) {
       return;
     }
     startingRef.current = true;
@@ -64,10 +72,13 @@ function IndexDraftLanding() {
       startingRef.current = false;
       setStartState((state) => ({ ...state, failed: true }));
     });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [handleNewThread, landing, mostRecentProject, startState.retryRequest]);
 
-  if (!bootstrapped) {
+  if (landing === null) {
     return null;
+  }
+  if (landing === "onboarding") {
+    return <Onboarding project={mostRecentProject} />;
   }
   if (mostRecentProject !== null) {
     return startState.failed ? (
@@ -81,7 +92,7 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  return <Onboarding />;
+  return null;
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {

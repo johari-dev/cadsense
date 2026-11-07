@@ -365,6 +365,131 @@
   }
 }
 
+/* Onboarding motion. Each plays once when its element mounts and never loops. Steps key their
+   content, so a new step remounts and rises (or slides, within one checklist row) into place. */
+@keyframes onboarding-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes onboarding-slide {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+@keyframes onboarding-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes onboarding-check-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+}
+
+@keyframes onboarding-check-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+/* Children rise in with a short stagger. `onboarding-enter-x` slides them in from the right. */
+.onboarding-enter > *,
+.onboarding-enter-x > * {
+  animation: onboarding-rise 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.onboarding-enter-x > * {
+  animation-name: onboarding-slide;
+}
+.onboarding-enter > :nth-child(2),
+.onboarding-enter-x > :nth-child(2) {
+  animation-delay: 25ms;
+}
+.onboarding-enter > :nth-child(3),
+.onboarding-enter-x > :nth-child(3) {
+  animation-delay: 50ms;
+}
+.onboarding-enter > :nth-child(n + 4),
+.onboarding-enter-x > :nth-child(n + 4) {
+  animation-delay: 75ms;
+}
+
+.onboarding-fade {
+  animation: onboarding-fade 250ms 150ms ease-out both;
+}
+
+/* A finished step's check: the badge pops in, then the tick draws (its path has pathLength=1). */
+.onboarding-check {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: onboarding-check-pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+.onboarding-check path {
+  stroke-dasharray: 1;
+  animation: onboarding-check-draw 300ms 100ms ease-out both;
+}
+
+/* Content that replaces other content in place (a row's new status, an error, a list). */
+@keyframes onboarding-swap {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+.onboarding-swap {
+  animation: onboarding-swap 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* A step's waiting ring scales in when the step starts. */
+@keyframes onboarding-mark-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.onboarding-mark-in {
+  animation: onboarding-mark-in 240ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+
+/* The checklist card's border lights up once when the last step finishes. */
+@keyframes onboarding-complete {
+  0% {
+    box-shadow: 0 0 0 0 rgb(252 252 252 / 0);
+    border-color: var(--border);
+  }
+  30% {
+    box-shadow: 0 0 0 4px rgb(252 252 252 / 0.06);
+    border-color: rgb(252 252 252 / 0.32);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgb(252 252 252 / 0);
+    border-color: var(--border);
+  }
+}
+.onboarding-complete {
+  animation: onboarding-complete 1100ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-enter > *,
+  .onboarding-enter-x > *,
+  .onboarding-fade,
+  .onboarding-check,
+  .onboarding-check path,
+  .onboarding-swap,
+  .onboarding-mark-in,
+  .onboarding-complete {
+    animation: none;
+  }
+}
+
 @utility live-activity-focus-aligned {
   width: calc(100% - var(--live-activity-focus-width) - var(--live-activity-focus-width));
   margin-left: var(--live-activity-focus-width);

@@ -19,7 +19,7 @@ const elapsedLabel = (ms: number) => {
 };
 
 /** Time since `startedAt` as text, updated once a second. Its own state keeps the tick local. */
-function ElapsedClock({ startedAt }: { readonly startedAt: string }) {
+export function ElapsedClock({ startedAt }: { readonly startedAt: string }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);

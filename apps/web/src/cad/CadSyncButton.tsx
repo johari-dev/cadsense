@@ -82,8 +82,8 @@ function unsyncableDescription(project: Project): string {
     : "The Onshape tab this project links to is not an Assembly or Part Studio. Choose CAD in project settings.";
 }
 
-/** The toast for a start the server refused. Busy and throttled are expected, so they explain. */
-function refusedDescription(cause: unknown): string {
+/** Why the server refused to start a CAD operation. Busy and throttled are expected, so they explain. */
+export function refusedDescription(cause: unknown): string {
   if (isCadUserOperationError(cause) && cause.reason === "busy")
     return "CAD is busy. Wait for agent runs and the current CAD operation to finish.";
   if (isCadUserOperationError(cause) && cause.reason === "throttled")

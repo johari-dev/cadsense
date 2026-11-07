@@ -14,7 +14,11 @@ import { readLocalApi } from "../localApi";
 import { inferProjectTitleFromPath } from "../lib/projectPaths";
 import { newProjectId } from "../lib/utils";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useEnvironments,
+  usePrimaryEnvironmentId,
+  type EnvironmentPresentation,
+} from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
 import { projectEnvironment } from "../state/projects";
 import { onshapeProjectEnvironment } from "../state/onshapeProjects";
@@ -25,6 +29,43 @@ import { OnshapeProjectCreateForm } from "./OnshapeProjectCreateForm";
 import { LocalCadProjectCreateForm } from "./LocalCadProjectCreateForm";
 import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
+
+/** Native folder and file pickers browse the desktop app's local backend, so they need it. */
+function canPickNativelyOn(environment: EnvironmentPresentation | undefined) {
+  return (
+    !!environment &&
+    environment.connection.phase === "connected" &&
+    (environment.entry.target._tag === "PrimaryConnectionTarget" ||
+      desktopLocalBackendId(environment.entry.target) !== null)
+  );
+}
+
+/** Where the native pickers open, and which backend they browse, for `environment`. */
+function pickerOptions(environment: EnvironmentPresentation) {
+  const backendId = desktopLocalBackendId(environment.entry.target);
+  return {
+    ...(backendId ? { targetEnvironmentId: backendId } : {}),
+    initialPath:
+      environment.serverConfig?.settings?.addProjectBaseDirectory ||
+      (environment.serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/"),
+  };
+}
+
+/**
+ * The desktop app's file dialog for picking a CAD file on `environment`'s machine, or null where
+ * there is none: a browser, or a remote or disconnected backend. The picker resolves to the chosen
+ * path, or null when cancelled.
+ */
+export function nativeCadFilePicker(
+  environment: EnvironmentPresentation | undefined,
+): (() => Promise<string | null>) | null {
+  if (!isElectron || !environment || !canPickNativelyOn(environment)) return null;
+  return async () =>
+    (await readLocalApi()?.dialogs.pickFile({
+      ...pickerOptions(environment),
+      filters: CAD_FILE_FILTERS,
+    })) ?? null;
+}
 
 export function AddProjectDialog() {
   const [open, setOpen] = useState(false);
@@ -47,12 +88,7 @@ export function AddProjectDialog() {
   const createLocalCadProject = useAtomCommand(localCadProjectEnvironment.create, {
     reportFailure: false,
   });
-  // Native folder and file pickers browse the desktop app's local backend, so they need it.
-  const canPickNatively =
-    !!environment &&
-    environment.connection.phase === "connected" &&
-    (environment.entry.target._tag === "PrimaryConnectionTarget" ||
-      desktopLocalBackendId(environment.entry.target) !== null);
+  const canPickNatively = canPickNativelyOn(environment);
 
   useEffect(
     () =>
@@ -66,28 +102,9 @@ export function AddProjectDialog() {
     [],
   );
 
-  /** Where the native pickers open, and which backend they browse, for the chosen environment. */
-  function pickerOptions() {
-    if (!environment) return null;
-    const backendId = desktopLocalBackendId(environment.entry.target);
-    return {
-      ...(backendId ? { targetEnvironmentId: backendId } : {}),
-      initialPath:
-        environment.serverConfig?.settings?.addProjectBaseDirectory ||
-        (environment.serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/"),
-    };
-  }
-
   async function pickFolder() {
     const api = readLocalApi();
-    const options = pickerOptions();
-    return api && options ? api.dialogs.pickFolder(options) : null;
-  }
-
-  async function pickCadFile() {
-    const api = readLocalApi();
-    const options = pickerOptions();
-    return api && options ? api.dialogs.pickFile({ ...options, filters: CAD_FILE_FILTERS }) : null;
+    return api && environment ? api.dialogs.pickFolder(pickerOptions(environment)) : null;
   }
 
   /** Opens the project's most recent chat, or a new one when it has none. */
@@ -230,7 +247,7 @@ export function AddProjectDialog() {
             environmentId={environment.environmentId}
             environmentLabel={environment.label}
             connected={environment.connection.phase === "connected"}
-            pickFile={isElectron && canPickNatively ? pickCadFile : null}
+            pickFile={nativeCadFilePicker(environment)}
             onCancel={() => setKind(null)}
             onCreate={async (input) => {
               busyRef.current = true;
