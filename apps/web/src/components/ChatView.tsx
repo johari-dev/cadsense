@@ -139,6 +139,7 @@ import {
 } from "../previewMiniPlayerStore";
 import { RightPanel, resolveDefaultCadPanelWidth } from "./RightPanel";
 import { singleCadModelName } from "../cad/cadModelName";
+import { useCadDraftViewStore, usableCadDraftView } from "../cad/cadDraftViewStore";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
@@ -1744,65 +1745,10 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
   }, [activeThreadRef, openPreview]);
-  const cadOpeningRef = useRef(false);
-  const [cadOpening, setCadOpening] = useState(false);
   const openCadSection = useCallback(() => {
-    if (
-      !activeThreadRef ||
-      !activeThread ||
-      !activeProject ||
-      !cadAvailable ||
-      cadOpeningRef.current ||
-      sendInFlightRef.current ||
-      isSendBusy
-    )
-      return;
-    if (isServerThread) {
-      useRightPanelStore.getState().open(activeThreadRef, "cad");
-      return;
-    }
-    cadOpeningRef.current = true;
-    setCadOpening(true);
-    void createThread({
-      environmentId: activeThreadRef.environmentId,
-      input: {
-        threadId: activeThreadRef.threadId,
-        projectId: activeProject.id,
-        title: activeThread.title,
-        modelSelection: activeThread.modelSelection,
-        runtimeMode,
-        interactionMode: "default",
-        createdAt: new Date().toISOString(),
-      },
-    })
-      .then((result) => {
-        if (result._tag === "Success") {
-          markPromotedDraftThreadByRef(activeThreadRef);
-          useRightPanelStore.getState().open(activeThreadRef, "cad");
-        } else if (!isAtomCommandInterrupted(result)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not open CAD",
-              description: "The thread could not be created. Your draft is preserved.",
-            }),
-          );
-        }
-      })
-      .finally(() => {
-        cadOpeningRef.current = false;
-        setCadOpening(false);
-      });
-  }, [
-    activeThreadRef,
-    activeThread,
-    activeProject,
-    cadAvailable,
-    isServerThread,
-    createThread,
-    runtimeMode,
-    isSendBusy,
-  ]);
+    if (!activeThreadRef || !cadAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "cad");
+  }, [activeThreadRef, cadAvailable]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -1837,7 +1783,6 @@ function ChatViewContent(props: ChatViewProps) {
     (section: RightPanelSection) => {
       if (!activeThreadRef) return;
       if (section === "cad") {
-        // A draft thread has to become a server thread before CAD can load.
         openCadSection();
         return;
       }
@@ -2636,7 +2581,6 @@ function ChatViewContent(props: ChatViewProps) {
       isSendBusy ||
       isConnecting ||
       threadDetailLoading ||
-      cadOpeningRef.current ||
       sendInFlightRef.current ||
       feedbackUploadsInFlightRef.current.has(routeThreadKey)
     ) {
@@ -3119,6 +3063,13 @@ function ChatViewContent(props: ChatViewProps) {
 
     let turnStartSucceeded = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
+      const draftThreadRef = scopeThreadRef(activeThread.environmentId, threadIdForSend);
+      const draftCadView = cadLinked
+        ? usableCadDraftView(
+            activeProject,
+            useCadDraftViewStore.getState().views[scopedThreadKey(draftThreadRef)],
+          )
+        : undefined;
       const bootstrap = isLocalDraftThread
         ? {
             createThread: {
@@ -3128,6 +3079,7 @@ function ChatViewContent(props: ChatViewProps) {
               runtimeMode,
               interactionMode,
               createdAt: activeThread.createdAt,
+              ...(draftCadView ? { cadUserView: draftCadView } : {}),
             },
           }
         : undefined;
@@ -3163,6 +3115,7 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (bootstrap) useCadDraftViewStore.getState().clear(draftThreadRef);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
@@ -3901,21 +3854,21 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelContent = activeThreadRef ? (
     rightPanelSection === "cad" && activeProject ? (
       <Suspense fallback={null}>
-        {cadLinked && isServerThread ? (
+        {cadLinked ? (
+          // A draft keeps the same panel when its first send creates the thread.
           <CadPanel
             key={activeThreadKey}
             project={activeProject}
             threadRef={activeThreadRef}
+            draft={!isServerThread}
             fullscreen={rightPanelMaximized}
             titleSlot={cadTitleSlot}
           />
-        ) : cadAvailable && isServerThread ? (
+        ) : cadAvailable ? (
           <CadFilePrompt project={activeProject} />
         ) : (
           <div className="p-4 text-sm text-muted-foreground">
-            {cadAvailable
-              ? "Start a thread to open its CAD view."
-              : "CAD is not available for this project."}
+            CAD is not available for this project.
           </div>
         )}
       </Suspense>
@@ -4209,7 +4162,7 @@ function ChatViewContent(props: ChatViewProps) {
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
                             isConnecting={isConnecting}
-                            isSendBusy={isSendBusy || cadOpening}
+                            isSendBusy={isSendBusy}
                             sendDisabledReason={
                               feedbackUploading
                                 ? "Sending feedback"

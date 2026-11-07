@@ -58,6 +58,7 @@ import {
   CadRootIdentity,
   CadOperationResult,
 } from "./cadLifecycle.ts";
+import { CadViewState } from "./cadView.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -808,6 +809,8 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   createdAt: IsoDateTime,
+  /** The CAD view the draft showed. The server saves it as the thread's view before the turn. */
+  cadUserView: Schema.optional(CadViewState),
 });
 
 const ThreadTurnStartBootstrap = Schema.Struct({

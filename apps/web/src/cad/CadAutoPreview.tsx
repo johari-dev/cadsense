@@ -36,7 +36,7 @@ export function CadAutoPreview({
   const state = useAtomValue(
     cadPanelEnvironment.watch({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
+      input: { threadId: threadRef.threadId, projectId: project.id },
     }),
   );
   const data = AsyncResult.isSuccess(state) ? state.value : null;

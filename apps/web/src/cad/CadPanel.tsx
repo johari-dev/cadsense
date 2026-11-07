@@ -4,6 +4,7 @@ import {
   isSolidWorksFile,
   type CadComment,
   type CadViewState,
+  type ProjectId,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -39,6 +40,7 @@ import { CadCameraToolbar } from "./CadCameraToolbar";
 import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
 import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
+import { useCadDraftViewStore, usableCadDraftView } from "./cadDraftViewStore";
 import { CadScenePicker } from "./CadScenePicker";
 import { CadSyncButton, cadSyncPlan } from "./CadSyncButton";
 import { CadFilePrompt } from "./CadFilePrompt";
@@ -155,6 +157,7 @@ function PendingCadScene({ environmentId }: { environmentId: string }) {
 
 export function CadScene({
   threadRef,
+  projectId,
   view,
   disabled,
   cadDimmed,
@@ -167,6 +170,7 @@ export function CadScene({
   lockStatus = null,
 }: {
   threadRef: ScopedThreadRef;
+  projectId: ProjectId;
   view: CadViewState;
   disabled: boolean;
   cadDimmed: boolean;
@@ -180,7 +184,7 @@ export function CadScene({
 }) {
   const sceneAtom = cadPanelEnvironment.scene({
     environmentId: threadRef.environmentId,
-    input: { threadId: threadRef.threadId, snapshotId: view.snapshotId },
+    input: { threadId: threadRef.threadId, projectId, snapshotId: view.snapshotId },
   });
   const lease = useAtomValue(sceneAtom);
   const registry = useContext(RegistryContext);
@@ -654,6 +658,7 @@ export function CadScene({
 export function CadPanel({
   project,
   threadRef,
+  draft = false,
   fullscreen = false,
   compact = false,
   titleSlot = null,
@@ -661,6 +666,8 @@ export function CadPanel({
 }: {
   project: Project;
   threadRef: ScopedThreadRef;
+  /** A draft thread has no server row, so its view lives in `useCadDraftViewStore` until it is sent. */
+  draft?: boolean;
   fullscreen?: boolean;
   compact?: boolean;
   /** The right panel's title row. The scene picker renders there when given, else in its own row. */
@@ -670,7 +677,7 @@ export function CadPanel({
   const state = useAtomValue(
     cadPanelEnvironment.watch({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
+      input: { threadId: threadRef.threadId, projectId: project.id },
     }),
   );
   const commentState = useAtomValue(
@@ -772,7 +779,11 @@ export function CadPanel({
     ),
   );
   const optimistic = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
-  const currentView = (!locked && optimistic) || data?.view || null;
+  const draftView = useCadDraftViewStore((s) => (draft ? s.views[reviewKey] : undefined));
+  const usableDraftView = usableCadDraftView(project, draftView);
+  const currentView = draft
+    ? (usableDraftView ?? data?.view ?? null)
+    : (!locked && optimistic) || data?.view || null;
   const view =
     historicalView ||
     (localView?.snapshotId === currentView?.snapshotId ? localView : null) ||
@@ -791,7 +802,8 @@ export function CadPanel({
     }
     updateReview((current) => ({ ...current, localView: null }));
     setError(null);
-    edits.select(next);
+    if (draft) useCadDraftViewStore.getState().set(threadRef, next);
+    else edits.select(next);
   };
   const choose = (comment: CadComment, target: CadCommentLocation) => {
     if (onOpenComments) {
@@ -957,6 +969,7 @@ export function CadPanel({
             captureId={data?.captureId ?? null}
             key={`${threadRef.threadId}:${view.snapshotId}`}
             threadRef={threadRef}
+            projectId={project.id}
             view={view}
             disabled={viewerLocked}
             cadDimmed={viewerLocked && !agentControl}

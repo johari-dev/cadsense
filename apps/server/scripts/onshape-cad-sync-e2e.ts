@@ -195,22 +195,22 @@ const panelView = async (page: Page) => {
     syncButtons: await syncButton.count(),
   };
 };
-// A new project opens on a draft, and the CAD panel loads once the draft is a thread. Sending a
-// message is how a user gets there; the turn is stopped as soon as it starts.
+// A new project opens on a draft whose right panel already shows the project's CAD. Sending a
+// message turns the draft into a chat, and the app moves from the draft's URL to the chat's. The
+// turn is stopped as soon as it starts.
 const startThread = async (page: Page) => {
-  const placeholder = page.getByText("Start a thread to open its CAD view.");
   const composer = page
     .locator('[data-chat-composer-form="true"] [contenteditable="true"]')
     .first();
-  for (let attempt = 0; !(await placeholder.isVisible()); attempt++) {
-    if (attempt === 30) throw new Error("The draft's right panel never asked for a thread");
+  for (let attempt = 0; !(await panel.isVisible()); attempt++) {
+    if (attempt === 30) throw new Error("The draft's right panel never showed its CAD");
     await openRightPanel(page);
-    await placeholder.waitFor({ timeout: 1_000 }).catch(() => {});
+    await panel.waitFor({ timeout: 1_000 }).catch(() => {});
   }
   await composer.click();
   await page.keyboard.type("Open the CAD view.");
   await page.getByRole("button", { name: "Send message" }).click();
-  await placeholder.waitFor({ state: "detached", timeout: 30_000 });
+  await page.waitForURL((next) => !next.pathname.startsWith("/draft/"), { timeout: 30_000 });
   await page
     .getByRole("button", { name: "Stop generation" })
     .click({ timeout: 15_000 })
