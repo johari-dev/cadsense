@@ -1,48 +1,13 @@
-import {
-  CheckIcon,
-  DownloadIcon,
-  ArrowsClockwiseIcon as RefreshCwIcon,
-  ArrowClockwiseIcon as RotateCwIcon,
-} from "~/lib/icons";
-import type { AnimationEventHandler } from "react";
-
-import { cn } from "../../lib/utils";
+import { CheckIcon, DownloadIcon, ArrowClockwiseIcon as RotateCwIcon } from "~/lib/icons";
 
 const DOWNLOAD_PROGRESS_RADIUS = 14;
 const DOWNLOAD_PROGRESS_CIRCUMFERENCE = 2 * Math.PI * DOWNLOAD_PROGRESS_RADIUS;
 
-export type DesktopUpdateStatusIconState =
-  | "idle"
-  | "checking"
-  | "available"
-  | "downloading"
-  | "downloaded";
+export type DesktopUpdateStatusIconState = "available" | "downloading" | "downloaded";
 
 function normalizeDesktopUpdateDownloadPercent(percent: number | null): number {
   if (percent === null || !Number.isFinite(percent)) return 0;
   return Math.min(100, Math.max(0, percent));
-}
-
-export function shouldShowDesktopUpdateCheckIcon({
-  isAnimationLatched,
-  isChecking,
-  prefersReducedMotion,
-}: {
-  readonly isAnimationLatched: boolean;
-  readonly isChecking: boolean;
-  readonly prefersReducedMotion: boolean;
-}): boolean {
-  return isChecking || (isAnimationLatched && !prefersReducedMotion);
-}
-
-export function shouldContinueDesktopUpdateCheckAnimation({
-  isChecking,
-  prefersReducedMotion,
-}: {
-  readonly isChecking: boolean;
-  readonly prefersReducedMotion: boolean;
-}): boolean {
-  return isChecking && !prefersReducedMotion;
 }
 
 function DesktopUpdateAvailableIcon() {
@@ -105,27 +70,15 @@ function DesktopUpdateDownloadedIcon() {
   );
 }
 
+/** The sidebar update button's icon for a pending update. */
 export function DesktopUpdateStatusIcon({
   downloadPercent,
-  isCheckAnimating,
-  onCheckAnimationIteration,
   status,
 }: {
-  readonly downloadPercent?: number | null;
-  readonly isCheckAnimating?: boolean;
-  readonly onCheckAnimationIteration?: AnimationEventHandler<SVGSVGElement>;
+  readonly downloadPercent: number | null;
   readonly status: DesktopUpdateStatusIconState;
 }) {
   if (status === "available") return <DesktopUpdateAvailableIcon />;
-  if (status === "downloading") {
-    return <DesktopUpdateDownloadingIcon percent={downloadPercent ?? null} />;
-  }
-  if (status === "downloaded") return <DesktopUpdateDownloadedIcon />;
-
-  return (
-    <RefreshCwIcon
-      className={cn("size-4", status === "checking" && isCheckAnimating && "animate-spin")}
-      onAnimationIteration={onCheckAnimationIteration}
-    />
-  );
+  if (status === "downloading") return <DesktopUpdateDownloadingIcon percent={downloadPercent} />;
+  return <DesktopUpdateDownloadedIcon />;
 }
