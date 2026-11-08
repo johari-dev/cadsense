@@ -115,15 +115,18 @@ export function RightPanel(props: RightPanelProps) {
         >
           {props.section === "cad" && atHome ? (
             <>
+              {/* In a narrow panel the title gives up width before the CAD chip beside it, but
+                  no further than w-16: a flex item's automatic minimum is min(width, text), so the
+                  span (not the h2) clips, and short titles keep their natural width. */}
               {props.projectTitle ? (
-                <h2 className="max-w-[50%] shrink-0 truncate pl-2 text-sm font-medium">
-                  {props.projectTitle}
+                <h2 className="flex w-16 max-w-[50%] shrink-[3] basis-[content] pl-2 text-sm font-medium">
+                  <span className="truncate">{props.projectTitle}</span>
                 </h2>
               ) : null}
               <div
                 ref={props.titleSlotRef}
                 className={cn(
-                  "flex min-w-0 flex-1 items-center",
+                  "flex min-w-0 flex-auto items-center",
                   props.projectTitle ? "pl-1.5" : "pl-1",
                 )}
               />
