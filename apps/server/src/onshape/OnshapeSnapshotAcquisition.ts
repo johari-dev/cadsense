@@ -24,6 +24,7 @@ import {
   measureCadGeometry,
 } from "@cadsense/shared/cadSceneBudget";
 import { CadSnapshotStore, type CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
+import { CadProgressReporter } from "../cad/CadOperationProgress.ts";
 import { cadTransferArtifacts } from "../cad/CadTransferArtifacts.ts";
 import { ServerConfig } from "../config.ts";
 import { normalizeCadGeometry, CadGeometryError } from "../cad/CadGeometry.ts";
@@ -125,6 +126,7 @@ export const make = Effect.gen(function* () {
     input: OnshapeSnapshotAcquisitionInput,
   ) {
     const { source } = input;
+    const progress = yield* CadProgressReporter;
     const read = Effect.fn(function* (path: string, query = "") {
       yield* store.checkReserve();
       return yield* connections.readJson({
@@ -170,6 +172,7 @@ export const make = Effect.gen(function* () {
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
     if (source.workspaceType !== "m") return yield* acquireBulk(context, source);
+    yield* progress.step("reading");
     const base = `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${microversionId}/e/${root.elementId}`;
     const query = new URLSearchParams({ configuration: root.configuration });
     if (root.kind === "assembly") {
@@ -197,8 +200,10 @@ export const make = Effect.gen(function* () {
       )).map((asset) => [asset.geometryKey, asset]),
     );
     const assets: CadGeometryAsset[] = [];
+    const required = draft.parts.filter((part) => part.geometryRequired).length;
     for (const part of draft.parts) {
       if (!part.geometryRequired) continue;
+      yield* progress.step("downloading", { done: assets.length, total: required });
       const cached = cachedAssets.get(part.geometryKey);
       if (cached !== undefined) {
         yield* Effect.try({
@@ -245,6 +250,7 @@ export const make = Effect.gen(function* () {
       });
       assets.push(asset);
     }
+    yield* progress.step("saving");
     const manifest = yield* completeSnapshotManifest(draft, assets);
     yield* store.publish(manifest);
     return manifest;

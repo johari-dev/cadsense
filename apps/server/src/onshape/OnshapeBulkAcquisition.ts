@@ -18,6 +18,7 @@ import { CadGeometryError, normalizeCadGeometry } from "../cad/CadGeometry.ts";
 import { applyOnshapeOpacity } from "./OnshapeGeometryAppearance.ts";
 import { batchOnshapeGeometry } from "./OnshapeGeometryBatching.ts";
 import { CadSnapshotStore } from "../cad/CadSnapshotStore.ts";
+import { CadProgressReporter } from "../cad/CadOperationProgress.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import {
   OnshapeConnections,
@@ -77,6 +78,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
     source: OnshapeProjectSource,
   ) {
     const { root } = context;
+    const progress = yield* CadProgressReporter;
     const cacheKey = NodeCrypto.createHash("sha256")
       .update(context.projectId)
       .update("\0")
@@ -137,6 +139,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             query.set("withThumbnails", "false");
             query.set("includePropertyDefaults", "false");
           }
+          yield* progress.step("reading");
           const response = yield* read({
             path: `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${root.microversionId}/e/${root.elementId}`,
             query: query.toString(),
@@ -155,11 +158,13 @@ export const makeBulkAcquisition = Effect.gen(function* () {
               response,
             );
           if (!draft.parts.some((part) => part.geometryRequired)) {
+            yield* progress.step("saving");
             const manifest = yield* completeSnapshotManifest(draft, []);
             yield* store.publish(manifest);
             yield* entry.write({ phase: "complete", revisionKey, snapshotId: manifest.snapshotId });
             return manifest;
           }
+          yield* progress.step("exporting");
           const translation = yield* read({
             method: "POST",
             query: "",
@@ -193,6 +198,8 @@ export const makeBulkAcquisition = Effect.gen(function* () {
           initialStatus = translation;
         }
         if (checkpoint.phase === "exporting") {
+          // A resumed export reports here; a new one already did before submitting it.
+          yield* progress.step("exporting");
           let exported: { readonly externalId: string; readonly documentId: string } | null = null;
           let status = initialStatus;
           for (let attempt = 0; attempt < ONSHAPE_TRANSLATION_MAX_POLLS; attempt++) {
@@ -236,6 +243,9 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             yield* entry.clear();
             return yield* new OnshapeExportError({ reason: "revision-changed" });
           }
+          yield* progress.step("downloading", { done: 0 });
+          // Report each further MiB, not each chunk.
+          let reportedBytes = 0;
           const downloaded = yield* connections.readBinary({
             bulkExport: true,
             connectionId: source.connectionId,
@@ -243,7 +253,17 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             path: `${ONSHAPE_API_BASE_PATH}/documents/d/${exported.documentId}/externaldata/${exported.externalId}`,
             query: "",
             beforeRequest: store.checkReserve(),
-            beforeChunk: (bytes) => store.checkReserve(bytes),
+            beforeChunk: (bytes) =>
+              store.checkReserve(bytes).pipe(
+                Effect.andThen(
+                  bytes - reportedBytes < 1024 ** 2
+                    ? Effect.void
+                    : Effect.suspend(() => {
+                        reportedBytes = bytes;
+                        return progress.step("downloading", { done: bytes });
+                      }),
+                ),
+              ),
           });
           checkpoint = yield* entry.saveDownload(checkpoint.draft, revisionKey, downloaded.bytes);
         }
@@ -276,8 +296,10 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         let missingBatch:
           | { studio: string; geometry: ReturnType<typeof readOnshapeExportGeometry> | undefined }
           | undefined;
+        const required = orderedParts.filter((part) => part.geometryRequired).length;
         for (const part of orderedParts) {
           if (!part.geometryRequired) continue;
+          yield* progress.step("building", { done: assets.length, total: required });
           const extracted = geometry.has(part.geometryKey)
             ? yield* Effect.try({
                 try: () => geometry.extract(part.geometryKey),
@@ -391,6 +413,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
           yield* Effect.try({ try: () => budget.add(asset, complexity), catch: geometryFailure });
           assets.push(asset);
         }
+        yield* progress.step("saving");
         const partOrder = new Map(draft.parts.map((part, index) => [part.geometryKey, index]));
         assets.sort((a, b) => partOrder.get(a.geometryKey)! - partOrder.get(b.geometryKey)!);
         const manifest: CadSnapshotManifest = yield* completeSnapshotManifest(draft, assets);

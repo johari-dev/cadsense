@@ -52,6 +52,7 @@ describe("Onshape connection contracts", () => {
       host: "https://cad.onshape.com",
       verifiedAt: "2026-09-04T00:00:00.000Z",
       updatedAt: "2026-09-04T00:00:00.000Z",
+      apiUsage: { year: 2026, used: 12, limit: 2500 },
       accessKeyId: "must-not-cross-the-wire",
       secretKey: "must-not-cross-the-wire",
     });
@@ -61,6 +62,7 @@ describe("Onshape connection contracts", () => {
       host: "https://cad.onshape.com",
       verifiedAt: "2026-09-04T00:00:00.000Z",
       updatedAt: "2026-09-04T00:00:00.000Z",
+      apiUsage: { year: 2026, used: 12, limit: 2500 },
     });
     expect(JSON.stringify(summary)).not.toContain("must-not-cross-the-wire");
   });
@@ -75,6 +77,7 @@ describe("Onshape connection contracts", () => {
           host: "https://cad.onshape.com",
           verifiedAt: "2026-09-04T00:00:00.000Z",
           updatedAt: "2026-09-04T00:00:00.000Z",
+          apiUsage: { year: 2026, used: 12, limit: 2500 },
           secretKey: "must-not-cross-the-wire",
         },
       ],
@@ -87,6 +90,7 @@ describe("Onshape connection contracts", () => {
         host: "https://cad.onshape.com",
         verifiedAt: "2026-09-04T00:00:00.000Z",
         updatedAt: "2026-09-04T00:00:00.000Z",
+        apiUsage: { year: 2026, used: 12, limit: 2500 },
       },
     ]);
     expect(result.catalogUpdatedAt).toBe("2026-09-04T00:00:00.000Z");

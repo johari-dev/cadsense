@@ -73,6 +73,7 @@ export const decideCadState = Effect.fn("decideCadState")(function* (
     ...(command.type === "project.cad.operation.end" && command.retryAt
       ? { retryAt: command.retryAt }
       : {}),
+    ...(command.apiCalls ? { apiCalls: command.apiCalls } : {}),
   };
   let roots = cad.roots;
   let catalog = cad.catalog;

@@ -211,6 +211,25 @@ describe("bounded Onshape JSON transport", () => {
       assert.isTrue(cancelled);
     }).pipe(Effect.provide(layer(fetch)));
   });
+  it.effect("reports a billed status even when reading its body then fails", () => {
+    const statuses: number[] = [];
+    const failure = { reason: "disk-space" };
+    const fetch: FetchHandler = async () => new Response(new Uint8Array([1, 2]));
+    return Effect.gen(function* () {
+      const transport = yield* OnshapeTransport.OnshapeTransport;
+      yield* transport
+        .execute({
+          ...request,
+          responseType: "binary",
+          beforeChunk: () => Effect.fail(failure),
+          onResponse: (status) => Effect.sync(() => statuses.push(status)),
+        })
+        .pipe(Effect.flip);
+      // Onshape bills the call once it answers 200; the failed download does not undo that.
+      assert.deepEqual(statuses, [200]);
+    }).pipe(Effect.provide(layer(fetch)));
+  });
+
   it.effect("returns bounded binary bytes and a normalized media type without assuming GLB", () => {
     const fetch: FetchHandler = async () =>
       new Response(new Uint8Array([1, 2, 3]), {

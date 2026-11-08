@@ -14,6 +14,9 @@ import {
   type OnshapeConnectionRemoveResult,
   type OnshapeConnectionRenameInput,
   type OnshapeConnectionReplaceCredentialsInput,
+  type OnshapeConnectionSetApiLimitInput,
+  type OnshapeApiUsage,
+  DEFAULT_ONSHAPE_YEARLY_API_LIMIT,
   OnshapeConnectionSummary,
   OnshapeInsufficientPermissionsError,
   OnshapeInvalidCredentialsError,
@@ -36,6 +39,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import { CadProgressReporter } from "../cad/CadOperationProgress.ts";
 import { MAX_ONSHAPE_DOWNLOAD_REDIRECTS, ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import * as OnshapeRequestSigner from "./OnshapeRequestSigner.ts";
 import * as OnshapeTransport from "./OnshapeTransport.ts";
@@ -70,6 +74,9 @@ interface ConnectionRow {
   readonly verifiedAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly apiCallsYear: number;
+  readonly apiCallsUsed: number;
+  readonly apiCallLimit: number;
 }
 
 interface CredentialBlobRow {
@@ -116,6 +123,13 @@ export interface OnshapeConnectionsShape {
   readonly rename: (
     input: OnshapeConnectionRenameInput,
   ) => Effect.Effect<OnshapeConnectionSummary, OnshapeConnectionError>;
+  readonly setApiLimit: (
+    input: OnshapeConnectionSetApiLimitInput,
+  ) => Effect.Effect<OnshapeConnectionSummary, OnshapeConnectionError>;
+  /** This year's API calls through a connection. Reads the database; contacts no one. */
+  readonly apiUsage: (
+    connectionId: OnshapeConnectionId,
+  ) => Effect.Effect<OnshapeApiUsage, OnshapeConnectionError>;
   readonly replaceCredentials: (
     input: OnshapeConnectionReplaceCredentialsInput,
   ) => Effect.Effect<OnshapeConnectionSummary, OnshapeConnectionError>;
@@ -179,6 +193,15 @@ const nextUpdatedAt = Effect.fn("OnshapeConnections.nextUpdatedAt")(function* (
   );
 });
 
+const currentYear = DateTime.now.pipe(Effect.map((now) => DateTime.getPartUtc(now, "year")));
+
+/** A count saved in an earlier year is this year's zero. */
+const apiUsageOf = (row: ConnectionRow, year: number): OnshapeApiUsage => ({
+  year,
+  used: row.apiCallsYear === year ? row.apiCallsUsed : 0,
+  limit: row.apiCallLimit,
+});
+
 const decodeSummary = Effect.fn("OnshapeConnections.decodeSummary")(function* (
   row: ConnectionRow,
   operation: OnshapeConnectionPersistenceOperation,
@@ -189,6 +212,7 @@ const decodeSummary = Effect.fn("OnshapeConnections.decodeSummary")(function* (
     host: row.host,
     verifiedAt: row.verifiedAt,
     updatedAt: row.updatedAt,
+    apiUsage: apiUsageOf(row, yield* currentYear),
   }).pipe(Effect.mapError(() => persistenceError(operation)));
 });
 
@@ -223,7 +247,10 @@ export const make = Effect.gen(function* () {
         credential_revision AS "credentialRevision",
         verified_at AS "verifiedAt",
         created_at AS "createdAt",
-        updated_at AS "updatedAt"
+        updated_at AS "updatedAt",
+        api_calls_year AS "apiCallsYear",
+        api_calls_used AS "apiCallsUsed",
+        api_call_limit AS "apiCallLimit"
       FROM onshape_connections
       ORDER BY created_at ASC, connection_id ASC
     `.pipe(Effect.mapError(() => persistenceError(operation)));
@@ -241,7 +268,10 @@ export const make = Effect.gen(function* () {
         credential_revision AS "credentialRevision",
         verified_at AS "verifiedAt",
         created_at AS "createdAt",
-        updated_at AS "updatedAt"
+        updated_at AS "updatedAt",
+        api_calls_year AS "apiCallsYear",
+        api_calls_used AS "apiCallsUsed",
+        api_call_limit AS "apiCallLimit"
       FROM onshape_connections
       WHERE connection_id = ${connectionId}
       LIMIT 1
@@ -296,10 +326,12 @@ export const make = Effect.gen(function* () {
   ) {
     yield* sql`
       INSERT INTO onshape_connections (
-        connection_id, name, host, credential_revision, verified_at, created_at, updated_at
+        connection_id, name, host, credential_revision, verified_at, created_at, updated_at,
+        api_calls_year, api_calls_used, api_call_limit
       ) VALUES (
         ${row.connectionId}, ${row.name}, ${row.host}, ${row.credentialRevision}, ${row.verifiedAt},
-        ${row.createdAt}, ${row.updatedAt}
+        ${row.createdAt}, ${row.updatedAt}, ${row.apiCallsYear}, ${row.apiCallsUsed},
+        ${row.apiCallLimit}
       )
     `.pipe(Effect.mapError(() => persistenceError(operation)));
   });
@@ -416,7 +448,28 @@ export const make = Effect.gen(function* () {
     return yield* new OnshapeNetworkError();
   });
 
+  /**
+   * Records one call Onshape bills: in the connection's yearly count, and in the running CAD
+   * operation's progress. A connection still being created has no row yet, so `create` counts its
+   * verification call itself.
+   */
+  const countApiCall = Effect.fn("OnshapeConnections.countApiCall")(function* (
+    connectionId: OnshapeConnectionId | null,
+  ) {
+    yield* (yield* CadProgressReporter).apiCall;
+    if (connectionId === null) return;
+    const year = yield* currentYear;
+    // A failed count must not fail the Onshape read it describes, which was already paid for.
+    yield* sql`
+      UPDATE onshape_connections
+      SET api_calls_used = CASE WHEN api_calls_year = ${year} THEN api_calls_used + 1 ELSE 1 END,
+          api_calls_year = ${year}
+      WHERE connection_id = ${connectionId}
+    `.pipe(Effect.catch(() => Effect.logWarning("Could not count an Onshape API call.")));
+  });
+
   const request = Effect.fn("OnshapeConnections.request")(function* <E = never, R = never>(
+    connectionId: OnshapeConnectionId | null,
     host: string,
     credentials: StoredCredentials,
     path: string,
@@ -457,6 +510,10 @@ export const make = Effect.gen(function* () {
         },
         ...(responseType ? { responseType } : {}),
         ...(bulkExport ? { bulkExport } : {}),
+        // Onshape bills every 2xx and 3xx response, including download redirects, even when
+        // reading its body fails afterward.
+        onResponse: (status: number) =>
+          status >= 200 && status < 400 ? countApiCall(connectionId) : Effect.void,
         ...(beforeChunk
           ? {
               beforeChunk: (receivedBytes: number) =>
@@ -483,6 +540,7 @@ export const make = Effect.gen(function* () {
   });
 
   const verify = Effect.fn("OnshapeConnections.verify")(function* (
+    connectionId: OnshapeConnectionId | null,
     host: string,
     credentials: StoredCredentials,
   ) {
@@ -502,7 +560,7 @@ export const make = Effect.gen(function* () {
     }
     verificationAttempts.push(nowMs);
 
-    yield* request(host, credentials, VERIFY_PATH, VERIFY_QUERY);
+    yield* request(connectionId, host, credentials, VERIFY_PATH, VERIFY_QUERY);
   });
 
   const readCredentials = Effect.fn("OnshapeConnections.readCredentials")(function* (
@@ -572,8 +630,16 @@ export const make = Effect.gen(function* () {
               Effect.mapError(() => new OnshapeNetworkError()),
             )
           : undefined;
-      return (yield* request(host, credentials, input.path, input.query, "json", undefined, body))
-        .body;
+      return (yield* request(
+        input.connectionId,
+        host,
+        credentials,
+        input.path,
+        input.query,
+        "json",
+        undefined,
+        body,
+      )).body;
     },
   );
 
@@ -587,6 +653,7 @@ export const make = Effect.gen(function* () {
       yield* checkRemoteCooldown();
       if (input.beforeRequest) yield* input.beforeRequest;
       const response = yield* request(
+        input.connectionId,
         url.origin,
         credentials,
         url.pathname,
@@ -665,7 +732,7 @@ export const make = Effect.gen(function* () {
             accessKeyId: input.accessKeyId,
             secretKey: input.secretKey,
           };
-          yield* verify(host, credentials);
+          yield* verify(null, host, credentials);
           const connectionId = yield* crypto.randomUUIDv4.pipe(
             Effect.map(OnshapeConnectionId.make),
             Effect.mapError(() => persistenceError("create")),
@@ -684,6 +751,10 @@ export const make = Effect.gen(function* () {
             verifiedAt,
             createdAt: verifiedAt,
             updatedAt,
+            // The verification call above is the connection's first billed call.
+            apiCallsYear: yield* currentYear,
+            apiCallsUsed: 1,
+            apiCallLimit: DEFAULT_ONSHAPE_YEARLY_API_LIMIT,
           };
           const blob = { connectionId, credentialRevision };
           let committed = false;
@@ -750,6 +821,41 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const setApiLimit: OnshapeConnectionsShape["setApiLimit"] = Effect.fn(
+    "OnshapeConnections.setApiLimit",
+  )(function* (input) {
+    return yield* mutationLock.withPermits(1)(
+      Effect.gen(function* () {
+        const existing = yield* getRow(input.connectionId, "set-api-limit");
+        if (Option.isNone(existing)) {
+          return yield* new OnshapeConnectionNotFoundError({ connectionId: input.connectionId });
+        }
+        const updatedAt = yield* nextUpdatedAt(yield* getCatalogUpdatedAt("set-api-limit"));
+        yield* sql
+          .withTransaction(
+            sql`
+              UPDATE onshape_connections
+              SET api_call_limit = ${input.limit}, updated_at = ${updatedAt}
+              WHERE connection_id = ${input.connectionId}
+            `.pipe(Effect.andThen(setCatalogUpdatedAt(updatedAt, "set-api-limit"))),
+          )
+          .pipe(Effect.mapError(() => persistenceError("set-api-limit")));
+        return yield* decodeSummary(
+          { ...existing.value, apiCallLimit: input.limit, updatedAt },
+          "set-api-limit",
+        );
+      }),
+    );
+  });
+
+  const apiUsage: OnshapeConnectionsShape["apiUsage"] = Effect.fn("OnshapeConnections.apiUsage")(
+    function* (connectionId) {
+      const row = yield* getRow(connectionId, "list");
+      if (Option.isNone(row)) return yield* new OnshapeConnectionNotFoundError({ connectionId });
+      return apiUsageOf(row.value, yield* currentYear);
+    },
+  );
+
   const replaceCredentials: OnshapeConnectionsShape["replaceCredentials"] = Effect.fn(
     "OnshapeConnections.replaceCredentials",
   )(function* (input) {
@@ -765,7 +871,7 @@ export const make = Effect.gen(function* () {
           accessKeyId: input.accessKeyId,
           secretKey: input.secretKey,
         };
-        yield* verify(host, credentials);
+        yield* verify(input.connectionId, host, credentials);
         const credentialRevision = yield* crypto.randomUUIDv4.pipe(
           Effect.map((uuid) => uuid.replaceAll("-", "")),
           Effect.mapError(() => persistenceError("replace-credentials")),
@@ -831,8 +937,16 @@ export const make = Effect.gen(function* () {
             }),
           ),
         );
+        // Reread the row: verification just counted a call on it.
+        const updated = yield* getRow(input.connectionId, "replace-credentials");
         return yield* decodeSummary(
-          { ...existing.value, host, credentialRevision, verifiedAt, updatedAt },
+          {
+            ...(Option.isSome(updated) ? updated.value : existing.value),
+            host,
+            credentialRevision,
+            verifiedAt,
+            updatedAt,
+          },
           "replace-credentials",
         );
       }),
@@ -907,6 +1021,8 @@ export const make = Effect.gen(function* () {
     list,
     create,
     rename,
+    setApiLimit,
+    apiUsage,
     replaceCredentials,
     remove,
     readJson,

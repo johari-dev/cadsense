@@ -47,6 +47,8 @@ import { OrchestrationEventStoreLive } from "../persistence/Layers/Orchestration
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
+import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
+import * as CadOperationProgress from "../cad/CadOperationProgress.ts";
 import { CadDiskSpace, CadSnapshotStore, make as makeStore } from "../cad/CadSnapshotStore.ts";
 import { CadPanel } from "../cad/CadPanel.ts";
 import { pruneCadSnapshots } from "../cad/CadSnapshotRetention.ts";
@@ -97,6 +99,18 @@ const store = Layer.effect(CadSnapshotStore, makeStore).pipe(
 const onshape = Layer.mergeAll(
   Layer.succeed(OnshapeCadRoots, { discover: unused }),
   Layer.succeed(OnshapeSnapshotAcquisition, { acquire: unused }),
+  Layer.succeed(OnshapeConnections, {
+    readBinary: unused,
+    readJson: unused,
+    list: unused,
+    create: unused,
+    rename: unused,
+    setApiLimit: unused,
+    apiUsage: unused,
+    replaceCredentials: unused,
+    remove: unused,
+  }),
+  CadOperationProgress.layer,
   // Native agent shutdown is not under test; no agent runs exist here.
   Layer.succeed(CadProjectQuiescence, { confirm: () => Effect.void }),
 );

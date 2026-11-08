@@ -54,6 +54,13 @@ export function createOnshapeConnectionAtoms<R, E>(
       concurrency: mutationConcurrency,
       onSuccess: refreshList,
     }),
+    setApiLimit: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:onshape-connections:set-api-limit",
+      tag: WS_METHODS.onshapeConnectionsSetApiLimit,
+      scheduler: mutationScheduler,
+      concurrency: mutationConcurrency,
+      onSuccess: refreshList,
+    }),
     replaceCredentials: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:onshape-connections:replace-credentials",
       tag: WS_METHODS.onshapeConnectionsReplaceCredentials,
