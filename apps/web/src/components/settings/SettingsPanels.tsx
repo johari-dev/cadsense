@@ -329,6 +329,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.showContextWindowIndicator
         ? ["Context window indicator visibility"]
         : []),
+      ...(settings.showOnshapeSyncApiCalls !== DEFAULT_UNIFIED_SETTINGS.showOnshapeSyncApiCalls
+        ? ["Onshape API calls per sync"]
+        : []),
       ...(settings.streamAssistantText !== DEFAULT_UNIFIED_SETTINGS.streamAssistantText
         ? ["Streaming text"]
         : []),
@@ -368,6 +371,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.streamAssistantText,
       settings.showPermissionSettings,
       settings.showContextWindowIndicator,
+      settings.showOnshapeSyncApiCalls,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
       settings.fontFamilySans,
@@ -392,6 +396,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       streamAssistantText: DEFAULT_UNIFIED_SETTINGS.streamAssistantText,
       showPermissionSettings: DEFAULT_UNIFIED_SETTINGS.showPermissionSettings,
       showContextWindowIndicator: DEFAULT_UNIFIED_SETTINGS.showContextWindowIndicator,
+      showOnshapeSyncApiCalls: DEFAULT_UNIFIED_SETTINGS.showOnshapeSyncApiCalls,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -448,6 +453,19 @@ export function AppearanceSettingsPanel() {
                 updateSettings({ showContextWindowIndicator: Boolean(checked) })
               }
               aria-label="Show context window indicator"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("show-onshape-sync-api-calls")}
+          description="Show how many Onshape API calls each CAD sync uses, in its progress toast."
+          control={
+            <Switch
+              checked={settings.showOnshapeSyncApiCalls}
+              onCheckedChange={(checked) =>
+                updateSettings({ showOnshapeSyncApiCalls: Boolean(checked) })
+              }
+              aria-label="Show Onshape API calls per sync"
             />
           }
         />

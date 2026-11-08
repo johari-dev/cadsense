@@ -19,6 +19,7 @@ import {
 } from "./cadUser.ts";
 import { CadRenderError, CadRenderEvent } from "./cadRender.ts";
 import { CadStorageEntry, CadStorageInput, CadThumbnailSaveInput } from "./cadStorage.ts";
+import { CadOperationProgress } from "./cadLifecycle.ts";
 import { CadViewError, CadViewState } from "./cadView.ts";
 import {
   CadPanelInput,
@@ -69,6 +70,7 @@ import {
   OnshapeConnectionRemoveInput,
   OnshapeConnectionRemoveResult,
   OnshapeConnectionRenameInput,
+  OnshapeConnectionSetApiLimitInput,
   OnshapeConnectionReplaceCredentialsInput,
   OnshapeConnectionSummary,
   OnshapeProjectCreateBaseInput,
@@ -182,6 +184,7 @@ export const WS_METHODS = {
   onshapeConnectionsList: "onshape.connections.list",
   onshapeConnectionsCreate: "onshape.connections.create",
   onshapeConnectionsRename: "onshape.connections.rename",
+  onshapeConnectionsSetApiLimit: "onshape.connections.setApiLimit",
   onshapeConnectionsReplaceCredentials: "onshape.connections.replaceCredentials",
   onshapeConnectionsRemove: "onshape.connections.remove",
   onshapeProjectsCreate: "onshape.projects.create",
@@ -201,6 +204,7 @@ export const WS_METHODS = {
   cadPanelSave: "cad.panel.save",
   cadPanelScene: "cad.panel.scene",
   cadStorageWatch: "cad.storage.watch",
+  cadProgressWatch: "cad.progress.watch",
   cadStorageRun: "cad.storage.run",
   cadThumbnailSave: "cad.thumbnail.save",
   featureScriptPreview: "featurescript.preview",
@@ -441,6 +445,15 @@ export const WsOnshapeConnectionsRenameRpc = Rpc.make(WS_METHODS.onshapeConnecti
   error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
 });
 
+export const WsOnshapeConnectionsSetApiLimitRpc = Rpc.make(
+  WS_METHODS.onshapeConnectionsSetApiLimit,
+  {
+    payload: OnshapeConnectionSetApiLimitInput,
+    success: OnshapeConnectionSummary,
+    error: Schema.Union([OnshapeConnectionError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOnshapeConnectionsReplaceCredentialsRpc = Rpc.make(
   WS_METHODS.onshapeConnectionsReplaceCredentials,
   {
@@ -529,6 +542,13 @@ export const WsCadPanelWatchRpc = Rpc.make(WS_METHODS.cadPanelWatch, {
   payload: CadPanelInput,
   success: CadPanelState,
   error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+/** Every running Onshape CAD operation's live progress, again on each change. */
+export const WsCadProgressWatchRpc = Rpc.make(WS_METHODS.cadProgressWatch, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(CadOperationProgress),
+  error: EnvironmentAuthorizationError,
   stream: true,
 });
 export const WsCadStorageWatchRpc = Rpc.make(WS_METHODS.cadStorageWatch, {
@@ -760,6 +780,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOnshapeConnectionsListRpc,
   WsOnshapeConnectionsCreateRpc,
   WsOnshapeConnectionsRenameRpc,
+  WsOnshapeConnectionsSetApiLimitRpc,
   WsOnshapeConnectionsReplaceCredentialsRpc,
   WsOnshapeConnectionsRemoveRpc,
   WsOnshapeProjectsCreateRpc,
@@ -775,6 +796,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCadReviewLearningsWatchRpc,
   WsCadReviewLearningRemoveRpc,
   WsCadStorageWatchRpc,
+  WsCadProgressWatchRpc,
   WsCadStorageRunRpc,
   WsCadThumbnailSaveRpc,
   WsCadPanelSceneRpc,

@@ -42,6 +42,8 @@ const makeHarness = Effect.fn(function* (options?: {
     list: unused,
     create: unused,
     rename: unused,
+    setApiLimit: unused,
+    apiUsage: unused,
     replaceCredentials: unused,
     remove: unused,
     readBinary: unused,

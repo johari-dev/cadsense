@@ -37,6 +37,7 @@ const connection = OnshapeConnectionSummary.make({
   host: "https://cad.onshape.com",
   verifiedAt: now,
   updatedAt: now,
+  apiUsage: { year: 2026, used: 0, limit: 2_500 },
 });
 const source = OnshapeProjectSource.make({
   connectionId,
@@ -79,6 +80,8 @@ const makeHarness = Effect.fn(function* (options?: {
           }),
         create: unsupported,
         rename: unsupported,
+        setApiLimit: unsupported,
+        apiUsage: unsupported,
         replaceCredentials: unsupported,
         remove: unsupported,
         readJson: unsupported,

@@ -52,6 +52,7 @@ import { OnshapeConnectionId, OnshapeProjectSource } from "./onshape.ts";
 import { LocalCadProjectSource } from "./localCad.ts";
 import {
   CadCatalog,
+  CadOperationApiCalls,
   CadProjectState,
   CadOperationId,
   CadOperationKind,
@@ -1054,6 +1055,7 @@ const CadOperationCompleteCommand = Schema.Struct({
   projectId: ProjectId,
   operationId: CadOperationId,
   result: CadOperationResult,
+  apiCalls: Schema.optionalKey(CadOperationApiCalls),
 });
 const CadOperationEndCommand = Schema.Struct({
   type: Schema.Literal("project.cad.operation.end"),
@@ -1065,6 +1067,7 @@ const CadOperationEndCommand = Schema.Struct({
   retryAt: Schema.optionalKey(IsoDateTime),
   // A failed local CAD sync still rescans the folder, so the user can choose another file.
   catalog: Schema.optionalKey(CadCatalog),
+  apiCalls: Schema.optionalKey(CadOperationApiCalls),
 });
 const ThreadTurnStartSettleCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start.settle"),

@@ -43,6 +43,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "show-onshape-sync-api-calls",
+    title: "Show Onshape API calls per sync",
+    to: "/settings/appearance",
+  },
+  {
     id: "add-project-starts-in",
     title: "Default project folder",
     to: "/settings/general",

@@ -101,6 +101,7 @@ import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import { LocalCadProjects } from "./localCad/LocalCadProjects.ts";
 import { CadUserOperations } from "./cad/CadUserOperations.ts";
 import { CadStorage } from "./cad/CadStorage.ts";
+import { CadOperationProgress } from "./cad/CadOperationProgress.ts";
 import { CadRenderBroker } from "./cad/CadRenderBroker.ts";
 import { saveCadThumbnail } from "./cad/CadThumbnails.ts";
 import { CadPanel } from "./cad/CadPanel.ts";
@@ -411,6 +412,7 @@ const makeWsRpcLayer = (
       const localCadProjects = yield* LocalCadProjects;
       const cadUserOperations = yield* CadUserOperations;
       const cadStorage = yield* CadStorage;
+      const cadOperationProgress = yield* CadOperationProgress;
       const cadRenderBroker = yield* CadRenderBroker;
       const cadPanel = yield* CadPanel;
       const cadComments = yield* CadComments;
@@ -901,6 +903,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.onshapeConnectionsRename, onshapeConnections.rename(input), {
             "rpc.aggregate": "onshape-connections",
           }),
+        [WS_METHODS.onshapeConnectionsSetApiLimit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.onshapeConnectionsSetApiLimit,
+            onshapeConnections.setApiLimit(input),
+            { "rpc.aggregate": "onshape-connections" },
+          ),
         [WS_METHODS.onshapeConnectionsReplaceCredentials]: (input) =>
           observeRpcEffect(
             WS_METHODS.onshapeConnectionsReplaceCredentials,
@@ -957,6 +965,8 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.cadStorageWatch]: () =>
           observeRpcStream(WS_METHODS.cadStorageWatch, cadStorage.watch),
+        [WS_METHODS.cadProgressWatch]: () =>
+          observeRpcStream(WS_METHODS.cadProgressWatch, cadOperationProgress.watch),
         [WS_METHODS.cadStorageRun]: (input) =>
           observeRpcEffect(WS_METHODS.cadStorageRun, cadStorage.run(input)),
         [WS_METHODS.cadThumbnailSave]: (input) =>

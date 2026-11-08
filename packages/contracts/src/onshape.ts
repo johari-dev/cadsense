@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -11,6 +17,12 @@ export const MAX_ONSHAPE_SECRET_KEY_LENGTH = 512;
 export const MAX_ONSHAPE_RETRY_AFTER_SECONDS = 86_400;
 export const MAX_ONSHAPE_PROJECT_URL_LENGTH = 4_096;
 export const MAX_ONSHAPE_CONFIGURATION_LENGTH = 4_096;
+/**
+ * The yearly API call limit a new connection assumes: Onshape's Free, Standard, and EDU Student
+ * plans. Professional (5,000) and Enterprise (10,000) users set theirs on the connection.
+ */
+export const DEFAULT_ONSHAPE_YEARLY_API_LIMIT = 2_500;
+export const MAX_ONSHAPE_YEARLY_API_LIMIT = 10_000_000;
 
 const ONSHAPE_ENTITY_ID_PATTERN = /^[0-9a-f]{24}$/;
 
@@ -151,6 +163,18 @@ export const OnshapeRetryAfterSeconds = NonNegativeInt.check(
 export type OnshapeRetryAfterSeconds = typeof OnshapeRetryAfterSeconds.Type;
 
 /**
+ * Onshape API calls this app made with one connection in a calendar year. Onshape bills only calls
+ * that return 2xx or 3xx and reports usage nowhere in its API, so this is cadsense's own count:
+ * other apps using the same account are not in it.
+ */
+export const OnshapeApiUsage = Schema.Struct({
+  year: Schema.Int,
+  used: NonNegativeInt,
+  limit: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_ONSHAPE_YEARLY_API_LIMIT)),
+});
+export type OnshapeApiUsage = typeof OnshapeApiUsage.Type;
+
+/**
  * The only saved connection shape permitted to cross the server boundary.
  * Credentials deliberately exist only on the write inputs below.
  */
@@ -160,6 +184,7 @@ export const OnshapeConnectionSummary = Schema.Struct({
   host: OnshapeConnectionHost,
   verifiedAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  apiUsage: OnshapeApiUsage,
 });
 export type OnshapeConnectionSummary = typeof OnshapeConnectionSummary.Type;
 
@@ -184,6 +209,13 @@ export const OnshapeConnectionRenameInput = Schema.Struct({
   name: OnshapeConnectionName,
 });
 export type OnshapeConnectionRenameInput = typeof OnshapeConnectionRenameInput.Type;
+
+/** Sets the yearly API call limit of the account's Onshape plan. Local; contacts no one. */
+export const OnshapeConnectionSetApiLimitInput = Schema.Struct({
+  connectionId: OnshapeConnectionId,
+  limit: OnshapeApiUsage.fields.limit,
+});
+export type OnshapeConnectionSetApiLimitInput = typeof OnshapeConnectionSetApiLimitInput.Type;
 
 /** Replaces the host and credentials after one explicit verification request. */
 export const OnshapeConnectionReplaceCredentialsInput = Schema.Struct({
@@ -321,6 +353,7 @@ export const OnshapeConnectionPersistenceOperation = Schema.Literals([
   "list",
   "create",
   "rename",
+  "set-api-limit",
   "replace-credentials",
   "remove",
 ]);

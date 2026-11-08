@@ -4,6 +4,7 @@ import {
   type EnvironmentPresentation as BaseEnvironmentPresentation,
 } from "@cadsense/client-runtime/connection";
 import {
+  MAX_ONSHAPE_YEARLY_API_LIMIT,
   MAX_ONSHAPE_ACCESS_KEY_ID_LENGTH,
   MAX_ONSHAPE_CONNECTION_HOST_LENGTH,
   MAX_ONSHAPE_CONNECTION_NAME_LENGTH,
@@ -13,6 +14,7 @@ import {
 } from "@cadsense/contracts";
 import {
   CheckCircleIcon as CheckCircle2Icon,
+  GaugeIcon,
   KeyIcon as KeyRoundIcon,
   LaptopIcon,
   LinkIcon,
@@ -130,6 +132,22 @@ function VerifiedAt({ value }: { readonly value: string }) {
       <CheckCircle2Icon className="size-3.5 text-success" aria-hidden />
       <time dateTime={value}>{label}</time>
     </span>
+  );
+}
+
+const usageFormatter = new Intl.NumberFormat();
+
+/**
+ * The connection's Onshape API calls this year against its plan's limit. The count is cadsense's
+ * own: Onshape reports usage nowhere in its API, so other apps on the account are not in it.
+ */
+function ApiUsage({ usage }: { readonly usage: OnshapeConnectionSummary["apiUsage"] }) {
+  const nearLimit = usage.used >= usage.limit * 0.8;
+  return (
+    <p className={cn("text-xs tabular-nums", nearLimit ? "text-warning" : "text-muted-foreground")}>
+      {usageFormatter.format(usage.used)} of {usageFormatter.format(usage.limit)} API calls used by
+      cadsense in {usage.year}
+    </p>
   );
 }
 
@@ -434,6 +452,76 @@ function RenameConnectionForm({
   );
 }
 
+function ApiLimitForm({
+  formId,
+  connection,
+  pending,
+  onCancel,
+  onSave,
+}: {
+  readonly formId: string;
+  readonly connection: OnshapeConnectionSummary;
+  readonly pending: boolean;
+  readonly onCancel: () => void;
+  readonly onSave: (limit: number) => Promise<string | null>;
+}) {
+  const id = useId();
+  const [value, setValue] = useState(String(connection.apiUsage.limit));
+  const [error, setError] = useState<string | undefined>();
+  const [errorFocusRequest, setErrorFocusRequest] = useState(0);
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (pending) return;
+    const limit = Number(value.replaceAll(",", "").trim());
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ONSHAPE_YEARLY_API_LIMIT) {
+      setError(
+        `Enter a whole number from 1 to ${usageFormatter.format(MAX_ONSHAPE_YEARLY_API_LIMIT)}.`,
+      );
+      setErrorFocusRequest((current) => current + 1);
+      return;
+    }
+    void onSave(limit);
+  };
+
+  return (
+    <form
+      id={formId}
+      className="space-y-4 border-t border-border/60 px-4 py-4 sm:px-5"
+      onSubmit={submit}
+    >
+      <div className="space-y-1">
+        <h4 className="text-sm font-medium text-foreground">Yearly API call limit</h4>
+        <p className="text-xs text-muted-foreground">
+          Onshape limits API calls per user each year by plan: 2,500 for Free, Standard, and EDU
+          Student, 5,000 for Professional, 10,000 for Enterprise. Sync toasts show what remains.
+        </p>
+      </div>
+      <TextField
+        id={`${id}-limit`}
+        label="Calls per year"
+        value={value}
+        error={error}
+        errorFocusRequest={error === undefined ? null : errorFocusRequest}
+        disabled={pending}
+        autoFocus
+        autoComplete="off"
+        maxLength={12}
+        onChange={(next) => {
+          setValue(next);
+          setError(undefined);
+        }}
+      />
+      <FormActions
+        pending={pending}
+        pendingLabel="Saving..."
+        submitLabel="Save limit"
+        onCancel={onCancel}
+      />
+    </form>
+  );
+}
+
 function ReplaceCredentialsForm({
   formId,
   connection,
@@ -527,6 +615,7 @@ function ConnectionCard({
   onEdit,
   onCancelEdit,
   onRename,
+  onApiLimit,
   onReplaceCredentials,
   onRemove,
 }: {
@@ -537,6 +626,10 @@ function ConnectionCard({
   readonly onEdit: (editor: Exclude<OnshapeConnectionEditor, null>) => void;
   readonly onCancelEdit: () => void;
   readonly onRename: (connection: OnshapeConnectionSummary, name: string) => Promise<string | null>;
+  readonly onApiLimit: (
+    connection: OnshapeConnectionSummary,
+    limit: number,
+  ) => Promise<string | null>;
   readonly onReplaceCredentials: (
     connection: OnshapeConnectionSummary,
     draft: OnshapeCredentialDraft,
@@ -545,6 +638,8 @@ function ConnectionCard({
 }) {
   const isRenaming = editor?.kind === "rename" && editor.connectionId === connection.connectionId;
   const isReplacing = editor?.kind === "replace" && editor.connectionId === connection.connectionId;
+  const isLimiting = editor?.kind === "limit" && editor.connectionId === connection.connectionId;
+  const limitFormId = useId();
   const isRemoving = pendingKey === `remove:${connection.connectionId}`;
   const renameFormId = useId();
   const replaceFormId = useId();
@@ -560,6 +655,7 @@ function ConnectionCard({
             <h3 className="truncate text-sm font-semibold text-foreground">{connection.name}</h3>
             <p className="truncate font-mono text-xs text-muted-foreground">{connection.host}</p>
             <VerifiedAt value={connection.verifiedAt} />
+            <ApiUsage usage={connection.apiUsage} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1 sm:justify-end">
@@ -574,6 +670,18 @@ function ConnectionCard({
           >
             <PencilIcon aria-hidden />
             Rename
+          </Button>
+          <Button
+            data-onshape-focus-key={`limit:${connection.connectionId}`}
+            size="sm"
+            variant="ghost-muted"
+            disabled={interactionsDisabled}
+            aria-expanded={isLimiting}
+            aria-controls={limitFormId}
+            onClick={() => onEdit({ kind: "limit", connectionId: connection.connectionId })}
+          >
+            <GaugeIcon aria-hidden />
+            API limit
           </Button>
           <Button
             data-onshape-focus-key={`replace:${connection.connectionId}`}
@@ -606,6 +714,15 @@ function ConnectionCard({
           pending={pendingKey === `rename:${connection.connectionId}`}
           onCancel={onCancelEdit}
           onSave={(name) => onRename(connection, name)}
+        />
+      ) : null}
+      {isLimiting ? (
+        <ApiLimitForm
+          formId={limitFormId}
+          connection={connection}
+          pending={pendingKey === `limit:${connection.connectionId}`}
+          onCancel={onCancelEdit}
+          onSave={(limit) => onApiLimit(connection, limit)}
         />
       ) : null}
       {isReplacing ? (
@@ -649,6 +766,7 @@ function EnvironmentOnshapeConnections({
     cancelEditor,
     saveCreate,
     saveRename,
+    saveApiLimit,
     saveReplacement,
     remove,
   } = useOnshapeConnectionsController(environmentId);
@@ -817,6 +935,7 @@ function EnvironmentOnshapeConnections({
             onEdit={beginEditing}
             onCancelEdit={stopEditing}
             onRename={saveRename}
+            onApiLimit={saveApiLimit}
             onReplaceCredentials={saveReplacement}
             onRemove={removeWithLock}
           />

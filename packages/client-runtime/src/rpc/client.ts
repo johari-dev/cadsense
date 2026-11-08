@@ -53,6 +53,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.cadReviewLearningsWatch
   | typeof WS_METHODS.cadPanelWatch
   | typeof WS_METHODS.cadStorageWatch
+  | typeof WS_METHODS.cadProgressWatch
   | typeof WS_METHODS.cadPanelScene;
 
 export type EnvironmentStreamRpcTag = EnvironmentSubscriptionRpcTag;

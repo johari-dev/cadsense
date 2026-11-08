@@ -14,11 +14,18 @@ import { reactHookHarness as hooks } from "../test/reactHookHarness";
 
 const start = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => vi.fn());
+const toastUpdate = vi.hoisted(() => vi.fn());
+const toastClose = vi.hoisted(() => vi.fn());
 const threads = vi.hoisted(() => ({ current: [] as unknown[] }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
   const { reactHookHarness } = await import("../test/reactHookHarness");
-  return { ...actual, useEffect: reactHookHarness.useEffect, useState: reactHookHarness.useState };
+  return {
+    ...actual,
+    useEffect: reactHookHarness.useEffect,
+    useRef: reactHookHarness.useRef,
+    useState: reactHookHarness.useState,
+  };
 });
 vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../test/reactHookHarness");
@@ -29,7 +36,14 @@ vi.mock("../state/onshapeProjects", () => ({
 }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => start }));
 vi.mock("../state/entities", () => ({ useThreadShells: () => threads.current }));
-vi.mock("../components/ui/toast", () => ({ toastManager: { add: toast } }));
+vi.mock("../components/ui/toast", () => ({
+  toastManager: { add: toast, update: toastUpdate, close: toastClose },
+}));
+vi.mock("../hooks/useSettings", () => ({
+  useClientSettings: (select: (settings: { showOnshapeSyncApiCalls: boolean }) => unknown) =>
+    select({ showOnshapeSyncApiCalls: false }),
+}));
+vi.mock("../state/cadProgress", () => ({ cadProgressEnvironment: { watch: () => null } }));
 import { CadSyncButton } from "./CadSyncButton";
 
 const decodeProject = Schema.decodeUnknownSync(OrchestrationProjectShell);
@@ -144,6 +158,12 @@ const outcome = (status: string, reason: string | null = null) => ({
   completedAt: "2026-09-05T00:01:00Z",
   reason,
 });
+/** The toast an Onshape sync shows while it runs, until its outcome replaces it. */
+const loading = (name: string) => ({
+  type: "loading",
+  title: `Syncing ${name}`,
+  description: "Checking Onshape for changes.",
+});
 /** Lets the click handler's awaited start settle. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -153,6 +173,9 @@ describe("CAD panel Sync button", () => {
     start.mockReset();
     start.mockResolvedValue(AsyncResult.success({ operationId }));
     toast.mockReset();
+    toast.mockReturnValue("loading-toast");
+    toastUpdate.mockReset();
+    toastClose.mockReset();
     threads.current = [];
   });
   it("syncs the local root the panel shows in that root's configuration", () => {
@@ -237,7 +260,8 @@ describe("CAD panel Sync button", () => {
         }),
         null,
       );
-      expect(toast).toHaveBeenCalledExactlyOnceWith({
+      expect(toast).toHaveBeenCalledExactlyOnceWith(loading("FullTelescope"));
+      expect(toastUpdate).toHaveBeenCalledExactlyOnceWith("loading-toast", {
         type: "success",
         title: "FullTelescope synced",
         description: "Chats showing it now show the new revision.",
@@ -334,25 +358,27 @@ describe("CAD panel Sync button", () => {
     press(before, roots[0]!.rootId);
     await settle();
     render(before, roots[0]!.rootId);
-    expect(toast).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledExactlyOnceWith(loading("Robot"));
+    expect(toastUpdate).not.toHaveBeenCalled();
     const after = withCad(before, {
       roots: [{ ...roots[0]!, current: snapshot(3, "e") }, roots[1]!],
       lastOutcome: outcome("succeeded"),
     });
     render(after, roots[0]!.rootId);
-    expect(toast).toHaveBeenCalledExactlyOnceWith({
+    expect(toastUpdate).toHaveBeenCalledExactlyOnceWith("loading-toast", {
       type: "success",
       title: "Robot synced",
       description: "Chats showing it now show the new revision.",
     });
     render(after, roots[0]!.rootId);
+    expect(toastUpdate).toHaveBeenCalledOnce();
     expect(toast).toHaveBeenCalledOnce();
   });
   it("says an unchanged sync left the model as it was, even as a new snapshot", async () => {
     // A local STEP import writes a new snapshot of unchanged bytes; only the microversion holds.
     for (const current of [snapshot(2), snapshot(3)]) {
       hooks.reset();
-      toast.mockReset();
+      toastUpdate.mockReset();
       const before = onshapeWith(roots, catalog("Robot", "assembly"));
       press(before, roots[0]!.rootId);
       await settle();
@@ -361,7 +387,7 @@ describe("CAD panel Sync button", () => {
         lastOutcome: outcome("succeeded"),
       });
       render(after, roots[0]!.rootId);
-      expect(toast).toHaveBeenCalledExactlyOnceWith({
+      expect(toastUpdate).toHaveBeenCalledExactlyOnceWith("loading-toast", {
         type: "info",
         title: "Robot is already up to date",
       });
@@ -373,17 +399,19 @@ describe("CAD panel Sync button", () => {
     press(before, roots[0]!.rootId);
     await settle();
     render(withCad(before, { lastOutcome: outcome("failed", reason) }), roots[0]!.rootId);
-    expect(toast).toHaveBeenCalledExactlyOnceWith({
+    expect(toastUpdate).toHaveBeenCalledExactlyOnceWith("loading-toast", {
       type: "error",
       title: "Could not sync Robot",
       description: reason,
     });
     hooks.reset();
-    toast.mockReset();
+    toastUpdate.mockReset();
     press(before, roots[0]!.rootId);
     await settle();
     render(withCad(before, { lastOutcome: outcome("cancelled") }), roots[0]!.rootId);
-    expect(toast).not.toHaveBeenCalled();
+    // A cancelled sync only takes its loading toast away.
+    expect(toastUpdate).not.toHaveBeenCalled();
+    expect(toastClose).toHaveBeenCalledExactlyOnceWith("loading-toast");
   });
   it("ignores an outcome that belongs to another operation", async () => {
     const before = onshapeWith(roots, catalog("Robot", "assembly"));
@@ -394,7 +422,8 @@ describe("CAD panel Sync button", () => {
       operationId: CadSnapshotId.make("00000000-0000-4000-8000-00000000000b"),
     };
     render(withCad(before, { lastOutcome: other }), roots[0]!.rootId);
-    expect(toast).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledExactlyOnceWith(loading("Robot"));
+    expect(toastUpdate).not.toHaveBeenCalled();
   });
   it("explains a sync the server refuses to start", async () => {
     start.mockResolvedValue(

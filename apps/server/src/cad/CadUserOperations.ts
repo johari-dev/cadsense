@@ -24,10 +24,12 @@ import * as Scope from "effect/Scope";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
+import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
 import { OnshapeExportError } from "../onshape/OnshapeBulkAcquisition.ts";
 import { snapshotRootId } from "../onshape/OnshapeSnapshotManifest.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
+import { CadOperationProgress, CadProgressReporter } from "./CadOperationProgress.ts";
 import { pruneCadSnapshots } from "./CadSnapshotRetention.ts";
 import { CadGeometryError } from "./CadGeometry.ts";
 import { localCadElementId, localCadRootIdentity } from "../localCad/LocalCadFiles.ts";
@@ -241,6 +243,8 @@ export const make = Effect.gen(function* () {
   const store = yield* CadSnapshotStore;
   const roots = yield* OnshapeCadRoots;
   const acquisition = yield* OnshapeSnapshotAcquisition;
+  const connections = yield* OnshapeConnections;
+  const progress = yield* CadOperationProgress;
   const local = yield* LocalCadImport;
   const quiescence = yield* CadProjectQuiescence;
   const crypto = yield* Crypto.Crypto;
@@ -337,6 +341,15 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError(() => new CadUserOperationError({ reason: "busy" })));
         const ready = yield* Deferred.make<void>();
         let completed = false;
+        // Onshape operations report live progress, and record the API calls they made.
+        const tracking =
+          source.kind === "onshape" ? yield* progress.begin(operationId, input.projectId) : null;
+        const apiCalls = Effect.gen(function* () {
+          if (tracking === null || source.kind !== "onshape") return {};
+          const calls = yield* tracking.apiCalls;
+          const usage = yield* connections.apiUsage(source.source.connectionId).pipe(Effect.option);
+          return Option.isSome(usage) ? { apiCalls: { calls, usage: usage.value } } : {};
+        });
         const work = Effect.gen(function* () {
           yield* Deferred.await(ready);
           yield* store.checkReserve();
@@ -358,6 +371,7 @@ export const make = Effect.gen(function* () {
                 kind: "discover",
                 catalog: { ...catalog, refreshedAt: DateTime.formatIso(yield* DateTime.now) },
               },
+              ...(yield* apiCalls),
             });
           } else {
             const manifest =
@@ -405,10 +419,12 @@ export const make = Effect.gen(function* () {
                 },
                 ...(Option.isSome(catalog) ? { catalog: { ...catalog.value, refreshedAt } } : {}),
               },
+              ...(yield* apiCalls),
             });
           }
           completed = true;
         }).pipe(
+          tracking ? Effect.provideService(CadProgressReporter, tracking.reporter) : (self) => self,
           // Only the work is cancellable. The fiber starts uninterruptible, so the outcome handler
           // below is in place even when a cancel lands before the fiber's first step.
           Effect.interruptible,
@@ -472,6 +488,7 @@ export const make = Effect.gen(function* () {
                   reason: cancelled
                     ? "CAD operation cancelled."
                     : failureReason(error, source.kind),
+                  ...(yield* apiCalls),
                 })
                 .pipe(
                   Effect.catch(() =>
@@ -481,6 +498,8 @@ export const make = Effect.gen(function* () {
               yield* prune(input.projectId);
             }),
           ),
+          // After the outcome, so the live progress never disappears before it.
+          Effect.ensuring(tracking?.end ?? Effect.void),
           Effect.catchCause(() => Effect.void),
         );
         const fiber = yield* Effect.forkIn(work, scope, { uninterruptible: true });

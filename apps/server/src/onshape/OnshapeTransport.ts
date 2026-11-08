@@ -15,6 +15,8 @@ export interface OnshapeTransportRequest<E = never, R = never> {
   readonly responseType?: "json" | "binary";
   readonly bulkExport?: boolean;
   readonly beforeChunk?: (receivedBytes: number) => Effect.Effect<void, E, R>;
+  /** Runs once the response status arrives, before the body is read, so it sees billed calls. */
+  readonly onResponse?: (status: number) => Effect.Effect<void>;
 }
 
 export interface OnshapeTransportResponse {
@@ -85,6 +87,7 @@ export const layer = Layer.effect(
             }).pipe(Effect.andThen(client.execute(request))),
           Effect.flatMap(
             Effect.fn(function* (response) {
+              if (request.onResponse) yield* request.onResponse(response.status);
               if (metrics) {
                 if (response.status >= 200 && response.status < 400)
                   metrics.quotaCountedRequests = (metrics.quotaCountedRequests ?? 0) + 1;

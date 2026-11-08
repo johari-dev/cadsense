@@ -79,6 +79,7 @@ import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
+import * as CadOperationProgress from "./cad/CadOperationProgress.ts";
 import * as LocalCadImport from "./localCad/LocalCadImport.ts";
 import * as LocalCadProjects from "./localCad/LocalCadProjects.ts";
 import * as SolidWorksBridge from "./localCad/SolidWorksBridge.ts";
@@ -292,6 +293,7 @@ const AgentRuntimeLayerLive = Layer.mergeAll(
   CadRenderLifecycle.layer,
 ).pipe(
   Layer.provideMerge(CadPresentation.layer),
+  Layer.provideMerge(CadOperationProgress.layer),
   Layer.provideMerge(CadViewingLayerLive),
   Layer.provideMerge(CadProjectQuiescence.layer),
   Layer.provideMerge(CadAcquisitionLayerLive),

@@ -155,6 +155,8 @@ const harness = Effect.fn(function* (options?: {
     list: unused,
     create: unused,
     rename: unused,
+    setApiLimit: unused,
+    apiUsage: unused,
     remove: unused,
     replaceCredentials: unused,
     readJson: (request) =>

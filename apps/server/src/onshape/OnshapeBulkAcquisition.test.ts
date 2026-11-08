@@ -114,6 +114,8 @@ const makeHarness = (count: number, multipleStudios = false) =>
       list: unused,
       create: unused,
       rename: unused,
+      setApiLimit: unused,
+      apiUsage: unused,
       remove: unused,
       replaceCredentials: unused,
       readJson: (request: OnshapeJsonRequest) =>

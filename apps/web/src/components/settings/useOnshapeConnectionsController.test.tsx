@@ -16,6 +16,7 @@ const atoms = vi.hoisted(() => ({
   list: vi.fn(),
   create: Symbol("create"),
   rename: Symbol("rename"),
+  setApiLimit: Symbol("setApiLimit"),
   replaceCredentials: Symbol("replaceCredentials"),
   remove: Symbol("remove"),
 }));
@@ -29,6 +30,7 @@ const testState = vi.hoisted(() => ({
   },
   create: vi.fn(),
   rename: vi.fn(),
+  setApiLimit: vi.fn(),
   replaceCredentials: vi.fn(),
   remove: vi.fn(),
   confirm: vi.fn(),
@@ -60,6 +62,7 @@ vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: (command: symbol) => {
     if (command === atoms.create) return testState.create;
     if (command === atoms.rename) return testState.rename;
+    if (command === atoms.setApiLimit) return testState.setApiLimit;
     if (command === atoms.replaceCredentials) return testState.replaceCredentials;
     if (command === atoms.remove) return testState.remove;
     throw new Error("Unexpected Onshape command");
@@ -82,6 +85,7 @@ const baseConnection: OnshapeConnectionSummary = {
   host: "https://cad.onshape.com",
   verifiedAt: "2026-09-04T00:00:00.000Z",
   updatedAt: "2026-09-04T00:00:00.000Z",
+  apiUsage: { year: 2026, used: 0, limit: 2_500 },
 };
 const credentialDraft: OnshapeConnectionDraft = {
   name: "Team Onshape",

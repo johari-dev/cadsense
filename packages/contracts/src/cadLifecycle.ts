@@ -2,13 +2,14 @@ import * as Schema from "effect/Schema";
 import {
   IsoDateTime,
   NonNegativeInt,
+  ProjectId,
   TrimmedNonEmptyString,
   ThreadId,
   TurnId,
 } from "./baseSchemas.ts";
 import type { OrchestrationProjectShell, OrchestrationThread } from "./orchestration.ts";
 import { CadHash, CadRootKind, CadSnapshotId } from "./cad.ts";
-import { OnshapeElementId, OnshapeWorkspaceId } from "./onshape.ts";
+import { OnshapeApiUsage, OnshapeElementId, OnshapeWorkspaceId } from "./onshape.ts";
 
 export const CadOperationId = CadSnapshotId;
 export const CadOperationKind = Schema.Literals(["discover", "sync", "cleanup"]);
@@ -45,6 +46,12 @@ export const CadSnapshotMetadata = Schema.Struct({
   assetBytes: NonNegativeInt,
 });
 export type CadSnapshotMetadata = typeof CadSnapshotMetadata.Type;
+/** The Onshape API calls one CAD operation made, and its connection's yearly usage after it. */
+export const CadOperationApiCalls = Schema.Struct({
+  calls: NonNegativeInt,
+  usage: OnshapeApiUsage,
+});
+export type CadOperationApiCalls = typeof CadOperationApiCalls.Type;
 export const CadOperationOutcome = Schema.Struct({
   operationId: CadOperationId,
   kind: CadOperationKind,
@@ -52,6 +59,8 @@ export const CadOperationOutcome = Schema.Struct({
   completedAt: IsoDateTime,
   reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
   retryAt: Schema.optionalKey(IsoDateTime),
+  // Onshape operations only. Absent on local CAD and on outcomes recorded before it existed.
+  apiCalls: Schema.optionalKey(CadOperationApiCalls),
 });
 export const CadRootLineage = Schema.Struct({
   ...CadRootIdentity.fields,
@@ -59,6 +68,35 @@ export const CadRootLineage = Schema.Struct({
   rollback: Schema.NullOr(CadSnapshotMetadata),
   lastOutcome: Schema.NullOr(CadOperationOutcome),
 });
+/**
+ * The steps of an Onshape sync, in order. A sync of a microversion skips `checking` and
+ * `exporting`, as it downloads each part itself; an unchanged sync can end after `checking`.
+ */
+export const CAD_SYNC_STEPS = [
+  "checking",
+  "reading",
+  "exporting",
+  "downloading",
+  "building",
+  "saving",
+] as const;
+export const CadSyncStep = Schema.Literals(CAD_SYNC_STEPS);
+export type CadSyncStep = typeof CadSyncStep.Type;
+/**
+ * Live progress of one running Onshape CAD operation. Held in server memory only and never
+ * persisted: it ends with the operation, whose outcome records what lasts.
+ */
+export const CadOperationProgress = Schema.Struct({
+  operationId: CadOperationId,
+  projectId: ProjectId,
+  step: CadSyncStep,
+  stepStartedAt: IsoDateTime,
+  // Units the step has finished, and how many it has when known: parts, or bytes downloaded.
+  done: Schema.optionalKey(NonNegativeInt),
+  total: Schema.optionalKey(NonNegativeInt),
+  apiCalls: NonNegativeInt,
+});
+export type CadOperationProgress = typeof CadOperationProgress.Type;
 export const CadOperation = Schema.Struct({
   operationId: CadOperationId,
   kind: CadOperationKind,

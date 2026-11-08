@@ -5,7 +5,8 @@
  * way a user does: add an Onshape connection, create a project from --url, open a chat, and look at
  * the CAD panel. Then, by --flow:
  *
- *   sync      press the panel's Sync button and wait for the model to show (the default)
+ *   sync      press the panel's Sync button and wait for the model to show (the default), then
+ *             turn on "Show Onshape API calls per sync" and sync again, unchanged
  *   refresh   refresh the CAD catalog in project settings and look at the panel again, as a user
  *             had to before the panel could sync a project that was never refreshed
  *
@@ -16,6 +17,8 @@
  *   dev.log           dev runner, server, and web output
  *   cad-state.json    the project's CAD state from the dev database after each step
  *   summary.json      step timings, what each step observed, and the Onshape requests used
+ *   toasts.json       each sync's toasts as they changed, with the time since the click
+ *   NN-*-toast-*.png  the sync toast at each new step it showed
  *
  *   ONSHAPE_CREDENTIAL_FILE=key.json node apps/server/scripts/onshape-cad-sync-e2e.ts \
  *     --url <onshape document or element url> --out .cadsense/onshape-sync-e2e/run [--flow refresh]
@@ -63,8 +66,15 @@ const summary: {
   flow: string;
   steps: { name: string; ms: number; observed?: unknown }[];
   onshapeRequests?: number | null;
+  // The connection's yearly API call count the app saved, which should equal onshapeRequests.
+  connectionApiCalls?: { year: number; used: number; limit: number } | null;
+  failures: string[];
   ok: boolean;
-} = { flow: values.flow, steps: [], ok: false };
+} = { flow: values.flow, steps: [], failures: [], ok: false };
+/** Records a failed expectation; the run then ends not ok, with every failure listed. */
+const expect = (condition: boolean, failure: string) => {
+  if (!condition) summary.failures.push(failure);
+};
 const writeSummary = () =>
   NodeFS.writeFileSync(NodePath.join(out, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 
@@ -138,6 +148,24 @@ const readCadState = (step: string) => {
     NodePath.join(out, "cad-state.json"),
     `${JSON.stringify(cadStates, null, 2)}\n`,
   );
+};
+/** The yearly API usage the app saved for the run's one connection. */
+const connectionApiCalls = () => {
+  for (const file of findFiles(home, /^state\.sqlite$/)) {
+    const db = new NodeSqlite.DatabaseSync(file, { readOnly: true });
+    try {
+      const row = db
+        .prepare(
+          'SELECT api_calls_year AS year, api_calls_used AS used, api_call_limit AS "limit" FROM onshape_connections',
+        )
+        .get() as { year: number; used: number; limit: number } | undefined;
+      if (row) return { year: row.year, used: row.used, limit: row.limit };
+    } catch {
+    } finally {
+      db.close();
+    }
+  }
+  return null;
 };
 /** HTTP requests the server sent to Onshape, counted from its trace spans. Null with no traces. */
 const onshapeRequests = () => {
@@ -260,17 +288,138 @@ try {
     return panelView(page);
   });
   if (values.flow === "sync") {
+    const toastTimeline: Record<string, { ms: number; title: string; description: string }[]> = {};
+    /**
+     * Clicks Sync and records the sync's toast until it stops loading: every text it showed, and
+     * a screenshot at each new step. Returns the toast's final title and description.
+     */
+    const syncWithToast = async (page: Page, name: string) => {
+      const timeline: { ms: number; title: string; description: string }[] = [];
+      toastTimeline[name] = timeline;
+      const toast = page.locator('[data-slot="toast-title"]', { hasText: /Sync|sync|up to date/ });
+      const started = Date.now();
+      await syncButton.click();
+      let steps = 0;
+      for (;;) {
+        const root = toast.first().locator("xpath=ancestor::*[@data-type][1]");
+        const visible = await root.isVisible().catch(() => false);
+        if (visible) {
+          const type = await root.getAttribute("data-type");
+          const title = (await toast.first().innerText()).trim();
+          const description = (
+            await root
+              .locator('[data-slot="toast-description"]')
+              .innerText()
+              .catch(() => "")
+          ).trim();
+          const last = timeline.at(-1);
+          if (!last || last.title !== title || last.description !== description) {
+            timeline.push({ ms: Date.now() - started, title, description });
+            // The step's sentence, not its counters, decides a new screenshot.
+            const sentence = description.split(/[.\d]/)[0];
+            if (!last || last.description.split(/[.\d]/)[0] !== sentence || type !== "loading")
+              await page.screenshot({
+                path: NodePath.join(
+                  out,
+                  `${String(shots + 1).padStart(2, "0")}-${name}-toast-${++steps}.png`,
+                ),
+              });
+          }
+          if (type !== "loading") return { title, description, timeline };
+        }
+        if (Date.now() - started > 10 * 60_000) throw new Error(`${name} never finished`);
+        await page.waitForTimeout(250);
+      }
+    };
     await run("sync", async (page) => {
       await syncButton.hover();
       await page.waitForTimeout(1500);
-      await syncButton.click();
+      const result = await syncWithToast(page, "sync");
       await panel
         .locator("canvas")
         .first()
         .waitFor({ timeout: 10 * 60_000 });
       await page.waitForTimeout(5000);
-      return { panel: (await panel.innerText()).trim() };
+      const loadingTexts = result.timeline.slice(0, -1).map((entry) => entry.description);
+      expect(
+        result.timeline.some((entry) => entry.title.startsWith("Syncing ")),
+        "The sync never showed a loading toast",
+      );
+      expect(
+        new Set(loadingTexts.map((text) => text.split(/[.\d]/)[0])).size >= 3,
+        `The loading toast showed fewer than 3 steps: ${JSON.stringify(loadingTexts)}`,
+      );
+      expect(result.title.endsWith(" synced"), `The sync ended with "${result.title}"`);
+      expect(
+        /remaining this year/.test(result.description),
+        "The finished sync does not say how many calls remain",
+      );
+      expect(
+        !/API call/.test(result.timeline.map((entry) => entry.description).join(" ")),
+        "The sync showed its call count with the setting off",
+      );
+      return { panel: (await panel.innerText()).trim(), toast: result };
     });
+    await run("turn-on-api-calls", async (page) => {
+      await page.goto(`${url}settings/appearance`, { waitUntil: "networkidle" });
+      const toggle = page.getByRole("switch", { name: "Show Onshape API calls per sync" });
+      await toggle.click();
+      await waitFor("the setting to save", async () =>
+        (await toggle.getAttribute("aria-checked")) === "true" ? true : undefined,
+      );
+      await page.goto(threadUrl, { waitUntil: "networkidle" });
+      return panelView(page);
+    });
+    await run("sync-unchanged", async (page) => {
+      const before = connectionApiCalls();
+      const result = await syncWithToast(page, "sync-unchanged");
+      await page.waitForTimeout(3000);
+      const after = connectionApiCalls();
+      const used =
+        /Used (\d+) API call/.exec(result.timeline.at(-1)!.description) ??
+        /^(\d+) API call/m.exec(result.description);
+      const remaining = /([\d,]+) remaining this year/.exec(result.description);
+      expect(
+        result.title.endsWith("already up to date"),
+        `The unchanged sync said "${result.title}"`,
+      );
+      expect(
+        used !== null,
+        `The toast does not show the calls the sync used: ${result.description}`,
+      );
+      expect(
+        before !== null &&
+          after !== null &&
+          used !== null &&
+          after.used - before.used === Number(used[1]),
+        `The toast says ${used?.[1]} calls, but the saved count went from ${before?.used} to ${after?.used}`,
+      );
+      expect(
+        after !== null &&
+          remaining !== null &&
+          Number(remaining[1]!.replaceAll(",", "")) === after.limit - after.used,
+        `The toast says ${remaining?.[1]} remain, but ${after?.limit} - ${after?.used} do`,
+      );
+      return { toast: result, before, after };
+    });
+    await run("connection-usage", async (page) => {
+      await page.goto(`${url}settings/integrations`, { waitUntil: "networkidle" });
+      const usage = page.getByText(/API calls used by cadsense in \d{4}/).first();
+      await usage.waitFor({ timeout: 30_000 });
+      await usage.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1500);
+      const text = (await usage.innerText()).trim();
+      const saved = connectionApiCalls();
+      expect(
+        saved !== null && text.startsWith(`${saved.used.toLocaleString("en-US")} of 2,500`),
+        `The connection card says "${text}", but the app saved ${JSON.stringify(saved)}`,
+      );
+      return { card: text };
+    });
+    NodeFS.writeFileSync(
+      NodePath.join(out, "toasts.json"),
+      `${JSON.stringify(toastTimeline, null, 2)}\n`,
+    );
   } else {
     await run("refresh-catalog", async (page) => {
       const settings = page.getByRole("button", { name: /^Project settings for / }).first();
@@ -296,6 +445,14 @@ try {
   summary.ok = pageErrors.length === 0;
 } finally {
   summary.onshapeRequests = onshapeRequests();
+  summary.connectionApiCalls = connectionApiCalls();
+  // Every request in a clean run succeeds, and Onshape bills each one, so the counts must agree.
+  if (summary.onshapeRequests !== null && summary.connectionApiCalls !== null)
+    expect(
+      summary.onshapeRequests === summary.connectionApiCalls.used,
+      `The traces show ${summary.onshapeRequests} Onshape requests, but the app counted ${summary.connectionApiCalls.used}`,
+    );
+  summary.ok &&= summary.failures.length === 0;
   summary.steps.push({ name: "page-errors", ms: 0, observed: pageErrors });
   writeSummary();
   const video = page.video();

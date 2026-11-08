@@ -22,6 +22,8 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
+import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
+import * as CadOperationProgress from "./CadOperationProgress.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { CadProjectQuiescence, make } from "./CadUserOperations.ts";
 import { localCadElementId } from "../localCad/LocalCadFiles.ts";
@@ -158,6 +160,19 @@ const harness = Effect.fn(function* (options?: {
         ),
     }),
     Layer.succeed(OnshapeSnapshotAcquisition, { acquire: unused }),
+    Layer.succeed(OnshapeConnections, {
+      readBinary: unused,
+      readJson: unused,
+      list: unused,
+      create: unused,
+      rename: unused,
+      setApiLimit: unused,
+      apiUsage: () => Effect.succeed({ year: 2026, used: 3, limit: 2_500 }),
+      replaceCredentials: unused,
+      remove: unused,
+    }),
+    CadOperationProgress.layer,
+
     Layer.succeed(LocalCadImport, {
       // A failed local sync rescans the folder; a missing folder keeps the outcome catalog-free.
       catalog: () => Effect.fail(new LocalCadError({ reason: "folder-not-found" })),

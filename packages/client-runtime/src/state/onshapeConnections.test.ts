@@ -41,6 +41,7 @@ const SUMMARY: OnshapeConnectionSummary = {
   host: "https://cad.onshape.com",
   verifiedAt: "2026-09-04T00:00:00.000Z",
   updatedAt: "2026-09-04T00:00:00.000Z",
+  apiUsage: { year: 2026, used: 0, limit: 2_500 },
 };
 const LIST_RESULT: OnshapeConnectionListResult = {
   connections: [SUMMARY],

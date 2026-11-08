@@ -21,6 +21,7 @@ import { OnshapeCadRoots } from "../onshape/OnshapeCadRoots.ts";
 import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
 import { OnshapeProjects } from "../onshape/OnshapeProjects.ts";
 import { OnshapeSnapshotAcquisition } from "../onshape/OnshapeSnapshotAcquisition.ts";
+import * as CadOperationProgress from "../cad/CadOperationProgress.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
@@ -109,12 +110,15 @@ const onshape = Layer.mergeAll(
     list: onshapeUnused,
     create: onshapeUnused,
     rename: onshapeUnused,
+    setApiLimit: onshapeUnused,
+    apiUsage: onshapeUnused,
     replaceCredentials: onshapeUnused,
     remove: onshapeUnused,
   }),
   Layer.succeed(OnshapeProjects, { create: onshapeUnused, setConnection: onshapeUnused }),
   Layer.succeed(OnshapeCadRoots, { discover: onshapeUnused }),
   Layer.succeed(OnshapeSnapshotAcquisition, { acquire: onshapeUnused }),
+  CadOperationProgress.layer,
   // Native agent shutdown is not under test; no agent runs exist here.
   Layer.succeed(CadProjectQuiescence, { confirm: () => Effect.void }),
 );

@@ -24,6 +24,7 @@ export type OnshapeConnectionEditor =
   | { readonly kind: "add" }
   | { readonly kind: "rename"; readonly connectionId: string }
   | { readonly kind: "replace"; readonly connectionId: string }
+  | { readonly kind: "limit"; readonly connectionId: string }
   | null;
 
 const EMPTY_ONSHAPE_CONNECTIONS: ReadonlyArray<OnshapeConnectionSummary> = [];
@@ -57,6 +58,9 @@ export function useOnshapeConnectionsController(environmentId: EnvironmentId) {
     reportFailure: false,
   });
   const renameConnection = useAtomCommand(onshapeConnectionEnvironment.rename, {
+    reportFailure: false,
+  });
+  const setApiLimit = useAtomCommand(onshapeConnectionEnvironment.setApiLimit, {
     reportFailure: false,
   });
   const replaceCredentials = useAtomCommand(onshapeConnectionEnvironment.replaceCredentials, {
@@ -183,6 +187,21 @@ export function useOnshapeConnectionsController(environmentId: EnvironmentId) {
       },
     );
 
+  const saveApiLimit = (connection: OnshapeConnectionSummary, limit: number) =>
+    runMutation(
+      `limit:${connection.connectionId}`,
+      `Saving the API call limit of "${connection.name}".`,
+      () =>
+        setApiLimit({
+          environmentId,
+          input: { connectionId: connection.connectionId, limit },
+        }),
+      (updatedConnection) => {
+        recordOptimisticConnection(updatedConnection);
+        setEditor(null);
+      },
+    );
+
   const saveReplacement = (connection: OnshapeConnectionSummary, draft: OnshapeCredentialDraft) =>
     runMutation(
       `replace:${connection.connectionId}`,
@@ -251,6 +270,7 @@ export function useOnshapeConnectionsController(environmentId: EnvironmentId) {
     cancelEditor: () => setEditor(null),
     saveCreate,
     saveRename,
+    saveApiLimit,
     saveReplacement,
     remove,
   };
