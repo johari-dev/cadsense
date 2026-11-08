@@ -32,6 +32,8 @@ export function resolveDefaultCadPanelWidth(viewportWidth: number): number {
 interface RightPanelProps {
   mode: PreviewPanelMode;
   open?: boolean;
+  /** Forwarded to PreviewPanelShell: whether an open change slides or snaps. */
+  animate?: boolean;
   onExited?: () => void;
   maximized?: boolean;
   layoutControls?: ReactNode;
@@ -90,6 +92,7 @@ export function RightPanel(props: RightPanelProps) {
     <PreviewPanelShell
       mode={props.mode}
       {...(props.open !== undefined ? { open: props.open } : {})}
+      {...(props.animate !== undefined ? { animate: props.animate } : {})}
       {...(props.onExited !== undefined ? { onExited: props.onExited } : {})}
       {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
       {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
