@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { CadHash } from "./cad.ts";
 
 /** SolidWorks parts and assemblies. They import through the SolidWorks installed on the machine. */
 export const SOLIDWORKS_FILE_EXTENSIONS = [".sldprt", ".sldasm"] as const;
@@ -78,6 +79,24 @@ export const LocalCadProjectSetFileInput = Schema.Struct({
   filePath: TrimmedNonEmptyString.check(Schema.isMaxLength(MAX_LOCAL_CAD_PATH_LENGTH)),
 });
 export type LocalCadProjectSetFileInput = typeof LocalCadProjectSetFileInput.Type;
+
+/**
+ * Whether a local root's file on disk still matches its current snapshot. "changed" means it was
+ * saved or re-exported since, so a Sync would import a new revision. "unavailable" means there is
+ * nothing to compare: no snapshot yet, an unknown root, or a file that is missing or unreadable.
+ */
+export const LocalCadSourceStatus = Schema.Literals(["unchanged", "changed", "unavailable"]);
+export type LocalCadSourceStatus = typeof LocalCadSourceStatus.Type;
+
+/** Compares the file behind one root of a local CAD project with that root's current snapshot. */
+export const LocalCadSourceCheckInput = Schema.Struct({
+  projectId: ProjectId,
+  rootId: CadHash,
+});
+export type LocalCadSourceCheckInput = typeof LocalCadSourceCheckInput.Type;
+
+export const LocalCadSourceCheckResult = Schema.Struct({ status: LocalCadSourceStatus });
+export type LocalCadSourceCheckResult = typeof LocalCadSourceCheckResult.Type;
 
 export const LocalCadErrorReason = Schema.Literals([
   "folder-not-found",

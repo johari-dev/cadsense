@@ -19,6 +19,21 @@ through the SolidWorks installed on the machine (see [SolidWorks files](#solidwo
 5. After editing and re-exporting the file, Sync in the CAD panel header or project settings imports
    the new revision. The header button, which Onshape projects share, is disabled while any chat in
    the project runs, and its tooltip names those chats. A toast reports the result.
+6. The panel notices a changed file by itself. When it opens, after each new snapshot, and whenever
+   the window comes back into focus, it asks `localCad.source.check` whether the shown root's file
+   still hashes to that root's current snapshot. If not, the header button reads **Sync changes**
+   in the accent color, as it does for a first sync. `cad_context` gives the agent the same answer
+   as `localFileStatus`, since the agent cannot sync while it runs and should tell the user instead.
+
+### Noticing a changed file
+
+`LocalCadImport.sourceStatus` hashes the files the way an import does (`sourceFiles`, then
+`localCadFilesMicroversionId`), so for a SolidWorks assembly a change to any part it uses counts, and
+a Sync always clears the prompt. It is read only and never fails: a root with no snapshot, an
+unknown root, or a file that is missing or unreadable is `unavailable`, and the button stays plain.
+A file is read and hashed again only when its size or mtime moved, so checking on every focus costs
+a `stat` per file. Saving the same bytes again (a new mtime only) is `unchanged`. There is no file
+watcher: a file changed while the window keeps focus shows the prompt at the next focus or snapshot.
 
 ### From the CAD panel
 
@@ -92,6 +107,8 @@ and cancelling terminates the worker.
 | Cancel during import                                  | Worker terminated, outcome `cancelled`, nothing published    |
 | Unchanged file synced again                           | Latest snapshot reused; occt does not run                    |
 | Changed file synced again                             | New microversion; the previous snapshot becomes the rollback |
+| File changed on disk since its snapshot               | Panel Sync reads Sync changes; `cad_context` says so         |
+| File saved again with the same bytes                  | Still `unchanged`; no prompt                                 |
 | Repeated sibling names (three bolts)                  | Distinct, stable occurrence paths                            |
 | Folder already used by a folder project               | That project gets the CAD source                             |
 | Folder used by an Onshape project                     | `onshape-project`                                            |
@@ -263,6 +280,8 @@ material or mass rather than failing the conversion.
 
 ## Limits
 
+- The changed-file check keys its cache on size and mtime, so a rewrite that keeps both (two saves
+  in the same mtime tick, with the same length) is missed until either moves.
 - Meshes come back in world coordinates, so moving a part between exports reads as
   `geometry-changed` in `cad_diff`, not `moved`. Both outdate comments the same way. SolidWorks
   imports place parts by their component transforms instead, so moves read as moves there.

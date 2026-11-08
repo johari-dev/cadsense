@@ -9,10 +9,11 @@ import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isValidElement, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { reactHookHarness as hooks } from "../test/reactHookHarness";
 
 const start = vi.hoisted(() => vi.fn());
+const checkSource = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => vi.fn());
 const toastUpdate = vi.hoisted(() => vi.fn());
 const toastClose = vi.hoisted(() => vi.fn());
@@ -34,7 +35,12 @@ vi.mock("react/compiler-runtime", async () => {
 vi.mock("../state/onshapeProjects", () => ({
   onshapeProjectEnvironment: { startCadOperation: "start" },
 }));
-vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => start }));
+vi.mock("../state/localCadProjects", () => ({
+  localCadProjectEnvironment: { checkSource: "checkSource" },
+}));
+vi.mock("../state/use-atom-command", () => ({
+  useAtomCommand: (command: string) => (command === "checkSource" ? checkSource : start),
+}));
 vi.mock("../state/entities", () => ({ useThreadShells: () => threads.current }));
 vi.mock("../components/ui/toast", () => ({
   toastManager: { add: toast, update: toastUpdate, close: toastClose },
@@ -121,6 +127,7 @@ const withCad = (project: TestProject, change: object): TestProject => ({
 });
 
 interface Props {
+  className?: string;
   children?: ReactNode;
   render?: ReactNode;
   disabled?: boolean;
@@ -177,6 +184,61 @@ describe("CAD panel Sync button", () => {
     toastUpdate.mockReset();
     toastClose.mockReset();
     threads.current = [];
+    checkSource.mockReset();
+    checkSource.mockResolvedValue(AsyncResult.success({ status: "unchanged" }));
+    // The source check listens for the window coming back into focus.
+    vi.stubGlobal("window", new EventTarget());
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+  });
+  afterEach(() => {
+    hooks.reset();
+    vi.unstubAllGlobals();
+  });
+  describe("when the local file changed on disk", () => {
+    const checked = {
+      environmentId: EnvironmentId.make("test"),
+      input: { projectId: "cad-sync-button", rootId: roots[0]!.rootId },
+    };
+    it("checks on open and again on focus, and then offers to sync the changes", async () => {
+      render(projectWith(roots), roots[0]!.rootId);
+      await settle();
+      expect(checkSource).toHaveBeenCalledExactlyOnceWith(checked);
+      expect(text(render(projectWith(roots), roots[0]!.rootId))).not.toContain("Sync changes");
+
+      checkSource.mockResolvedValue(AsyncResult.success({ status: "changed" }));
+      window.dispatchEvent(new Event("focus"));
+      await settle();
+      expect(checkSource).toHaveBeenCalledTimes(2);
+      const tree = render(projectWith(roots), roots[0]!.rootId);
+      expect(text(tree)).toContain("Sync changes");
+      expect(text(tree)).toContain("changed on disk since it was imported");
+      // The same accent label the onboarding prompt gives a first sync.
+      expect(syncButton(tree)!.className).toContain("text-(--accent-text)");
+      // The prompt is the same button, so it still syncs the shown root.
+      syncButton(tree)!.onClick!();
+      expect(start).toHaveBeenLastCalledWith(
+        synced({ elementId: element, kind: "assembly", configuration: "default" }),
+      );
+    });
+    it("drops the prompt once a sync gives the root a new snapshot, and checks that one", async () => {
+      checkSource.mockResolvedValue(AsyncResult.success({ status: "changed" }));
+      render(projectWith(roots), roots[0]!.rootId);
+      await settle();
+      expect(text(render(projectWith(roots), roots[0]!.rootId))).toContain("Sync changes");
+
+      checkSource.mockResolvedValue(AsyncResult.success({ status: "unchanged" }));
+      const resynced = projectWith([{ ...roots[0]!, current: snapshot(3, "e") }]);
+      expect(text(render(resynced, roots[0]!.rootId))).not.toContain("Sync changes");
+      await settle();
+      expect(checkSource).toHaveBeenCalledTimes(2);
+      expect(text(render(resynced, roots[0]!.rootId))).not.toContain("Sync changes");
+    });
+    it("never checks an Onshape project or a root with nothing imported", async () => {
+      render(onshapeWith([roots[0]!], catalog("Bracket", "assembly")), roots[0]!.rootId);
+      render(projectWith([]), null);
+      await settle();
+      expect(checkSource).not.toHaveBeenCalled();
+    });
   });
   it("syncs the local root the panel shows in that root's configuration", () => {
     press(projectWith(roots), roots[1]!.rootId);

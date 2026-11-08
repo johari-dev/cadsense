@@ -49,6 +49,7 @@ import * as Semaphore from "effect/Semaphore";
 import type * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
+import { LocalCadImport } from "../localCad/LocalCadImport.ts";
 import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
 import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
 import {
@@ -145,6 +146,7 @@ export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const query = yield* ProjectionSnapshotQuery;
   const store = yield* CadSnapshotStore;
+  const localImport = yield* LocalCadImport;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -352,9 +354,15 @@ export const make = Effect.gen(function* () {
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
               );
+              // Sync is refused while the agent runs, so it can only tell the user the file moved on.
+              const localFileStatus =
+                project.localCadSource && state
+                  ? yield* localImport.sourceStatus(project, state.rootId)
+                  : null;
               return {
                 state,
                 revision: state?.revision ?? currentSession.revision ?? 0,
+                ...(localFileStatus ? { localFileStatus } : {}),
                 designBrief: designBrief && { path: designBrief.path, bytes: designBrief.bytes },
                 roots: roots.map((root) => ({
                   rootId: root.rootId,

@@ -35,6 +35,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { CadSnapshotStore, CadSnapshotStoreError } from "./CadSnapshotStore.ts";
 import { initialCadView } from "./CadViewState.ts";
 import { CadViewing, make } from "./CadViewing.ts";
+import { LocalCadImport } from "../localCad/LocalCadImport.ts";
 import { CadComments } from "./CadComments.ts";
 import { CadAgentChecksResult, makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import { BACKSTOP_NOTE } from "../provider/CadCheckBackstop.ts";
@@ -544,6 +545,14 @@ const dependencies = Layer.mergeAll(
   Layer.provide(OrchestrationEventStoreLive),
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
   Layer.provideMerge(SqlitePersistenceMemory),
+  // These projects are Onshape projects, so cad_context never compares a local file.
+  Layer.provideMerge(
+    Layer.succeed(LocalCadImport, {
+      catalog: () => Effect.die("Unexpected local CAD scan"),
+      acquire: () => Effect.die("Unexpected local CAD import"),
+      sourceStatus: () => Effect.die("Unexpected local CAD source check"),
+    }),
+  ),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "cadsense-cad-viewing-" })),
   Layer.provideMerge(AnalyticsService.layerTest),
   Layer.provideMerge(NodeServices.layer),

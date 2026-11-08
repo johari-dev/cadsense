@@ -25,5 +25,10 @@ export function createLocalCadProjectAtoms<R, E>(
       tag: WS_METHODS.localCadProjectsSetFile,
       scheduler,
     }),
+    checkSource: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:local-cad:check-source",
+      tag: WS_METHODS.localCadSourceCheck,
+      scheduler,
+    }),
   };
 }

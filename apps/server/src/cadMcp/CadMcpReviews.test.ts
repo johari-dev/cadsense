@@ -445,6 +445,25 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })(
 
     // A finished import counts only for the file it read. A re-export after it, before the next
     // call, is imported rather than opening the older model.
+    it.effect("tells the agent in cad_context when the file changed after the import", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const folder = yield* makeFolder();
+        const reviews = yield* makeReviews();
+        yield* openReady(reviews, { file: folder.part });
+        const status = Effect.fn(function* () {
+          const result = yield* reviews.call("cad_context", {});
+          assert.isFalse(result.isError);
+          return (yield* Schema.decodeUnknownEffect(
+            Schema.Struct({ localFileStatus: Schema.String }),
+          )(result.structuredContent)).localFileStatus;
+        });
+        assert.strictEqual(yield* status(), "unchanged");
+        yield* fs.writeFileString(folder.part, "\n", { flag: "a" });
+        assert.strictEqual(yield* status(), "changed");
+      }).pipe(Effect.scoped),
+    );
+
     it.effect("imports again when the file changed after the import a call waited on", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
