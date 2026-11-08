@@ -881,6 +881,16 @@ export function CadPanel({
   const shownFile = project.localCadSource
     ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
     : undefined;
+  // The empty state tells the user to press the header's Sync button, which can download the
+  // linked CAD before the catalog was ever refreshed too. A local project shows its file prompt.
+  const syncPrompted =
+    !view &&
+    !!data &&
+    !data.unavailableRootId &&
+    !roots.length &&
+    !project.localCadSource &&
+    !compact &&
+    cadSyncPlan(project, shownRootId) !== null;
   // The header row: the scene picker, with the Sync button for the shown root after it.
   const scenePicker = !compact && (
     <>
@@ -940,6 +950,7 @@ export function CadPanel({
             project={project}
             rootId={shownRootId}
             disabled={!!data?.agentControlling || !!historicalView}
+            prompted={syncPrompted}
           />
         }
       />
@@ -1012,8 +1023,7 @@ export function CadPanel({
             "This downloaded CAD is unavailable. You can select another cached scene."
           ) : roots.length ? (
             "Select a CAD scene above."
-          ) : !compact && cadSyncPlan(project, shownRootId) ? (
-            // The header's Sync button can download it, before the catalog was ever refreshed too.
+          ) : syncPrompted ? (
             "No CAD has been downloaded. Press Sync to download it from Onshape."
           ) : (
             "No CAD has been downloaded. Choose an Assembly or Part Studio in project settings, then sync it."

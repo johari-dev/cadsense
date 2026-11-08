@@ -128,7 +128,7 @@ const text = (tree: ReactNode): string => {
 };
 const render = (project: TestProject, rootId: string | null) => {
   hooks.beginRender();
-  return CadSyncButton({ project, rootId, disabled: false });
+  return CadSyncButton({ project, rootId, disabled: false, prompted: false });
 };
 const press = (project: TestProject, rootId: string | null) =>
   syncButton(render(project, rootId))!.onClick!();

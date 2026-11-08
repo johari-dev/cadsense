@@ -88,16 +88,19 @@ function refusedDescription(cause: unknown): string {
  * names those chats. Once the server records the outcome of a sync it started, a toast says whether
  * the model changed, stayed the same, or failed and why. For an Onshape project that was never
  * refreshed, the click refreshes the catalog and then syncs the linked element. Renders nothing
- * without a root to sync.
+ * without a root to sync. While `prompted`, the panel's empty state tells the user to press Sync,
+ * so the button shows its label in the accent color until the first download.
  */
 export function CadSyncButton({
   project,
   rootId,
   disabled,
+  prompted,
 }: {
   project: Project;
   rootId: string | null;
   disabled: boolean;
+  prompted: boolean;
 }) {
   const start = useAtomCommand(onshapeProjectEnvironment.startCadOperation, {
     reportFailure: false,
@@ -212,11 +215,16 @@ export function CadSyncButton({
       {/* A disabled button gets no pointer events, so the span carries the tooltip. */}
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
         {/* A muted icon beside the model name, like the header's other controls. It shows a
-            label only while it runs. */}
+            label while it runs, and an accent "Sync" label while the empty state points at it. */}
         <Button
-          size={syncing ? "xs" : "icon-xs"}
+          size={syncing || prompted ? "xs" : "icon-xs"}
           variant="ghost-muted"
-          aria-label={syncing ? undefined : "Sync"}
+          className={
+            prompted && !syncing
+              ? "[--control-icon-color:currentColor] bg-(--accent-text)/14 text-(--accent-text) [:hover,[data-pressed]]:bg-(--accent-text)/22 [:hover,[data-pressed]]:text-(--accent-text)"
+              : undefined
+          }
+          aria-label={syncing || prompted ? undefined : "Sync"}
           disabled={disabled || blocker !== null}
           onClick={() => void (root ? sync(root) : discover())}
         >
@@ -227,7 +235,9 @@ export function CadSyncButton({
                 ? "Converting…"
                 : "Importing…"
               : "Syncing…"
-            : null}
+            : prompted
+              ? "Sync"
+              : null}
         </Button>
       </TooltipTrigger>
       <TooltipPopup>
