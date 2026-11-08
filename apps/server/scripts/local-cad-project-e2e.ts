@@ -392,7 +392,9 @@ try {
   await run("draft-part-drawing", async (page) => {
     await panel.getByRole("button", { name: "Parts", exact: true }).click();
     const parts = page.getByRole("dialog", { name: "View changes and parts" });
-    const make = page.getByRole("menuitem", { name: /^Make (part drawing|drawings for this group)$/ });
+    const make = page.getByRole("menuitem", {
+      name: /^Make (part drawing|drawings for this group)$/,
+    });
     const rows = parts.getByRole("treeitem");
     await rows.first().waitFor();
     let opened: string | null = null;
