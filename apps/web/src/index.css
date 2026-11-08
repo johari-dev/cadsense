@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark, .dark *));
@@ -7,7 +8,9 @@
 
 :root {
   --app-scrollbar-width: 6px;
-  --cad-viewport-background: #171717;
+  /* A flat fill one step above the chat canvas (the theme's panel surface), so black and
+     dark-anodized parts keep a readable silhouette while the viewer stays on the palette. */
+  --cad-viewport-background: var(--app-theme-surface);
   /*
    * Compact UI geometry. Keep these values semantic so sidebar, palette,
    * tooltip, and toolbar controls cannot quietly drift apart.
@@ -53,8 +56,10 @@
   --workspace-topbar-height: env(titlebar-area-height, 52px);
   --workspace-controls-top: env(titlebar-area-y, 0px);
   --workspace-controls-left: calc(env(titlebar-area-x, 0px) + 0.75rem);
+  /* The titlebar buttons sit 0.375rem from the native window controls, half the left inset,
+     so the panel toggles read as part of the same cluster as minimize / maximize / close. */
   --workspace-controls-right: calc(
-    100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px) + 0.75rem
+    100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px) + 0.375rem
   );
   --workspace-native-controls-inset: calc(
     100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px) + 0.75rem
@@ -72,7 +77,8 @@
   --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6), 0 4px 8px -4px rgb(0 0 0 / 0.45);
   --shadow-xl: 0 20px 40px -10px rgb(0 0 0 / 0.65), 0 8px 12px -6px rgb(0 0 0 / 0.45);
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans:
+    "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
     "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Consolas,
     "Liberation Mono", Menlo, monospace;
@@ -1286,79 +1292,79 @@
 }
 
 :root {
-  /* Default dark theme: a near-black palette with an orange accent for focus and accent
-     text. */
+  /* Default dark theme: T3 Themes' Graphite (https://t3themes.com/themes/graphite/), dark
+     variant. Neutral grays with a faint cool hue on the canvas, white as the action color, and
+     a blue accent for focus and accent text. */
   color-scheme: dark;
   --radius: 0.625rem;
-  --app-theme-accent-text: rgb(245 128 86);
+  --app-theme-accent-text: oklch(0.692697 0.162182 258.764);
   /* Selection blue, shared with the CAD scene's part highlight (CadSceneModel's 0x7dbbff),
      for "on" and "selected" control states. */
   --app-theme-selection: #7dbbff;
   /* An off two-state control: a dark track with a hairline, so it reads against the canvas. */
-  --app-theme-control-off: #2e2e2e;
-  --app-theme-control-off-border: #4a4a4a;
-  --app-theme-canvas: #111111;
-  --app-theme-chrome: #101010;
-  --app-theme-toolbar: #111111;
-  --app-theme-toolbar-foreground: #fcfcfc;
-  --app-theme-toolbar-border: rgb(252 252 252 / 8%);
-  --app-theme-toolbar-control: rgb(252 252 252 / 2.6%);
-  --app-theme-toolbar-control-foreground: rgb(252 252 252 / 72.2%);
-  --app-theme-toolbar-control-hover: rgb(252 252 252 / 3.9%);
-  --app-theme-surface: #131313;
-  --app-theme-surface-raised: #171717;
-  /* Lighter than both the chrome (#101010 to #131313) and the CAD viewport (#171717), so
-     floating panels read as lifted from either. */
-  --app-theme-surface-overlay: #1c1c1c;
-  --app-theme-popover-border: rgb(252 252 252 / 12%);
+  --app-theme-control-off: oklch(0.278038 0.005457 286.039);
+  --app-theme-control-off-border: oklch(0.38 0.0017 286.3);
+  --app-theme-canvas: oklch(0.19168 0.001992 286.21);
+  --app-theme-chrome: oklch(0.19168 0.001992 286.21);
+  --app-theme-toolbar: oklch(0.19168 0.001992 286.21);
+  --app-theme-toolbar-foreground: oklch(0.970151 0 0);
+  --app-theme-toolbar-border: oklch(0.239695 0.001882 286.257);
+  --app-theme-toolbar-control: oklch(0.247759 0 0);
+  --app-theme-toolbar-control-foreground: oklch(0.970151 0 0);
+  --app-theme-toolbar-control-hover: oklch(0.278038 0.005457 286.039);
+  --app-theme-surface: oklch(0.247759 0 0);
+  --app-theme-surface-raised: oklch(0.260325 0 0);
+  /* Lighter than the chrome and the bottom of the CAD viewport's backdrop, so floating
+     panels read as lifted from either. */
+  --app-theme-surface-overlay: oklch(0.226859 0.001909 286.247);
+  --app-theme-popover-border: oklch(0.321465 0.001748 286.301);
   /* Text tiers: primary (--app-theme-text), secondary (muted-foreground) for
      descriptions, subtitles, and inactive labels, and tertiary for timestamps,
-     counts, and hints. Placeholders sit just above tertiary so an empty input
+     counts, and hints. Placeholders sit just below tertiary so an empty input
      still reads as empty. Disabled controls drop to 50% opacity, which keeps
      them below the secondary tier. */
-  --app-theme-text: #fcfcfc;
-  --app-theme-text-muted: rgb(252 252 252 / 68%);
-  --app-theme-text-tertiary: rgb(252 252 252 / 46%);
-  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split), matching
-     the sidebar edge's 8%. */
-  --app-theme-border: rgb(252 252 252 / 8%);
-  --app-theme-input: rgb(252 252 252 / 11.8%);
-  --app-theme-focus: rgb(245 128 86 / 63%);
-  --app-theme-accent: #fcfcfc;
-  --app-theme-accent-foreground: #111111;
-  --app-theme-secondary: rgb(252 252 252 / 2.6%);
-  --app-theme-secondary-foreground: #fcfcfc;
-  --app-theme-muted: rgb(252 252 252 / 2.6%);
+  --app-theme-text: oklch(0.970151 0 0);
+  --app-theme-text-muted: oklch(0.650041 0 0);
+  --app-theme-text-tertiary: oklch(0.56 0 0);
+  /* One hairline for every divider (sidebar edge, headers, the chat and CAD split). */
+  --app-theme-border: oklch(0.269009 0.001828 286.276);
+  --app-theme-input: oklch(0.321465 0.001748 286.301);
+  --app-theme-focus: oklch(0.692697 0.162182 258.764);
+  --app-theme-accent: oklch(0.970151 0 0);
+  --app-theme-accent-foreground: oklch(0.19168 0.001992 286.21);
+  --app-theme-secondary: oklch(0.247759 0 0);
+  --app-theme-secondary-foreground: oklch(0.970151 0 0);
+  --app-theme-muted: oklch(0.247759 0 0);
   --app-theme-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-placeholder: rgb(252 252 252 / 48%);
-  --app-theme-secondary-label: var(--app-theme-text-muted);
-  --app-theme-icon-muted: rgb(252 252 252 / 62%);
-  --app-theme-error: oklch(0.734642 0.162647 21.864);
-  --app-theme-error-foreground: oklch(0.702184 0.189226 22.228);
-  --app-theme-error-surface: oklch(0.265257 0.046957 17.692);
-  --app-theme-warning: oklch(0.907199 0.147282 95.02);
-  --app-theme-warning-foreground: oklch(0.829017 0.171221 81.038);
-  --app-theme-warning-surface: oklch(0.29544 0.044884 76.271);
-  --app-theme-update: oklch(0.854514 0 0);
-  --app-theme-update-foreground: oklch(0.854514 0 0);
-  --app-theme-update-surface: oklch(0.430694 0 0);
-  --app-theme-accent-surface: rgb(252 252 252 / 3.9%);
-  --app-theme-accent-surface-foreground: #fcfcfc;
-  --app-theme-message-surface: rgb(252 252 252 / 2.6%);
-  --app-theme-message-foreground: #fcfcfc;
-  --app-theme-message-action: #fcfcfc;
-  --app-theme-message-action-foreground: #111111;
-  --app-theme-message-action-hover: #ffffff;
-  --app-theme-code-background: rgb(252 252 252 / 2.6%);
-  --app-theme-code-foreground: #fcfcfc;
-  --app-theme-sidebar: #111111;
-  --app-theme-sidebar-foreground: #fcfcfc;
-  --app-theme-sidebar-muted-foreground: var(--app-theme-text-muted);
-  --app-theme-sidebar-control-surface: rgb(252 252 252 / 2.6%);
-  --app-theme-sidebar-row-hover: rgb(252 252 252 / 3.9%);
-  --app-theme-sidebar-row-active: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-row-selected: rgb(252 252 252 / 5.5%);
-  --app-theme-sidebar-border: rgb(252 252 252 / 8%);
+  --app-theme-placeholder: oklch(0.531282 0 0);
+  --app-theme-secondary-label: oklch(0.731595 0 0);
+  --app-theme-icon-muted: oklch(0.633429 0 0);
+  --app-theme-error: oklch(0.710712 0.181847 24.751);
+  --app-theme-error-foreground: oklch(0.753514 0.147879 23.657);
+  --app-theme-error-surface: oklch(0.244493 0.032093 19.639);
+  --app-theme-warning: oklch(0.7631 0.149218 44.196);
+  --app-theme-warning-foreground: oklch(0.829615 0.104495 49.171);
+  --app-theme-warning-surface: oklch(0.257878 0.027095 53.909);
+  --app-theme-update: oklch(0.689693 0.165682 255.39);
+  --app-theme-update-foreground: oklch(0.803634 0.100395 255.224);
+  --app-theme-update-surface: oklch(0.244625 0.028819 255.236);
+  --app-theme-accent-surface: oklch(0.278038 0.005457 286.039);
+  --app-theme-accent-surface-foreground: oklch(0.970151 0 0);
+  --app-theme-message-surface: oklch(0.247759 0 0);
+  --app-theme-message-foreground: oklch(0.970151 0 0);
+  --app-theme-message-action: oklch(0.970151 0 0);
+  --app-theme-message-action-foreground: oklch(0.19168 0.001992 286.21);
+  --app-theme-message-action-hover: oklch(0.885305 0 0);
+  --app-theme-code-background: oklch(0.2182 0.001928 286.239);
+  --app-theme-code-foreground: oklch(0.91887 0 0);
+  --app-theme-sidebar: oklch(0.19168 0.001992 286.21);
+  --app-theme-sidebar-foreground: oklch(0.95514 0 0);
+  --app-theme-sidebar-muted-foreground: oklch(0.633429 0 0);
+  --app-theme-sidebar-control-surface: oklch(0.226859 0.001909 286.247);
+  --app-theme-sidebar-row-hover: oklch(0.25277 0.003721 286.13);
+  --app-theme-sidebar-row-active: oklch(0.278038 0.005457 286.039);
+  --app-theme-sidebar-row-selected: oklch(0.278038 0.005457 286.039);
+  --app-theme-sidebar-border: oklch(0.226859 0.001909 286.247);
 }
 
 /* Map the permanent application palette onto the semantic surface tokens. */
@@ -1432,21 +1438,13 @@
   --app-scrollbar-thumb-hover: var(--app-theme-muted-foreground);
 }
 
-/* The composer is a translucent lift over --chat-background. Route its
-   measured flattened color through the raised-surface role instead of deriving
-   another tint from the canvas, which made the dark composer too red. */
+/* The composer is a raised field on the canvas: the palette's raised surface for the fill and
+   its input hairline for the outline, so it reads as its own field in the hero and in threads
+   alike. The placeholder stays on the theme's placeholder tier. */
 :root .chat-composer-glass-shell {
   --chat-composer-glass-surface: var(--app-theme-surface-raised);
-  --chat-composer-outline: var(--app-theme-toolbar-border);
-
-  /* Dark: a #191919 fill, a #404040 outline, and a #999 placeholder, so the composer reads as
-     its own field against the near-black canvas in the hero and in threads alike. */
-  @variant dark {
-    --chat-composer-glass-surface: color-mix(in srgb, var(--color-white) 3.5%, var(--background));
-    --chat-composer-outline: color-mix(in srgb, var(--color-white) 20%, var(--background));
-    --chat-composer-highlight: color-mix(in srgb, var(--app-theme-input) 12%, transparent);
-    --color-placeholder: rgb(252 252 252 / 56%);
-  }
+  --chat-composer-outline: var(--app-theme-input);
+  --chat-composer-highlight: color-mix(in srgb, var(--app-theme-input) 12%, transparent);
 }
 
 :root
@@ -1459,14 +1457,7 @@
     :not([data-variant]),
     [data-variant="default"]
   ) {
-  --chat-composer-attached-outline: var(--chat-composer-outline, var(--app-theme-toolbar-border));
-
-  @variant dark {
-    --chat-composer-attached-outline: var(
-      --chat-composer-outline,
-      color-mix(in srgb, var(--app-theme-input) 30%, var(--background))
-    );
-  }
+  --chat-composer-attached-outline: var(--chat-composer-outline, var(--app-theme-input));
 }
 
 /* Workspace actions use a small, separate chrome hierarchy. Keeping these
@@ -2110,12 +2101,10 @@ code {
   box-shadow: 0 6px 24px -10px rgb(0 0 0 / 30%);
 }
 /* Focus stays quiet: the thread composer is focused on load, so a ring would show at rest on
-   every thread. The outline only brightens; keyboard focus on the footer controls still shows
-   their own focus rings. */
+   every thread. The outline only brightens, from the input hairline toward the text color;
+   keyboard focus on the footer controls still shows their own focus rings. */
 :root .chat-composer-glass-shell:focus-within {
-  @variant dark {
-    --chat-composer-outline: color-mix(in srgb, var(--color-white) 30%, var(--background));
-  }
+  --chat-composer-outline: color-mix(in srgb, var(--app-theme-text) 22%, var(--app-theme-input));
 }
 [data-chat-composer-footer] {
   border-top: 0;
@@ -2123,7 +2112,7 @@ code {
 /* Shared shell for the composer model picker panel and the settings model menus. */
 .composer-model-menu,
 .composer-model-panel {
-  border: 1px solid rgb(255 255 255 / 9%);
+  border: 1px solid var(--popover-border);
   border-radius: var(--radius-xl);
   /* One clipped shape: the tab strip, list, and Reasoning footer share the outer radius. */
   overflow: hidden;
@@ -2185,11 +2174,14 @@ code {
 }
 
 /* Continuous ("squircle") composer corners where the browser supports corner-shape. Plain
-   rounded corners everywhere else. */
+   rounded corners everywhere else. corner-shape does not inherit, so the host's ::after
+   outline is listed too: it inherits only the radius, and a round outline drifts off the
+   squircle fill at every corner. */
 @supports (corner-shape: squircle) {
   .chat-composer-glass-shell,
   .chat-composer-glass-shell::before,
   .chat-composer-glass-host,
+  .chat-composer-glass-host::after,
   [data-chat-composer-main-surface="true"],
   [data-chat-composer-surface="true"] {
     corner-shape: squircle;

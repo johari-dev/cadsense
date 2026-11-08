@@ -59,10 +59,11 @@ export const formatPendingPrimaryActionLabel = (input: {
 
 /**
  * Send and stop are quiet icon buttons like the composer's attach button: no fill until
- * hovered, so the composer footer reads as one row of controls.
+ * hovered, then the footer's shared 8% foreground tint (the model trigger uses it too; the
+ * accent surface barely shows on the raised composer), so the footer reads as one row.
  */
 export const COMPOSER_ICON_ACTION_CLASS_NAME =
-  "relative flex size-7.5 shrink-0 items-center justify-center rounded-[var(--control-radius)] text-muted-foreground transition-colors duration-150 enabled:cursor-pointer hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
+  "relative flex size-7.5 shrink-0 items-center justify-center rounded-[var(--control-radius)] text-muted-foreground transition-colors duration-150 enabled:cursor-pointer hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:after:absolute pointer-coarse:after:size-11 [&_svg]:size-4";
 
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();

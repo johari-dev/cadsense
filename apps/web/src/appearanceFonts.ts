@@ -8,24 +8,19 @@
 import {
   DEFAULT_CODE_FONT_SIZE,
   DEFAULT_INTERFACE_FONT_SIZE,
-  DEFAULT_PROMPT_FONT_SIZE,
   MAX_CODE_FONT_SIZE,
   MAX_INTERFACE_FONT_SIZE,
-  MAX_PROMPT_FONT_SIZE,
   MIN_CODE_FONT_SIZE,
   MIN_INTERFACE_FONT_SIZE,
-  MIN_PROMPT_FONT_SIZE,
 } from "@cadsense/contracts";
 
 export const DEFAULT_SANS_FONT_STACK =
-  '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+  '"Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
 
 // Concrete names first: some engines alias `ui-monospace` to the
 // proportional system UI font, which would break every code surface.
 export const DEFAULT_CODE_FONT_STACK =
   '"JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
-
-export const TYPOGRAPHY_ADVANCED_STORAGE_KEY = "cadsense:typography-advanced";
 
 function quoteFontFamilyName(name: string): string {
   const bare = name.trim();
@@ -51,9 +46,7 @@ export function cssFontFamilies(input: string): string | null {
 export interface AppearanceFontPreferences {
   readonly sans: string;
   readonly code: string;
-  readonly composer: string;
   readonly sizeInterface: number;
-  readonly sizePrompt: number;
   readonly sizeCode: number;
   /** Grayscale `antialiased` rendering; false keeps the heavier platform default. */
   readonly smoothing: boolean;
@@ -64,8 +57,9 @@ export interface AppearanceFontPreferences {
  * override so the stylesheet defaults (and theme changes) stay in charge.
  *
  * Sizes are always written: the interface size drives the root font size (and
- * with it every rem-based dimension), while the prompt and code sizes stay in
- * absolute pixels so they do not scale twice.
+ * with it every rem-based dimension, the composer's text included), while the
+ * code size stays in absolute pixels so it does not scale twice. The interface
+ * family and size are the one global font: the composer has no override.
  */
 export function applyAppearanceFontVariables(
   root: HTMLElement,
@@ -74,8 +68,6 @@ export function applyAppearanceFontVariables(
   const families: ReadonlyArray<readonly [variable: string, custom: string, fallback: string]> = [
     ["--font-sans", preferences.sans, DEFAULT_SANS_FONT_STACK],
     ["--font-mono", preferences.code, DEFAULT_CODE_FONT_STACK],
-    // The composer falls back to whatever the sans preference resolves to.
-    ["--font-composer", preferences.composer, "var(--font-sans)"],
   ];
   for (const [variable, custom, fallback] of families) {
     const list = cssFontFamilies(custom);
@@ -87,7 +79,6 @@ export function applyAppearanceFontVariables(
   }
 
   root.style.fontSize = `${clampInterfaceFontSize(preferences.sizeInterface)}px`;
-  root.style.setProperty("--font-size-prompt", `${clampPromptFontSize(preferences.sizePrompt)}px`);
   const code = clampCodeFontSize(preferences.sizeCode);
   root.style.setProperty("--font-size-code", `${code}px`);
 
@@ -114,10 +105,6 @@ export function clampInterfaceFontSize(value: number): number {
     MAX_INTERFACE_FONT_SIZE,
     DEFAULT_INTERFACE_FONT_SIZE,
   );
-}
-
-export function clampPromptFontSize(value: number): number {
-  return clampFontSize(value, MIN_PROMPT_FONT_SIZE, MAX_PROMPT_FONT_SIZE, DEFAULT_PROMPT_FONT_SIZE);
 }
 
 export function clampCodeFontSize(value: number): number {

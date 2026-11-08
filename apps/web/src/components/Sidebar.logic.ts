@@ -1,4 +1,3 @@
-import * as React from "react";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { ContextMenuItem } from "@cadsense/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@cadsense/contracts/settings";
@@ -211,40 +210,6 @@ export function createThreadJumpHintVisibilityController(input: {
     dispose: () => {
       clearPendingShow();
     },
-  };
-}
-
-export function useThreadJumpHintVisibility(): {
-  showThreadJumpHints: boolean;
-  updateThreadJumpHintsVisibility: (shouldShow: boolean) => void;
-} {
-  const [showThreadJumpHints, setShowThreadJumpHints] = React.useState(false);
-  const controllerRef = React.useRef<ThreadJumpHintVisibilityController | null>(null);
-
-  React.useEffect(() => {
-    const controller = createThreadJumpHintVisibilityController({
-      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
-      onVisibilityChange: (visible) => {
-        setShowThreadJumpHints(visible);
-      },
-      setTimeoutFn: window.setTimeout.bind(window),
-      clearTimeoutFn: window.clearTimeout.bind(window),
-    });
-    controllerRef.current = controller;
-
-    return () => {
-      controller.dispose();
-      controllerRef.current = null;
-    };
-  }, []);
-
-  const updateThreadJumpHintsVisibility = React.useCallback((shouldShow: boolean) => {
-    controllerRef.current?.sync(shouldShow);
-  }, []);
-
-  return {
-    showThreadJumpHints,
-    updateThreadJumpHintsVisibility,
   };
 }
 
@@ -508,12 +473,16 @@ export function resolveSidebarThreadTitle(title: string, projectName: string): s
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
+/**
+ * A thread row under its project: a 36px hitbox as wide as the project header, with the title
+ * inset (ps-11.5) to line up with the project name past its thumbnail.
+ */
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
 }): string {
   const baseClassName =
-    "h-8 w-full translate-x-0 cursor-pointer justify-start gap-2 rounded-md px-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+    "h-9 w-full translate-x-0 cursor-pointer justify-start gap-2 rounded-md ps-11.5 pe-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
   if (input.isSelected && input.isActive) {
     return cn(

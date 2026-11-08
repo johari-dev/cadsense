@@ -131,8 +131,6 @@ import thumbDownSvg from "@material-symbols/svg-700/rounded/thumb_down.svg?raw";
 import thumbDownFillSvg from "@material-symbols/svg-700/rounded/thumb_down-fill.svg?raw";
 import thumbUpSvg from "@material-symbols/svg-700/rounded/thumb_up.svg?raw";
 import thumbUpFillSvg from "@material-symbols/svg-700/rounded/thumb_up-fill.svg?raw";
-import keyboardReturnSvg from "@material-symbols/svg-700/rounded/keyboard_return.svg?raw";
-import stopSvg from "@material-symbols/svg-700/rounded/stop.svg?raw";
 
 export type IconWeight = "thin" | "light" | "regular" | "bold" | "fill" | "duotone";
 export type IconProps = Omit<ComponentProps<"svg">, "ref"> & {
@@ -300,5 +298,34 @@ export const ListTreeIcon = materialIcon(accountTreeSvg);
 export const QuotesIcon = materialIcon(formatQuoteSvg);
 export const ThumbsDownIcon = materialIcon(thumbDownSvg, { fill: thumbDownFillSvg });
 export const ThumbsUpIcon = materialIcon(thumbUpSvg, { fill: thumbUpFillSvg });
-export const ArrowElbowDownLeftIcon = materialIcon(keyboardReturnSvg);
-export const StopIcon = materialIcon(stopSvg);
+/**
+ * The composer's send and stop glyphs keep the earlier Tabler outline style (24-unit grid, a
+ * 2-unit round stroke) instead of the Material set: Tabler's corner-down-left arrow, and a
+ * 15-unit rounded square that reads a touch larger than the open arrow it replaces.
+ */
+function strokeIcon(paths: readonly string[]): Icon {
+  return function AppIcon({ weight: _weight, size = "1em", ...props }: IconProps) {
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        {...props}
+      >
+        {paths.map((d) => (
+          <path key={d} d={d} />
+        ))}
+      </svg>
+    );
+  };
+}
+export const ArrowElbowDownLeftIcon = strokeIcon(["M18 6v6a3 3 0 0 1 -3 3h-10l4 -4m0 8l-4 -4"]);
+export const StopIcon = strokeIcon([
+  "M4.5 6.5a2 2 0 0 1 2 -2h11a2 2 0 0 1 2 2v11a2 2 0 0 1 -2 2h-11a2 2 0 0 1 -2 -2z",
+]);

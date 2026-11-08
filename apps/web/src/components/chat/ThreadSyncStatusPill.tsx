@@ -1,6 +1,30 @@
+import { useEffect, useState } from "react";
+
 import { CircleNotchIcon as LoaderCircleIcon } from "~/lib/icons";
 
 import { threadSyncLabel, type ThreadSyncPhase } from "../../threadSync";
+
+/** How long a resync of messages already on screen runs before its drawer shows. */
+const SYNCING_DRAWER_DELAY_MS = 600;
+
+/**
+ * The sync phase the composer should show. "Loading" (no messages yet) shows at once. A resync
+ * of messages already on screen runs each time the tab becomes visible again and usually settles
+ * in well under a second; showing it at once flashed the drawer, which grew the composer overlay
+ * and scrolled the transcript. So it only shows once it has run for SYNCING_DRAWER_DELAY_MS.
+ */
+export function useShownThreadSyncPhase(phase: ThreadSyncPhase | null): ThreadSyncPhase | null {
+  const [slowSync, setSlowSync] = useState(false);
+  useEffect(() => {
+    if (phase !== "syncing") {
+      setSlowSync(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlowSync(true), SYNCING_DRAWER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+  return phase === "syncing" && !slowSync ? null : phase;
+}
 
 export function ThreadSyncStatusPill({ phase }: { readonly phase: ThreadSyncPhase }) {
   const label = threadSyncLabel(phase);
