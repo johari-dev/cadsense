@@ -2827,8 +2827,12 @@ function SidebarIconRail({
     projects.find((project) => project.projectKey === activeProjectKey) ?? projects[0];
 
   return (
+    // Fixed at the collapsed width (the icon width minus the sidebar's 1px right border), not
+    // the sidebar's: the rail appears as soon as the sidebar collapses, while the sidebar is
+    // still animating down from full width, and centering in that width threw every icon to
+    // the middle of the old sidebar before it slid back.
     <div
-      className="hidden min-h-0 flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
+      className="hidden min-h-0 w-[calc(var(--sidebar-width-icon)-1px)] flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
       data-sidebar-icon-rail=""
     >
       {threadProject ? (
