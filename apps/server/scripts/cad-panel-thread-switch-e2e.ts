@@ -98,24 +98,25 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 // Records every slide the panel shell starts. The shell animates its own element with the
-// Web Animations API, so a wrapped `animate` sees each one.
-await page.addInitScript(() => {
-  const slides: { at: number; path: string; from: string; to: string }[] = [];
-  Reflect.set(window, "__panelSlides", slides);
+// Web Animations API, so a wrapped `animate` sees each one. It runs in the page, and this
+// package has no DOM types, so it is plain script text.
+type Slide = { at: number; path: string; from: string; to: string };
+await page.addInitScript(`
+  const slides = [];
+  window.__panelSlides = slides;
   const animate = Element.prototype.animate;
   Element.prototype.animate = function (keyframes, options) {
     if (this instanceof HTMLElement && this.dataset.previewPanelMode && Array.isArray(keyframes)) {
-      const [from, to] = keyframes as Keyframe[];
       slides.push({
         at: Math.round(performance.now()),
         path: location.pathname,
-        from: String(from?.width),
-        to: String(to?.width),
+        from: String(keyframes[0]?.width),
+        to: String(keyframes[1]?.width),
       });
     }
     return animate.call(this, keyframes, options);
   };
-});
+`);
 const pageErrors: string[] = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
 let shots = 0;
@@ -140,8 +141,7 @@ const panel = page.getByRole("region", { name: "CAD panel" });
 const canvas = panel.locator("canvas").first();
 const composer = page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first();
 const stop = page.getByRole("button", { name: "Stop generation" });
-const slides = () =>
-  page.evaluate(() => Reflect.get(window, "__panelSlides") as { from: string; to: string }[]);
+const slides = () => page.evaluate<Slide[]>("window.__panelSlides");
 /** Slides the page started since `before`, each one a panel opening or closing. */
 const slidesSince = async (before: number) => (await slides()).slice(before);
 const openRightPanel = async () => {
