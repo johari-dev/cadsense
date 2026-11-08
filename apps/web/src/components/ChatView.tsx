@@ -875,7 +875,8 @@ function ChatViewContent(props: ChatViewProps) {
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
   const rightPanelOpen = rightPanelState.isOpen;
-  const rightPanelPresence = usePanelPresence(rightPanelOpen);
+  // Each chat keeps its own panel state, so moving between chats snaps the panel to the new chat's.
+  const rightPanelPresence = usePanelPresence(rightPanelOpen, routeThreadKey);
   useEffect(() => {
     if (!rightPanelPresence.present) {
       setMaximizedRightPanelThreadKey((key) => (key === routeThreadKey ? null : key));
@@ -4272,6 +4273,7 @@ function ChatViewContent(props: ChatViewProps) {
           // read on mount, so remount only when a thread with CAD swaps in for one without.
           key={cadAvailable ? "design" : "tools"}
           open={rightPanelOpen}
+          animate={rightPanelPresence.animate}
           onExited={rightPanelPresence.onExited}
           mode="inline"
           {...(cadAvailable

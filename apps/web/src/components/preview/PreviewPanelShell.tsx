@@ -53,6 +53,11 @@ export function PreviewPanelShell(props: {
   mode: PreviewPanelMode;
   maximized?: boolean;
   open?: boolean;
+  /**
+   * Whether the next `open` change slides (default true). False snaps the panel open or shut,
+   * for a panel that appears because the view changed rather than because it was opened.
+   */
+  animate?: boolean;
   onExited?: () => void;
   /**
    * Overrides the localStorage key used to persist the panel width. Embedded
@@ -71,6 +76,9 @@ export function PreviewPanelShell(props: {
   const animationRef = useRef<Animation | null>(null);
   const exitRef = useRef(props.onExited);
   exitRef.current = props.onExited;
+  // Read when `open` changes, so turning animation back on never slides an open panel again.
+  const animateRef = useRef(props.animate ?? true);
+  animateRef.current = props.animate ?? true;
   const open = props.open ?? true;
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -80,7 +88,7 @@ export function PreviewPanelShell(props: {
     const currentWidth = host.getBoundingClientRect().width;
     prior?.cancel();
     const naturalWidth = host.getBoundingClientRect().width;
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!animateRef.current || matchMedia("(prefers-reduced-motion: reduce)").matches) {
       animationRef.current = null;
       content.style.removeProperty("width");
       if (!open) exitRef.current?.();
