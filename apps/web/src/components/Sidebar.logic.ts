@@ -432,36 +432,40 @@ export interface ProjectSourceInput {
     | undefined;
 }
 
-const LOCAL_CAD_FORMAT_LABELS: ReadonlyArray<readonly [extension: string, label: string]> = [
-  [".step", "STEP file"],
-  [".stp", "STEP file"],
-  [".iges", "IGES file"],
-  [".igs", "IGES file"],
-  [".sldasm", "SolidWorks · Assembly"],
-  [".sldprt", "SolidWorks · Part"],
-];
-
 /** A project row's subtitle: an optional source logo, then a short label. */
 export interface ProjectSourceDescription {
   /** Shown before the label in place of the source's name. */
-  readonly logo: "onshape" | null;
+  readonly logo: "onshape" | "solidworks" | null;
   readonly label: string;
 }
 
+const LOCAL_CAD_FORMATS: ReadonlyArray<
+  readonly [extension: string, description: ProjectSourceDescription]
+> = [
+  [".step", { logo: null, label: "STEP file" }],
+  [".stp", { logo: null, label: "STEP file" }],
+  [".iges", { logo: null, label: "IGES file" }],
+  [".igs", { logo: null, label: "IGES file" }],
+  [".sldasm", { logo: "solidworks", label: "Assembly" }],
+  [".sldprt", { logo: "solidworks", label: "Part" }],
+];
+
 /**
  * The project row's subtitle: where its CAD comes from and what kind it is. An Onshape project
- * shows the Onshape logo and its model kind ("Assembly"); a local file shows its format ("STEP
- * file"). Onshape element names such as "Part Studio 1" mean little at a glance, so callers keep
- * those for the tooltip.
+ * shows the Onshape logo and its model kind ("Assembly"), and a SolidWorks file shows the
+ * SolidWorks logo and its kind ("Part"); any other local file shows its format ("STEP file").
+ * Onshape element names such as "Part Studio 1" mean little at a glance, so callers keep those
+ * for the tooltip.
  */
 export function describeProjectSource(project: ProjectSourceInput): ProjectSourceDescription {
   if (project.localCadSource) {
     const path = project.localCadSource.filePath.toLowerCase();
-    return {
-      logo: null,
-      label:
-        LOCAL_CAD_FORMAT_LABELS.find(([extension]) => path.endsWith(extension))?.[1] ?? "CAD file",
-    };
+    return (
+      LOCAL_CAD_FORMATS.find(([extension]) => path.endsWith(extension))?.[1] ?? {
+        logo: null,
+        label: "CAD file",
+      }
+    );
   }
   if (project.onshapeSource) {
     const synced = project.cad?.roots.filter((root) => root.current !== null) ?? [];

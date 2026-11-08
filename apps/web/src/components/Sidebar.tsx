@@ -160,6 +160,7 @@ import {
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
   describeProjectSource,
+  type ProjectSourceDescription,
   resolveSidebarThreadTitle,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -208,6 +209,12 @@ const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
  */
 const SIDEBAR_PROJECT_ICON_CLASS =
   "size-7 rounded-md border border-sidebar-border bg-sidebar-control-surface p-1 [&[src='/onshape.svg']]:opacity-70 [&[src='/onshape.svg']]:grayscale";
+
+/** The image and alt text for each logo a project row's subtitle can show. */
+const PROJECT_SOURCE_LOGOS = {
+  onshape: { src: "/onshape.svg", alt: "Onshape" },
+  solidworks: { src: "/solidworks.svg", alt: "SolidWorks" },
+} satisfies Record<NonNullable<ProjectSourceDescription["logo"]>, { src: string; alt: string }>;
 
 /** The thread row's timestamp: the relative value without its "ago" suffix. */
 function formatCompactRelativeTime(isoDate: string): string {
@@ -2058,8 +2065,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const source = describeProjectSource(project);
   const subtitle = (
     <>
-      {source.logo === "onshape" ? (
-        <img src="/onshape.svg" alt="Onshape" className="size-3 shrink-0 object-contain" />
+      {source.logo ? (
+        <img
+          src={PROJECT_SOURCE_LOGOS[source.logo].src}
+          alt={PROJECT_SOURCE_LOGOS[source.logo].alt}
+          className="size-3 shrink-0 object-contain"
+        />
       ) : null}
       <span className="truncate">{source.label}</span>
     </>

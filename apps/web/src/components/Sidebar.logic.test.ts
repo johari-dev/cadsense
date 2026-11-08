@@ -1684,6 +1684,7 @@ describe("describeProjectSource", () => {
   });
   const onshape = (label: string) => ({ logo: "onshape", label });
   const local = (label: string) => ({ logo: null, label });
+  const solidworks = (label: string) => ({ logo: "solidworks", label });
 
   it("names an Onshape project by the kind of its synced model, beside the Onshape logo", () => {
     expect(
@@ -1726,14 +1727,17 @@ describe("describeProjectSource", () => {
     expect(describeProjectSource({ localCadSource: { filePath: "bracket.igs" } })).toEqual(
       local("IGES file"),
     );
-    expect(describeProjectSource({ localCadSource: { filePath: "Gearbox.SLDASM" } })).toEqual(
-      local("SolidWorks · Assembly"),
-    );
-    expect(describeProjectSource({ localCadSource: { filePath: "plate.sldprt" } })).toEqual(
-      local("SolidWorks · Part"),
-    );
     expect(describeProjectSource({ localCadSource: { filePath: "notes.cad" } })).toEqual(
       local("CAD file"),
+    );
+  });
+
+  it("names a SolidWorks file by its kind, beside the SolidWorks logo", () => {
+    expect(describeProjectSource({ localCadSource: { filePath: "Gearbox.SLDASM" } })).toEqual(
+      solidworks("Assembly"),
+    );
+    expect(describeProjectSource({ localCadSource: { filePath: "plate.sldprt" } })).toEqual(
+      solidworks("Part"),
     );
   });
 
