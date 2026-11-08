@@ -4,7 +4,6 @@ import {
   ArchiveIcon as ArchiveX,
   CaretRightIcon as ChevronRightIcon,
   ArrowUUpLeftIcon as Undo2Icon,
-  FolderOpenIcon,
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
@@ -13,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type DesktopUpdateChannel,
+  type DesktopUpdateStatus,
   ProviderDriverKind,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
@@ -58,17 +58,12 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import {
-  primaryServerConfigAtom,
-  primaryServerObservabilityAtom,
-  primaryServerProvidersAtom,
-} from "../../state/server";
+import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import {
   DEFAULT_CODE_FONT_STACK,
@@ -86,7 +81,6 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   formatDiagnosticsDescription,
-  getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
 } from "./SettingsPanels.logic";
 import {
@@ -99,8 +93,22 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { CadStorageSection } from "../../cad/CadStorageSettings";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+// The line under Version in the desktop app. Idle covers the short wait before the first
+// automatic check after launch.
+const UPDATE_STATUS_LABELS: Readonly<Record<DesktopUpdateStatus, string>> = {
+  disabled: "Updates are off in this build.",
+  idle: "Not checked yet.",
+  checking: "Checking for updates…",
+  "up-to-date": "Up to date.",
+  available: "Update available.",
+  downloading: "Downloading update…",
+  downloaded: "Update ready to install.",
+  error: "Could not check for updates.",
+};
+
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
@@ -247,10 +255,7 @@ function AboutVersionSection() {
   };
   const buttonLabel =
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for updates";
-  const description =
-    action === "download" || action === "install"
-      ? "Update available."
-      : "Current version of the application.";
+  const description = UPDATE_STATUS_LABELS[updateState?.status ?? "idle"];
 
   return (
     <>
@@ -277,7 +282,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Nightly follows nightly builds, and you can switch back anytime."
+          description="Nightly gets new features first. You can switch back anytime."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -310,7 +315,11 @@ function AboutVersionSection() {
   );
 }
 
-export function useSettingsRestore(onRestored?: () => void) {
+/**
+ * What Restore defaults would reset, and the action that resets it after a confirm. Settings
+ * with no row in the modal are left alone, so restoring cannot flip a hidden preference.
+ */
+function useSettingsRestore() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
 
@@ -332,43 +341,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.showOnshapeSyncApiCalls !== DEFAULT_UNIFIED_SETTINGS.showOnshapeSyncApiCalls
         ? ["Onshape API calls per sync"]
         : []),
-      ...(settings.streamAssistantText !== DEFAULT_UNIFIED_SETTINGS.streamAssistantText
-        ? ["Streaming text"]
-        : []),
-      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Default project folder"]
-        : []),
-      ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-        ? ["Archive confirmation"]
-        : []),
-      ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-        ? ["Delete confirmation"]
-        : []),
-      ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit
-        ? ["Quit confirmation"]
-        : []),
       ...(isTextGenerationModelDirty ? ["Thread title model"] : []),
-      ...getChangedBrowserSettingLabels(settings),
-      ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
-        ? ["Agent browser access"]
-        : []),
       ...(settings.enableUsageAnalytics !== DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics
         ? ["Usage analytics"]
         : []),
     ],
     [
       isTextGenerationModelDirty,
-      settings.addProjectBaseDirectory,
-      settings.browserAutoShowFloatingPreview,
-      settings.browserDefaultAppearance,
-      settings.browserDefaultViewport,
-      settings.browserDefaultZoomFactor,
-      settings.confirmQuit,
-      settings.confirmThreadArchive,
-      settings.confirmThreadDelete,
-      settings.enableAgentBrowserAccess,
       settings.enableUsageAnalytics,
-      settings.streamAssistantText,
       settings.showPermissionSettings,
       settings.showContextWindowIndicator,
       settings.showOnshapeSyncApiCalls,
@@ -393,14 +373,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     updateSettings({
-      streamAssistantText: DEFAULT_UNIFIED_SETTINGS.streamAssistantText,
       showPermissionSettings: DEFAULT_UNIFIED_SETTINGS.showPermissionSettings,
       showContextWindowIndicator: DEFAULT_UNIFIED_SETTINGS.showContextWindowIndicator,
       showOnshapeSyncApiCalls: DEFAULT_UNIFIED_SETTINGS.showOnshapeSyncApiCalls,
-      addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-      confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-      confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-      confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
@@ -408,15 +383,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
       fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
       fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
-      browserDefaultViewport: DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
-      browserDefaultZoomFactor: DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor,
-      browserDefaultAppearance: DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance,
-      browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
-      enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
       enableUsageAnalytics: DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics,
     });
-    onRestored?.();
-  }, [changedSettingLabels, onRestored, updateSettings]);
+  }, [changedSettingLabels, updateSettings]);
 
   return {
     changedSettingLabels,
@@ -429,10 +398,10 @@ export function AppearanceSettingsPanel() {
   return (
     <SettingsPageContainer>
       <TypographySection />
-      <SettingsSection title="Visibility">
+      <SettingsSection title="Composer">
         <SettingsRow
           {...searchableSetting("show-permission-settings")}
-          description="Show access controls in the composer. When hidden, agents edit freely and an automatic reviewer checks actions that need more access."
+          description="Show access controls. When hidden, agents edit freely and a reviewer checks riskier actions."
           control={
             <Switch
               checked={settings.showPermissionSettings}
@@ -445,7 +414,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("show-context-window-indicator")}
-          description="Show context window usage beside the send button."
+          description="Show context usage beside the send button."
           control={
             <Switch
               checked={settings.showContextWindowIndicator}
@@ -456,9 +425,11 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+      </SettingsSection>
+      <SettingsSection title="CAD">
         <SettingsRow
           {...searchableSetting("show-onshape-sync-api-calls")}
-          description="Show how many Onshape API calls each CAD sync uses, in its progress toast."
+          description="Show the call count in each sync's progress toast."
           control={
             <Switch
               checked={settings.showOnshapeSyncApiCalls}
@@ -500,7 +471,7 @@ function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
   return (
     <FontFamilySettingsRow
       {...searchableSetting("interface-font")}
-      description="General interface text outside code blocks."
+      description="Text across the app, except code."
       defaultFamily={defaults.sans}
       defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilySans}
       value={settings.fontFamilySans}
@@ -531,7 +502,7 @@ function PromptFontRow() {
   return (
     <FontFamilySettingsRow
       {...searchableSetting("prompt-font")}
-      description="Only the box you write prompts in. Mono works well here."
+      description="The message box. Mono works well here."
       defaultFamily={defaults.interfaceFamily}
       defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer}
       value={settings.fontFamilyComposer}
@@ -562,7 +533,7 @@ function FontSmoothingRow() {
   return (
     <SettingsRow
       {...searchableSetting("font-smoothing")}
-      description="Thinner grayscale anti-aliasing instead of the heavier macOS default."
+      description="Thinner text than the macOS default."
       resetAction={
         settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
           <SettingResetButton
@@ -636,7 +607,7 @@ function TypographySection() {
   }, [searchTargetId, setAdvanced]);
   return (
     <SettingsSection
-      title="Appearance"
+      title="Fonts"
       headerAction={
         <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
           Advanced
@@ -851,53 +822,36 @@ function FontFamilySettingsRow({
 }
 
 /**
- * Resets every setting `useSettingsRestore` tracks. While nothing differs it is disabled but
- * keeps the secondary text color instead of fading, so it reads as an available page action.
- * The undo glyph matches the per-row reset buttons.
+ * The last row on General. Resets every setting `useSettingsRestore` tracks, after a confirm
+ * that names them. It sits at the bottom so the page opens on real settings, not an action.
  */
-function RestoreDefaultsButton({ onRestored }: { readonly onRestored: () => void }) {
-  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+function RestoreDefaultsRow() {
+  const { changedSettingLabels, restoreDefaults } = useSettingsRestore();
+  const nothingChanged = changedSettingLabels.length === 0;
 
   return (
-    <Button
-      variant="outline"
-      className="text-muted-foreground not-disabled:text-foreground disabled:opacity-100"
-      disabled={changedSettingLabels.length === 0}
-      onClick={() => void restoreDefaults()}
-    >
-      <Undo2Icon className="size-3.5" />
-      Restore defaults
-    </Button>
+    <SettingsRow
+      {...searchableSetting("restore-defaults")}
+      description={
+        nothingChanged
+          ? "Everything is already on its default."
+          : `Resets ${changedSettingLabels.length} changed ${changedSettingLabels.length === 1 ? "setting" : "settings"}.`
+      }
+      control={
+        <Button variant="outline" disabled={nothingChanged} onClick={() => void restoreDefaults()}>
+          <Undo2Icon className="size-3.5" />
+          Restore defaults
+        </Button>
+      }
+    />
   );
 }
 
-/** General settings. `onRestored` runs after Restore defaults so the route can remount it. */
-export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () => void }) {
+/** Picks the model that writes thread titles. Lives on the Providers page, below the providers. */
+export function ThreadTitleModelSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const observability = useAtomValue(primaryServerObservabilityAtom);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
-  const serverConfig = useAtomValue(primaryServerConfigAtom);
-  const defaultProjectDirectory =
-    serverConfig?.environment.platform.os === "windows" ? "C:\\" : "~/";
-  // Opens the desktop folder picker Add Project uses, starting at the current folder.
-  const chooseDefaultProjectFolder = async () => {
-    const picked = await readLocalApi()?.dialogs.pickFolder({
-      initialPath: settings.addProjectBaseDirectory || defaultProjectDirectory,
-    });
-    if (picked) updateSettings({ addProjectBaseDirectory: picked });
-  };
-  const diagnosticsDescription = formatDiagnosticsDescription({
-    localTracingEnabled: observability?.localTracingEnabled ?? false,
-    otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
-    ...(observability?.otlpTracesUrl === undefined
-      ? {}
-      : { otlpTracesUrl: observability.otlpTracesUrl }),
-    otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
-    ...(observability?.otlpMetricsUrl === undefined
-      ? {}
-      : { otlpMetricsUrl: observability.otlpMetricsUrl }),
-  });
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
@@ -921,247 +875,137 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+
+  return (
+    <SettingsSection title="Thread titles">
+      <SettingsRow
+        {...searchableSetting("text-generation-model")}
+        description="Writes and renames thread titles."
+        resetAction={
+          isTextGenerationModelDirty ? (
+            <SettingResetButton
+              label="thread title model"
+              onClick={() =>
+                updateSettings({
+                  textGenerationModelSelection:
+                    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <ProviderModelPicker
+              activeInstanceId={textGenInstanceId}
+              model={textGenModel}
+              lockedProvider={null}
+              instanceEntries={textGenerationModelInstanceEntries}
+              modelOptionsByInstance={textGenerationModelOptionsByInstance}
+              triggerVariant="outline"
+              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
+              onInstanceModelChange={(instanceId, model) => {
+                updateSettings({
+                  textGenerationModelSelection: resolveAppModelSelectionState(
+                    {
+                      ...settings,
+                      textGenerationModelSelection: createModelSelection(instanceId, model),
+                    },
+                    serverProviders,
+                  ),
+                });
+              }}
+            />
+            <TraitsPicker
+              provider={textGenProvider}
+              models={
+                // Use the exact instance's models (rather than the
+                // first-kind-match) so a custom text-gen instance like
+                // `codex_personal` gets its own model list, not the
+                // default Codex one.
+                textGenInstanceEntry?.models ?? []
+              }
+              model={textGenModel}
+              prompt=""
+              onPromptChange={() => {}}
+              modelOptions={textGenModelOptions}
+              allowPromptInjectedEffort={false}
+              triggerVariant="outline"
+              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
+              onModelOptionsChange={(nextOptions) => {
+                updateSettings({
+                  textGenerationModelSelection: resolveAppModelSelectionState(
+                    {
+                      ...settings,
+                      textGenerationModelSelection: createModelSelection(
+                        textGenInstanceId,
+                        textGenModel,
+                        nextOptions,
+                      ),
+                    },
+                    serverProviders,
+                  ),
+                });
+              }}
+            />
+          </div>
+        }
+      />
+    </SettingsSection>
+  );
+}
+
+/**
+ * General settings: version and updates, diagnostics, privacy, and Restore defaults last.
+ * Streaming text, the default project folder, and the archive, delete, and quit
+ * confirmations have no rows here. They keep their stored values, which default to the
+ * intended behavior.
+ */
+export function GeneralSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const observability = useAtomValue(primaryServerObservabilityAtom);
+  const diagnosticsDescription = formatDiagnosticsDescription({
+    localTracingEnabled: observability?.localTracingEnabled ?? false,
+    otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
+    ...(observability?.otlpTracesUrl === undefined
+      ? {}
+      : { otlpTracesUrl: observability.otlpTracesUrl }),
+    otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
+    ...(observability?.otlpMetricsUrl === undefined
+      ? {}
+      : { otlpMetricsUrl: observability.otlpMetricsUrl }),
+  });
+
   return (
     <SettingsPageContainer>
-      <SettingsSection
-        title="General"
-        headerAction={<RestoreDefaultsButton onRestored={onRestored} />}
-      >
-        <SettingsRow
-          {...searchableSetting("streaming-text")}
-          description="Show assistant text as it arrives."
-          resetAction={
-            settings.streamAssistantText !== DEFAULT_UNIFIED_SETTINGS.streamAssistantText ? (
-              <SettingResetButton
-                label="streaming text"
-                onClick={() =>
-                  updateSettings({
-                    streamAssistantText: DEFAULT_UNIFIED_SETTINGS.streamAssistantText,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.streamAssistantText}
-              onCheckedChange={(checked) =>
-                updateSettings({ streamAssistantText: Boolean(checked) })
-              }
-              aria-label="Streaming text"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("add-project-starts-in")}
-          // The input's placeholder shows the folder used while this is empty.
-          description="Start in this folder when adding a project."
-          resetAction={
-            settings.addProjectBaseDirectory !==
-            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
-              <SettingResetButton
-                label="default project folder"
-                onClick={() =>
-                  updateSettings({
-                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full items-center gap-1.5 sm:w-auto">
-              <DraftInput
-                className="w-full sm:w-60"
-                value={settings.addProjectBaseDirectory}
-                onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-                placeholder={
-                  defaultProjectDirectory === "~/"
-                    ? "~/ (home folder)"
-                    : `${defaultProjectDirectory} (default)`
-                }
-                spellCheck={false}
-                aria-label="Default project folder"
-              />
-              {/* The native picker needs the desktop app; the browser build can only type a path. */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="inline-flex shrink-0">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        aria-label="Choose folder"
-                        disabled={!isElectron}
-                        onClick={() => void chooseDefaultProjectFolder()}
-                      >
-                        <FolderOpenIcon className="size-4" />
-                      </Button>
-                    </span>
-                  }
-                />
-                <TooltipPopup side="top">
-                  {isElectron ? "Choose folder" : "Choosing a folder needs the desktop app"}
-                </TooltipPopup>
-              </Tooltip>
-            </div>
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("archive-confirmation")}
-          description="Ask before archiving a thread."
-          resetAction={
-            settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
-              <SettingResetButton
-                label="archive confirmation"
-                onClick={() =>
-                  updateSettings({
-                    confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.confirmThreadArchive}
-              onCheckedChange={(checked) =>
-                updateSettings({ confirmThreadArchive: Boolean(checked) })
-              }
-              aria-label="Confirm thread archiving"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("delete-confirmation")}
-          description="Ask before deleting a thread and its chat history."
-          resetAction={
-            settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
-              <SettingResetButton
-                label="delete confirmation"
-                onClick={() =>
-                  updateSettings({
-                    confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.confirmThreadDelete}
-              onCheckedChange={(checked) =>
-                updateSettings({ confirmThreadDelete: Boolean(checked) })
-              }
-              aria-label="Confirm thread deletion"
-            />
-          }
-        />
-
+      <SettingsSection title="About">
         {isElectron ? (
+          <AboutVersionSection />
+        ) : (
           <SettingsRow
-            {...searchableSetting("quit-confirmation")}
-            description="Hold the quit shortcut to quit. A quick tap shows a hint."
-            resetAction={
-              settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? (
-                <SettingResetButton
-                  label="quit confirmation"
-                  onClick={() =>
-                    updateSettings({ confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.confirmQuit}
-                onCheckedChange={(checked) => updateSettings({ confirmQuit: Boolean(checked) })}
-                aria-label="Hold to quit"
-              />
-            }
+            title={<AboutVersionTitle />}
+            description="Updates come with the desktop app."
           />
-        ) : null}
-
+        )}
         <SettingsRow
-          {...searchableSetting("text-generation-model")}
-          description="Model that writes and regenerates thread titles."
-          resetAction={
-            isTextGenerationModelDirty ? (
-              <SettingResetButton
-                label="thread title model"
-                onClick={() =>
-                  updateSettings({
-                    textGenerationModelSelection:
-                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  })
-                }
-              />
-            ) : null
-          }
+          {...searchableSetting("diagnostics")}
+          description={diagnosticsDescription}
           control={
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <ProviderModelPicker
-                activeInstanceId={textGenInstanceId}
-                model={textGenModel}
-                lockedProvider={null}
-                instanceEntries={textGenerationModelInstanceEntries}
-                modelOptionsByInstance={textGenerationModelOptionsByInstance}
-                triggerVariant="outline"
-                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
-                onInstanceModelChange={(instanceId, model) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: createModelSelection(instanceId, model),
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-              <TraitsPicker
-                provider={textGenProvider}
-                models={
-                  // Use the exact instance's models (rather than the
-                  // first-kind-match) so a custom text-gen instance like
-                  // `codex_personal` gets its own model list, not the
-                  // default Codex one.
-                  textGenInstanceEntry?.models ?? []
-                }
-                model={textGenModel}
-                prompt=""
-                onPromptChange={() => {}}
-                modelOptions={textGenModelOptions}
-                allowPromptInjectedEffort={false}
-                triggerVariant="outline"
-                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASS}
-                onModelOptionsChange={(nextOptions) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: createModelSelection(
-                          textGenInstanceId,
-                          textGenModel,
-                          nextOptions,
-                        ),
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-            </div>
+            <Button
+              render={<Link {...settingsLocation("diagnostics")} replace />}
+              variant="outline"
+            >
+              View diagnostics
+            </Button>
           }
         />
+      </SettingsSection>
 
+      <SettingsSection title="Privacy">
         <SettingsRow
           {...searchableSetting("usage-analytics")}
-          description="Send anonymous usage data, such as how many turns and CAD previews you run, to help improve Cadsense. It never includes prompts, files, or CAD data. Turning this off also deletes this install's anonymous id."
+          description="Send anonymous usage counts and failure data to help improve Cadsense. Never includes prompts, files, or CAD data."
           resetAction={
             settings.enableUsageAnalytics !== DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics ? (
               <SettingResetButton
@@ -1186,27 +1030,8 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
         />
       </SettingsSection>
 
-      <SettingsSection title="About">
-        {isElectron ? (
-          <AboutVersionSection />
-        ) : (
-          <SettingsRow
-            title={<AboutVersionTitle />}
-            description="Current version of the application."
-          />
-        )}
-        <SettingsRow
-          {...searchableSetting("diagnostics")}
-          description={diagnosticsDescription}
-          control={
-            <Button
-              render={<Link {...settingsLocation("diagnostics")} replace />}
-              variant="outline"
-            >
-              View diagnostics
-            </Button>
-          }
-        />
+      <SettingsSection title="Reset">
+        <RestoreDefaultsRow />
       </SettingsSection>
     </SettingsPageContainer>
   );
@@ -1350,7 +1175,7 @@ export function ArchivedThreadsPanel() {
             description={
               isLoadingArchive
                 ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
+                : (archiveError ?? "Threads you archive show up here.")
             }
           />
         </SettingsSection>
@@ -1441,6 +1266,7 @@ export function ArchivedThreadsPanel() {
           </SettingsSection>
         ))
       )}
+      <CadStorageSection />
     </SettingsPageContainer>
   );
 }

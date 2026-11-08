@@ -241,10 +241,10 @@ try {
   // `/` forwards to a draft. Settings opened there (as removing the active project does) must
   // stay open over that draft.
   await run("root-link-forwarded", async (page) => {
-    await page.goto(`${url}?settings=cad-storage`, { waitUntil: "networkidle" });
+    await page.goto(`${url}?settings=archived#cad-storage`, { waitUntil: "networkidle" });
     await page.waitForURL((next) => next.pathname.startsWith("/draft/"), { timeout: 30_000 });
     await settingsDialog.waitFor({ timeout: 10_000 });
-    if (settingsParam(page) !== "cad-storage") throw new Error(`Forwarded to ${page.url()}`);
+    if (settingsParam(page) !== "archived") throw new Error(`Forwarded to ${page.url()}`);
     return { url: page.url() };
   });
   summary.ok = pageErrors.length === 0;

@@ -6,12 +6,12 @@ import {
 } from "@cadsense/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useState } from "react";
-import { DatabaseIcon } from "~/lib/icons";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { cadStorageEnvironment } from "../state/cadStorage";
 import { useAtomCommand } from "../state/use-atom-command";
 import { Button } from "../components/ui/button";
-import { SettingsPageContainer, SettingsSection } from "../components/settings/settingsLayout";
+import { SettingsSection } from "../components/settings/settingsLayout";
+import { searchableSetting } from "../components/settings/settingsSearch";
 import { requestCadRemoval } from "./CadRemovalDialog";
 
 function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
@@ -52,8 +52,8 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
     return (
       <p role="status" className="p-4 text-sm text-muted-foreground">
         {AsyncResult.isFailure(state)
-          ? "CAD storage is unavailable in this environment."
-          : "Loading CAD storage…"}
+          ? "Removed projects are unavailable in this environment."
+          : "Loading removed projects…"}
       </p>
     );
   return (
@@ -65,8 +65,7 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
       )}
       {state.value.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No removed CAD projects. Removing an Onshape or local CAD project can keep its threads and
-          CAD data here.
+          No removed projects. Removing a CAD project can keep its threads and CAD data here.
         </p>
       )}
       {state.value.map((entry) => (
@@ -131,26 +130,27 @@ function RetainedProjects({ environmentId }: { environmentId: EnvironmentId }) {
     </div>
   );
 }
-export function CadStorageSettings() {
+/**
+ * Removed CAD projects, shown at the bottom of the Archive tab. Each entry can be restored or
+ * have its retained data deleted. Links reach it with the `cad-storage` hash.
+ */
+export function CadStorageSection() {
   const environmentId = usePrimaryEnvironmentId();
   return (
-    <SettingsPageContainer>
-      <SettingsSection title="CAD storage" icon={<DatabaseIcon className="size-4" />}>
-        <div className="space-y-5 p-4">
+    <SettingsSection {...searchableSetting("cad-storage")}>
+      <div className="space-y-4 px-3 pt-1 pb-4 sm:px-4">
+        <p className="text-[13px] leading-[1.45] text-muted-foreground">
+          Restore a removed project or delete the data kept for it. This never contacts Onshape or
+          changes a local project's folder.
+        </p>
+        {environmentId ? (
+          <RetainedProjects key={environmentId} environmentId={environmentId} />
+        ) : (
           <p className="text-sm text-muted-foreground">
-            Restore removed Onshape and local CAD projects, or delete their retained data. These
-            actions use local data, do not contact Onshape, and never change a local project's
-            folder. Threads and captured images are preserved.
+            Connect an environment to see removed projects.
           </p>
-          {environmentId ? (
-            <RetainedProjects key={environmentId} environmentId={environmentId} />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Connect an environment to inspect CAD storage.
-            </p>
-          )}
-        </div>
-      </SettingsSection>
-    </SettingsPageContainer>
+        )}
+      </div>
+    </SettingsSection>
   );
 }

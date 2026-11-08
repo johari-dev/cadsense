@@ -12,14 +12,16 @@ import * as Schema from "effect/Schema";
 export const SETTINGS_TAB_LABELS = {
   general: "General",
   appearance: "Appearance",
-  keybindings: "Keybindings",
   providers: "Providers",
   integrations: "Integrations",
-  "cad-storage": "CAD storage",
+  keybindings: "Keybindings",
   archived: "Archive",
 } as const;
 
-/** A settings page. Diagnostics has no tab of its own; General links to it. */
+/**
+ * A settings page. Diagnostics has no tab of its own; General links to it. Removed CAD projects
+ * live at the bottom of Archive, reached with the `cad-storage` hash.
+ */
 export type SettingsTab = keyof typeof SETTINGS_TAB_LABELS | "diagnostics";
 
 export interface SettingsSearchParams {

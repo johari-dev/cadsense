@@ -10,9 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
-  getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
-  isSamePreviewViewport,
 } from "./SettingsPanels.logic";
 
 describe("settings helpers", () => {
@@ -55,15 +53,5 @@ describe("settings helpers", () => {
     });
     expect(patch.providerInstances?.[instanceId]).toEqual(instance);
     expect(patch.providers?.codex).toEqual(DEFAULT_SERVER_SETTINGS.providers.codex);
-  });
-
-  it("compares browser viewport values structurally", () => {
-    expect(getChangedBrowserSettingLabels(DEFAULT_UNIFIED_SETTINGS)).toEqual([]);
-    expect(
-      isSamePreviewViewport(
-        { _tag: "preset", width: 390, height: 844, presetId: "iphone-12-pro" },
-        { _tag: "preset", width: 390, height: 844, presetId: "ipad-mini" },
-      ),
-    ).toBe(false);
   });
 });

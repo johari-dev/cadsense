@@ -56,20 +56,21 @@ describe("searchSettings", () => {
     ]);
   });
 
-  it("lists thread confirmations in panel order", () => {
-    expect(searchSettings("confirmation").map((item) => item.id)).toEqual([
-      "archive-confirmation",
-      "delete-confirmation",
-    ]);
+  it("does not offer settings that have no row", () => {
+    for (const query of [
+      "confirmation",
+      "streaming",
+      "project folder",
+      "hold to quit",
+      "cad storage",
+      "browser",
+    ]) {
+      expect(searchSettings(query)).toEqual([]);
+    }
   });
 
   it("returns no results for an empty query", () => {
     expect(searchSettings("   ", ITEMS)).toEqual([]);
-  });
-
-  it("hides desktop-only settings from browser search", () => {
-    expect(SETTINGS_SEARCH_ITEMS.some((item) => item.id === "quit-confirmation")).toBe(true);
-    expect(searchSettings("quit confirmation")).toEqual([]);
   });
 
   it("keeps catalog result ids unique", () => {
@@ -80,16 +81,20 @@ describe("searchSettings", () => {
   it("serves anchor props to panels from the catalog", () => {
     expect(searchableSetting("show-permission-settings")).toEqual({
       id: "show-permission-settings",
-      title: "Show permission settings",
+      title: "Permission settings",
     });
     expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
   });
 
   it("routes appearance settings to their current section", () => {
-    expect(searchSettings("show context window")[0]).toMatchObject({
+    expect(searchSettings("context window")[0]).toMatchObject({
       id: "show-context-window-indicator",
       tab: "appearance",
     });
+  });
+  it("routes the title model and removed CAD projects to their new tabs", () => {
+    expect(searchSettings("title model")[0]).toMatchObject({ tab: "providers" });
+    expect(searchSettings("removed cad")[0]).toMatchObject({ tab: "archived" });
   });
   it("does not offer removed appearance settings", () => {
     expect(searchSettings("word wrap")).toEqual([]);
