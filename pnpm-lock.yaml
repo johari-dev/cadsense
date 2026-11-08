@@ -274,15 +274,18 @@ importers:
       '@lexical/react':
         specifier: ^0.41.0
         version: 0.41.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(yjs@13.6.31)
+      '@material-symbols/svg-300':
+        specifier: ^0.48.3
+        version: 0.48.3
+      '@material-symbols/svg-700':
+        specifier: ^0.48.3
+        version: 0.48.3
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
       '@pierre/trees':
         specifier: 1.0.0-beta.4
         version: 1.0.0-beta.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      '@tabler/icons-react':
-        specifier: ^3.49.0
-        version: 3.49.0(react@19.2.6)
       '@tanstack/react-pacer':
         specifier: ^0.19.4
         version: 0.19.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -1604,6 +1607,12 @@ packages:
     resolution: {integrity: sha512-9QOtNffcOF/c1seMCDnjckb3R9WHcG34tky+FHpNKKCW0wc/scYLwMtO+ptyGUfMW0/b/n4qRiALlaFHc9Oj7Q==}
     engines: {node: '>= 10.0.0'}
 
+  '@material-symbols/svg-300@0.48.3':
+    resolution: {integrity: sha512-ab6wS8JfN4ZYV2rKRxT2oDWo7945I8nKAawnJf4ONUQXN77wVmQZ1smWlNmNrdCC4UbCYSghyHc5GDtYYKJtXw==}
+
+  '@material-symbols/svg-700@0.48.3':
+    resolution: {integrity: sha512-VlpoVaRZMyqC6Ci0zI9EMT7XWCmGQfAkl8iAE3bt1pgxND2gzth7XEZ32bIfIel2pNIbw4J4v5UOMHAjS7bspg==}
+
   '@modelcontextprotocol/sdk@1.29.0':
     resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
     engines: {node: '>=18'}
@@ -2396,14 +2405,6 @@ packages:
   '@szmarczak/http-timer@4.0.6':
     resolution: {integrity: sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w==}
     engines: {node: '>=10'}
-
-  '@tabler/icons-react@3.49.0':
-    resolution: {integrity: sha512-Um59pm5RVNUaQjFUtG0r4oYJbZuBS3tGugAA2tgBg0WufMk34Eio3nsO30RUkLuL2giYPQUNdY9HvqltLLYyNA==}
-    peerDependencies:
-      react: '>= 16'
-
-  '@tabler/icons@3.49.0':
-    resolution: {integrity: sha512-l+GnSkFETx0U26icxv1VUFnxxiTqXfCcVRiRAnyMwibupM2S2L/hSaZ9gmSgz01rkrsH/93NvLsxykqdanc6lw==}
 
   '@tailwindcss/node@4.3.0':
     resolution: {integrity: sha512-aFb4gUhFOgdh9AXo4IzBEOzBkkAxm9VigwDJnMIYv3lcfXCJVesNfbEaBl4BNgVRyid92AmdviqwBUBRKSeY3g==}
@@ -7351,6 +7352,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@material-symbols/svg-300@0.48.3': {}
+
+  '@material-symbols/svg-700@0.48.3': {}
+
   '@modelcontextprotocol/sdk@1.29.0(zod@4.4.3)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.27)
@@ -7863,13 +7868,6 @@ snapshots:
   '@szmarczak/http-timer@4.0.6':
     dependencies:
       defer-to-connect: 2.0.1
-
-  '@tabler/icons-react@3.49.0(react@19.2.6)':
-    dependencies:
-      '@tabler/icons': 3.49.0
-      react: 19.2.6
-
-  '@tabler/icons@3.49.0': {}
 
   '@tailwindcss/node@4.3.0':
     dependencies:
