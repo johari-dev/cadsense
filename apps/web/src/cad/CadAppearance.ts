@@ -5,7 +5,7 @@ export const CadAppearance = Schema.Struct({
   dark: Schema.Boolean,
 });
 export type CadAppearance = typeof CadAppearance.Type;
-export const DEFAULT_CAD_APPEARANCE: CadAppearance = { background: 0x171717, dark: true };
+export const DEFAULT_CAD_APPEARANCE: CadAppearance = { background: 0x212121, dark: true };
 
 /** Resolve CSS colors through the browser so custom palettes and OKLCH work in WebGL too. */
 export function readCadAppearance(): CadAppearance {
@@ -20,9 +20,9 @@ export function readCadAppearance(): CadAppearance {
   // this right after queueing a full draw of the model, which stalled the panel's opening.
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return DEFAULT_CAD_APPEARANCE;
-  context.fillStyle = "#171717";
+  context.fillStyle = "#212121";
   context.fillRect(0, 0, 1, 1);
-  context.fillStyle = color || "#171717";
+  context.fillStyle = color || "#212121";
   context.fillRect(0, 0, 1, 1);
   const [red = 20, green = 20, blue = 20] = context.getImageData(0, 0, 1, 1).data;
   return {

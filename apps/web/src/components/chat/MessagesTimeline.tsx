@@ -171,13 +171,6 @@ const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 // As tall as the list's 2.125rem top fade, so the first row is never faded at rest.
 const TIMELINE_LIST_HEADER = <div className="h-8.5" />;
-// The fade under the chat header's divider: the first 0.8rem (12px) is fully masked, so no
-// glyph fragment shows against the divider, then a ramp that stays faint until about 24px and
-// is clear by 2.125rem (32px), so a line passing through reads as gone rather than ghosted.
-// The second layer keeps the scrollbar lane unmasked, like the shared topbar-scroll-fade.
-const TIMELINE_TOP_FADE_CLASS_NAME =
-  "[mask-image:linear-gradient(to_bottom,transparent_0.8rem,rgb(0_0_0/0.08)_1.4rem,rgb(0_0_0/0.45)_1.8rem,black_2.125rem),linear-gradient(black,black)] [mask-position:left_top,right_top] [mask-repeat:no-repeat] [mask-size:100%_100%,var(--app-scrollbar-width)_100%]";
-
 // Header row shown when older turns exist beyond the loaded window. Plain
 // button, no spinner animation; the label change is the loading indicator.
 function TimelineLoadEarlierHeader({
@@ -189,7 +182,7 @@ function TimelineLoadEarlierHeader({
 }) {
   return (
     <div className="pt-8.5">
-      <div className="mx-auto w-full max-w-3xl pb-2">
+      <div className="mx-auto w-full max-w-[40.8rem] pb-2">
         <button
           type="button"
           onClick={onLoadEarlier}
@@ -202,7 +195,6 @@ function TimelineLoadEarlierHeader({
     </div>
   );
 }
-const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
@@ -254,7 +246,6 @@ interface MessagesTimelineProps {
   onEndTextCoveredChange: (covered: boolean) => void;
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
-  topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
   /** Sends feedback on the latest response as a new user turn. */
@@ -295,7 +286,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onEndTextCoveredChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
-  topFadeEnabled = false,
   loadEarlier = null,
   onRedoWithFeedback,
   pendingApprovals = EMPTY_PENDING_APPROVALS,
@@ -469,6 +459,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const lastRow = rows.at(-1);
   const lastRowIdRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     lastRowIdRef.current = rows.at(-1)?.id ?? null;
@@ -648,7 +639,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="mx-auto w-full min-w-0 max-w-[40.8rem] overflow-x-clip"
+        data-timeline-root="true"
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -687,10 +681,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             }
             maintainVisibleContentPosition={maintainVisibleContentPosition}
             onScroll={handleScroll}
-            className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && TIMELINE_TOP_FADE_CLASS_NAME,
-            )}
+            className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5"
             ListHeaderComponent={
               loadEarlier !== null ? (
                 <TimelineLoadEarlierHeader
@@ -701,7 +692,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 TIMELINE_LIST_HEADER
               )
             }
-            ListFooterComponent={TIMELINE_LIST_FOOTER}
+            ListFooterComponent={
+              lastRow && timelineRowPaddingClass(lastRow) !== "pb-4"
+                ? TIMELINE_TIGHT_END_FOOTER
+                : null
+            }
           />
           <TimelineMinimap
             items={minimapItems}
@@ -1035,27 +1030,41 @@ function TimelineMinimap({
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
+/**
+ * A row's bottom padding, which is its gap to the next row. Commentary (non-terminal
+ * assistant) rows carry no metadata row, so they sit closer to the work that follows them.
+ */
+function timelineRowPaddingClass(row: TimelineRow): "pb-1.5" | "pb-2" | "pb-4" {
+  if (row.kind === "turn-fold" || row.kind === "working") return "pb-1.5";
+  if (
+    (row.kind === "message" && row.message.role === "assistant" && !row.showAssistantMeta) ||
+    row.kind === "work" ||
+    row.kind === "cad-filmstrip" ||
+    row.kind === "cad-comments" ||
+    row.kind === "cad-drawing" ||
+    row.kind === "tool-card" ||
+    row.kind === "featurescript-preview" ||
+    row.kind === "work-toggle" ||
+    row.kind === "turn-plan"
+  ) {
+    return "pb-2";
+  }
+  return "pb-4";
+}
+
+/**
+ * The list's end inset stops at the composer's solid edge, so the last row's own bottom
+ * padding is all that separates it from the composer. A finished message brings 1rem; any
+ * tighter row (a tool card, a work group, the working line, as when a turn is stopped mid-tool)
+ * gets this 1rem footer on top, so it never ends up flush against the composer.
+ */
+const TIMELINE_TIGHT_END_FOOTER = <div className="h-4" />;
+
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        // Commentary (non-terminal assistant) rows carry no metadata row, so
-        // they sit closer to the work that follows them.
-        row.kind === "turn-fold" || row.kind === "working"
-          ? "pb-1.5"
-          : (row.kind === "message" &&
-                row.message.role === "assistant" &&
-                !row.showAssistantMeta) ||
-              row.kind === "work" ||
-              row.kind === "cad-filmstrip" ||
-              row.kind === "cad-comments" ||
-              row.kind === "cad-drawing" ||
-              row.kind === "tool-card" ||
-              row.kind === "featurescript-preview" ||
-              row.kind === "work-toggle" ||
-              row.kind === "turn-plan"
-            ? "pb-2"
-            : "pb-4",
+        timelineRowPaddingClass(row),
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}

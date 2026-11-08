@@ -446,24 +446,32 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           compactDisabledReason={props.compactDisabledReason}
         />
       ) : null}
-      {props.modelPicker}
-      <ComposerPrimaryActions
-        compact={props.compact}
-        pendingAction={props.pendingAction}
-        isRunning={props.isRunning}
-        showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
-        promptHasText={props.promptHasText}
-        isSendBusy={props.isSendBusy}
-        sendDisabledReason={props.sendDisabledReason}
-        isConnecting={props.isConnecting}
-        isEnvironmentUnavailable={props.isEnvironmentUnavailable}
-        hasSendableContent={props.hasSendableContent}
-        preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
-        showSendWhileRunning={props.showSendWhileRunning ?? false}
-        onPreviousPendingQuestion={props.onPreviousPendingQuestion}
-        onInterrupt={props.onInterrupt}
-        onImplementPlanInNewThread={props.onImplementPlanInNewThread}
-      />
+      {/* Send / stop tuck 4px under the model trigger's right padding: both buttons carry their
+          own inner padding, so even touching boxes left the glyph ~20px from the reasoning
+          level. Overlapping keeps the trigger's hover fill symmetric and puts the glyph ~14px
+          away. */}
+      <div className="flex min-w-0 items-center">
+        {props.modelPicker}
+        <div className="-ms-1 flex shrink-0 items-center gap-0.5">
+          <ComposerPrimaryActions
+            compact={props.compact}
+            pendingAction={props.pendingAction}
+            isRunning={props.isRunning}
+            showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
+            promptHasText={props.promptHasText}
+            isSendBusy={props.isSendBusy}
+            sendDisabledReason={props.sendDisabledReason}
+            isConnecting={props.isConnecting}
+            isEnvironmentUnavailable={props.isEnvironmentUnavailable}
+            hasSendableContent={props.hasSendableContent}
+            preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+            showSendWhileRunning={props.showSendWhileRunning ?? false}
+            onPreviousPendingQuestion={props.onPreviousPendingQuestion}
+            onInterrupt={props.onInterrupt}
+            onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+          />
+        </div>
+      </div>
     </>
   );
 });
@@ -3175,7 +3183,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              className="size-7.5 sm:size-7.5 [&_svg]:size-4"
+                              // The footer's shared hover tint, in the ghost variant's own
+                              // hover selector so it replaces the faint accent fill.
+                              className="size-7.5 data-pressed:bg-foreground/8 sm:size-7.5 [:hover,[data-pressed]]:bg-foreground/8 [&_svg]:size-4"
                               onPointerDown={(event) => event.preventDefault()}
                               onClick={() => attachmentInputRef.current?.click()}
                               aria-label="Attach files"

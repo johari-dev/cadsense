@@ -13,7 +13,6 @@ export const SETTINGS_SEARCH_ITEMS = [
   { id: "usage-analytics", title: "Usage analytics", tab: "general" },
   { id: "restore-defaults", title: "Restore defaults", tab: "general" },
   { id: "interface-font", title: "Interface font", tab: "appearance" },
-  { id: "prompt-font", title: "Prompt font", tab: "appearance" },
   { id: "font-smoothing", title: "Font smoothing", tab: "appearance" },
   { id: "show-permission-settings", title: "Permission settings", tab: "appearance" },
   { id: "show-context-window-indicator", title: "Context window indicator", tab: "appearance" },

@@ -708,7 +708,7 @@ export function CadCommentsCard({
                   // lights a row once the pointer has moved over the list (see hoverReady).
                   "border-l-2 text-[14px] leading-[20px]",
                   expanded
-                    ? "border-[#7dbbff] bg-[#202832]"
+                    ? "border-selection-accent bg-selection-accent/10"
                     : "border-transparent group-data-[hover-ready]/list:hover:bg-foreground/[0.04]",
                 )}
               >
@@ -760,7 +760,7 @@ export function CadCommentsCard({
                   // 16px around the expanded finding; the body lines up under the title.
                   // 12px between the explanation, the part chip and the actions.
                   <div className="space-y-[12px] ps-[44px] pe-4 pb-4">
-                    <p className="whitespace-pre-wrap text-[14px] leading-[21px] text-[#bdbdbd]">
+                    <p className="whitespace-pre-wrap text-[14px] leading-[21px] text-secondary-label">
                       {c.body}
                     </p>
                     {outdated && <p className="text-[12px] text-muted-foreground">{outdated}</p>}

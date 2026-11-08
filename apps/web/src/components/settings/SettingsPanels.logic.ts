@@ -9,12 +9,7 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@cadsense/contracts/settings";
 
 type TypographySettings = Pick<
   UnifiedSettings,
-  | "fontFamilySans"
-  | "fontFamilyComposer"
-  | "fontFamilyCode"
-  | "fontSizeInterface"
-  | "fontSizePrompt"
-  | "fontSizeCode"
+  "fontFamilySans" | "fontFamilyCode" | "fontSizeInterface" | "fontSizeCode"
 >;
 
 export function getChangedTypographySettingLabels(settings: TypographySettings): string[] {
@@ -22,10 +17,6 @@ export function getChangedTypographySettingLabels(settings: TypographySettings):
     ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans ||
     settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
       ? ["Interface font"]
-      : []),
-    ...(settings.fontFamilyComposer !== DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer ||
-    settings.fontSizePrompt !== DEFAULT_UNIFIED_SETTINGS.fontSizePrompt
-      ? ["Prompt font"]
       : []),
     ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ||
     settings.fontSizeCode !== DEFAULT_UNIFIED_SETTINGS.fontSizeCode

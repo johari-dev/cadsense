@@ -7,7 +7,6 @@ import {
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -25,13 +24,10 @@ import {
 import {
   DEFAULT_UNIFIED_SETTINGS,
   MAX_INTERFACE_FONT_SIZE,
-  MAX_PROMPT_FONT_SIZE,
   MIN_INTERFACE_FONT_SIZE,
-  MIN_PROMPT_FONT_SIZE,
 } from "@cadsense/contracts/settings";
 import { createModelSelection } from "@cadsense/shared/model";
 import * as Equal from "effect/Equal";
-import * as Schema from "effect/Schema";
 import { APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
@@ -43,7 +39,6 @@ import {
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
-import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -71,9 +66,7 @@ import {
   isFontFamilyAvailable,
   isMonospaceFamily,
   resolveDefaultFamilyLabel,
-  TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../../appearanceFonts";
-import { PromptFontPreview } from "./SettingsFontPreviews";
 import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -89,7 +82,6 @@ import {
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
-  useSettingsSearchTargetId,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -353,11 +345,9 @@ function useSettingsRestore() {
       settings.showContextWindowIndicator,
       settings.showOnshapeSyncApiCalls,
       settings.fontFamilyCode,
-      settings.fontFamilyComposer,
       settings.fontFamilySans,
       settings.fontSizeCode,
       settings.fontSizeInterface,
-      settings.fontSizePrompt,
     ],
   );
 
@@ -378,10 +368,8 @@ function useSettingsRestore() {
       showOnshapeSyncApiCalls: DEFAULT_UNIFIED_SETTINGS.showOnshapeSyncApiCalls,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
-      fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
       fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
-      fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
       fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
       enableUsageAnalytics: DEFAULT_UNIFIED_SETTINGS.enableUsageAnalytics,
     });
@@ -445,7 +433,6 @@ export function AppearanceSettingsPanel() {
   );
 }
 function useFontDefaultFamilies() {
-  const settings = usePrimarySettings();
   // An unset preference shows the font it resolves to on this machine; the
   // default stacks are the platform's own faces, so the name is probed, not
   // hardcoded.
@@ -456,22 +443,17 @@ function useFontDefaultFamilies() {
     }),
     [],
   );
-  return {
-    sans: defaults.sans,
-    code: defaults.code,
-    // The composer inherits whatever the interface preference resolves to.
-    interfaceFamily: settings.fontFamilySans.trim() || defaults.sans,
-  };
+  return defaults;
 }
 
-function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
+function InterfaceFontRow() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const defaults = useFontDefaultFamilies();
   return (
     <FontFamilySettingsRow
       {...searchableSetting("interface-font")}
-      description="Text across the app, except code."
+      description="Text across the app."
       defaultFamily={defaults.sans}
       defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilySans}
       value={settings.fontFamilySans}
@@ -490,38 +472,6 @@ function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
         defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
         onChange: (fontSizeInterface) => updateSettings({ fontSizeInterface }),
       }}
-      {...(preview !== undefined ? { preview } : {})}
-    />
-  );
-}
-
-function PromptFontRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const defaults = useFontDefaultFamilies();
-  return (
-    <FontFamilySettingsRow
-      {...searchableSetting("prompt-font")}
-      description="The message box. Mono works well here."
-      defaultFamily={defaults.interfaceFamily}
-      defaultValue={DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer}
-      value={settings.fontFamilyComposer}
-      onValueChange={(fontFamilyComposer) => updateSettings({ fontFamilyComposer })}
-      onReset={() =>
-        updateSettings({
-          fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
-          fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
-        })
-      }
-      size={{
-        label: "Prompt font size",
-        min: MIN_PROMPT_FONT_SIZE,
-        max: MAX_PROMPT_FONT_SIZE,
-        value: settings.fontSizePrompt,
-        defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
-        onChange: (fontSizePrompt) => updateSettings({ fontSizePrompt }),
-      }}
-      preview={<PromptFontPreview />}
     />
   );
 }
@@ -555,71 +505,12 @@ function FontSmoothingRow() {
   );
 }
 
-function FontSettingsGroup() {
-  return (
-    <>
-      <InterfaceFontRow />
-      <PromptFontRow />
-      <FontSmoothingRow />
-    </>
-  );
-}
-
-function SimpleFontRows() {
-  return (
-    <>
-      <InterfaceFontRow preview={<PromptFontPreview />} />
-    </>
-  );
-}
-
-// Font smoothing only renders on macOS, so a search jump to it elsewhere
-// must not flip the section - the target would never mount to be scrolled to.
-const ADVANCED_TYPOGRAPHY_TARGET_IDS: ReadonlySet<string> = new Set([
-  "prompt-font",
-  ...(typeof navigator !== "undefined" && isMacPlatform(navigator.platform)
-    ? ["font-smoothing"]
-    : []),
-]);
-
-/**
- * The interface font by default, with an Advanced switch in the section header
- * that reveals the per-surface override rows. The choice persists locally,
- * and a settings-search jump to an override row flips Advanced on so the
- * target exists to scroll to.
- */
+/** The one global font for the whole app, plus font smoothing on macOS. */
 function TypographySection() {
-  const [advanced, setAdvanced] = useLocalStorage(
-    TYPOGRAPHY_ADVANCED_STORAGE_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const searchTargetId = useSettingsSearchTargetId();
-  // Flip Advanced on once per search jump so the hidden target can mount and
-  // scroll; tracking the handled id lets the user turn it back off without
-  // the still-set target immediately re-expanding the section.
-  const lastExpandedTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (searchTargetId === null || !ADVANCED_TYPOGRAPHY_TARGET_IDS.has(searchTargetId)) return;
-    if (lastExpandedTargetRef.current === searchTargetId) return;
-    lastExpandedTargetRef.current = searchTargetId;
-    setAdvanced(true);
-  }, [searchTargetId, setAdvanced]);
   return (
-    <SettingsSection
-      title="Fonts"
-      headerAction={
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-          Advanced
-          <Switch
-            checked={advanced}
-            onCheckedChange={(checked) => setAdvanced(Boolean(checked))}
-            aria-label="Show advanced typography settings"
-          />
-        </label>
-      }
-    >
-      {advanced ? <FontSettingsGroup /> : <SimpleFontRows />}
+    <SettingsSection title="Fonts">
+      <InterfaceFontRow />
+      <FontSmoothingRow />
     </SettingsSection>
   );
 }
@@ -630,7 +521,6 @@ function FontFamilySettingsRow({
   description,
   defaultFamily,
   defaultValue,
-  preview,
   value,
   onValueChange,
   onReset,
@@ -644,7 +534,6 @@ function FontFamilySettingsRow({
   defaultFamily: string;
   /** The persisted family value supplied by the unified settings defaults. */
   defaultValue: string;
-  preview?: ReactNode;
   value: string;
   onValueChange: (value: string) => void;
   onReset: () => void;
@@ -815,9 +704,7 @@ function FontFamilySettingsRow({
       description={description}
       resetAction={resetAction}
       control={control}
-    >
-      {preview}
-    </SettingsRow>
+    />
   );
 }
 

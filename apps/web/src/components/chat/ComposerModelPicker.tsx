@@ -32,6 +32,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
   getDisplayModelName,
+  getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
   type ModelEsque,
 } from "./providerIconUtils";
@@ -207,7 +208,8 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
 
   const modelName = activeModel ? getTriggerDisplayModelName(activeModel) : props.model;
   const unavailable = activeModel?.isUnavailable ?? false;
-  const triggerTitle = [modelName, unavailable ? "Unavailable" : null, props.traits?.label]
+  const fullModelName = activeModel ? getTriggerDisplayModelLabel(activeModel) : props.model;
+  const triggerTitle = [fullModelName, unavailable ? "Unavailable" : null, props.traits?.label]
     .filter(Boolean)
     .join(" · ");
 
@@ -225,8 +227,12 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
                   disabled={props.disabled}
                   className={cn(
                     // A ghost control like the rest of the footer: no fill until hovered or
-                    // open. 28px tall with 10px side padding at the default interface size.
-                    "flex h-7.5 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-[var(--control-radius)] px-2.75 text-[0.8333rem] text-foreground/90 outline-none transition-colors duration-150 hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-60 data-popup-open:bg-accent data-popup-open:text-foreground motion-reduce:transition-none",
+                    // open, then an 8% foreground tint (the accent surface barely shows on the
+                    // raised composer). 28px tall with 7.5px side padding at the default size.
+                    // "Open" keys on aria-expanded, which only the menu sets: this button is
+                    // also the tooltip trigger, and the tooltip sets data-popup-open too, so
+                    // the returned focus after a pick would otherwise light the trigger.
+                    "flex h-7.5 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-[var(--control-radius)] px-2 text-[0.8333rem] text-foreground/90 outline-none transition-colors duration-150 hover:bg-foreground/8 focus-visible:ring-1 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-60 aria-expanded:bg-foreground/8 aria-expanded:text-foreground motion-reduce:transition-none",
                     props.compact ? "max-w-52" : "max-w-64",
                   )}
                 />
@@ -242,20 +248,23 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               iconClassName={cn("size-3.75", props.activeProviderIconClassName)}
             />
           ) : null}
-          <span className="min-w-0 truncate">{modelName}</span>
-          {unavailable ? <span className="shrink-0 text-muted-foreground">Unavailable</span> : null}
+          {/* Name and reasoning level read as one phrase ("Opus 5.5 High"): 4px apart, closer
+              than the 6px between the icon and the name. */}
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="min-w-0 truncate font-medium">{modelName}</span>
+            {unavailable ? (
+              <span className="shrink-0 text-muted-foreground">Unavailable</span>
+            ) : null}
+            {props.traits?.label ? (
+              // A plain gray word that keeps its color through hover and while the menu is open.
+              <span className="shrink-0 text-secondary-label">{props.traits.label}</span>
+            ) : null}
+          </span>
           {props.traits?.showFastModeIcon ? (
             <>
               <LightningIcon aria-hidden="true" weight="fill" className="size-3.5 shrink-0" />
               <span className="sr-only">Fast mode on</span>
             </>
-          ) : null}
-          {props.traits?.label ? (
-            // The reasoning level always follows the model name as its own quiet pill, in every
-            // composer, so "Claude Opus 5.5" and "Medium" never read as one long name.
-            <span className="shrink-0 rounded-md bg-foreground/[0.07] px-1.5 py-px text-[0.75rem] leading-4 text-muted-foreground">
-              {props.traits.label}
-            </span>
           ) : null}
         </TooltipTrigger>
         {isMenuOpen ? null : <TooltipPopup side="top">{triggerTitle}</TooltipPopup>}

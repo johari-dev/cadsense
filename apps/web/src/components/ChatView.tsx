@@ -225,7 +225,7 @@ import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/Compos
 import { useCadOperationComposerState } from "../cad/CadOperationComposerBanner";
 import { hasAvailableClaudeCompactionProvider } from "./chat/ContextWindowMeter.logic";
 import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
-import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
+import { ThreadSyncStatusPill, useShownThreadSyncPhase } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
   DRAFT_HERO_TRANSITION_DURATION_MS,
@@ -560,6 +560,7 @@ function ChatViewContent(props: ChatViewProps) {
   const draftId = routeKind === "draft" ? props.draftId : null;
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
   const threadDetailLoading = threadSyncPhase === "loading";
+  const shownThreadSyncPhase = useShownThreadSyncPhase(threadSyncPhase);
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -751,6 +752,9 @@ function ChatViewContent(props: ChatViewProps) {
   const legendListRef = useRef<LegendListRef | null>(null);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
+  // How far the timeline's end stops above the window bottom: the overlay minus its open top
+  // band (see updateHeight), so the last row's own bottom padding may sit in that band.
+  const [timelineEndInset, setTimelineEndInset] = useState(0);
   const [scrollToEndClearance, setScrollToEndClearance] = useState(0);
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
@@ -1675,7 +1679,6 @@ function ChatViewContent(props: ChatViewProps) {
   )
     ? activeProviderStatus
     : null;
-  const hasTimelineTopBanner = Boolean(visibleThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeWorkspaceRoot = activeProjectCwd ?? undefined;
   const setThreadError = useCallback(
@@ -1952,11 +1955,11 @@ function ChatViewContent(props: ChatViewProps) {
       return getAnchoredTurnMetrics({
         state,
         anchorIndex,
-        composerOverlayHeight,
+        composerOverlayHeight: timelineEndInset,
         anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
       });
     },
-    [composerOverlayHeight],
+    [timelineEndInset],
   );
   const timelineRealContentOverflowsViewport = useCallback(
     (list?: LegendListRef | null) => {
@@ -1981,11 +1984,11 @@ function ChatViewContent(props: ChatViewProps) {
       const realContentBottom = lastRowTop + Math.max(1, lastRowHeight);
       const visibleScrollLength = Math.max(
         0,
-        (state.scrollLength ?? 0) - composerOverlayHeight - CHAT_LIST_ANCHOR_OFFSET,
+        (state.scrollLength ?? 0) - timelineEndInset - CHAT_LIST_ANCHOR_OFFSET,
       );
       return realContentBottom > visibleScrollLength;
     },
-    [composerOverlayHeight],
+    [timelineEndInset],
   );
   // Live-follow stays active after send/thread-open until an actual list scroll
   // gesture opts out.
@@ -2059,8 +2062,7 @@ function ChatViewContent(props: ChatViewProps) {
         // up, and a gesture landing in that window while still pinned would
         // otherwise break follow with no scroll event left to re-arm it.
         const viewportIsAwayFromEnd = () =>
-          resolveTimelineIsAtEnd(legendListRef.current?.getState(), composerOverlayHeight) ===
-          false;
+          resolveTimelineIsAtEnd(legendListRef.current?.getState(), timelineEndInset) === false;
         // Only an upward wheel is a navigation intent; wheeling down while
         // following either does nothing (at the end) or moves toward it.
         const handleWheel = (event: WheelEvent) => {
@@ -2135,7 +2137,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       removeListeners?.();
     };
-  }, [activeThread?.id, composerOverlayHeight, timelineRealContentOverflowsViewport]);
+  }, [activeThread?.id, timelineEndInset, timelineRealContentOverflowsViewport]);
 
   const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
     // Anchored-end space can be remeasured when the turn completes. Once the
@@ -2366,6 +2368,13 @@ function ChatViewContent(props: ChatViewProps) {
       if (nextHeight <= 0) return;
       setComposerOverlayHeight((currentHeight) =>
         currentHeight === nextHeight ? currentHeight : nextHeight,
+      );
+      // The overlay's top padding is an open band above the composer's solid backing. Counting
+      // it as covered left a band's worth of blank space under the last message at full scroll.
+      const openBand = Number.parseFloat(getComputedStyle(composerOverlayElement).paddingTop);
+      const nextEndInset = Math.max(0, nextHeight - Math.round(openBand || 0));
+      setTimelineEndInset((currentInset) =>
+        currentInset === nextEndInset ? currentInset : nextEndInset,
       );
       const nextClearance = Math.max(0, nextHeight - shoulderTabReserve(composerOverlayElement));
       setScrollToEndClearance((currentClearance) =>
@@ -3946,7 +3955,8 @@ function ChatViewContent(props: ChatViewProps) {
     addFiles: (files) => composerRef.current?.addDroppedFiles(files),
   });
   const externalComposerDrawerAttached =
-    composerBannerItems.length > 0 || Boolean(threadSyncPhase && !activeEnvironmentUnavailable);
+    composerBannerItems.length > 0 ||
+    Boolean(shownThreadSyncPhase && !activeEnvironmentUnavailable);
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -4044,13 +4054,12 @@ function ChatViewContent(props: ChatViewProps) {
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 anchorMessageId={timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
-                contentInsetEndAdjustment={composerOverlayHeight}
+                contentInsetEndAdjustment={timelineEndInset}
                 liveFollowEnabled={timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChange}
                 onEndTextCoveredChange={onEndTextCoveredChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
-                topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
                 onRedoWithFeedback={onRedoWithFeedback}
                 pendingApprovals={pendingApprovals}
@@ -4094,13 +4103,11 @@ function ChatViewContent(props: ChatViewProps) {
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
               }
             >
-              {/* Docked, the composer sits on a solid backing down to the window edge so the
-                  transcript never shows through below or beside it; the top 1rem fades in. */}
+              {/* Docked, the composer sits on a solid backing from its top edge down to the window
+                  edge so the transcript never shows through below or beside it. The overlay's
+                  1rem top band above it stays open, with no fade. */}
               {isDraftHeroState ? null : (
-                <div
-                  aria-hidden
-                  className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,var(--background)_1rem)]"
-                />
+                <div aria-hidden className="absolute inset-x-0 top-4 bottom-0 bg-background" />
               )}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
@@ -4112,8 +4119,8 @@ function ChatViewContent(props: ChatViewProps) {
                   className={cn(
                     "group/composer-stack pointer-events-auto relative z-10",
                     isDraftHeroState
-                      ? "[--chat-composer-max-width:42.5rem]"
-                      : "[--chat-composer-max-width:50rem]",
+                      ? "[--chat-composer-max-width:36.125rem]"
+                      : "[--chat-composer-max-width:42.5rem]",
                   )}
                 >
                   {isDraftHeroState ? (
@@ -4133,8 +4140,8 @@ function ChatViewContent(props: ChatViewProps) {
                   ) : (
                     <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                   )}
-                  {threadSyncPhase && !activeEnvironmentUnavailable ? (
-                    <ThreadSyncStatusPill phase={threadSyncPhase} />
+                  {shownThreadSyncPhase && !activeEnvironmentUnavailable ? (
+                    <ThreadSyncStatusPill phase={shownThreadSyncPhase} />
                   ) : null}
                   <div className="relative">
                     <div

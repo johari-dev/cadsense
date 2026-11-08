@@ -260,135 +260,143 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   return (
     <>
       <SettingsPageContainer>
-        <SettingsSection title="Project" icon={<SettingsIcon className="size-4" />}>
-          <SettingsRow
-            title="Name"
-            description="Shown in the sidebar and thread list."
-            control={
-              <Input
-                key={`${projectKey(project)}:${project.title}`}
-                className="w-full sm:w-64"
-                aria-label="Project name"
-                defaultValue={project.title}
-                onChange={() => {
-                  nameEditedRef.current = true;
-                }}
-                onBlur={(event) => {
-                  if (!nameEditedRef.current) return;
-                  nameEditedRef.current = false;
-                  const title = event.currentTarget.value.trim();
-                  if (!title) {
-                    event.currentTarget.value = project.title;
-                    toastManager.add({ type: "warning", title: "Project name cannot be empty" });
-                    return;
-                  }
-                  void update({ title });
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-              />
-            }
-          />
-          {!project.onshapeSource && (
+        {/* A full page, unlike the settings dialog's tabs: cap it at the chat column's width
+            (MessagesTimeline's 40.8rem) so rows read at the same measure as the chat. */}
+        <div className="mx-auto w-full max-w-[40.8rem]">
+          <SettingsSection title="Project" icon={<SettingsIcon className="size-4" />}>
             <SettingsRow
-              title="Folder"
-              description={project.workspaceRoot}
+              title="Name"
+              description="Shown in the sidebar and thread list."
               control={
-                <Button variant="outline" type="button" onClick={() => void showInExplorer()}>
-                  <FolderOpenIcon />
-                  Open in Explorer
+                <Input
+                  key={`${projectKey(project)}:${project.title}`}
+                  className="w-full sm:w-64"
+                  aria-label="Project name"
+                  defaultValue={project.title}
+                  onChange={() => {
+                    nameEditedRef.current = true;
+                  }}
+                  onBlur={(event) => {
+                    if (!nameEditedRef.current) return;
+                    nameEditedRef.current = false;
+                    const title = event.currentTarget.value.trim();
+                    if (!title) {
+                      event.currentTarget.value = project.title;
+                      toastManager.add({ type: "warning", title: "Project name cannot be empty" });
+                      return;
+                    }
+                    void update({ title });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              }
+            />
+            {!project.onshapeSource && (
+              <SettingsRow
+                title="Folder"
+                description={project.workspaceRoot}
+                control={
+                  <Button variant="outline" type="button" onClick={() => void showInExplorer()}>
+                    <FolderOpenIcon />
+                    Open in Explorer
+                  </Button>
+                }
+              />
+            )}
+          </SettingsSection>
+
+          {project.onshapeSource && (
+            <OnshapeProjectSettings
+              project={project}
+              source={project.onshapeSource}
+              busy={cadBusy}
+            />
+          )}
+          {hasCadSource(project) && (
+            <>
+              <CadProjectSettings project={project} runActive={cadRunActive} />
+              <CadReviewLearnings project={project} />
+            </>
+          )}
+
+          <SettingsSection title="New threads">
+            <SettingsRow
+              title="Model"
+              description="New threads in this project start with this model."
+              resetAction={
+                storedSelection !== null ? (
+                  <SettingResetButton
+                    label="project default model"
+                    onClick={() => setDefaultModel(null)}
+                  />
+                ) : null
+              }
+              control={
+                resolvedSelection && activeEntry ? (
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <ProviderModelPicker
+                      activeInstanceId={resolvedSelection.instanceId}
+                      model={resolvedSelection.model}
+                      lockedProvider={null}
+                      instanceEntries={instanceEntries}
+                      modelOptionsByInstance={modelOptionsByInstance}
+                      triggerVariant="outline"
+                      onInstanceModelChange={(instanceId, model) =>
+                        setDefaultModel(createModelSelection(instanceId, model))
+                      }
+                    />
+                    <TraitsPicker
+                      provider={activeEntry.driverKind as ProviderDriverKind}
+                      models={activeEntry.models}
+                      model={resolvedSelection.model}
+                      prompt=""
+                      onPromptChange={() => undefined}
+                      modelOptions={resolvedSelection.options ?? []}
+                      allowPromptInjectedEffort={false}
+                      triggerVariant="outline"
+                      onModelOptionsChange={(options) =>
+                        setDefaultModel(
+                          createModelSelection(
+                            resolvedSelection.instanceId,
+                            resolvedSelection.model,
+                            options,
+                          ),
+                        )
+                      }
+                    />
+                  </div>
+                ) : (
+                  <span className="text-sm text-muted-foreground">No providers available</span>
+                )
+              }
+            />
+          </SettingsSection>
+
+          <SettingsSection title="Danger zone">
+            <SettingsRow
+              title="Remove project"
+              description={
+                project.onshapeSource
+                  ? "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files."
+                  : project.localCadSource
+                    ? "Preserves threads and captures. Choose whether to delete imported CAD. Files in the folder are not touched."
+                    : "Deletes this project's threads without touching its files."
+              }
+              control={
+                <Button
+                  variant="destructive-outline"
+                  disabled={cadBusy}
+                  onClick={() => void removeProject()}
+                >
+                  <Trash2Icon />
+                  Remove project
                 </Button>
               }
             />
-          )}
-        </SettingsSection>
-
-        {project.onshapeSource && (
-          <OnshapeProjectSettings project={project} source={project.onshapeSource} busy={cadBusy} />
-        )}
-        {hasCadSource(project) && (
-          <>
-            <CadProjectSettings project={project} runActive={cadRunActive} />
-            <CadReviewLearnings project={project} />
-          </>
-        )}
-
-        <SettingsSection title="New threads">
-          <SettingsRow
-            title="Model"
-            description="New threads in this project start with this model."
-            resetAction={
-              storedSelection !== null ? (
-                <SettingResetButton
-                  label="project default model"
-                  onClick={() => setDefaultModel(null)}
-                />
-              ) : null
-            }
-            control={
-              resolvedSelection && activeEntry ? (
-                <div className="flex flex-wrap items-center justify-end gap-1.5">
-                  <ProviderModelPicker
-                    activeInstanceId={resolvedSelection.instanceId}
-                    model={resolvedSelection.model}
-                    lockedProvider={null}
-                    instanceEntries={instanceEntries}
-                    modelOptionsByInstance={modelOptionsByInstance}
-                    triggerVariant="outline"
-                    onInstanceModelChange={(instanceId, model) =>
-                      setDefaultModel(createModelSelection(instanceId, model))
-                    }
-                  />
-                  <TraitsPicker
-                    provider={activeEntry.driverKind as ProviderDriverKind}
-                    models={activeEntry.models}
-                    model={resolvedSelection.model}
-                    prompt=""
-                    onPromptChange={() => undefined}
-                    modelOptions={resolvedSelection.options ?? []}
-                    allowPromptInjectedEffort={false}
-                    triggerVariant="outline"
-                    onModelOptionsChange={(options) =>
-                      setDefaultModel(
-                        createModelSelection(
-                          resolvedSelection.instanceId,
-                          resolvedSelection.model,
-                          options,
-                        ),
-                      )
-                    }
-                  />
-                </div>
-              ) : (
-                <span className="text-sm text-muted-foreground">No providers available</span>
-              )
-            }
-          />
-        </SettingsSection>
-
-        <SettingsSection title="Danger zone">
-          <SettingsRow
-            title="Remove project"
-            description={
-              project.onshapeSource
-                ? "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files."
-                : project.localCadSource
-                  ? "Preserves threads and captures. Choose whether to delete imported CAD. Files in the folder are not touched."
-                  : "Deletes this project's threads without touching its files."
-            }
-            control={
-              <Button
-                variant="destructive-outline"
-                disabled={cadBusy}
-                onClick={() => void removeProject()}
-              >
-                <Trash2Icon />
-                Remove project
-              </Button>
-            }
-          />
-        </SettingsSection>
+          </SettingsSection>
+        </div>
       </SettingsPageContainer>
     </>
   );

@@ -1,8 +1,8 @@
 import { settingsLocation } from "../settings/settingsLocation";
-import { ArrowLeftIcon, GearSixIcon as SettingsIcon } from "~/lib/icons";
+import { ArrowLeftIcon } from "~/lib/icons";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
-import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
+import { useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -58,7 +58,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           backdropVariant && resolveSidebarStageFocusRingOffsetClass(backdropVariant),
         )}
       />
-      <SidebarBrand onBackdrop={backdropVariant !== null} />
       {pillLabel ? (
         <Badge
           className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground group-data-[collapsible=icon]:hidden"
@@ -72,28 +71,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     </SidebarHeader>
   );
 });
-
-function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
-  return (
-    <Link
-      aria-label="Go to design workspace"
-      className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex group-data-[collapsible=icon]:md:hidden",
-        onBackdrop ? "text-white" : "text-foreground",
-      )}
-      to="/"
-    >
-      <span
-        className={cn(
-          "truncate text-base font-semibold tracking-tight",
-          onBackdrop ? "text-white" : "text-foreground",
-        )}
-      >
-        Cadsense
-      </span>
-    </Link>
-  );
-}
 
 function SidebarUtilityItem({
   icon,
@@ -158,8 +135,16 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         </SidebarMenuItem>
       ) : (
         <>
+          {/* The app's mark stands in for a gear: the sidebar carries no other branding. */}
           <SidebarUtilityItem
-            icon={<SettingsIcon />}
+            icon={
+              <img
+                src="/app-icon.png"
+                alt=""
+                aria-hidden="true"
+                className="size-5 shrink-0 rounded-[5px]"
+              />
+            }
             label="Settings"
             onClick={handleSettingsClick}
           />

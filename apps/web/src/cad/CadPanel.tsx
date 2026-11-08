@@ -762,6 +762,9 @@ export function CadPanel({
   const viewerLocked = locked && !commentsOpen && !historicalView;
   // Keep the outline for a live tool call or a locked viewer the agent owns, not a usable one.
   const agentControl = showActivity || (viewerLocked && !!lockStatus?.agent);
+  // The strip only explains locks the user could not otherwise read: while the agent owns the
+  // viewer, its outline already says so, so agent statuses keep the lock without the strip.
+  const lockStrip = viewerLocked && lockStatus && !lockStatus.agent ? lockStatus : null;
   const [edits] = useState(() =>
     createCadViewEdits(
       async (view, expectedRevision) => {
@@ -984,7 +987,7 @@ export function CadPanel({
             view={view}
             disabled={viewerLocked}
             cadDimmed={viewerLocked && !agentControl}
-            lockStatus={viewerLocked ? lockStatus : null}
+            lockStatus={lockStrip}
             commentsCard={{
               threadRef,
               comments,
@@ -1030,7 +1033,7 @@ export function CadPanel({
           )}
         </div>
       )}
-      {!view && viewerLocked && lockStatus && <CadLockStrip status={lockStatus} />}
+      {!view && lockStrip && <CadLockStrip status={lockStrip} />}
       {!view && comments.length > 0 && (
         <CadCommentsCard
           threadRef={threadRef}

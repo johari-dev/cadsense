@@ -3,7 +3,7 @@ import {
   resolveSelectableProviderInstanceEntry,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { getTriggerDisplayModelName, type ModelEsque } from "./providerIconUtils";
+import { getDisplayModelName, type ModelEsque } from "./providerIconUtils";
 
 export function hasAvailableClaudeCompactionProvider(input: {
   readonly providers: ReadonlyArray<ProviderInstanceEntry>;
@@ -41,7 +41,9 @@ export function resolveContextWindowModelDisplayName(
     .get(selection.instanceId)
     ?.find((model) => model.slug === selection.model);
 
-  return selectedModel ? getTriggerDisplayModelName(selectedModel) : selection.model;
+  return selectedModel
+    ? getDisplayModelName(selectedModel, { preferShortName: true })
+    : selection.model;
 }
 
 export function formatContextWindowCompactionMessage(

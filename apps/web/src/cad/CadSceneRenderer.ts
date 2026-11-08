@@ -71,36 +71,6 @@ const FOCUS_FILL = 0.8;
 const REFIT_RATIO = 1.25;
 /** A single resize step at least this large is a jump (maximizing), not one animation frame. */
 const RESIZE_JUMP = 1.1;
-/**
- * The interactive viewport's backdrop: a cool lift at the top falling to just above the themed
- * background at the bottom, so the canvas reads as its own space against the app chrome.
- * Captures keep the flat themed color.
- */
-const createBackdrop = (background: number, dark: boolean) => {
-  const steps = 64;
-  const data = new Uint8Array(steps * 4);
-  const channels = [(background >> 16) & 0xff, (background >> 8) & 0xff, background & 0xff];
-  // On the default #171717 this runs from #24262a at the top to #1a1b1d at the bottom: lighter
-  // and cooler than the chat column at every height, so dark plates keep their outline.
-  const lift = dark ? [13, 15, 19] : [6, 6, 8];
-  const base = dark ? [3, 4, 6] : null;
-  for (let row = 0; row < steps; row++) {
-    // Rows run bottom to top; ease so most of the lift sits in the upper half.
-    const t = (row / (steps - 1)) ** 1.4;
-    channels.forEach((value, channel) => {
-      const bottom = base ? value + base[channel]! : value * 0.94;
-      data[row * 4 + channel] = Math.round(
-        Math.min(255, bottom + (value + lift[channel]! - bottom) * t),
-      );
-    });
-    data[row * 4 + 3] = 255;
-  }
-  const texture = new THREE.DataTexture(data, 1, steps);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.magFilter = texture.minFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-  return texture;
-};
 /** A sky/ground ambient, a key from the upper right front, and a low fill from the back left. */
 const CAD_LIGHTS = {
   keyDirection: [3, -4, 5],
@@ -114,8 +84,8 @@ const CAD_LIGHTS = {
  * Onshape appearance. Exposure sets the overall level; luminance below TONE_KNEE then passes
  * through unchanged, so black anodized parts stay near-black, and only highlights above it roll
  * off smoothly toward TONE_CEILING. Key-lit aluminum (#e8 untouched) lands near #b7 so it does
- * not outshine the chat or swallow yellow pins, and front faces stay near #a0. Overlays (backdrop,
- * outlines, comment markers) and faded context are not tone mapped.
+ * not outshine the chat or swallow yellow pins, and front faces stay near #a0. Overlays (outlines,
+ * comment markers) and faded context are not tone mapped.
  */
 const TONE_EXPOSURE = 0.85;
 const TONE_KNEE = 0.33;
@@ -182,7 +152,6 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   fill.position.set(...CAD_LIGHTS.fillDirection);
   scene.add(fill);
   for (const light of [ambient, key, fill]) light.layers.enable(CAD_CONTEXT_LAYER);
-  let backdrop = createBackdrop(DEFAULT_CAD_APPEARANCE.background, DEFAULT_CAD_APPEARANCE.dark);
   // Faded context draws as one quiet, neutral layer: a depth-only pass keeps just the nearest
   // context surface at each pixel, so overlapping parts never stack into fog, then that surface
   // is shaded once at low opacity behind or around the solid parts in focus.
@@ -311,11 +280,9 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
   };
   /** Draws faded context over the solid parts (see contextDepth). */
   const drawContext = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
-    const background = scene.background;
     const autoClear = renderer.autoClear;
     const layers = eye.layers.mask;
     try {
-      scene.background = null;
       renderer.autoClear = false;
       eye.layers.set(CAD_CONTEXT_LAYER);
       scene.overrideMaterial = contextDepth;
@@ -324,21 +291,16 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       renderer.render(scene, eye);
     } finally {
       scene.overrideMaterial = null;
-      scene.background = background;
       renderer.autoClear = autoClear;
       eye.layers.mask = layers;
     }
   };
   /**
-   * Draws the model, its outline, and any faded context from `eye`, without comment markers or
-   * frame callbacks. Captures pass `withBackdrop: false` to keep the flat themed background.
+   * Draws the model, its outline, and any faded context from `eye` over the flat themed clear
+   * color, without comment markers or frame callbacks.
    */
-  const drawScene = (
-    eye: THREE.PerspectiveCamera | THREE.OrthographicCamera,
-    withBackdrop = true,
-  ) => {
+  const drawScene = (eye: THREE.PerspectiveCamera | THREE.OrthographicCamera) => {
     renderer.clippingPlanes = model?.clippingPlanes() ?? [];
-    scene.background = withBackdrop ? backdrop : null;
     renderer.render(scene, eye);
     // The outline's opaque normal pass would draw cut-open or ghosted parts as solid shells.
     // Faded context is on its own layer, so only the parts in focus get edges.
@@ -351,10 +313,10 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       );
     if (model?.hasFaded()) drawContext(eye);
   };
-  const render = (withBackdrop = true) => {
+  const render = () => {
     assertAvailable();
     const start = options.onFrame ? performance.now() : 0;
-    drawScene(camera, withBackdrop);
+    drawScene(camera);
     if (commentMarkers.children.length) {
       const autoClear = renderer.autoClear;
       const clippingPlanes = renderer.clippingPlanes;
@@ -715,7 +677,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     if (!model || !view) throw new CadRendererError("invalid-view");
     const token = generation,
       revision = frameRevision;
-    render(false);
+    render();
     let blob: Blob | null;
     try {
       blob =
@@ -747,7 +709,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         width / height,
       ),
     );
-    drawScene(overview, false);
+    drawScene(overview);
     let encoded: Promise<Blob | null>;
     try {
       encoded =
@@ -1551,8 +1513,6 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (next.background === appearance.background && next.dark === appearance.dark) return;
       appearance = next;
       renderer.setClearColor(next.background);
-      backdrop.dispose();
-      backdrop = createBackdrop(next.background, next.dark);
       const lights = next.dark ? CAD_LIGHTS.dark : CAD_LIGHTS.light;
       ambient.intensity = lights.ambient;
       key.intensity = lights.key;
@@ -1652,7 +1612,6 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
       if (disposed) return;
       clearCommentMarkers();
       outline.dispose();
-      backdrop.dispose();
       contextDepth.dispose();
       contextSurface.dispose();
       disposed = true;

@@ -39,7 +39,6 @@ import {
   hasCadSource,
   ProjectId,
   type ScopedThreadRef,
-  type ResolvedKeybindingsConfig,
   ThreadId,
 } from "@cadsense/contracts";
 import {
@@ -83,13 +82,11 @@ import {
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
-  shouldShowThreadJumpHintsForModifiers,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { isModelPickerOpen } from "../modelPickerVisibility";
-import { useShortcutModifierState } from "../shortcutModifierState";
 import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -168,7 +165,6 @@ import {
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
-  useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
@@ -256,32 +252,6 @@ function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string
     ...project.memberProjects.map((member) => member.physicalProjectKey),
     ...project.memberProjects.map((member) => legacyProjectCwdPreferenceKey(member.workspaceRoot)),
   ];
-}
-
-function buildThreadJumpLabelMap(input: {
-  keybindings: ResolvedKeybindingsConfig;
-  platform: string;
-  threadJumpCommandByKey: ReadonlyMap<
-    string,
-    NonNullable<ReturnType<typeof threadJumpCommandForIndex>>
-  >;
-}): ReadonlyMap<string, string> {
-  if (input.threadJumpCommandByKey.size === 0) {
-    return EMPTY_THREAD_JUMP_LABELS;
-  }
-
-  const shortcutLabelOptions = {
-    platform: input.platform,
-    context: {},
-  } as const;
-  const mapping = new Map<string, string>();
-  for (const [threadKey, command] of input.threadJumpCommandByKey) {
-    const label = shortcutLabelForCommand(input.keybindings, command, shortcutLabelOptions);
-    if (label) {
-      mapping.set(threadKey, label);
-    }
-  }
-  return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
 }
 
 interface SidebarThreadRowProps {
@@ -789,17 +759,17 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
   return (
-    // The extra 0.75rem start inset lines thread titles up with the project icon's left
-    // edge: one visible tree step that still leaves titles most of the row.
+    // Full width like the project header, so a thread's hitbox spans the sidebar; the rows
+    // inset their own titles to the project name (see resolveThreadRowClassName).
     <SidebarMenuSub
       ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 py-0 ps-4 pe-1 sm:mx-1 sm:ps-4.5 sm:pe-1.5"
+      className="mx-0 my-0 w-full translate-x-0 gap-0.5 overflow-hidden border-l-0 p-0"
     >
       {shouldShowThreadPanel && showEmptyThreadState ? (
         <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
           <div
             data-thread-selection-safe
-            className="flex h-8 w-full translate-x-0 items-center px-2 text-left text-xs text-sidebar-muted-foreground/75"
+            className="flex h-9 w-full translate-x-0 items-center ps-11.5 pe-2 text-left text-xs text-sidebar-muted-foreground/75"
           >
             <span>No threads yet</span>
           </div>
@@ -845,7 +815,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             render={showMoreButtonRender}
             data-thread-selection-safe
             size="sm"
-            className="h-8 w-full translate-x-0 justify-start px-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+            className="h-9 w-full translate-x-0 justify-start ps-11.5 pe-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             onClick={() => {
               expandThreadListForProject(projectKey);
             }}
@@ -863,7 +833,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             render={showLessButtonRender}
             data-thread-selection-safe
             size="sm"
-            className="h-8 w-full translate-x-0 justify-start px-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+            className="h-9 w-full translate-x-0 justify-start ps-11.5 pe-2 text-left text-xs text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             onClick={() => {
               collapseThreadListForProject(projectKey);
             }}
@@ -1162,6 +1132,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     threadLastVisitedAts,
     visibleProjectThreads,
   ]);
+
+  // Threads a closed project hides; the open thread stays shown under it (pinnedCollapsedThread).
+  const collapsedThreadCount = projectExpanded
+    ? 0
+    : visibleProjectThreads.length - (pinnedCollapsedThread ? 1 : 0);
 
   const handleProjectButtonClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -2083,9 +2058,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       <div className="group/project-header relative">
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
-          // The hover actions take their room only while shown, so project names use the
-          // full row the rest of the time.
-          className={`h-auto min-h-12 pr-2 group-focus-within/project-header:pr-14 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:pr-14 group-hover/project-header:text-sidebar-foreground max-sm:pr-14 ${
+          className={`h-auto min-h-12 pr-2 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2095,34 +2068,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           onKeyDown={handleProjectButtonKeyDown}
           onContextMenu={handleProjectButtonContextMenu}
         >
-          {!projectExpanded && projectStatus ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    aria-label={projectStatus.label}
-                    className={`-ml-0.5 relative inline-flex size-3.5 shrink-0 items-center justify-center ${projectStatus.colorClass}`}
-                  />
-                }
-              >
-                <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
-                  <span
-                    className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
-                      projectStatus.pulse ? "animate-status-pulse" : ""
-                    }`}
-                  />
-                </span>
-                <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-icon-muted opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
-            </Tooltip>
-          ) : (
-            <ChevronRightIcon
-              className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-                projectExpanded ? "rotate-90" : ""
-              }`}
-            />
-          )}
           <ProjectFavicon
             cadSnapshotId={currentCadRoots[0]?.current?.snapshotId}
             className={SIDEBAR_PROJECT_ICON_CLASS}
@@ -2130,7 +2075,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             cwd={project.workspaceRoot}
             onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
           />
-          <span className="flex min-w-0 flex-1 items-center gap-2">
+          {/* The hover actions sit over the trailing status and count, left of the chevron; the
+              name gives them room only while they show, so it uses the full row otherwise. */}
+          <span className="flex min-w-0 flex-1 items-center gap-2 group-focus-within/project-header:me-12 group-hover/project-header:me-12 max-sm:me-12">
             <span className="min-w-0">
               <span className="block truncate text-sm font-semibold text-sidebar-foreground">
                 {project.displayName}
@@ -2158,8 +2105,39 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               </span>
             ) : null}
           </span>
+          {/* A closed project still says what it hides: the most urgent thread status, then how
+              many threads are tucked away. */}
+          {!projectExpanded && projectStatus ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    aria-label={projectStatus.label}
+                    className={`inline-flex size-3.5 shrink-0 items-center justify-center group-focus-within/project-header:invisible group-hover/project-header:invisible max-sm:invisible ${projectStatus.colorClass}`}
+                  />
+                }
+              >
+                <span
+                  className={`size-[7px] rounded-full ${projectStatus.dotClass} ${
+                    projectStatus.pulse ? "animate-status-pulse" : ""
+                  }`}
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
+            </Tooltip>
+          ) : null}
+          {collapsedThreadCount > 0 ? (
+            <span className="shrink-0 text-xs tabular-nums text-sidebar-muted-foreground group-focus-within/project-header:invisible group-hover/project-header:invisible max-sm:invisible">
+              {collapsedThreadCount}
+            </span>
+          ) : null}
+          <ChevronRightIcon
+            className={`size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
+              projectExpanded ? "rotate-90" : ""
+            }`}
+          />
         </SidebarMenuButton>
-        <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 flex -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+        <div className="pointer-events-none absolute top-[calc(50%+1px)] right-6 flex -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -2717,7 +2695,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             onDragEnd={handleProjectDragEnd}
             onDragCancel={handleProjectDragCancel}
           >
-            <SidebarMenu>
+            <SidebarMenu className="gap-2">
               <SortableContext
                 items={sortedProjects.map((project) => project.projectKey)}
                 strategy={verticalListSortingStrategy}
@@ -2754,7 +2732,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             </SidebarMenu>
           </DndContext>
         ) : (
-          <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+          <SidebarMenu ref={attachProjectListAutoAnimateRef} className="gap-2">
             {sortedProjects.map((project) => (
               <SidebarProjectListRow
                 key={project.projectKey}
@@ -2935,7 +2913,6 @@ export default function ThreadSidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
   >(() => new Set());
-  const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
@@ -2944,7 +2921,6 @@ export default function ThreadSidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const platform = navigator.platform;
-  const shortcutModifiers = useShortcutModifierState();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentLabelById = useMemo(
@@ -3240,27 +3216,6 @@ export default function ThreadSidebar() {
     () => [...threadJumpCommandByKey.keys()],
     [threadJumpCommandByKey],
   );
-  const sidebarShortcutContext = { modelPickerOpen: isModelPickerOpen() };
-  const threadJumpLabelByKey = useMemo(
-    () =>
-      buildThreadJumpLabelMap({
-        keybindings,
-        platform,
-        threadJumpCommandByKey,
-      }),
-    [keybindings, platform, threadJumpCommandByKey],
-  );
-  const shouldShowThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
-      platform,
-      context: sidebarShortcutContext,
-    },
-  );
-  const visibleThreadJumpLabelByKey = showThreadJumpHints
-    ? threadJumpLabelByKey
-    : EMPTY_THREAD_JUMP_LABELS;
   const orderedSidebarThreadKeys = visibleSidebarThreadKeys;
   const prewarmedSidebarThreadKeys = useMemo(
     () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),
@@ -3274,10 +3229,6 @@ export default function ThreadSidebar() {
       }),
     [prewarmedSidebarThreadKeys],
   );
-
-  useEffect(() => {
-    updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
-  }, [shouldShowThreadJumpHintsNow, updateThreadJumpHintsVisibility]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -3559,7 +3510,9 @@ export default function ThreadSidebar() {
           activeRouteProjectKey={activeRouteProjectKey}
           routeThreadKey={routeThreadKey}
           newThreadShortcutLabel={newThreadShortcutLabel}
-          threadJumpLabelByKey={visibleThreadJumpLabelByKey}
+          // Thread jump shortcuts (Ctrl+1…) still work; the rows just don't badge them while
+          // the modifier is held.
+          threadJumpLabelByKey={EMPTY_THREAD_JUMP_LABELS}
           attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
           expandThreadListForProject={expandThreadListForProject}
           collapseThreadListForProject={collapseThreadListForProject}

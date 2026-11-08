@@ -50,10 +50,19 @@ export function getDisplayModelName(
   return stripLeadingQualifier(name, model.subProvider);
 }
 
+/**
+ * Model families the provider icon already names. Labels drawn beside that icon drop the
+ * prefix, so "Claude Opus 5.5" reads "Opus 5.5" and "GPT-6.1 Sol" reads "6.1 Sol".
+ */
+const ICON_NAMED_FAMILY_PREFIX = /^(?:claude|gpt)(?:\s+|-)(?=\S)/iu;
+
+/** The compact name for a picker trigger, which always renders the provider icon beside it. */
 export function getTriggerDisplayModelName(model: ModelEsque): string {
-  return getDisplayModelName(model, { preferShortName: true });
+  const name = getDisplayModelName(model, { preferShortName: true });
+  return name.replace(ICON_NAMED_FAMILY_PREFIX, "") || name;
 }
 
+/** The full name for a trigger's tooltip, where the provider icon is not repeated. */
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  return getTriggerDisplayModelName(model);
+  return getDisplayModelName(model);
 }

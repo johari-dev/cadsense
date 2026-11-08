@@ -508,7 +508,7 @@ const runningShell = (id: string, title: string, turnId: string) => ({
   session: null,
 });
 
-it("keeps this chat's viewer undimmed and explained between CAD tool calls in one run", () => {
+it("keeps this chat's viewer locked and undimmed, with no strip, between CAD tool calls in one run", () => {
   const { render, current } = reviewHarness();
   boundary.threads = [runningShell("thread", "This chat", "turn-1")];
   boundary.panelState = AsyncResult.success({
@@ -521,10 +521,8 @@ it("keeps this chat's viewer undimmed and explained between CAD tool calls in on
   const scene = render();
   expect(scene.disabled).toBe(true);
   expect(scene.cadDimmed).toBe(false);
-  expect(scene.lockStatus).toEqual({
-    message: "Agent is looking at CAD. Controls unlock when the run ends.",
-    agent: true,
-  });
+  // The agent outline marks the lock, so agent statuses draw no strip.
+  expect(scene.lockStatus).toBeNull();
 });
 
 it("keeps this chat's viewer usable while another chat in the project runs", () => {
