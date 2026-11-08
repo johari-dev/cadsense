@@ -1,13 +1,11 @@
 import { WarningIcon as TriangleAlertIcon } from "~/lib/icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { isElectron } from "../../env";
-import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
-  canCheckForUpdate,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
@@ -15,6 +13,7 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
   shouldShowArm64IntelBuildWarning,
+  shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
 } from "../desktopUpdate.logic";
 import { showDesktopUpdateDownloadedToast } from "../desktopUpdate.toast";
@@ -22,38 +21,7 @@ import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Separator } from "../ui/separator";
 import { SidebarMenuItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  DesktopUpdateStatusIcon,
-  shouldContinueDesktopUpdateCheckAnimation,
-  shouldShowDesktopUpdateCheckIcon,
-} from "./DesktopUpdateStatusIcon";
-
-function resolveSidebarUpdatePresentation({
-  action,
-  isDownloading,
-  showCheckIcon,
-}: {
-  readonly action: ReturnType<typeof resolveDesktopUpdateButtonAction>;
-  readonly isDownloading: boolean;
-  readonly showCheckIcon: boolean;
-}) {
-  const showUpdateDetails = action !== "none" || isDownloading;
-  const iconStatus = showCheckIcon
-    ? "checking"
-    : action === "install"
-      ? "downloaded"
-      : isDownloading
-        ? "downloading"
-        : action === "download"
-          ? "available"
-          : "idle";
-
-  return {
-    iconStatus,
-    showUpdateDetails,
-    showUpdateIconState: showUpdateDetails && !showCheckIcon,
-  } as const;
-}
+import { DesktopUpdateStatusIcon } from "./DesktopUpdateStatusIcon";
 
 function keyReleaseNoteItems(items: ReadonlyArray<string>) {
   const occurrences = new Map<string, number>();
@@ -136,6 +104,10 @@ function SidebarUpdateArchitectureWarningContent() {
   );
 }
 
+/**
+ * Sidebar footer button for a pending update: download it, show download progress, or restart to
+ * install it. Hidden when there is nothing to act on; Settings holds the manual update check.
+ */
 export function SidebarUpdatePill() {
   return isElectron ? <SidebarUpdateControl /> : null;
 }
@@ -143,47 +115,20 @@ export function SidebarUpdatePill() {
 function SidebarUpdateControl() {
   const state = useDesktopUpdateState();
   const [isActionPending, setIsActionPending] = useState(false);
-  const [checkAnimationKey, setCheckAnimationKey] = useState(0);
-  const [isCheckAnimationLatched, setIsCheckAnimationLatched] = useState(false);
-  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-
-  useEffect(() => {
-    if (prefersReducedMotion) {
-      setIsCheckAnimationLatched(false);
-    } else if (state?.status === "checking") {
-      setIsCheckAnimationLatched(true);
-    }
-  }, [prefersReducedMotion, state?.status]);
 
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
-  const isDownloading = state?.status === "downloading";
-  const showCheckIcon = shouldShowDesktopUpdateCheckIcon({
-    isAnimationLatched: isCheckAnimationLatched,
-    isChecking: state?.status === "checking",
-    prefersReducedMotion,
-  });
-  const { iconStatus, showUpdateDetails, showUpdateIconState } = resolveSidebarUpdatePresentation({
-    action,
-    isDownloading,
-    showCheckIcon,
-  });
-  const tooltip = showUpdateDetails
-    ? state
-      ? getDesktopUpdateButtonTooltip(state)
-      : "Update available"
-    : showCheckIcon
-      ? "Checking for updates…"
-      : "Check for updates";
-  const disabled = showCheckIcon
-    ? true
-    : showUpdateDetails
-      ? isDesktopUpdateButtonDisabled(state)
-      : !canCheckForUpdate(state);
-  const isInteractionDisabled = disabled || isActionPending;
+  const iconStatus =
+    action === "install"
+      ? "downloaded"
+      : state?.status === "downloading"
+        ? "downloading"
+        : "available";
+  const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
+  const isInteractionDisabled = isDesktopUpdateButtonDisabled(state) || isActionPending;
 
   const handleAction = useCallback(async () => {
     const bridge = window.desktopBridge;
-    if (!bridge || !state) return;
+    if (!bridge || !state || action === "none") return;
     if (isInteractionDisabled) return;
 
     setIsActionPending(true);
@@ -264,46 +209,10 @@ function SidebarUpdateControl() {
           );
         })
         .finally(() => setIsActionPending(false));
-      return;
     }
+  }, [action, isInteractionDisabled, state]);
 
-    if (!prefersReducedMotion) {
-      setIsCheckAnimationLatched(true);
-      setCheckAnimationKey((key) => key + 1);
-    }
-    void bridge
-      .checkForUpdate()
-      .then((result) => {
-        if (result.checked) return;
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not check for updates",
-            description:
-              result.state.message ?? "Automatic updates are not available in this build.",
-          }),
-        );
-      })
-      .catch((error) => {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not check for updates",
-            description: error instanceof Error ? error.message : "Update check failed.",
-          }),
-        );
-      })
-      .finally(() => setIsActionPending(false));
-  }, [action, isInteractionDisabled, prefersReducedMotion, state]);
-
-  const handleCheckAnimationIteration = useCallback(() => {
-    setIsCheckAnimationLatched(
-      shouldContinueDesktopUpdateCheckAnimation({
-        isChecking: state?.status === "checking",
-        prefersReducedMotion,
-      }),
-    );
-  }, [prefersReducedMotion, state?.status]);
+  if (!state || !shouldShowDesktopUpdateButton(state)) return null;
 
   return (
     <SidebarMenuItem className="ml-auto shrink-0">
@@ -315,27 +224,14 @@ function SidebarUpdateControl() {
               aria-label={tooltip}
               aria-disabled={isInteractionDisabled || undefined}
               className={cn(
-                "inline-flex size-8 items-center justify-center rounded-full outline-hidden ring-ring transition-colors focus-visible:ring-2",
-                isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer",
-                showUpdateIconState
-                  ? cn(
-                      "bg-update-surface text-update-foreground",
-                      !isInteractionDisabled && "hover:bg-update/12",
-                    )
-                  : cn(
-                      "text-[var(--sidebar-icon-color)]",
-                      !isInteractionDisabled &&
-                        "hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-                    ),
-                disabled && !showUpdateIconState && "opacity-60",
+                "inline-flex size-8 items-center justify-center rounded-full bg-update-surface text-update-foreground outline-hidden ring-ring transition-colors focus-visible:ring-2",
+                isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer hover:bg-update/12",
               )}
               onClick={handleAction}
             >
               <DesktopUpdateStatusIcon
-                key={showCheckIcon ? checkAnimationKey : iconStatus}
-                downloadPercent={state?.downloadPercent ?? null}
-                isCheckAnimating={showCheckIcon && !prefersReducedMotion}
-                onCheckAnimationIteration={handleCheckAnimationIteration}
+                key={iconStatus}
+                downloadPercent={state.downloadPercent}
                 status={iconStatus}
               />
             </button>
@@ -344,29 +240,21 @@ function SidebarUpdateControl() {
         <TooltipPopup
           align="center"
           className={
-            showUpdateDetails && state?.channel === "nightly" && state.releaseNotes.length > 0
+            state.channel === "nightly" && state.releaseNotes.length > 0
               ? // pointer-events-auto overrides the positioner's pointer-events-none so the
                 // release notes stay open (and scrollable) when the cursor moves into them.
                 "pointer-events-auto max-w-none text-balance"
               : undefined
           }
           side="top"
-          style={
-            showUpdateDetails
-              ? {
-                  background:
-                    "color-mix(in srgb, var(--update) 18%, color-mix(in srgb, var(--popover) var(--glass-opacity), transparent))",
-                  borderColor: "var(--update-foreground)",
-                }
-              : undefined
-          }
-          variant={showUpdateDetails ? "glass" : "default"}
+          style={{
+            background:
+              "color-mix(in srgb, var(--update) 18%, color-mix(in srgb, var(--popover) var(--glass-opacity), transparent))",
+            borderColor: "var(--update-foreground)",
+          }}
+          variant="glass"
         >
-          {showUpdateDetails && state ? (
-            <SidebarUpdateReleaseNotesTooltip state={state} tooltip={tooltip} />
-          ) : (
-            tooltip
-          )}
+          <SidebarUpdateReleaseNotesTooltip state={state} tooltip={tooltip} />
         </TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>
