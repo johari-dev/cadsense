@@ -271,14 +271,26 @@ try {
   });
   const draftUrl = page.url();
   await run("running-chat-and-back", async (page) => {
-    const toRunning = await travel(() => page.goBack(), (next) => next.href === runningUrl);
+    const toRunning = await travel(
+      () => page.goBack(),
+      (next) => next.href === runningUrl,
+    );
     const stillRunning = await stop.isVisible();
     const toDraft = await travel(() => page.goForward(), isDraft);
     const drag = await probeDrag();
     expect(stillRunning, "The first chat's turn ended before the draft was revisited");
-    expect(toRunning.length === 0, `Draft to running chat replayed the slide: ${JSON.stringify(toRunning)}`);
-    expect(toDraft.length === 0, `Running chat to draft replayed the slide: ${JSON.stringify(toDraft)}`);
-    expect(drag.moved, `The draft's CAD did not answer a drag during the turn: ${JSON.stringify(drag)}`);
+    expect(
+      toRunning.length === 0,
+      `Draft to running chat replayed the slide: ${JSON.stringify(toRunning)}`,
+    );
+    expect(
+      toDraft.length === 0,
+      `Running chat to draft replayed the slide: ${JSON.stringify(toDraft)}`,
+    );
+    expect(
+      drag.moved,
+      `The draft's CAD did not answer a drag during the turn: ${JSON.stringify(drag)}`,
+    );
     return { toRunning, toDraft, stillRunning, drag };
   });
   await run("first-turn-done", async (page) => {
@@ -297,10 +309,19 @@ try {
   });
   const secondUrl = page.url();
   await run("switch-between-chats", async (page) => {
-    const toFirst = await travel(() => page.goBack(), (next) => next.href === runningUrl);
-    const toSecond = await travel(() => page.goForward(), (next) => next.href === secondUrl);
+    const toFirst = await travel(
+      () => page.goBack(),
+      (next) => next.href === runningUrl,
+    );
+    const toSecond = await travel(
+      () => page.goForward(),
+      (next) => next.href === secondUrl,
+    );
     expect(toFirst.length === 0, `Switching chats replayed the slide: ${JSON.stringify(toFirst)}`);
-    expect(toSecond.length === 0, `Switching chats replayed the slide: ${JSON.stringify(toSecond)}`);
+    expect(
+      toSecond.length === 0,
+      `Switching chats replayed the slide: ${JSON.stringify(toSecond)}`,
+    );
     return { toFirst, toSecond };
   });
   // Closing and opening the panel in one chat still slides both ways.
