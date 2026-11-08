@@ -26,7 +26,9 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import type { Reviewer } from "./reviewerSetup.logic";
 
-const ONSHAPE_API_KEYS_URL = "https://dev-portal.onshape.com/keys";
+// Onshape's API keys page, relative to a stack origin (cad.onshape.com or an
+// Enterprise domain).
+const ONSHAPE_API_KEYS_PATH = "/user/developer/apiKeys";
 
 /**
  * Step 2 of onboarding (A6 and A7): add the first robot. An Onshape link
@@ -182,7 +184,11 @@ export function AddRobotStep({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void readLocalApi()?.shell.openExternal(ONSHAPE_API_KEYS_URL)}
+              onClick={() =>
+                void readLocalApi()?.shell.openExternal(
+                  `${linkStack ?? ONSHAPE_PUBLIC_STACK_ORIGIN}${ONSHAPE_API_KEYS_PATH}`,
+                )
+              }
             >
               <ArrowSquareOutIcon className="size-3.5" aria-hidden />
               Open Onshape
