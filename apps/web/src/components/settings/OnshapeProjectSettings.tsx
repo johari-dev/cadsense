@@ -1,3 +1,4 @@
+import { settingsLocation } from "./settingsLocation";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -166,8 +167,7 @@ export function OnshapeProjectSettings({
             Refresh connections
           </Button>
           <Link
-            to="/settings/integrations"
-            search={{ environmentId: project.environmentId }}
+            {...settingsLocation("integrations", project.environmentId)}
             className="text-sm underline underline-offset-4"
           >
             Manage connections

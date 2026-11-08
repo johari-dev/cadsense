@@ -1,3 +1,4 @@
+import { settingsLocation } from "./settings/settingsLocation";
 import { singleCadModelName } from "../cad/cadModelName";
 import { useRemoveCadProject } from "../cad/useRemoveCadProject";
 import {
@@ -1284,7 +1285,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           removesActiveThread &&
           router.state.location.href === previousLocation
         ) {
-          void router.navigate({ to: "/settings/cad-storage" });
+          void router.navigate({ to: "/", search: { settings: "cad-storage" } });
         }
         if (result?._tag === "Failure" && !isAtomCommandInterrupted(result))
           toastManager.add(
@@ -2890,7 +2891,10 @@ function SidebarIconRail({
           );
         })}
       </div>
-      <SidebarRailButton label="Settings" onClick={() => void navigate({ to: "/settings" })}>
+      <SidebarRailButton
+        label="Settings"
+        onClick={() => void navigate({ ...settingsLocation("general") })}
+      >
         <SettingsIcon className="size-4" />
       </SidebarRailButton>
     </div>

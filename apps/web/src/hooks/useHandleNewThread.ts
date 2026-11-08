@@ -22,6 +22,8 @@ import { toastManager } from "../components/ui/toast";
 interface NewThreadOptions {
   readonly replace?: boolean;
   readonly carryComposerContent?: boolean;
+  /** Carries the current search params (such as open settings) over to the draft. */
+  readonly keepSearch?: boolean;
 }
 
 export function useNewThreadHandler() {
@@ -148,6 +150,7 @@ export function useNewThreadHandler() {
         await router.navigate({
           to: "/draft/$draftId",
           params: { draftId },
+          ...(options?.keepSearch ? { search: true } : {}),
           replace: options?.replace ?? false,
         });
       }

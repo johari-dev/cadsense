@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useCanGoBack, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   useCallback,
   useEffect,
@@ -8,44 +8,149 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
+import type { EnvironmentId } from "@cadsense/contracts";
+
+import { CadStorageSettings } from "../../cad/CadStorageSettings";
 import { MagnifyingGlassIcon as SearchIcon, XIcon } from "~/lib/icons";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
-import { scrollToSettingsTarget } from "./settingsLayout";
+import { DiagnosticsSettingsPanel } from "./DiagnosticsSettings";
+import { IntegrationsSettingsPanel } from "./IntegrationsSettings";
+import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
+import { ProviderSettingsPanel } from "./ProviderSettingsPanel";
 import {
-  searchSettings,
-  SETTINGS_SECTION_LABELS,
-  type SettingsPath,
-  type SettingsSearchItem,
-} from "./settingsSearch";
+  AppearanceSettingsPanel,
+  ArchivedThreadsPanel,
+  GeneralSettingsPanel,
+} from "./SettingsPanels";
+import { scrollToSettingsTarget, SettingsTabLabelProvider } from "./settingsLayout";
+import { settingsLocation, SETTINGS_TAB_LABELS, type SettingsTab } from "./settingsLocation";
+import { searchSettings, type SettingsSearchItem } from "./settingsSearch";
 
-const SETTINGS_TABS = Object.entries(SETTINGS_SECTION_LABELS) as ReadonlyArray<
-  readonly [SettingsPath, string]
+const SETTINGS_TABS = Object.entries(SETTINGS_TAB_LABELS) as ReadonlyArray<
+  readonly [keyof typeof SETTINGS_TAB_LABELS, string]
 >;
 
 /**
- * The settings shell: a centered modal with a tab per settings page and a search box. The
- * routed settings page renders as `children`. `onClose` runs for the close button and a click
- * on the backdrop; the settings route handles Escape itself.
+ * Mounted once in the root layout. Renders the settings modal over the current page while the
+ * `settings` search param is set, and nothing otherwise. The page behind stays mounted.
  */
-export function SettingsModal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
-  const pathname = useLocation({ select: (location) => location.pathname });
-
+export function SettingsOverlay() {
+  const search = useSearch({ from: "__root__" });
+  if (search.settings === undefined) return null;
   return (
+    <SettingsModal tab={search.settings}>
+      <SettingsPage tab={search.settings} onshapeEnvironmentId={search.onshapeEnvironmentId} />
+    </SettingsModal>
+  );
+}
+
+function SettingsPage({
+  tab,
+  onshapeEnvironmentId,
+}: {
+  tab: SettingsTab;
+  onshapeEnvironmentId: EnvironmentId | undefined;
+}) {
+  switch (tab) {
+    case "general":
+      return <GeneralSettingsPage />;
+    case "appearance":
+      return <AppearanceSettingsPanel />;
+    case "keybindings":
+      return <KeybindingsSettingsPanel />;
+    case "providers":
+      return <ProviderSettingsPanel />;
+    case "integrations":
+      return <IntegrationsSettingsPanel onshapeEnvironmentId={onshapeEnvironmentId} />;
+    case "cad-storage":
+      return <CadStorageSettings />;
+    case "archived":
+      return <ArchivedThreadsPanel />;
+    case "diagnostics":
+      return <DiagnosticsSettingsPanel />;
+  }
+}
+
+function GeneralSettingsPage() {
+  // Restoring defaults remounts the panel so draft inputs drop their local edits.
+  const [restoreCount, setRestoreCount] = useState(0);
+  return (
+    <GeneralSettingsPanel
+      key={restoreCount}
+      onRestored={() => setRestoreCount((count) => count + 1)}
+    />
+  );
+}
+
+/**
+ * Closes settings. Opening settings pushes one history entry and moving around inside it
+ * replaces, so Back returns to the page as it was. A settings link opened fresh has nothing
+ * to go back to, so it drops the settings params in place.
+ */
+function useCloseSettings() {
+  const navigate = useNavigate();
+  const canGoBack = useCanGoBack();
+  return useCallback(() => {
+    if (canGoBack) {
+      window.history.back();
+      return;
+    }
+    void navigate({ to: ".", search: {}, hash: "", replace: true });
+  }, [canGoBack, navigate]);
+}
+
+/**
+ * The settings shell: a centered modal with a tab per settings page and a search box. It
+ * portals to the body above the live page, takes focus so typing does not reach the page
+ * behind, and hands focus back when it closes. The close button, a backdrop click, and
+ * Escape all close it.
+ */
+function SettingsModal({ tab, children }: { tab: SettingsTab; children: ReactNode }) {
+  const onClose = useCloseSettings();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const tabLabel = tab === "diagnostics" ? null : SETTINGS_TAB_LABELS[tab];
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    dialogRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-40 bg-black/60" aria-hidden onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-black/60" aria-hidden onClick={onClose} />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        className="fixed top-1/2 left-1/2 z-40 flex h-[min(720px,calc(100dvh-2rem))] w-[min(960px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-popover-border bg-card text-foreground shadow-xl"
+        // Marks an open floating layer, so the chat behind does not turn typing into composer text.
+        data-slot="dialog"
+        tabIndex={-1}
+        className="fixed top-1/2 left-1/2 z-50 flex h-[min(720px,calc(100dvh-2rem))] w-[min(960px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-popover-border bg-card text-foreground shadow-xl outline-none"
       >
         <div className="flex items-center gap-3 pt-4 pr-4 pb-3 pl-7">
           <h1 className="text-base font-semibold">Settings</h1>
           <div className="flex-1" />
-          <SettingsSearch pathname={pathname} />
+          <SettingsSearch tab={tab} />
           <Button size="icon" variant="ghost" aria-label="Close settings" onClick={onClose}>
             <XIcon className="size-4" />
           </Button>
@@ -54,12 +159,12 @@ export function SettingsModal({ children, onClose }: { children: ReactNode; onCl
           aria-label="Settings pages"
           className="flex gap-1 overflow-x-auto border-b border-border px-[1.125rem]"
         >
-          {SETTINGS_TABS.map(([to, label]) => {
-            const isActive = pathname === to || pathname.startsWith(`${to}/`);
+          {SETTINGS_TABS.map(([tabId, label]) => {
+            const isActive = tab === tabId;
             return (
               <Link
-                key={to}
-                to={to}
+                key={tabId}
+                {...settingsLocation(tabId)}
                 replace
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
@@ -73,9 +178,12 @@ export function SettingsModal({ children, onClose }: { children: ReactNode; onCl
             );
           })}
         </nav>
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        <SettingsTabLabelProvider label={tabLabel}>
+          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        </SettingsTabLabelProvider>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
@@ -84,7 +192,7 @@ export function SettingsModal({ children, onClose }: { children: ReactNode; onCl
  * move through results, Enter opens one, and Escape clears the query before it closes
  * settings.
  */
-function SettingsSearch({ pathname }: { pathname: string }) {
+function SettingsSearch({ tab }: { tab: SettingsTab }) {
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
   const inputRef = useRef<HTMLInputElement>(null);
@@ -131,13 +239,18 @@ function SettingsSearch({ pathname }: { pathname: string }) {
     (item: SettingsSearchItem) => {
       clearSearch();
       const targetId = item.targetId ?? item.id;
-      if (pathname === item.to && currentHash.replace(/^#/, "") === targetId) {
+      if (tab === item.tab && currentHash.replace(/^#/, "") === targetId) {
         scrollToSettingsTarget(targetId);
         return;
       }
-      void navigate({ to: item.to, hash: targetId, replace: true, hashScrollIntoView: false });
+      void navigate({
+        ...settingsLocation(item.tab),
+        hash: targetId,
+        replace: true,
+        hashScrollIntoView: false,
+      });
     },
-    [clearSearch, currentHash, navigate, pathname],
+    [clearSearch, currentHash, navigate, tab],
   );
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape" && isSearching) {
@@ -225,7 +338,7 @@ function SettingsSearch({ pathname }: { pathname: string }) {
                 >
                   <span className="block truncate text-sm text-foreground">{item.title}</span>
                   <span className="block truncate text-[11px] text-muted-foreground">
-                    {SETTINGS_SECTION_LABELS[item.to]}
+                    {item.tab === "diagnostics" ? "Diagnostics" : SETTINGS_TAB_LABELS[item.tab]}
                   </span>
                 </button>
               ))}

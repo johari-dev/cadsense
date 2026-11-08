@@ -1,3 +1,4 @@
+import { settingsLocation } from "../settings/settingsLocation";
 import {
   type ProviderInstanceId,
   type ProviderDriverKind,
@@ -184,7 +185,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             );
           })}
         <MenuSeparator />
-        <MenuItem render={<Link to="/settings/providers" />} onClick={() => setIsMenuOpen(false)}>
+        <MenuItem
+          render={<Link {...settingsLocation("providers")} />}
+          onClick={() => setIsMenuOpen(false)}
+        >
           <PlusIcon className="size-3.5" />
           Add providers
         </MenuItem>

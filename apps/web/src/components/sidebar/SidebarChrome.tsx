@@ -1,3 +1,4 @@
+import { settingsLocation } from "../settings/settingsLocation";
 import { ArrowLeftIcon, GearSixIcon as SettingsIcon } from "~/lib/icons";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
@@ -123,13 +124,8 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
-  const currentFooterPage = useLocation({
-    select: (location) =>
-      /^\/settings(?:\/|$)/.test(location.pathname)
-        ? "settings"
-        : /^\/projects\/[^/]+\/?$/.test(location.pathname)
-          ? "project-settings"
-          : null,
+  const isOnProjectSettings = useLocation({
+    select: (location) => /^\/projects\/[^/]+\/?$/.test(location.pathname),
   });
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
@@ -138,7 +134,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [isMobile, setOpenMobile]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
-    void navigate({ to: "/settings" });
+    void navigate(settingsLocation("general"));
   }, [closeMobileSidebar, navigate]);
 
   const handleBackClick = useCallback(() => {
@@ -153,7 +149,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   return (
     // On the icon rail only the Back or Settings icon shows, centered under the toggle.
     <SidebarMenu className="flex-row items-center group-data-[collapsible=icon]:justify-center">
-      {currentFooterPage ? (
+      {isOnProjectSettings ? (
         <SidebarMenuItem className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
           <SidebarMenuButton onClick={handleBackClick}>
             <ArrowLeftIcon />
