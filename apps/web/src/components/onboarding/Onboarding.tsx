@@ -1,16 +1,25 @@
 import { useAtomValue } from "@effect/atom-react";
+import { scopeProjectRef } from "@cadsense/client-runtime/environment";
 import type { EnvironmentId, ServerProvider, ServerProviderSetupAction } from "@cadsense/contracts";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
-import { ArrowSquareOutIcon, CheckIcon, XIcon } from "~/lib/icons";
+import { ArrowSquareOutIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
+import { singleCadModelName } from "../../cad/cadModelName";
+import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
+import type { Project } from "../../types";
 import { ClaudeAI, OpenAI } from "../Icons";
+import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
+import { describeProjectSource } from "../Sidebar.logic";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
-import { AddRobotStep } from "./AddRobotStep";
+import { AddCadStep } from "./AddCadStep";
+import { ChecklistProgress, ChecklistRow, StepRow, type ChecklistRowStatus } from "./Checklist";
+import { importCadStage } from "./importCad.logic";
+import { ImportCadStep } from "./ImportCadStep";
 import {
   isReviewerReady,
   REVIEWERS,
@@ -25,25 +34,30 @@ const CHATGPT = REVIEWERS[0];
 const CLAUDE = REVIEWERS[1];
 
 /**
- * First-run screen on the home route, shown until the first project exists.
- * Step 1 connects an AI reviewer: one button installs Codex and opens the
- * ChatGPT sign-in, and Claude is the quiet alternative. Step 2 adds a robot.
- * Every state comes from the primary environment's provider snapshots, so a
- * reload or a second window shows the same step.
+ * First-run screen on the home route: one checklist card that connects an AI reviewer, adds a
+ * CAD, and imports it. The open step expands; finished steps fold to a one-line summary.
+ * `project` is the CAD project onboarding added, or null before there is one. The home route keeps this
+ * screen up through the first import, so the project opens with its model ready. Every step reads
+ * from live server state (provider snapshots, the project's CAD state), so a reload or a second
+ * window shows the same step.
  */
-export function Onboarding() {
+export function Onboarding({ project }: { readonly project: Project | null }) {
   const environmentId = usePrimaryEnvironmentId();
   const [view, setView] = useState<"setup" | "results">("setup");
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 flex-1 overflow-y-auto">
-        <div className="m-auto w-full max-w-[30rem] px-6 py-12">
+        <div className="m-auto w-full max-w-[32rem] px-6 py-12">
           {view === "results" ? <TestResults onBack={() => setView("setup")} /> : null}
           {/* Stays mounted under the results page so Back returns to the same step. */}
           {environmentId === null ? null : (
             <div hidden={view === "results"}>
-              <SetupSteps environmentId={environmentId} onShowResults={() => setView("results")} />
+              <SetupChecklist
+                environmentId={environmentId}
+                project={project}
+                onShowResults={() => setView("results")}
+              />
             </div>
           )}
         </div>
@@ -52,15 +66,154 @@ export function Onboarding() {
   );
 }
 
-function SetupSteps({
+function SetupChecklist({
   environmentId,
+  project,
   onShowResults,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly project: Project | null;
   readonly onShowResults: () => void;
 }) {
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const handleNewThread = useNewThreadHandler();
+  const [opening, setOpening] = useState(false);
+  const providerFor = (reviewer: Reviewer) =>
+    providers.find((provider) => provider.instanceId === reviewer.instanceId);
+  const reviewer = REVIEWERS.find((candidate) => isReviewerReady(providerFor(candidate)));
+  const reviewerProvider = reviewer && providerFor(reviewer);
+  const importStage = project === null ? null : importCadStage(project);
+  const done = [reviewer !== undefined, project !== null, importStage?.kind === "done"];
+  // The first unfinished step is open; -1 once all three are done.
+  const openIndex = done.indexOf(false);
+  const status = (index: number): ChecklistRowStatus =>
+    done[index] ? "done" : index === openIndex ? "open" : "todo";
+
+  const openProject = () => {
+    if (project === null) return;
+    setOpening(true);
+    void handleNewThread(scopeProjectRef(project.environmentId, project.id)).finally(() =>
+      setOpening(false),
+    );
+  };
+
+  return (
+    // On first load the header, progress bar, and card rise in one after another.
+    <div className="onboarding-enter">
+      <p className="text-center text-tertiary-foreground text-xs">
+        <span className="font-medium text-foreground">Set up Cadsense</span>
+      </p>
+      <ChecklistProgress done={done} />
+      <div
+        className={cn(
+          "mt-3 overflow-hidden rounded-xl border border-border bg-card",
+          openIndex === -1 && "onboarding-complete",
+        )}
+      >
+        <ChecklistRow
+          title="Connect an AI reviewer"
+          status={status(0)}
+          summary={
+            reviewer ? (
+              <>
+                <span className="shrink-0">{reviewer.account}</span>
+                {reviewerProvider?.auth.email ? (
+                  <>
+                    <span>·</span>
+                    <RedactedSensitiveText
+                      value={reviewerProvider.auth.email}
+                      ariaLabel="Toggle account email visibility"
+                      revealTooltip="Click to reveal email"
+                      hideTooltip="Click to hide email"
+                      className="max-w-40 truncate"
+                    />
+                  </>
+                ) : null}
+              </>
+            ) : null
+          }
+        >
+          <ReviewerStep
+            environmentId={environmentId}
+            providers={providers}
+            onShowResults={onShowResults}
+          />
+        </ChecklistRow>
+        <ChecklistRow
+          title="Add your CAD"
+          status={status(1)}
+          summary={
+            project ? (
+              <>
+                <span className="min-w-0 truncate">{project.title}</span>
+                <span>·</span>
+                <span className="min-w-0 truncate">
+                  {project.onshapeSource ? "Onshape" : describeProjectSource(project).label}
+                </span>
+              </>
+            ) : null
+          }
+        >
+          <AddCadStep environmentId={environmentId} providers={providers} />
+        </ChecklistRow>
+        <ChecklistRow
+          title="Import CAD"
+          status={status(2)}
+          summary={
+            project ? (
+              <span className="min-w-0 truncate">{singleCadModelName(project.cad) ?? ""}</span>
+            ) : null
+          }
+        >
+          {project ? <ImportCadStep project={project} /> : null}
+        </ChecklistRow>
+      </div>
+      {openIndex === 2 ? (
+        <p
+          key="chat-now"
+          className="onboarding-fade mt-4 text-center text-tertiary-foreground text-xs"
+        >
+          <button
+            type="button"
+            disabled={opening}
+            className="underline decoration-foreground/30 underline-offset-2 hover:text-foreground"
+            onClick={openProject}
+          >
+            Start chatting now
+          </button>
+          .{" "}
+          {importStage?.kind === "failed" || importStage?.kind === "choose"
+            ? "You can import from the CAD panel later."
+            : "The import keeps going."}
+        </p>
+      ) : openIndex === -1 && project ? (
+        <div key="open" className="onboarding-enter mt-5 flex flex-col items-center gap-2">
+          <Button size="lg" disabled={opening} onClick={openProject}>
+            Open {project.title}
+          </Button>
+          <p className="text-tertiary-foreground text-xs">
+            Your CAD is imported and ready to review.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Step 1: connect an AI reviewer. One button installs Codex and opens the ChatGPT sign-in, and
+ * Claude is the quiet alternative. Progress and failures read from the provider snapshots.
+ */
+function ReviewerStep({
+  environmentId,
+  providers,
+  onShowResults,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly onShowResults: () => void;
+}) {
   const runProviderSetup = useAtomCommand(serverEnvironment.runProviderSetup, {
     reportFailure: false,
   });
@@ -80,8 +233,14 @@ function SetupSteps({
 
   const providerFor = (reviewer: Reviewer) =>
     providers.find((provider) => provider.instanceId === reviewer.instanceId);
-  const readyReviewer = REVIEWERS.find((reviewer) => isReviewerReady(providerFor(reviewer)));
-  const activeId = choice === "picker" ? null : (choice ?? reviewerInSetup(providers));
+  // A reviewer that just finished signing in stays on screen while the step folds away.
+  const activeId =
+    choice === "picker"
+      ? null
+      : (choice ??
+        reviewerInSetup(providers) ??
+        REVIEWERS.find((reviewer) => isReviewerReady(providerFor(reviewer)))?.instanceId ??
+        null);
   const active = REVIEWERS.find((reviewer) => reviewer.instanceId === activeId) ?? null;
   const waitingOnBrowser =
     active !== null && reviewerStage(providerFor(active)).kind === "signingIn";
@@ -123,61 +282,46 @@ function SetupSteps({
     if (!isReviewerReady(provider)) await run(reviewer, "signIn");
   };
 
-  if (readyReviewer !== undefined) {
-    return (
-      <AddRobotStep
-        environmentId={environmentId}
-        reviewer={readyReviewer}
-        provider={providerFor(readyReviewer)}
-        providers={providers}
-      />
-    );
-  }
-
   return (
-    <div>
-      <Stepper current="Step 1 of 2" detail="then add your robot" />
-      <h1 className="mt-2 font-semibold text-[22px] tracking-tight">Connect an AI reviewer</h1>
-      {active === null ? (
-        <ChooseReviewer
-          onStart={(reviewer) => void start(reviewer)}
-          onShowResults={onShowResults}
-        />
-      ) : (
-        <ReviewerProgress
-          reviewer={active}
-          stage={reviewerStage(providerFor(active))}
-          requesting={requesting}
-          onSignIn={() => {
-            setLocalError(null);
-            void run(active, "signIn");
-          }}
-          onRetry={() => void start(active)}
-          onBack={() => {
-            setLocalError(null);
-            setChoice("picker");
-          }}
-        />
-      )}
+    <>
+      {/* Keyed so switching between the picker and a reviewer's progress slides in. */}
+      <div key={active?.instanceId ?? "picker"} className="onboarding-enter-x">
+        {active === null ? (
+          <ChooseReviewer
+            onStart={(reviewer) => void start(reviewer)}
+            onShowResults={onShowResults}
+          />
+        ) : (
+          <ReviewerProgress
+            reviewer={active}
+            stage={reviewerStage(providerFor(active))}
+            requesting={requesting}
+            onSignIn={() => {
+              setLocalError(null);
+              void run(active, "signIn");
+            }}
+            onRetry={() => void start(active)}
+            onBack={() => {
+              setLocalError(null);
+              setChoice("picker");
+            }}
+          />
+        )}
+      </div>
       {localError !== null ? (
-        <p role="alert" className="mt-3 text-destructive-foreground text-sm">
+        <p
+          key={localError}
+          role="alert"
+          className="onboarding-swap mt-3 text-destructive-foreground text-sm"
+        >
           {localError}
         </p>
       ) : null}
-    </div>
+    </>
   );
 }
 
-function Stepper({ current, detail }: { readonly current: string; readonly detail?: string }) {
-  return (
-    <p className="text-tertiary-foreground text-xs">
-      <span className="font-medium text-foreground">{current}</span>
-      {detail ? <span> · {detail}</span> : null}
-    </p>
-  );
-}
-
-/** A1: one free path, the test result once, and Claude as the quiet alternative. */
+/** One free path, the test result once, and Claude as the quiet alternative. */
 function ChooseReviewer({
   onStart,
   onShowResults,
@@ -187,43 +331,42 @@ function ChooseReviewer({
 }) {
   return (
     <>
-      <p className="mt-2 text-muted-foreground text-sm">
+      <p className="text-muted-foreground text-sm">
         Cadsense reviews your CAD using your own AI account. A free ChatGPT account works.
       </p>
-      <Button size="lg" className="mt-6 w-full" onClick={() => onStart(CHATGPT)}>
+      <Button size="lg" className="mt-4 w-full" onClick={() => onStart(CHATGPT)}>
         <OpenAI className="size-4 fill-current dark:fill-current" aria-hidden />
         Start free with ChatGPT
       </Button>
-      <p className="mt-2.5 text-center text-muted-foreground text-xs">
+      <p className="mt-2 text-center text-muted-foreground text-xs">
         We install Codex, OpenAI's sign-in tool, then open ChatGPT in your browser. Free, Plus and
         Pro accounts all use this button.
       </p>
-      <div className="my-6 h-px bg-border" />
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        Across 3 reviews of one test robot, the free model found all 8 known problems in every run.
-        Paid models found about 4 more per review.{" "}
-        <button
-          type="button"
-          className="text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground"
-          onClick={onShowResults}
-        >
-          Compare test results
-        </button>
-      </p>
-      <div className="mt-4 flex items-center gap-3">
+      <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-2.5">
         <ClaudeAI className="size-4 shrink-0" aria-hidden />
-        <p className="flex-1 text-muted-foreground text-sm">
+        <p className="flex-1 text-muted-foreground text-xs">
           Have Claude Pro or Max? Claude's comments were the clearest in our test.
         </p>
         <Button size="sm" variant="outline" onClick={() => onStart(CLAUDE)}>
           Use Claude
         </Button>
       </div>
+      <p className="mt-3 text-tertiary-foreground text-xs leading-relaxed">
+        Across 3 reviews of one test robot, the free model found all 8 known problems in every run.
+        Paid models found about 4 more per review.{" "}
+        <button
+          type="button"
+          className="text-muted-foreground underline decoration-foreground/30 underline-offset-2 hover:text-foreground"
+          onClick={onShowResults}
+        >
+          Compare test results
+        </button>
+      </p>
     </>
   );
 }
 
-/** A2 to A5: install progress, the browser sign-in wait, and both failures. */
+/** Install progress, the browser sign-in wait, both failures, and the finished state. */
 function ReviewerProgress({
   reviewer,
   stage,
@@ -246,11 +389,11 @@ function ReviewerProgress({
 
   return (
     <>
-      <div className="mt-6 rounded-lg border border-border bg-card">
+      <div className="rounded-lg border border-border bg-background/40">
         {installDone ? (
-          <Row mark="done">{reviewer.tool} installed</Row>
+          <StepRow mark="done">{reviewer.tool} installed</StepRow>
         ) : stage.kind === "installFailed" ? (
-          <Row mark="failed">
+          <StepRow mark="failed">
             <p>Couldn't install {reviewer.tool}</p>
             <p className="mt-1 text-muted-foreground text-xs">
               Check your internet connection, then try again. School networks sometimes block
@@ -262,9 +405,9 @@ function ReviewerProgress({
                 Try again
               </Button>
             </div>
-          </Row>
+          </StepRow>
         ) : stage.kind === "needsInstall" && !requesting ? (
-          <Row mark="pending">
+          <StepRow mark="pending">
             <p>Install {reviewer.tool}</p>
             <p className="mt-1 text-muted-foreground text-xs">{reviewer.toolBlurb}</p>
             <div className="mt-3 flex gap-2">
@@ -272,22 +415,24 @@ function ReviewerProgress({
                 Install {reviewer.tool}
               </Button>
             </div>
-          </Row>
+          </StepRow>
         ) : (
-          <Row mark="waiting">
+          <StepRow mark="waiting">
             <p>Installing {reviewer.tool}</p>
             <p className="mt-1 text-muted-foreground text-xs">
               {reviewer.toolBlurb} This takes about a minute.
             </p>
-          </Row>
+          </StepRow>
         )}
         <div className="h-px bg-border" />
         {!installDone ? (
-          <Row mark="pending" dim>
+          <StepRow mark="pending" dim>
             {signInLabel}
-          </Row>
+          </StepRow>
+        ) : stage.kind === "ready" ? (
+          <StepRow mark="done">Signed in to {reviewer.account}</StepRow>
         ) : stage.kind === "signingIn" ? (
-          <Row mark="waiting">
+          <StepRow mark="waiting">
             <p>{signInLabel} in your browser</p>
             <p className="mt-1 text-muted-foreground text-xs">
               We opened {reviewer.account} in a browser tab. Sign in there, then come back. This
@@ -299,9 +444,9 @@ function ReviewerProgress({
                 Open sign-in again
               </Button>
             </div>
-          </Row>
+          </StepRow>
         ) : stage.kind === "signInFailed" ? (
-          <Row mark="failed">
+          <StepRow mark="failed">
             <p>Sign-in didn't finish</p>
             <p className="mt-1 text-muted-foreground text-xs">
               Trying again opens a fresh sign-in page.
@@ -312,16 +457,16 @@ function ReviewerProgress({
                 Try again
               </Button>
             </div>
-          </Row>
+          </StepRow>
         ) : stage.kind === "turnedOff" ? (
-          <Row mark="pending">
+          <StepRow mark="pending">
             <p>{reviewer.account} is turned off</p>
             <p className="mt-1 text-muted-foreground text-xs">
               Turn it back on in Settings, under Providers.
             </p>
-          </Row>
+          </StepRow>
         ) : (
-          <Row mark="pending">
+          <StepRow mark="pending">
             <p>{signInLabel}</p>
             <p className="mt-1 text-muted-foreground text-xs">
               Opens {reviewer.account} in your browser.
@@ -331,10 +476,10 @@ function ReviewerProgress({
                 {signInLabel}
               </Button>
             </div>
-          </Row>
+          </StepRow>
         )}
       </div>
-      <div className="mt-4 space-y-1.5 text-tertiary-foreground text-xs">
+      <div className="mt-3 space-y-1.5 text-tertiary-foreground text-xs">
         {reviewer.account === "ChatGPT" ? (
           <p>No ChatGPT account? You can make one for free on the sign-in page.</p>
         ) : (
@@ -361,41 +506,5 @@ function FailureDetails({ reason }: { readonly reason: string }) {
     <p className="mt-1.5 break-words font-mono text-[11px] text-tertiary-foreground">
       Details: {reason}
     </p>
-  );
-}
-
-/**
- * One line of the setup card. The marks are static: a check, a cross, a ring
- * with a dot for "waiting on this", and an empty ring for "not yet".
- */
-function Row({
-  mark,
-  dim = false,
-  children,
-}: {
-  readonly mark: "done" | "failed" | "waiting" | "pending";
-  readonly dim?: boolean;
-  readonly children: ReactNode;
-}) {
-  return (
-    <div className={cn("flex items-start gap-3 px-4 py-3.5 text-sm", dim && "opacity-45")}>
-      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-        {mark === "done" ? (
-          <CheckIcon className="size-3.5 text-success" aria-label="Done" />
-        ) : mark === "failed" ? (
-          <XIcon className="size-3.5 text-destructive-foreground" aria-label="Failed" />
-        ) : mark === "waiting" ? (
-          <span
-            className="flex size-3.5 items-center justify-center rounded-full border-[1.5px] border-foreground"
-            aria-label="In progress"
-          >
-            <span className="size-1.5 rounded-full bg-foreground" />
-          </span>
-        ) : (
-          <span className="size-3.5 rounded-full border-[1.5px] border-input" aria-hidden />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
   );
 }

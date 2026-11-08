@@ -21,14 +21,16 @@ const errorMessage = (cause: unknown, fallback: string) =>
  * dialog opens as soon as the form does, and the project folder is the picked file's folder.
  * `pickFile` is null without one (a browser, or a remote environment); the form then takes a typed
  * folder path, which the server resolves, and lists its STEP, IGES, and SolidWorks files to choose
- * from.
+ * from. `inline` fits the form inside onboarding's checklist: no heading or padding, and Continue
+ * instead of Create project. The Back button shows only with `onCancel`.
  */
 export function LocalCadProjectCreateForm(props: {
   environmentId: EnvironmentId;
   environmentLabel: string;
   connected: boolean;
   pickFile: (() => Promise<string | null>) | null;
-  onCancel: () => void;
+  inline?: boolean;
+  onCancel?: () => void;
   onCreate: (input: {
     title: string;
     workspaceRoot: string;
@@ -113,7 +115,7 @@ export function LocalCadProjectCreateForm(props: {
 
   return (
     <form
-      className="space-y-4 overflow-y-auto p-5"
+      className={props.inline ? "space-y-4" : "space-y-4 overflow-y-auto p-5"}
       aria-label="Create local CAD project"
       noValidate
       onSubmit={async (event) => {
@@ -140,14 +142,21 @@ export function LocalCadProjectCreateForm(props: {
         }
       }}
     >
-      <div>
-        <h2 className="text-base font-medium">New local CAD project</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          On {props.environmentLabel}. Review a STEP, IGES, or SolidWorks file in a folder. Nothing
-          is uploaded, and you can sync again after saving. SolidWorks files need SolidWorks
+      {props.inline ? (
+        <p className="text-xs text-tertiary-foreground">
+          A STEP, IGES, or SolidWorks file. Nothing is uploaded. SolidWorks files need SolidWorks
           installed on this computer.
         </p>
-      </div>
+      ) : (
+        <div>
+          <h2 className="text-base font-medium">New local CAD project</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            On {props.environmentLabel}. Review a STEP, IGES, or SolidWorks file in a folder.
+            Nothing is uploaded, and you can sync again after saving. SolidWorks files need
+            SolidWorks installed on this computer.
+          </p>
+        </div>
+      )}
       {!props.connected && (
         <p role="alert" className="text-sm text-destructive">
           This environment is disconnected.
@@ -265,7 +274,7 @@ export function LocalCadProjectCreateForm(props: {
         {(listing || picked) && (
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor={`${id}-name`}>
-              Project name
+              {props.inline ? "CAD name" : "Project name"}
             </label>
             <Input
               id={`${id}-name`}
@@ -284,12 +293,20 @@ export function LocalCadProjectCreateForm(props: {
           {error}
         </p>
       )}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" disabled={pending} onClick={props.onCancel}>
-          Back
-        </Button>
+      <div className={props.inline ? "flex gap-2" : "flex justify-end gap-2"}>
+        {props.onCancel ? (
+          <Button type="button" variant="ghost" disabled={pending} onClick={props.onCancel}>
+            Back
+          </Button>
+        ) : null}
         <Button type="submit" disabled={busy || !props.connected || !selection}>
-          {pending ? "Creating…" : "Create project"}
+          {props.inline
+            ? pending
+              ? "Adding…"
+              : "Continue"
+            : pending
+              ? "Creating…"
+              : "Create project"}
         </Button>
       </div>
     </form>
