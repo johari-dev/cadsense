@@ -3872,11 +3872,12 @@ function ChatViewContent(props: ChatViewProps) {
           </div>
         )}
       </Suspense>
-    ) : rightPanelSection === "drawing" && rightPanelState.drawing && isServerThread ? (
+    ) : rightPanelSection === "drawing" && rightPanelState.drawing && activeProject ? (
       <Suspense fallback={null}>
         <CadDrawingPanel
           key={`${activeThreadKey}:${rightPanelState.drawing.requestId}`}
           threadRef={activeThreadRef}
+          projectId={activeProject.id}
           drawing={rightPanelState.drawing}
         />
       </Suspense>
