@@ -7,6 +7,7 @@ import {
   DrawingMaxTapDepth,
   MAX_DRAWING_MAX_TAP_DEPTH,
   MIN_DRAWING_MAX_TAP_DEPTH,
+  type ProjectId,
   type ScopedThreadRef,
 } from "@cadsense/contracts";
 import { CaretLeftIcon, CaretRightIcon, PrinterIcon } from "~/lib/icons";
@@ -137,14 +138,17 @@ const buildSheet = (
 
 export function CadDrawingPanel({
   threadRef,
+  projectId,
   drawing,
 }: {
   threadRef: ScopedThreadRef;
+  /** Lets a draft thread, which has no server row yet, load its project's scene. */
+  projectId: ProjectId;
   drawing: RightPanelDrawing;
 }) {
   const sceneAtom = cadPanelEnvironment.scene({
     environmentId: threadRef.environmentId,
-    input: { threadId: threadRef.threadId, snapshotId: drawing.snapshotId },
+    input: { threadId: threadRef.threadId, projectId, snapshotId: drawing.snapshotId },
   });
   // Mounting the lease keeps the scene ticket alive while the drawing is open.
   const lease = useAtomValue(sceneAtom);

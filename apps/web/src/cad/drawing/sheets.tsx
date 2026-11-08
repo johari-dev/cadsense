@@ -498,7 +498,7 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
           size={0.09}
         />
         <Cell x={9.3} y={7.45} w={1.45} h={0.4} label="Team" value={data.team || "—"} size={0.1} />
-        <Cell x={7.8} y={7.85} w={1.0} h={0.4} label="Drawn" value="CADsense" size={0.08} />
+        <Cell x={7.8} y={7.85} w={1.0} h={0.4} label="Drawn" value="Cadsense" size={0.08} />
         <Cell x={8.8} y={7.85} w={0.8} h={0.4} label="Date" value={data.source.date} size={0.08} />
         <Cell
           x={9.6}

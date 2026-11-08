@@ -387,6 +387,36 @@ try {
       components: componentCount(),
     };
   });
+  // A part drawing works on the draft too. Right-clicking a row in the parts list opens it, and
+  // its sheet loads from the same scene the model does. Back returns to the model.
+  await run("draft-part-drawing", async (page) => {
+    await panel.getByRole("button", { name: "Parts", exact: true }).click();
+    const parts = page.getByRole("dialog", { name: "View changes and parts" });
+    const make = page.getByRole("menuitem", {
+      name: /^Make (part drawing|drawings for this group)$/,
+    });
+    const rows = parts.getByRole("treeitem");
+    await rows.first().waitFor();
+    let opened: string | null = null;
+    for (let index = 0; !opened && index < (await rows.count()); index++) {
+      await rows.nth(index).click({ button: "right" });
+      if ((await make.isVisible()) && (await make.isEnabled())) {
+        opened = (await rows.nth(index).innerText()).trim();
+        await make.click();
+      } else await parts.getByRole("heading", { name: /Parts/ }).click();
+    }
+    if (!opened) throw new Error("No row in the parts list offered a drawing");
+    const drawn = page.getByTestId("cad-drawing-sheet").or(page.getByTestId("cad-drawing-skipped"));
+    await drawn.first().waitFor({ timeout: 120_000 });
+    if (!new URL(page.url()).pathname.startsWith("/draft/"))
+      throw new Error("The drawing opened somewhere other than the draft");
+    const sheets = await page.getByTestId("cad-drawing-sheet").count();
+    // The step's own screenshot comes after Back, so the sheet gets one here.
+    await page.screenshot({ path: NodePath.join(out, "draft-part-drawing-sheet.png") });
+    await page.getByRole("button", { name: /^Back to / }).click();
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    return { url: page.url(), row: opened, sheets };
+  });
   // The draft's view is its own. Exploding the parts on the draft and then sending the first
   // message gives the new chat that same view, saved by the server before the turn starts.
   const explode = panel.getByRole("button", { name: "Exploded view" });
