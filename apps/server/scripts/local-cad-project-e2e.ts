@@ -738,7 +738,9 @@ try {
     kept.manifests = manifests().length;
     kept.files = folderFiles();
     await removalDialog.getByRole("button", { name: "Remove project" }).click();
-    await page.waitForURL(/\/settings\/cad-storage$/, { timeout: 60_000 });
+    await page.waitForURL((next) => next.searchParams.get("settings") === "archived", {
+      timeout: 60_000,
+    });
     await retainedEntry.waitFor({ timeout: 30_000 });
     if (manifests().length !== kept.manifests) throw new Error("Removal deleted the kept CAD");
     if (folderFiles().join() !== kept.files.join()) throw new Error("Removal changed the folder");
@@ -768,7 +770,9 @@ try {
     };
   });
   await run("restored", async (page) => {
-    await page.goto(new URL("settings/cad-storage", url).href, { waitUntil: "networkidle" });
+    await page.goto(new URL("?settings=archived#cad-storage", url).href, {
+      waitUntil: "networkidle",
+    });
     await retainedEntry.getByRole("button", { name: "Restore project" }).click();
     await retainedEntry.waitFor({ state: "detached", timeout: 60_000 });
     await page.goto(threadUrl, { waitUntil: "networkidle" });

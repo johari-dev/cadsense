@@ -53,6 +53,11 @@ import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { searchableSetting } from "./settingsSearch";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { ThreadTitleModelSection } from "./SettingsPanels";
+
+// Named apart from the Providers tab so the heading shows and the refresh button sits beside
+// it, instead of floating alone above the rows.
+const PROVIDERS_SECTION_TITLE = "AI accounts";
 
 function providerEnvironmentIcon(environment: EnvironmentPresentation) {
   if (environment.entry.target._tag === "PrimaryConnectionTarget") return MonitorIcon;
@@ -72,7 +77,7 @@ function EnvironmentUnavailableRow({
   readonly deviceTabs?: ReactNode;
 }) {
   return (
-    <SettingsSection title="Providers">
+    <SettingsSection title={PROVIDERS_SECTION_TITLE}>
       {deviceTabs}
       <SettingsRow
         title="Provider settings are unavailable"
@@ -161,12 +166,12 @@ export function ProviderSettingsPanel() {
   return (
     <SettingsPageContainer>
       {options.length === 0 ? (
-        <SettingsSection title="Providers">
+        <SettingsSection title={PROVIDERS_SECTION_TITLE}>
           <SettingsRow
             title={isReady ? "No connected devices" : "Loading devices"}
             description={
               isReady
-                ? "Connect an execution environment before configuring providers."
+                ? "Connect a device to sign in to an AI account."
                 : "Reading connected execution environments."
             }
           />
@@ -180,6 +185,8 @@ export function ProviderSettingsPanel() {
           deviceTabs={deviceTabs}
         />
       ) : null}
+
+      <ThreadTitleModelSection />
     </SettingsPageContainer>
   );
 }
@@ -312,7 +319,8 @@ function EnvironmentProviderSettings({
 
   return (
     <SettingsSection
-      {...searchableSetting("providers")}
+      id={searchableSetting("providers").id}
+      title={PROVIDERS_SECTION_TITLE}
       headerAction={
         <Tooltip>
           <TooltipTrigger

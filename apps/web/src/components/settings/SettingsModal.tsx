@@ -12,7 +12,6 @@ import { createPortal } from "react-dom";
 
 import type { EnvironmentId } from "@cadsense/contracts";
 
-import { CadStorageSettings } from "../../cad/CadStorageSettings";
 import { MagnifyingGlassIcon as SearchIcon, XIcon } from "~/lib/icons";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -57,7 +56,7 @@ function SettingsPage({
 }) {
   switch (tab) {
     case "general":
-      return <GeneralSettingsPage />;
+      return <GeneralSettingsPanel />;
     case "appearance":
       return <AppearanceSettingsPanel />;
     case "keybindings":
@@ -66,24 +65,11 @@ function SettingsPage({
       return <ProviderSettingsPanel />;
     case "integrations":
       return <IntegrationsSettingsPanel onshapeEnvironmentId={onshapeEnvironmentId} />;
-    case "cad-storage":
-      return <CadStorageSettings />;
     case "archived":
       return <ArchivedThreadsPanel />;
     case "diagnostics":
       return <DiagnosticsSettingsPanel />;
   }
-}
-
-function GeneralSettingsPage() {
-  // Restoring defaults remounts the panel so draft inputs drop their local edits.
-  const [restoreCount, setRestoreCount] = useState(0);
-  return (
-    <GeneralSettingsPanel
-      key={restoreCount}
-      onRestored={() => setRestoreCount((count) => count + 1)}
-    />
-  );
 }
 
 /**

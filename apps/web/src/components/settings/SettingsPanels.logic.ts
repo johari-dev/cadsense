@@ -1,5 +1,4 @@
 import type {
-  PreviewViewportSetting,
   ProviderDriverKind,
   ProviderInstanceConfig,
   ProviderInstanceId,
@@ -31,47 +30,6 @@ export function getChangedTypographySettingLabels(settings: TypographySettings):
     ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ||
     settings.fontSizeCode !== DEFAULT_UNIFIED_SETTINGS.fontSizeCode
       ? ["Code font"]
-      : []),
-  ];
-}
-
-export type BrowserDefaultSettings = Pick<
-  UnifiedSettings,
-  | "browserDefaultViewport"
-  | "browserDefaultZoomFactor"
-  | "browserDefaultAppearance"
-  | "browserAutoShowFloatingPreview"
->;
-
-export function isSamePreviewViewport(
-  left: PreviewViewportSetting,
-  right: PreviewViewportSetting,
-): boolean {
-  if (left._tag !== right._tag) return false;
-  if (left._tag === "fill" || right._tag === "fill") return true;
-  if (left.width !== right.width || left.height !== right.height) return false;
-  return left._tag === "preset" && right._tag === "preset"
-    ? left.presetId === right.presetId
-    : true;
-}
-
-export function getChangedBrowserSettingLabels(settings: BrowserDefaultSettings): string[] {
-  return [
-    ...(isSamePreviewViewport(
-      settings.browserDefaultViewport,
-      DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
-    )
-      ? []
-      : ["Browser viewport"]),
-    ...(settings.browserDefaultZoomFactor !== DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor
-      ? ["Browser zoom"]
-      : []),
-    ...(settings.browserDefaultAppearance !== DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance
-      ? ["Browser appearance"]
-      : []),
-    ...(settings.browserAutoShowFloatingPreview !==
-    DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview
-      ? ["Floating preview"]
       : []),
   ];
 }

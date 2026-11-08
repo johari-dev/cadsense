@@ -1285,7 +1285,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           removesActiveThread &&
           router.state.location.href === previousLocation
         ) {
-          void router.navigate({ to: "/", search: { settings: "cad-storage" } });
+          void router.navigate({ to: "/", search: { settings: "archived" }, hash: "cad-storage" });
         }
         if (result?._tag === "Failure" && !isAtomCommandInterrupted(result))
           toastManager.add(
