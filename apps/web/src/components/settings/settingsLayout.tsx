@@ -14,7 +14,6 @@ import {
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SETTINGS_SECTION_LABELS } from "./settingsSearch";
 
 interface SettingsSearchTargetContextValue {
   readonly targetId: string | null;
@@ -38,6 +37,19 @@ export function SettingsSearchTargetProvider({
 }) {
   const value = useMemo(() => ({ targetId, onTargetHandled }), [onTargetHandled, targetId]);
   return <SettingsSearchTargetContext value={value}>{children}</SettingsSearchTargetContext>;
+}
+
+const SettingsTabLabelContext = createContext<string | null>(null);
+
+/** The settings modal provides its active tab's label so a group with the same title can skip a visible heading. */
+export function SettingsTabLabelProvider({
+  label,
+  children,
+}: {
+  label: string | null;
+  children: ReactNode;
+}) {
+  return <SettingsTabLabelContext value={label}>{children}</SettingsTabLabelContext>;
 }
 
 function scrollAndFocusSettingsTarget(target: HTMLElement): void {
@@ -137,10 +149,7 @@ export function SettingsSection({
   const targetRef = useSettingsSearchTarget<HTMLElement>(sectionProps.id);
   // The active tab already names the page, so a group titled the same keeps its heading for
   // screen readers only and shows just its action.
-  const repeatsTabLabel = useLocation({
-    select: (location) =>
-      (SETTINGS_SECTION_LABELS as Readonly<Record<string, string>>)[location.pathname] === title,
-  });
+  const repeatsTabLabel = useContext(SettingsTabLabelContext) === title;
 
   return (
     // A group: its title and any header action on one line, then its rows. Rows draw the
@@ -269,7 +278,14 @@ export function SettingsPageContainer({ children }: { children: ReactNode }) {
   const hash = useLocation({ select: (location) => location.hash });
   const targetId = hash.replace(/^#/, "") || null;
   const clearTargetHash = useCallback(() => {
-    void navigate({ hash: "", replace: true, resetScroll: false, hashScrollIntoView: false });
+    // `search: true` keeps the settings params, or clearing the hash would close settings.
+    void navigate({
+      search: true,
+      hash: "",
+      replace: true,
+      resetScroll: false,
+      hashScrollIntoView: false,
+    });
   }, [navigate]);
 
   // Pages pad 12px so a row's 16px inset puts text on the same 28px edge as the modal title

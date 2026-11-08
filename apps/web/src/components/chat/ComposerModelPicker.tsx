@@ -1,5 +1,6 @@
 // Composer model picker: one trigger pill (provider icon, model, effort) that opens a single
 // panel with provider tabs, search, model rows, and the selected model's trait rows.
+import { settingsLocation } from "../settings/settingsLocation";
 import type {
   ProviderDriverKind,
   ProviderInstanceId,
@@ -339,7 +340,7 @@ export const ComposerModelPicker = memo(function ComposerModelPicker(props: {
               <TooltipTrigger
                 render={
                   <Link
-                    to="/settings/providers"
+                    {...settingsLocation("providers")}
                     aria-label="Add provider"
                     className={cn(TAB_CLASS_NAME, "px-0")}
                     onClick={() => setMenuOpen(false)}

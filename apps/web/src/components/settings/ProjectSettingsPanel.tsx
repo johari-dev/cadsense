@@ -78,7 +78,8 @@ export function ProjectSettingsPage({ projectKey: selectedProjectKey }: { projec
     previousProject.current = project;
     if (!project && previous && projectKey(previous) === selectedProjectKey) {
       void navigate({
-        to: hasCadSource(previous) ? "/settings/cad-storage" : "/",
+        to: "/",
+        search: hasCadSource(previous) ? { settings: "cad-storage" } : {},
         replace: true,
       });
     }

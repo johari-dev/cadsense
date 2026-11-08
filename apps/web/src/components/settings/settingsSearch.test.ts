@@ -11,27 +11,27 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   {
     id: "word-wrap",
     title: "Word wrap",
-    to: "/settings/general",
+    tab: "general",
   },
   {
     id: "network-access",
     title: "Network access",
-    to: "/settings/integrations",
+    tab: "integrations",
   },
   {
     id: "providers",
     title: "Providers",
-    to: "/settings/providers",
+    tab: "providers",
   },
   {
     id: "provider-updates",
     title: "Update checks",
-    to: "/settings/general",
+    tab: "general",
   },
   {
     id: "automatic-updates",
     title: "Automatic updates",
-    to: "/settings/general",
+    tab: "general",
   },
 ];
 
@@ -88,7 +88,7 @@ describe("searchSettings", () => {
   it("routes appearance settings to their current section", () => {
     expect(searchSettings("show context window")[0]).toMatchObject({
       id: "show-context-window-indicator",
-      to: "/settings/appearance",
+      tab: "appearance",
     });
   });
   it("does not offer removed appearance settings", () => {

@@ -1,3 +1,4 @@
+import { settingsLocation } from "./settingsLocation";
 import {
   ArchiveIcon,
   ArchiveIcon as ArchiveX,
@@ -1198,7 +1199,10 @@ export function GeneralSettingsPanel({ onRestored }: { readonly onRestored: () =
           {...searchableSetting("diagnostics")}
           description={diagnosticsDescription}
           control={
-            <Button render={<Link to="/settings/diagnostics" />} variant="outline">
+            <Button
+              render={<Link {...settingsLocation("diagnostics")} replace />}
+              variant="outline"
+            >
               View diagnostics
             </Button>
           }

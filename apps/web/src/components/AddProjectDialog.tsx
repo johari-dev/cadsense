@@ -1,3 +1,4 @@
+import { settingsLocation } from "./settings/settingsLocation";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
@@ -191,8 +192,7 @@ export function AddProjectDialog() {
             onConfigure={() => {
               setOpen(false);
               void navigate({
-                to: "/settings/integrations",
-                search: { environmentId: environment.environmentId },
+                ...settingsLocation("integrations", environment.environmentId),
               });
             }}
             onCreate={async (input) => {

@@ -56,8 +56,10 @@ function IndexDraftLanding() {
       return;
     }
     startingRef.current = true;
+    // The landing only forwards, so settings opened at `/` stays open over the draft.
     void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
       replace: true,
+      keepSearch: true,
     }).catch(() => {
       startingRef.current = false;
       setStartState((state) => ({ ...state, failed: true }));

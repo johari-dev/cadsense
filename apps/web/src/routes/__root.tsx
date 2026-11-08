@@ -14,6 +14,8 @@ import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { AddProjectDialog } from "../components/AddProjectDialog";
+import { SettingsOverlay } from "../components/settings/SettingsModal";
+import { parseSettingsSearch } from "../components/settings/settingsLocation";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { Button } from "../components/ui/button";
@@ -47,6 +49,7 @@ export const Route = createRootRoute({
     await resolveInitialPrimaryEnvironmentDescriptor();
     return {};
   },
+  validateSearch: parseSettingsSearch,
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
@@ -61,6 +64,7 @@ function RootRouteView() {
       <AppSidebarLayout>
         <Outlet />
       </AppSidebarLayout>
+      <SettingsOverlay />
     </CommandPalette>
   );
 

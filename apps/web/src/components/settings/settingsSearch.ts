@@ -1,116 +1,99 @@
 import { isElectron } from "~/env";
 
-export type SettingsPath =
-  | "/settings/general"
-  | "/settings/appearance"
-  | "/settings/keybindings"
-  | "/settings/providers"
-  | "/settings/integrations"
-  | "/settings/cad-storage"
-  | "/settings/archived";
+import type { SettingsTab } from "./settingsLocation";
 
 export interface SettingsSearchItem {
   readonly id: string;
   readonly title: string;
-  readonly to: SettingsPath;
+  readonly tab: SettingsTab;
   readonly targetId?: string;
   readonly desktopOnly?: boolean;
 }
-
-export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/general": "General",
-  "/settings/appearance": "Appearance",
-  "/settings/keybindings": "Keybindings",
-  "/settings/providers": "Providers",
-  "/settings/integrations": "Integrations",
-  "/settings/cad-storage": "CAD storage",
-  "/settings/archived": "Archive",
-};
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "cad-storage",
     title: "CAD storage, removed Onshape and local CAD projects, restore and cleanup",
-    to: "/settings/cad-storage",
+    tab: "cad-storage",
   },
-  { id: "interface-font", title: "Interface font", to: "/settings/appearance" },
-  { id: "prompt-font", title: "Prompt font", to: "/settings/appearance" },
-  { id: "font-smoothing", title: "Font smoothing", to: "/settings/appearance" },
-  { id: "show-permission-settings", title: "Show permission settings", to: "/settings/appearance" },
+  { id: "interface-font", title: "Interface font", tab: "appearance" },
+  { id: "prompt-font", title: "Prompt font", tab: "appearance" },
+  { id: "font-smoothing", title: "Font smoothing", tab: "appearance" },
+  { id: "show-permission-settings", title: "Show permission settings", tab: "appearance" },
   {
     id: "show-context-window-indicator",
     title: "Show context window indicator",
-    to: "/settings/appearance",
+    tab: "appearance",
   },
   {
     id: "show-onshape-sync-api-calls",
     title: "Show Onshape API calls per sync",
-    to: "/settings/appearance",
+    tab: "appearance",
   },
   {
     id: "add-project-starts-in",
     title: "Default project folder",
-    to: "/settings/general",
+    tab: "general",
   },
-  { id: "archive-confirmation", title: "Archive confirmation", to: "/settings/general" },
-  { id: "delete-confirmation", title: "Delete confirmation", to: "/settings/general" },
+  { id: "archive-confirmation", title: "Archive confirmation", tab: "general" },
+  { id: "delete-confirmation", title: "Delete confirmation", tab: "general" },
   {
     id: "quit-confirmation",
     title: "Hold to quit",
-    to: "/settings/general",
+    tab: "general",
     desktopOnly: true,
   },
   {
     id: "text-generation-model",
     title: "Thread title model",
-    to: "/settings/general",
+    tab: "general",
   },
-  { id: "usage-analytics", title: "Usage analytics", to: "/settings/general" },
-  { id: "diagnostics", title: "Diagnostics", to: "/settings/general" },
+  { id: "usage-analytics", title: "Usage analytics", tab: "general" },
+  { id: "diagnostics", title: "Diagnostics", tab: "general" },
   {
     id: "streaming-text",
     title: "Streaming text",
-    to: "/settings/general",
+    tab: "general",
   },
-  { id: "keybindings", title: "Keybindings", to: "/settings/keybindings" },
-  { id: "providers", title: "Providers", to: "/settings/providers" },
+  { id: "keybindings", title: "Keybindings", tab: "keybindings" },
+  { id: "providers", title: "Providers", tab: "providers" },
   {
     id: "onshape-connections",
     title: "Onshape connections",
-    to: "/settings/integrations",
+    tab: "integrations",
     targetId: "onshape-connections",
   },
   {
     id: "agent-browser-access",
     title: "Agent browser access",
-    to: "/settings/integrations",
+    tab: "integrations",
     targetId: "browser",
   },
   {
     id: "browser-default-viewport",
     title: "Default browser viewport",
-    to: "/settings/integrations",
+    tab: "integrations",
     targetId: "browser",
   },
   {
     id: "browser-default-zoom",
     title: "Default browser zoom",
-    to: "/settings/integrations",
+    tab: "integrations",
     targetId: "browser",
   },
   {
     id: "browser-default-appearance",
     title: "Default browser appearance",
-    to: "/settings/integrations",
+    tab: "integrations",
     targetId: "browser",
   },
   {
     id: "browser-auto-show-floating-preview",
     title: "Auto-show floating preview",
-    to: "/settings/integrations",
+    tab: "integrations",
     targetId: "browser",
   },
-  { id: "archive", title: "Archived threads", to: "/settings/archived" },
+  { id: "archive", title: "Archived threads", tab: "archived" },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
