@@ -134,6 +134,29 @@ function SidebarControl() {
   );
 }
 
+/**
+ * Caps the collapsed icon rail with a piece of the title bar, so the rail and its right border
+ * start below the bar. The rail is full height and its sidebar header hides while folded, so
+ * without this its border cut through the macOS traffic lights and its empty top (the rail's
+ * `pt-[var(--workspace-topbar-height)]`) could not drag the window. No bottom border: pages
+ * without a bordered header (empty state, settings) would show it as a stray stub.
+ */
+function SidebarRailTitlebarCap() {
+  const { isMobile, state } = useSidebar();
+  if (isMobile || state !== "collapsed") return null;
+
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "fixed top-0 left-0 z-20 h-[var(--workspace-topbar-height)] w-(--sidebar-width-icon) bg-background",
+        isElectron && "drag-region",
+      )}
+      data-sidebar-rail-titlebar=""
+    />
+  );
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const isSettingsOpen = useLocation({
@@ -253,6 +276,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
       {children}
+      {/* Before the toggle: Electron on Windows builds the drag area in DOM order and ignores
+          z-index, so the toggle's no-drag must come after this drag strip to stay clickable. */}
+      <SidebarRailTitlebarCap />
       <SidebarControl />
     </SidebarProvider>
   );
