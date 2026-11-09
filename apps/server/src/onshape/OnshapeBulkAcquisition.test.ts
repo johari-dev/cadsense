@@ -26,11 +26,11 @@ import {
   type OnshapeReadRequest,
 } from "./OnshapeConnections.ts";
 import * as Acquisition from "./OnshapeSnapshotAcquisition.ts";
+import * as RecentElements from "./OnshapeRecentElements.ts";
 import * as SyncState from "./OnshapeSyncState.ts";
 import {
   bulkFixture,
   bulkInput,
-  bulkMicroversion,
   encodeFixture,
   translationDone,
 } from "./testFixtures/bulkExport.ts";
@@ -50,23 +50,29 @@ const decodeMaterials = Schema.decodeUnknownSync(
   ),
 );
 const unused = () => Effect.die("Unexpected operation");
-const makeHarness = (count: number, multipleStudios = false) =>
+/** Part Studio of each part, by index. Studio 0 is the fixture's own. */
+type StudioOf = (part: number) => number;
+const oneStudio: StudioOf = () => 0;
+const twoStudios: StudioOf = (i) => i % 2;
+/** One studio per part, so direct fetches cost more than an export for five or more parts. */
+const ownStudios: StudioOf = (i) => i;
+const studioId = (studio: number) =>
+  studio === 0 ? "888888888888888888888888" : studio.toString(16).padStart(2, "0").repeat(12);
+const makeHarness = (count: number, studioOf: StudioOf) =>
   Effect.gen(function* () {
     const fixture = bulkFixture(count);
     const metadata = fixture.metadata;
-    if (multipleStudios) {
-      for (let i = 0; i < count; i++) {
-        const elementId = i % 2 === 0 ? "888888888888888888888888" : "999999999999999999999999";
-        fixture.definition.parts[i]!.elementId = elementId;
-        fixture.definition.rootAssembly.instances[i]!.elementId = elementId;
-        metadata[i]!.elementId = elementId;
-      }
+    for (let i = 0; i < count; i++) {
+      const elementId = studioId(studioOf(i));
+      fixture.definition.parts[i]!.elementId = elementId;
+      fixture.definition.rootAssembly.instances[i]!.elementId = elementId;
+      metadata[i]!.elementId = elementId;
     }
     const assemblyMetadata = () => ({
       bomSource: {
         document: { id: bulkInput.source.documentId },
         element: { id: bulkInput.root.elementId, configuration: "default" },
-        documentMicroversion: { id: bulkMicroversion },
+        documentMicroversion: { id: fixture.definition.rootAssembly.documentMicroversion },
       },
       rows: fixture.definition.parts.map((part, i) => ({
         itemSource: {
@@ -100,11 +106,22 @@ const makeHarness = (count: number, multipleStudios = false) =>
       omitTwoBodies: false,
       batchFailure: undefined as OnshapeResponseError | undefined,
       batchMissingPart: false,
+      failElements: false,
     };
+    // Root-document elements and their revisions, as the elements list reports them.
+    const elements = [
+      { id: bulkInput.root.elementId, elementType: "ASSEMBLY", microversionId: "a".repeat(24) },
+      { id: "8".repeat(24), elementType: "PARTSTUDIO", microversionId: "b".repeat(24) },
+      { id: "c".repeat(24), elementType: "FEATURESTUDIO", microversionId: "c".repeat(24) },
+      { id: "d".repeat(24), elementType: "ASSEMBLY", microversionId: "d".repeat(24) },
+      { id: "6a".repeat(12), elementType: "VARIABLESTUDIO", microversionId: "6a".repeat(12) },
+      { id: "e".repeat(24), elementType: "BILLOFMATERIALS", microversionId: "e".repeat(24) },
+    ];
     const statusRead = yield* Deferred.make<void>();
     const pollScheduled = yield* Deferred.make<Duration.Duration>();
     const clock = yield* Clock.Clock;
-    let pins = 0;
+    // A change during export moves the workspace revision after submission.
+    let exported = false;
     const store = yield* Store.make.pipe(
       Effect.provideService(Store.CadDiskSpace, {
         availableBytes: () => Effect.succeed(10 * 1024 ** 3),
@@ -124,11 +141,12 @@ const makeHarness = (count: number, multipleStudios = false) =>
           if (request.path.endsWith("currentmicroversion"))
             return {
               microversion:
-                ++pins > 1 && options.changedDuringExport
+                exported && options.changedDuringExport
                   ? "999999999999999999999999"
-                  : bulkMicroversion,
+                  : fixture.definition.rootAssembly.documentMicroversion,
             };
           if (request.method === "POST") {
+            exported = true;
             return options.activeSubmission
               ? { ...translationDone, requestState: "ACTIVE" }
               : translationDone;
@@ -144,6 +162,10 @@ const makeHarness = (count: number, multipleStudios = false) =>
             const response = assemblyMetadata();
             bulkMetadata.change(response);
             return response;
+          }
+          if (request.path.endsWith("/elements")) {
+            if (options.failElements) return yield* new OnshapeRateLimitError({});
+            return elements;
           }
           if (request.path.includes("/assemblies/")) return fixture.definition;
           if (request.path.includes("/parts/")) {
@@ -194,6 +216,8 @@ const makeHarness = (count: number, multipleStudios = false) =>
           return { bytes, contentType: "model/3mf" };
         }),
     });
+    // Discovery's element list lives for the server's lifetime, unlike the rebuilt services.
+    const recent = yield* RecentElements.make;
     // Rebuild both services for every attempt to test actual on-disk recovery, not an in-memory memo.
     const acquire = () =>
       Effect.gen(function* () {
@@ -203,6 +227,7 @@ const makeHarness = (count: number, multipleStudios = false) =>
         const acquisition = yield* Acquisition.make.pipe(
           Effect.provideService(OnshapeConnections, connections),
           Effect.provideService(SyncState.OnshapeSyncState, syncState),
+          Effect.provideService(RecentElements.OnshapeRecentElements, recent),
           Effect.provideService(Store.CadSnapshotStore, {
             ...store,
             publish: (manifest) =>
@@ -223,6 +248,8 @@ const makeHarness = (count: number, multipleStudios = false) =>
       acquire,
       metadata,
       definition: fixture.definition,
+      elements,
+      recent,
       bulkMetadata,
       readAsset: store.readAsset,
       requests,
@@ -234,9 +261,9 @@ const makeHarness = (count: number, multipleStudios = false) =>
 const harness = <A, E, R>(
   use: (h: Effect.Success<ReturnType<typeof makeHarness>>) => Effect.Effect<A, E, R>,
   count = 400,
-  multipleStudios = false,
+  studioOf = oneStudio,
 ) =>
-  makeHarness(count, multipleStudios).pipe(
+  makeHarness(count, studioOf).pipe(
     Effect.flatMap(use),
     Effect.provide(
       layerTest(process.cwd(), { prefix: "onshape-bulk-" }).pipe(
@@ -246,7 +273,91 @@ const harness = <A, E, R>(
     Effect.scoped,
   );
 
+type Harness = Effect.Success<ReturnType<typeof makeHarness>>;
+/** Moves every part into the root document, as parts authored in the assembly's own document. */
+const authorInRootDocument = (h: Harness) => {
+  for (const part of [...h.definition.parts, ...h.definition.rootAssembly.instances]) {
+    part.documentId = bulkInput.source.documentId;
+    part.documentMicroversion = h.definition.rootAssembly.documentMicroversion;
+    Reflect.deleteProperty(part, "documentVersion");
+  }
+  for (const row of h.metadata) row.microversionId = h.definition.rootAssembly.documentMicroversion;
+};
+/** A new document revision: every root-document reference moves to it. */
+const advanceRevision = (h: Harness, microversion: string) => {
+  h.definition.rootAssembly.documentMicroversion = microversion;
+  for (const part of [...h.definition.parts, ...h.definition.rootAssembly.instances])
+    if (part.documentId === bulkInput.source.documentId) part.documentMicroversion = microversion;
+  for (const row of h.metadata) row.microversionId = microversion;
+};
+const editElement = (h: Harness, elementType: string) => {
+  const element = h.elements.find(
+    (e) => e.elementType === elementType && e.id !== bulkInput.root.elementId,
+  )!;
+  element.microversionId = "f".repeat(24);
+};
+const editRootAssembly = (h: Harness) => {
+  h.elements[0]!.microversionId = "9".repeat(24);
+  h.elements.find((e) => e.elementType === "BILLOFMATERIALS")!.microversionId = "9".repeat(24);
+};
+
+/** An export or a source-geometry download. */
+const downloadsGeometry = (request: { readonly path: string; readonly method?: string }) =>
+  request.method === "POST" ||
+  request.path.endsWith("/gltf") ||
+  request.path.includes("/externaldata/");
+
 describe("bulk snapshot acquisition", () => {
+  it.effect("fetches a few missing studios directly instead of exporting", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          const manifest = yield* h.acquire();
+          assert.lengthOf(manifest.assets, 3);
+          assert.deepEqual(
+            h.requests.map((r) => r.path.split("/").slice(3, 4)[0]),
+            ["assemblies", "parts", "partstudios"],
+          );
+          assert.deepEqual(new URLSearchParams(h.requests[2]!.query).getAll("partId"), [
+            "part-0",
+            "part-1",
+            "part-2",
+          ]);
+        }),
+      3,
+    ),
+  );
+  it.effect("exports when direct fetches would cost more than the export", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.acquire();
+          assert.lengthOf(
+            h.requests.filter((r) => r.method === "POST"),
+            1,
+          );
+          assert.isFalse(h.requests.some((r) => r.path.endsWith("/gltf")));
+        }),
+      5,
+      ownStudios,
+    ),
+  );
+  it.effect("splits a large studio into 64-part batches instead of per-part requests", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          const manifest = yield* h.acquire();
+          assert.lengthOf(manifest.assets, 130);
+          const batches = h.requests.filter((r) => r.path.endsWith("/gltf"));
+          assert.deepEqual(
+            batches.map((r) => new URLSearchParams(r.query).getAll("partId").length),
+            [64, 64, 2],
+          );
+          assert.isFalse(h.requests.some((r) => r.path.includes("/partid/")));
+        }),
+      130,
+    ),
+  );
   it.effect(
     "uses one assembly metadata read across studios and keeps opacity and review identities",
     () =>
@@ -270,7 +381,7 @@ describe("bulk snapshot acquisition", () => {
             assert.lengthOf(manifest.assets, 4);
           }),
         4,
-        true,
+        twoStudios,
       ),
   );
 
@@ -300,7 +411,7 @@ describe("bulk snapshot acquisition", () => {
           assert.equal(manifest.parts[0]!.source.fullConfiguration, "Width=1;Finish=Default");
         }),
       4,
-      true,
+      twoStudios,
     ),
   );
 
@@ -328,13 +439,13 @@ describe("bulk snapshot acquisition", () => {
             1,
           );
           assert.lengthOf(
-            h.requests.filter((r) => r.path.includes("/parts/")),
+            h.requests.filter((r) => r.path.includes("/parts/") && !r.path.endsWith("/gltf")),
             2,
           );
           assert.equal(manifest.parts[0]!.metadata?.isHidden, false);
         }),
       4,
-      true,
+      twoStudios,
     ),
   );
 
@@ -356,7 +467,7 @@ describe("bulk snapshot acquisition", () => {
           );
         }),
       4,
-      true,
+      twoStudios,
     ),
   );
 
@@ -385,7 +496,7 @@ describe("bulk snapshot acquisition", () => {
             assert.equal(manifest.parts[0]!.source.fullConfiguration, "Width=1;Visible=false");
           }),
         4,
-        true,
+        twoStudios,
       ),
   );
 
@@ -432,7 +543,7 @@ describe("bulk snapshot acquisition", () => {
             assert.lengthOf(manifest.assets, 4);
           }),
         4,
-        true,
+        twoStudios,
       ),
     );
   }
@@ -461,7 +572,7 @@ describe("bulk snapshot acquisition", () => {
               assert.lengthOf(manifest.assets, 4);
             }),
           4,
-          true,
+          twoStudios,
         ),
     );
   }
@@ -489,7 +600,7 @@ describe("bulk snapshot acquisition", () => {
             );
           }),
         4,
-        true,
+        twoStudios,
       ),
     );
   }
@@ -513,7 +624,8 @@ describe("bulk snapshot acquisition", () => {
           assert.equal(materials[0]!.alphaMode, "BLEND");
           assert.equal(materials[1]!.pbrMetallicRoughness.baseColorFactor[3], 1);
         }),
-      2,
+      5,
+      ownStudios,
     ),
   );
   it.effect("preserves authored part opacity in bulk snapshot metadata", () =>
@@ -571,7 +683,7 @@ describe("bulk snapshot acquisition", () => {
             }
         }),
       8,
-      true,
+      twoStudios,
     ),
   );
   it.effect("downloads only an omitted source body and resumes without resubmission", () =>
@@ -580,7 +692,7 @@ describe("bulk snapshot acquisition", () => {
         Effect.gen(function* () {
           h.options.omitBody = true;
           const result = yield* h.acquire();
-          assert.lengthOf(result.assets, 2);
+          assert.lengthOf(result.assets, 5);
           const exports = h.requests.filter((request) => request.method === "POST");
           assert.lengthOf(exports, 1);
           const before = h.requests.length;
@@ -600,16 +712,19 @@ describe("bulk snapshot acquisition", () => {
           );
           assert.isTrue(materials.every((material) => material.doubleSided === true));
         }),
-      2,
+      5,
+      ownStudios,
     ),
   );
+  /** Parts 0 and 1 share a studio and four others stand alone: five direct fetches. */
+  const pairedStudios: StudioOf = (i) => Math.max(0, i - 1);
   it.effect("batches only unresolved source bodies without a second assembly export", () =>
     harness(
       (h) =>
         Effect.gen(function* () {
           h.options.omitTwoBodies = true;
           const result = yield* h.acquire();
-          assert.lengthOf(result.assets, 3);
+          assert.lengthOf(result.assets, 6);
           assert.lengthOf(
             h.requests.filter((r) => r.method === "POST"),
             1,
@@ -624,9 +739,10 @@ describe("bulk snapshot acquisition", () => {
             "part-0",
             "part-1",
           ]);
-          assert.lengthOf(h.requests, 7);
+          assert.lengthOf(h.requests, 6);
         }),
-      3,
+      6,
+      pairedStudios,
     ),
   );
   it.effect("fetches composite parts from source geometry instead of the archive", () =>
@@ -638,7 +754,7 @@ describe("bulk snapshot acquisition", () => {
           h.definition.parts[1]!.bodyType = "composite";
           h.metadata[1]!.bodyType = "composite";
           const result = yield* h.acquire();
-          assert.lengthOf(result.assets, 3);
+          assert.lengthOf(result.assets, 5);
           const fallback = h.requests.filter((r) => r.path.includes("/partid/"));
           assert.lengthOf(fallback, 1);
           assert.include(fallback[0]!.path, "/partid/part-1/gltf");
@@ -647,7 +763,8 @@ describe("bulk snapshot acquisition", () => {
             0,
           );
         }),
-      3,
+      5,
+      ownStudios,
     ),
   );
   for (const fault of ["too-large", "timeout", "missing-part"] as const) {
@@ -659,7 +776,7 @@ describe("bulk snapshot acquisition", () => {
             if (fault === "missing-part") h.options.batchMissingPart = true;
             else h.options.batchFailure = new OnshapeResponseError({ reason: fault });
             const result = yield* h.acquire();
-            assert.lengthOf(result.assets, 3);
+            assert.lengthOf(result.assets, 6);
             assert.lengthOf(
               h.requests.filter((r) => r.method === "POST"),
               1,
@@ -673,7 +790,8 @@ describe("bulk snapshot acquisition", () => {
               fault === "missing-part" ? 1 : 2,
             );
           }),
-        3,
+        6,
+        pairedStudios,
       ),
     );
   }
@@ -685,7 +803,7 @@ describe("bulk snapshot acquisition", () => {
           const first = yield* h.acquire();
           assert.lengthOf(first.parts, 400);
           assert.lengthOf(first.assets, 400);
-          assert.lengthOf(h.requests, 6);
+          assert.lengthOf(h.requests, 5);
           assert.lengthOf(
             h.requests.filter((request) => request.path.includes("/partid/")),
             0,
@@ -699,11 +817,13 @@ describe("bulk snapshot acquisition", () => {
           });
           const second = yield* h.acquire();
           assert.equal(second.snapshotId, first.snapshotId);
-          assert.lengthOf(h.requests, 7);
+          assert.lengthOf(h.requests, 6);
+          // The workspace definition reports its microversion, so it is the only revision check.
+          assert.include(h.requests[5]!.path, `/assemblies/d/${bulkInput.source.documentId}/w/`);
         }),
       ),
   );
-  it.effect("resumes a failed download without another export or definition request", () =>
+  it.effect("resumes a failed download without another export", () =>
     harness((h) =>
       Effect.gen(function* () {
         h.options.failDownload = true;
@@ -741,9 +861,193 @@ describe("bulk snapshot acquisition", () => {
           const error = yield* h.acquire().pipe(Effect.flip);
           assert.equal(error._tag, "OnshapeExportError");
           assert.equal("reason" in error ? error.reason : null, "revision-changed");
-          assert.lengthOf(h.requests, 5);
+          assert.lengthOf(h.requests, 4);
         }),
-      2,
+      5,
+      ownStudios,
+    ),
+  );
+  it.effect("reuses linked geometry and metadata after a revision change", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          yield* h.acquire();
+          const before = h.requests.length;
+          h.definition.rootAssembly.documentMicroversion = "aaaaaaaaaaaaaaaaaaaaaaaa";
+          const changed = yield* h.acquire();
+          assert.equal(changed.root.microversionId, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          assert.lengthOf(changed.assets, 3);
+          // Linked versions never change, so only the definition is read.
+          const requests = h.requests.slice(before);
+          assert.lengthOf(requests, 1);
+          assert.isFalse(
+            requests.some(
+              (r) =>
+                r.method === "POST" || r.path.endsWith("/gltf") || r.path.endsWith("/elements"),
+            ),
+          );
+        }),
+      3,
+    ),
+  );
+  it.effect("reuses root-document geometry without exporting after an assembly-only edit", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          const first = yield* h.acquire();
+          assert.lengthOf(
+            h.requests.filter((r) => r.path.endsWith("/elements")),
+            1,
+          );
+          const before = h.requests.length;
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          editRootAssembly(h);
+          const changed = yield* h.acquire();
+          const requests = h.requests.slice(before);
+          assert.deepEqual(
+            requests.map((r) => r.path.split("/").slice(3, 4)[0]),
+            ["assemblies", "documents"],
+          );
+          assert.include(requests[1]!.path, "/m/aaaaaaaaaaaaaaaaaaaaaaaa/elements");
+          assert.equal(changed.root.microversionId, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          assert.notDeepEqual(
+            changed.parts.map((part) => part.geometryKey),
+            first.parts.map((part) => part.geometryKey),
+          );
+          assert.deepEqual(
+            changed.assets.map((asset) => asset.sha256),
+            first.assets.map((asset) => asset.sha256),
+          );
+          // The next edit compares against the reused snapshot.
+          advanceRevision(h, "cccccccccccccccccccccccc");
+          const after = h.requests.length;
+          yield* h.acquire();
+          assert.isFalse(h.requests.slice(after).some(downloadsGeometry));
+        }),
+      3,
+    ),
+  );
+  // Onshape bumps a studio's revision when its features, part properties, Feature Studio code,
+  // or derived sources change, and never for assembly edits. Unmeasured kinds count for all.
+  for (const [elementType, refetches] of [
+    ["PARTSTUDIO", true],
+    ["VARIABLESTUDIO", true],
+    ["FEATURESTUDIO", false],
+    ["ASSEMBLY", false],
+  ] as const)
+    it.effect(
+      `${refetches ? "refetches" : "reuses"} root-document geometry after a ${elementType} edit`,
+      () =>
+        harness(
+          (h) =>
+            Effect.gen(function* () {
+              authorInRootDocument(h);
+              yield* h.acquire();
+              const before = h.requests.length;
+              advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+              editElement(h, elementType);
+              const changed = yield* h.acquire();
+              assert.lengthOf(changed.assets, 3);
+              assert.equal(h.requests.slice(before).some(downloadsGeometry), refetches);
+            }),
+          3,
+        ),
+    );
+  it.effect("refetches a part and its metadata after an appearance edit in its studio", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          yield* h.acquire();
+          const before = h.requests.length;
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          h.metadata[1]!.appearance.opacity = 127;
+          editElement(h, "PARTSTUDIO");
+          const changed = yield* h.acquire();
+          assert.equal(changed.parts[1]!.metadata?.appearance?.opacity, 127);
+          assert.isTrue(h.requests.slice(before).some(downloadsGeometry));
+        }),
+      3,
+    ),
+  );
+  it.effect("records discovery's element list on a first sync instead of reading it", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          yield* h.recent.remember(bulkInput.source, structuredClone(h.elements));
+          yield* h.acquire();
+          assert.isFalse(h.requests.some((r) => r.path.endsWith("/elements")));
+          // The recorded fingerprint matches the next revision's own read.
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          editRootAssembly(h);
+          const before = h.requests.length;
+          yield* h.acquire();
+          const requests = h.requests.slice(before);
+          assert.lengthOf(
+            requests.filter((r) => r.path.endsWith("/elements")),
+            1,
+          );
+          assert.isFalse(requests.some(downloadsGeometry));
+        }),
+      3,
+    ),
+  );
+  it.effect("compares against an earlier snapshot with its own element list", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          yield* h.acquire();
+          // A list read before a Part Studio edit must not stand in for this revision's.
+          const stale = structuredClone(h.elements);
+          editElement(h, "PARTSTUDIO");
+          yield* h.recent.remember(bulkInput.source, stale);
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          const before = h.requests.length;
+          yield* h.acquire();
+          const requests = h.requests.slice(before);
+          assert.lengthOf(
+            requests.filter((r) => r.path.endsWith("/elements")),
+            1,
+          );
+          assert.isTrue(requests.some(downloadsGeometry));
+        }),
+      3,
+    ),
+  );
+  it.effect("reads its own element list when discovery's is over two minutes old", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          yield* h.recent.remember(bulkInput.source, structuredClone(h.elements));
+          yield* TestClock.adjust("3 minutes");
+          yield* h.acquire();
+          assert.lengthOf(
+            h.requests.filter((r) => r.path.endsWith("/elements")),
+            1,
+          );
+        }),
+      3,
+    ),
+  );
+  it.effect("keeps the reuse baseline when a changed sync fails before exporting", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          yield* h.acquire();
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          h.options.failElements = true;
+          assert.equal((yield* h.acquire().pipe(Effect.flip))._tag, "OnshapeRateLimitError");
+          h.options.failElements = false;
+          const before = h.requests.length;
+          yield* h.acquire();
+          assert.isFalse(h.requests.slice(before).some(downloadsGeometry));
+        }),
+      3,
     ),
   );
   it.effect("bounds status polling and preserves the job for the next explicit sync", () =>
@@ -771,7 +1075,8 @@ describe("bulk snapshot acquisition", () => {
             1,
           );
         }),
-      2,
+      5,
+      ownStudios,
     ),
   );
   it.effect("waits twenty seconds before polling a newly submitted export", () =>
@@ -789,13 +1094,14 @@ describe("bulk snapshot acquisition", () => {
           );
           yield* TestClock.adjust("1 second");
           const manifest = yield* Fiber.join(fiber);
-          assert.lengthOf(manifest.assets, 2);
+          assert.lengthOf(manifest.assets, 5);
           assert.lengthOf(
             h.requests.filter((r) => r.path.includes("/translations/")),
             1,
           );
         }),
-      2,
+      5,
+      ownStudios,
     ),
   );
 });

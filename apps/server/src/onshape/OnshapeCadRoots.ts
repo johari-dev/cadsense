@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import {
   OnshapeElementId,
   type OnshapeConnectionError,
@@ -10,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import { OnshapeConnections } from "./OnshapeConnections.ts";
+import { OnshapeRecentElements } from "./OnshapeRecentElements.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 
 const MicroversionResponse = Schema.Struct({ microversion: OnshapeWorkspaceId });
@@ -18,6 +20,7 @@ const ElementsResponse = Schema.Array(
     id: OnshapeElementId,
     name: Schema.String,
     elementType: Schema.String,
+    microversionId: Schema.optionalKey(OnshapeWorkspaceId),
   }),
 ).check(Schema.isMaxLength(10_000));
 const decodeMicroversion = Schema.decodeUnknownEffect(MicroversionResponse);
@@ -60,6 +63,7 @@ export class OnshapeCadRoots extends Context.Service<
  */
 export const make = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
+  const recent = yield* OnshapeRecentElements;
   const discover: OnshapeCadRoots["Service"]["discover"] = Effect.fn("OnshapeCadRoots.discover")(
     function* <E = never, R = never>(
       source: OnshapeProjectSource,
@@ -77,29 +81,13 @@ export const make = Effect.gen(function* () {
           ),
         );
 
-      // Resolve once, then list at that immutable revision even if the workspace advances.
-      const microversionId =
-        source.workspaceType === "m"
-          ? source.workspaceId
-          : (yield* read(
-              `${ONSHAPE_API_BASE_PATH}/documents/d/${source.documentId}/${source.workspaceType}/${source.workspaceId}/currentmicroversion`,
-            ).pipe(
-              Effect.flatMap(decodeMicroversion),
-              Effect.catchTag("SchemaError", () =>
-                Effect.fail(new OnshapeCadRootsError({ reason: "invalid-response" })),
-              ),
-            )).microversion;
-
+      const invalidResponse = () =>
+        Effect.fail(new OnshapeCadRootsError({ reason: "invalid-response" }));
+      // One read of the source revision lists every element with its own revision.
       const elements = yield* read(
-        `${ONSHAPE_API_BASE_PATH}/documents/d/${source.documentId}/m/${microversionId}/elements`,
+        `${ONSHAPE_API_BASE_PATH}/documents/d/${source.documentId}/${source.workspaceType}/${source.workspaceId}/elements`,
         "withThumbnails=false",
-      ).pipe(
-        Effect.flatMap(decodeElements),
-        Effect.catchTag("SchemaError", () =>
-          Effect.fail(new OnshapeCadRootsError({ reason: "invalid-response" })),
-        ),
-      );
-
+      ).pipe(Effect.flatMap(decodeElements), Effect.catchTag("SchemaError", invalidResponse));
       const ids = new Set<OnshapeElementId>();
       for (const element of elements) {
         if (ids.has(element.id)) {
@@ -107,6 +95,30 @@ export const make = Effect.gen(function* () {
         }
         ids.add(element.id);
       }
+      // The first sync after discovery records this list instead of reading it again.
+      if (source.workspaceType !== "m") yield* recent.remember(source, elements);
+
+      // Nothing reads the catalog revision; it only changes with the listed elements. Like the
+      // local catalog's, a workspace catalog's is a stand-in derived from element revisions.
+      const revisions = elements.flatMap((element) =>
+        element.microversionId === undefined ? [] : [`${element.id}:${element.microversionId}`],
+      );
+      const microversionId =
+        source.workspaceType === "m"
+          ? source.workspaceId
+          : revisions.length === elements.length
+            ? OnshapeWorkspaceId.make(
+                NodeCrypto.createHash("sha256")
+                  .update(revisions.sort().join(","))
+                  .digest("hex")
+                  .slice(0, 24),
+              )
+            : (yield* read(
+                `${ONSHAPE_API_BASE_PATH}/documents/d/${source.documentId}/${source.workspaceType}/${source.workspaceId}/currentmicroversion`,
+              ).pipe(
+                Effect.flatMap(decodeMicroversion),
+                Effect.catchTag("SchemaError", invalidResponse),
+              )).microversion;
 
       const roots: OnshapeCadRoot[] = [];
       for (const element of elements) {

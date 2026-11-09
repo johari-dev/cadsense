@@ -14,6 +14,7 @@ import { CAD_SCENE_LIMITS } from "@cadsense/shared/cadSceneBudget";
 import { CadSnapshotStore, CadSnapshotStoreError } from "../cad/CadSnapshotStore.ts";
 import { OnshapeConnections, type OnshapeReadRequest } from "./OnshapeConnections.ts";
 import * as Acquisition from "./OnshapeSnapshotAcquisition.ts";
+import * as RecentElements from "./OnshapeRecentElements.ts";
 import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
 const source = Schema.decodeUnknownSync(OnshapeProjectSource)({
@@ -191,6 +192,7 @@ const harness = Effect.fn(function* (options?: {
     Effect.provideService(CadSnapshotStore, store),
     Effect.provideService(OnshapeSyncState, { withEntry: unused }),
     Effect.provideService(OnshapeConnections, connections),
+    Effect.provideServiceEffect(RecentElements.OnshapeRecentElements, RecentElements.make),
   );
   return { service, requests, published, events, active: () => active };
 });

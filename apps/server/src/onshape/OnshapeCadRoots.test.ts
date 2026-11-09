@@ -8,10 +8,12 @@ import {
 } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import { OnshapeConnections, type OnshapeConnectionsShape } from "./OnshapeConnections.ts";
 import * as CadRoots from "./OnshapeCadRoots.ts";
+import * as RecentElements from "./OnshapeRecentElements.ts";
 
 const source = OnshapeProjectSource.make({
   connectionId: OnshapeConnectionId.make("00000000-0000-4000-8000-000000000001"),
@@ -57,8 +59,12 @@ const makeHarness = Effect.fn(function* (options?: {
           : (options?.elementsResponse ?? elements);
       }),
   });
-  const service = yield* CadRoots.make.pipe(Effect.provideService(OnshapeConnections, connections));
-  return { service, requests };
+  const recent = yield* RecentElements.make;
+  const service = yield* CadRoots.make.pipe(
+    Effect.provideService(OnshapeConnections, connections),
+    Effect.provideService(RecentElements.OnshapeRecentElements, recent),
+  );
+  return { service, requests, recent };
 });
 
 describe("Onshape CAD root discovery", () => {
@@ -70,36 +76,50 @@ describe("Onshape CAD root discovery", () => {
   );
 
   it.effect.each(["w", "v"] as const)(
-    "pins %s before listing and preserves configuration",
+    "lists %s elements in one request and preserves configuration",
     (workspaceType) =>
       Effect.gen(function* () {
-        const harness = yield* makeHarness();
+        const revised = elements.map((element, i) => ({
+          ...element,
+          microversionId: String(i + 1).repeat(24),
+        }));
+        const harness = yield* makeHarness({ elementsResponse: revised });
         const input = { ...source, workspaceType };
         const result = yield* harness.service.discover(input);
-        assert.deepStrictEqual(result, {
-          microversionId,
-          sourceElement: null,
-          roots: [
-            { elementId: assemblyId, name: "Intake assembly", kind: "assembly" },
-            { elementId: studioId, name: studioId, kind: "part-studio" },
-          ],
-        });
+        assert.deepStrictEqual(result.roots, [
+          { elementId: assemblyId, name: "Intake assembly", kind: "assembly" },
+          { elementId: studioId, name: studioId, kind: "part-studio" },
+        ]);
+        assert.match(result.microversionId, /^[a-f0-9]{24}$/);
         assert.deepStrictEqual(yield* Ref.get(harness.requests), [
           {
             connectionId: source.connectionId,
             host: source.host,
-            path: `/api/v17/documents/d/${source.documentId}/${workspaceType}/${source.workspaceId}/currentmicroversion`,
-            query: "",
-          },
-          {
-            connectionId: source.connectionId,
-            host: source.host,
-            path: `/api/v17/documents/d/${source.documentId}/m/${microversionId}/elements`,
+            path: `/api/v17/documents/d/${source.documentId}/${workspaceType}/${source.workspaceId}/elements`,
             query: "withThumbnails=false",
           },
         ]);
         assert.strictEqual(input.configuration, "Size=Large & Color=Blue+White");
+        // A first sync right after discovery records this list instead of reading it.
+        assert.isTrue(Option.isSome(yield* harness.recent.take(input)));
+        // The stand-in revision changes only with an element revision.
+        revised[1]!.microversionId = "9".repeat(24);
+        const edited = yield* harness.service.discover(input);
+        assert.notStrictEqual(edited.microversionId, result.microversionId);
       }),
+  );
+
+  it.effect("pins the revision when elements omit their revisions", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const result = yield* harness.service.discover(source);
+      assert.strictEqual(result.microversionId, microversionId);
+      const requests = yield* Ref.get(harness.requests);
+      assert.deepStrictEqual(
+        requests.map((request) => request.path.split("/").at(-1)),
+        ["elements", "currentmicroversion"],
+      );
+    }),
   );
 
   it.effect("uses a supplied microversion with one request", () =>
@@ -110,6 +130,8 @@ describe("Onshape CAD root discovery", () => {
       const requests = yield* Ref.get(harness.requests);
       assert.strictEqual(requests.length, 1);
       assert.include(requests[0]?.path ?? "", `/m/${source.workspaceId}/elements`);
+      // Microversion links never take the bulk path that records element lists.
+      assert.isTrue(Option.isNone(yield* harness.recent.take({ ...source, workspaceType: "m" })));
     }),
   );
 
@@ -164,7 +186,7 @@ describe("Onshape CAD root discovery", () => {
       assert.notInclude(String(error), "Private name");
       assert.strictEqual(
         (yield* Ref.get(harness.requests)).length,
-        "microversionResponse" in options ? 1 : 2,
+        "microversionResponse" in options ? 2 : 1,
       );
     }),
   );

@@ -89,6 +89,69 @@ after the document next changes. This run's artifacts are in
 `cad_hierarchy` over the stored manifest. The earlier `bom-targeted-live` recording no
 longer replays, because the BOM query now includes the Mass column.
 
+## Changed syncs
+
+November 8–9, 2026. Document `09b200c27afe613145d0d59f`, workspace `5aa10df555892630f7d012b9`,
+element `8b00bbb271a79c94ff741d94`, microversion `4b1c2dbc4a5dfc928f452d30`.
+
+The installed app spent 11 requests on every sync after a document edit, the same as a cold
+import. A new microversion discarded the whole checkpoint. The first Sync click also ran a
+2-request catalog discovery, so a first import cost 13.
+
+| Sync                              | Before | After | Requests after                                |
+| --------------------------------- | -----: | ----: | --------------------------------------------- |
+| Catalog discovery                 |      2 |     1 | elements                                      |
+| Cold, right after discovery       |     11 |    10 | definition, BOM, export (4), 4 studio batches |
+| Unchanged                         |      1 |     1 | definition                                    |
+| Assembly-only edit                |     11 |     2 | definition, elements                          |
+| Edit to a 6-part studio           |     11 |     4 | definition, elements, BOM, 1 studio batch     |
+| Edit to the 96-part studio        |     11 |     5 | definition, elements, BOM, 2 studio batches   |
+| Edit affecting every studio       |     11 |     7 | definition, elements, BOM, 4 studio batches   |
+| Cold, another project, same links |     11 |     7 | definition, BOM, elements, 4 studio batches   |
+| Subassembly root, same revision   |     11 |     2 | definition, BOM                               |
+
+The export is submit, poll, revision check, and download.
+
+How each saving works:
+
+- A workspace assembly definition reports `rootAssembly.documentMicroversion`, so it replaces
+  the first revision check. The live `/w/` and `/m/` responses were byte-identical.
+- Geometry keys pin each source revision. Linked documents are versioned, so their keys survive
+  workspace edits and are shared by every project.
+- Each Part Studio's element `microversionId` is its revision. A scratch-document experiment
+  (`element-revision-lab/`) measured what changes it. Renaming a part, changing its appearance,
+  editing the Feature Studio its feature uses, and adding a feature each changed that studio
+  and the studio deriving from it. Nothing changed unrelated elements. Across this document's
+  last 50 edits, all assembly edits, only the assembly and its BOM element changed.
+- Acquisition records a revision per root-document studio. It also folds in element kinds not
+  measured, such as Variable Studios and imported files. Parts of unchanged studios carry their
+  previous geometry and metadata forward. Part properties change the studio revision and linked
+  versions never change, so when every part carries forward, the BOM is not read.
+- A changed revision keeps the last completed checkpoint until a newer one replaces it, so a
+  sync that fails early does not lose what it can reuse.
+- When the parts still missing span few studios, acquisition fetches them directly: one request
+  per studio, in batches of at most 64 parts. It does this whenever that costs no more than an
+  export's submit, poll, download, and workspace revision check. Larger groups no longer fall
+  back to one request per part.
+- Discovery lists elements at the workspace and derives its unused catalog revision from them.
+  A cold sync within two minutes records that list instead of reading it again.
+
+Every phase matched the original snapshot's nodes, parts, metadata, and dependencies. Assets are
+byte-identical except refetched studios, which use the synchronous tessellation: after an edit
+to every studio, 1,263,720 triangles and 44.6 MB instead of 1,072,754 and 37.5 MB.
+
+Rejected:
+
+- A BOM read at `/w/` cannot replace the post-export revision check. It reports no
+  `documentMicroversion`, and its rows use `wvmType: "w"`, so no metadata matched.
+- Translation status responses carry no microversion. The connection policy allows exports only
+  at `w` or `v`, as Onshape documents, so exporting at the pinned microversion was not tried.
+- `documenthistory` at a microversion returns 400.
+
+Artifacts: `target-baseline-live/` (11 and 1), `target-v6-live/` (every row above),
+`target-v6-replay/` (the same counts offline), `element-revision-lab/` (the scratch-document
+edits), and `element-mv-research/`. Earlier runs are kept for comparison.
+
 ## Geometry and appearance
 
 Both versions retain **577 scene nodes, 196 source-part records, and 153 assets**.
