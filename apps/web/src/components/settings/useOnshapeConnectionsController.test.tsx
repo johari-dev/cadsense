@@ -345,8 +345,11 @@ describe("Onshape connections controller", () => {
     controller = renderController();
 
     expect(testState.confirm).toHaveBeenCalledWith(
-      'Remove "Team Onshape" and its saved credentials? Existing Onshape projects stay available offline, but future sync requires another compatible connection. This cannot be undone.',
-      { variant: "destructive" },
+      expect.objectContaining({
+        title: "Remove Team Onshape?",
+        confirmLabel: "Remove connection",
+        variant: "destructive",
+      }),
     );
     expect(testState.remove).toHaveBeenCalledWith({
       environmentId,

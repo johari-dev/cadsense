@@ -6,6 +6,7 @@ import {
 } from "@cadsense/client-runtime/state/runtime";
 import type { ScopedThreadRef, ThreadId, OnshapeProjectSource } from "@cadsense/contracts";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
+import { threadDeleteConfirmation } from "../components/confirmations";
 import { useCallback } from "react";
 
 import {
@@ -42,15 +43,13 @@ export function useThreadActionMenu(input: {
   readonly onStartRename: () => void;
 }) {
   const { threadRef, projectCwd, onshapeSource, onStartRename } = input;
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { archiveThread, deleteThread, offerArchiveUndo } = useThreadActions();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
   const pinThread = useAtomCommand(threadEnvironment.pin, { reportFailure: false });
   const unpinThread = useAtomCommand(threadEnvironment.unpin, { reportFailure: false });
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
-  const confirmThreadArchive = useClientSettings((settings) => settings.confirmThreadArchive);
-  const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{
     path: string;
     onshape?: boolean;
@@ -139,40 +138,51 @@ export function useThreadActionMenu(input: {
             );
             return;
           case "unpin": {
-            if (confirmThreadUnpin) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Unpin thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
+            const result = await unpinThread({
+              environmentId: threadRef.environmentId,
+              input: { threadId: threadRef.threadId },
+            });
+            if (result._tag === "Failure") {
+              if (!isAtomCommandInterrupted(result)) {
+                failureToast("Failed to unpin thread", squashAtomCommandFailure(result));
+              }
+              return;
             }
-            await reportFailure("Failed to unpin thread", () =>
-              unpinThread({
-                environmentId: threadRef.environmentId,
-                input: { threadId: threadRef.threadId },
+            const toastId = toastManager.add(
+              stackedThreadToast({
+                type: "success",
+                title: `Unpinned "${thread.title}"`,
+                actionProps: {
+                  children: "Undo",
+                  onClick: () => {
+                    toastManager.close(toastId);
+                    void reportFailure("Failed to pin thread", () =>
+                      pinThread({
+                        environmentId: threadRef.environmentId,
+                        input: { threadId: threadRef.threadId },
+                      }),
+                    );
+                  },
+                },
               }),
             );
             return;
           }
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
+            const result = await archiveThread(threadRef);
+            if (result._tag === "Failure") {
+              if (!isAtomCommandInterrupted(result)) {
+                failureToast("Failed to archive thread", squashAtomCommandFailure(result));
+              }
+              return;
             }
-            await reportFailure("Failed to archive thread", () => archiveThread(threadRef));
+            offerArchiveUndo([{ ref: threadRef, title: thread.title }]);
             return;
           }
           case "delete": {
             if (confirmThreadDelete) {
               const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(
-                  [
-                    `Delete thread "${thread.title}"?`,
-                    "This permanently clears conversation history for this thread.",
-                  ].join("\n"),
-                  { variant: "destructive" },
-                ),
+                api.dialogs.confirm(threadDeleteConfirmation(thread)),
               );
               if (confirmed._tag === "Failure" || !confirmed.value) return;
             }
@@ -186,12 +196,11 @@ export function useThreadActionMenu(input: {
     },
     [
       archiveThread,
-      confirmThreadArchive,
       confirmThreadDelete,
-      confirmThreadUnpin,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      offerArchiveUndo,
       onStartRename,
       projectCwd,
       onshapeSource,

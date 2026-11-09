@@ -269,7 +269,7 @@ try {
   await run("create-project", async (page) => {
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Add project" }).first().click();
-    await page.getByRole("button", { name: "Onshape project" }).click();
+    await page.getByRole("button", { name: "Onshape document" }).click();
     const form = page.getByRole("form", { name: "Create Onshape project" });
     const connection = form.getByLabel("Connection");
     await waitFor("the connection list", async () =>
@@ -280,7 +280,9 @@ try {
     await form.getByLabel("Onshape URL").fill(values.url!);
     await page.waitForTimeout(1000);
     await form.getByRole("button", { name: "Create project" }).click();
-    await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
+    await page
+      .getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ })
+      .waitFor({ state: "detached" });
   });
   await run("panel-new-project", async (page) => {
     await startThread(page);

@@ -66,7 +66,7 @@ function CommandDialogPopup({
         <CommandDialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
-            "pointer-events-auto max-h-105 max-w-xl text-foreground",
+            "dialog-glass pointer-events-auto max-h-105 max-w-xl text-foreground",
             className,
           )}
           data-slot="command-dialog-popup"

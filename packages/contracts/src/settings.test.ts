@@ -124,14 +124,6 @@ describe("ClientSettings environment identification", () => {
   });
 });
 
-describe("ClientSettings thread actions", () => {
-  it("keeps unpin confirmation opt-in and patchable", () => {
-    expect(decodeClientSettings({}).confirmThreadUnpin).toBe(false);
-    expect(decodeClientSettingsPatch({ confirmThreadUnpin: true }).confirmThreadUnpin).toBe(true);
-    expect(() => decodeClientSettingsPatch({ confirmThreadUnpin: "yes" })).toThrow();
-  });
-});
-
 describe("ServerSettings assistant text streaming", () => {
   it("streams by default while allowing an explicit opt-out", () => {
     expect(decodeServerSettings({}).streamAssistantText).toBe(true);

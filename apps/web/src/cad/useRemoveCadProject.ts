@@ -2,6 +2,7 @@ import type { EnvironmentId, OnshapeProjectSource, ProjectId } from "@cadsense/c
 import { useCallback } from "react";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cadStorageEnvironment } from "../state/cadStorage";
+import { readThreadShells } from "../state/entities";
 import { requestCadRemoval } from "./CadRemovalDialog";
 /** Asks how to remove an Onshape or local CAD project, then removes it through CAD storage. */
 export function useRemoveCadProject() {
@@ -18,6 +19,12 @@ export function useRemoveCadProject() {
         title: project.title,
         workspaceRoot: project.workspaceRoot,
         source: project.onshapeSource ? "onshape" : "local",
+        threadCount: readThreadShells().filter(
+          (thread) =>
+            thread.environmentId === project.environmentId &&
+            thread.projectId === project.id &&
+            thread.archivedAt === null,
+        ).length,
       });
       return choices
         ? run({

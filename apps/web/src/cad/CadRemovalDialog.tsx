@@ -6,11 +6,16 @@ import {
   AlertDialogPopup,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogDescription,
   AlertDialogFooter,
 } from "../components/ui/alert-dialog";
 import { Button } from "../components/ui/button";
-import { Checkbox } from "../components/ui/checkbox";
+import {
+  DialogLocation,
+  DialogRow,
+  DialogRowStatus,
+  DialogRows,
+} from "../components/ui/dialog-rows";
+import { Switch } from "../components/ui/switch";
 type Choices = { deleteCad: boolean; deleteWorkspace: boolean };
 type Request = {
   id: string;
@@ -18,6 +23,9 @@ type Request = {
   workspaceRoot: string;
   // A local CAD project's folder belongs to the user, so it never offers to delete the folder.
   source: CadStorageEntry["source"];
+  /** Threads the removal keeps, shown as a count. Omitted for cleanup, which keeps none. */
+  threadCount?: number;
+  /** Deleting data of a project that is already removed, from Settings → Archive. */
   cleanup?: boolean;
   resolve: (choices: Choices | null) => void;
 };
@@ -29,6 +37,11 @@ export function requestCadRemoval(input: Omit<Request, "resolve" | "id">): Promi
     useRequest.setState({ request: { ...input, id: String(++nextRequestId), resolve } }),
   );
 }
+const kept = <DialogRowStatus tone="neutral">Kept</DialogRowStatus>;
+/**
+ * Lists what removing a CAD project keeps (threads, captured images, the user's own files) and
+ * lets the user choose which CAD data to delete. Deleted data does not come back on a restore.
+ */
 function RemovalChoices({ request }: { request: Request }) {
   const [deleteCad, setDeleteCad] = useState(true);
   const [deleteWorkspace, setDeleteWorkspace] = useState(false);
@@ -44,46 +57,65 @@ function RemovalChoices({ request }: { request: Request }) {
         if (!open) finish(null);
       }}
     >
-      <AlertDialogPopup>
+      <AlertDialogPopup className="max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {request.cleanup
-              ? "Delete retained data"
-              : local
-                ? "Remove local CAD project"
-                : "Remove Onshape project"}
+            {request.cleanup ? `Delete data for ${request.title}` : `Remove ${request.title}`}
           </AlertDialogTitle>
-          <AlertDialogDescription>
-            {request.title}. Threads and captured images are preserved. You can restore the project
-            from Settings → CAD storage.
-          </AlertDialogDescription>
+          <DialogLocation>{request.workspaceRoot}</DialogLocation>
         </AlertDialogHeader>
-        <div className="space-y-4 px-6 py-4 text-sm">
-          <label className="flex items-center gap-2">
-            <Checkbox checked={deleteCad} onCheckedChange={setDeleteCad} />
-            {local ? "Delete imported CAD data" : "Delete downloaded CAD data"}
-          </label>
-          {!local && (
-            <label className="flex items-center gap-2">
-              <Checkbox checked={deleteWorkspace} onCheckedChange={setDeleteWorkspace} />
-              Delete workspace files
-            </label>
-          )}
-          <p className="break-all rounded-md bg-muted p-3 font-mono text-xs">
-            {request.workspaceRoot}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {local
-              ? "Files in this folder are not touched. Deleted CAD data is gone for good, but a restored project can import the file again."
-              : "Selected data will be permanently deleted. Restoring the project does not recover deleted files."}
-          </p>
+        <div className="px-5 pb-4">
+          <DialogRows>
+            {!request.cleanup && (
+              <>
+                <DialogRow
+                  label={
+                    request.threadCount === undefined
+                      ? "Threads"
+                      : request.threadCount === 1
+                        ? "1 thread"
+                        : `${request.threadCount} threads`
+                  }
+                >
+                  {kept}
+                </DialogRow>
+                <DialogRow label="Captured images">{kept}</DialogRow>
+                {local && <DialogRow label="Files in the folder">{kept}</DialogRow>}
+              </>
+            )}
+            <DialogRow
+              asLabel
+              label={local ? "Imported CAD data" : "Downloaded CAD data"}
+              detail={
+                local
+                  ? "A restored project can import the file again"
+                  : "Restoring doesn't bring it back"
+              }
+            >
+              <Switch checked={deleteCad} onCheckedChange={setDeleteCad} />
+            </DialogRow>
+            {!local && (
+              <DialogRow asLabel label="Workspace files" detail="Restoring doesn't bring them back">
+                <Switch checked={deleteWorkspace} onCheckedChange={setDeleteWorkspace} />
+              </DialogRow>
+            )}
+          </DialogRows>
         </div>
-        <AlertDialogFooter>
-          <Button variant="outline" onClick={() => finish(null)}>
+        <AlertDialogFooter className="sm:items-center">
+          {!request.cleanup && (
+            <p className="text-xs text-tertiary-foreground max-sm:text-center sm:me-auto">
+              Restore it from Settings → Archive
+            </p>
+          )}
+          <Button variant="ghost" onClick={() => finish(null)}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={() => finish({ deleteCad, deleteWorkspace })}>
-            {request.cleanup ? "Delete selected data" : "Remove project"}
+          <Button
+            variant="destructive"
+            disabled={request.cleanup && !deleteCad && !deleteWorkspace}
+            onClick={() => finish({ deleteCad, deleteWorkspace })}
+          >
+            {request.cleanup ? "Delete data" : "Remove project"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogPopup>

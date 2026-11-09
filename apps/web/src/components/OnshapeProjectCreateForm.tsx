@@ -41,7 +41,7 @@ export function OnshapeProjectCreateForm(props: {
 
   return (
     <form
-      className="space-y-4 overflow-y-auto p-5"
+      className="space-y-4 overflow-y-auto px-5 pb-5"
       aria-label="Create Onshape project"
       noValidate
       onSubmit={async (event) => {
@@ -84,12 +84,9 @@ export function OnshapeProjectCreateForm(props: {
         }
       }}
     >
-      <div>
-        <h2 className="text-base font-medium">New Onshape project</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          On {props.environmentLabel}. Creating a project uses no Onshape API requests.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        On {props.environmentLabel}. Creating a project uses no Onshape API requests.
+      </p>
       {!props.connected && (
         <p role="alert" className="text-sm text-destructive">
           This environment is disconnected.

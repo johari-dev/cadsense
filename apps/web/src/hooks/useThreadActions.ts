@@ -1,5 +1,5 @@
 import { scopeProjectRef, scopedThreadKey } from "@cadsense/client-runtime/environment";
-import { settlePromise } from "@cadsense/client-runtime/state/runtime";
+import { settlePromise, squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@cadsense/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
@@ -7,6 +7,8 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef } from "react";
 
+import { threadDeleteConfirmation } from "../components/confirmations";
+import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
@@ -108,6 +110,48 @@ export function useThreadActions() {
     [unarchiveThreadMutation],
   );
 
+  /**
+   * Shows an "Archived" toast whose Undo unarchives `threads`. Archiving asks for no
+   * confirmation because of this, so call it after every archive a user starts.
+   */
+  const offerArchiveUndo = useCallback(
+    (threads: ReadonlyArray<{ readonly ref: ScopedThreadRef; readonly title: string }>) => {
+      if (threads.length === 0) return;
+      const toastId = toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title:
+            threads.length === 1
+              ? `Archived "${threads[0]!.title}"`
+              : `Archived ${threads.length} threads`,
+          actionProps: {
+            children: "Undo",
+            onClick: () => {
+              toastManager.close(toastId);
+              void (async () => {
+                for (const { ref } of threads) {
+                  const result = await unarchiveThread(ref);
+                  if (result._tag === "Failure") {
+                    const error = squashAtomCommandFailure(result);
+                    toastManager.add(
+                      stackedThreadToast({
+                        type: "error",
+                        title: "Could not undo archive",
+                        description: error instanceof Error ? error.message : "An error occurred.",
+                      }),
+                    );
+                    return;
+                  }
+                }
+              })();
+            },
+          },
+        }),
+      );
+    },
+    [unarchiveThread],
+  );
+
   const deleteThread = useCallback(
     async (target: ScopedThreadRef, _opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
       const thread = readThreadShell(target);
@@ -160,13 +204,7 @@ export function useThreadActions() {
         if (localApi) {
           const title = readThreadShell(target)?.title ?? "this thread";
           const confirmation = await settlePromise(() =>
-            localApi.dialogs.confirm(
-              [
-                `Delete thread "${title}"?`,
-                "This permanently clears conversation history for this thread.",
-              ].join("\n"),
-              { variant: "destructive" },
-            ),
+            localApi.dialogs.confirm(threadDeleteConfirmation({ title })),
           );
           if (confirmation._tag === "Failure") return confirmation;
           if (!confirmation.value) return AsyncResult.success(undefined);
@@ -178,7 +216,13 @@ export function useThreadActions() {
   );
 
   return useMemo(
-    () => ({ archiveThread, unarchiveThread, deleteThread, confirmAndDeleteThread }),
-    [archiveThread, confirmAndDeleteThread, deleteThread, unarchiveThread],
+    () => ({
+      archiveThread,
+      offerArchiveUndo,
+      unarchiveThread,
+      deleteThread,
+      confirmAndDeleteThread,
+    }),
+    [archiveThread, confirmAndDeleteThread, deleteThread, offerArchiveUndo, unarchiveThread],
   );
 }

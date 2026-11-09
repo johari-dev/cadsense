@@ -897,10 +897,12 @@ export function DiagnosticsSettingsPanel() {
       if (signal === "SIGKILL") {
         let confirmed = false;
         try {
-          confirmed = await ensureLocalApi().dialogs.confirm(
-            `Send SIGKILL to process ${pid}? This cannot be handled by the process.`,
-            { variant: "destructive" },
-          );
+          confirmed = await ensureLocalApi().dialogs.confirm({
+            title: `Force kill process ${pid}?`,
+            description: "SIGKILL stops it at once. It can't clean up first.",
+            confirmLabel: "Force kill",
+            variant: "destructive",
+          });
         } catch (error) {
           clearSignaling();
           toastManager.add({

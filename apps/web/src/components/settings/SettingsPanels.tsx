@@ -32,7 +32,7 @@ import { APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
-  getDesktopUpdateInstallConfirmationMessage,
+  getDesktopUpdateInstallConfirmation,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
@@ -42,6 +42,7 @@ import { isElectron } from "../../env";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
+import { readRunningDesktopChatCount } from "../../state/runningChats";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
@@ -173,8 +174,9 @@ function AboutVersionSection() {
       let confirmed = false;
       try {
         confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(
+          getDesktopUpdateInstallConfirmation(
             updateState ?? { availableVersion: null, downloadedVersion: null },
+            readRunningDesktopChatCount(),
           ),
         );
       } catch (error) {
@@ -354,12 +356,15 @@ function useSettingsRestore() {
   const restoreDefaults = useCallback(async () => {
     if (changedSettingLabels.length === 0) return;
     const api = readLocalApi();
-    const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
-        "\n",
-      ),
-      { variant: "destructive" },
-    );
+    const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm({
+      title: "Restore defaults?",
+      rows: changedSettingLabels.map((label) => ({
+        label,
+        status: { label: "Reset", tone: "neutral" },
+      })),
+      confirmLabel: "Restore defaults",
+      variant: "destructive",
+    });
     if (!confirmed) return;
 
     updateSettings({

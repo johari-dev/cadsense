@@ -1,6 +1,6 @@
 import {
   DEFAULT_CLIENT_SETTINGS,
-  type ConfirmDialogOptions,
+  type ConfirmDialogRequest,
   type ContextMenuItem,
   type DesktopBridge,
 } from "@cadsense/contracts";
@@ -16,7 +16,7 @@ const showContextMenuFallbackMock =
 const dismissContextMenuMock = vi.fn<() => void>();
 
 const requestConfirmDialogMock =
-  vi.fn<(message: string, options?: ConfirmDialogOptions) => Promise<boolean> | undefined>();
+  vi.fn<(request: ConfirmDialogRequest) => Promise<boolean> | undefined>();
 
 vi.mock("./contextMenuFallback", () => ({
   showContextMenuFallback: showContextMenuFallbackMock,
@@ -97,19 +97,23 @@ describe("LocalApi", () => {
   it("uses the themed confirmation host when it is available", async () => {
     requestConfirmDialogMock.mockResolvedValue(true);
     const { createLocalApi } = await import("./localApi");
-    const options = { variant: "destructive" } as const;
+    const request = {
+      title: "Delete this thread?",
+      confirmLabel: "Delete thread",
+      variant: "destructive",
+    } as const;
 
-    await expect(createLocalApi().dialogs.confirm("Delete this thread?", options)).resolves.toBe(
-      true,
-    );
-    expect(requestConfirmDialogMock).toHaveBeenCalledWith("Delete this thread?", options);
+    await expect(createLocalApi().dialogs.confirm(request)).resolves.toBe(true);
+    expect(requestConfirmDialogMock).toHaveBeenCalledWith(request);
   });
 
   it("fails closed in a browser when no themed host is available", async () => {
     requestConfirmDialogMock.mockReturnValue(undefined);
     const { createLocalApi } = await import("./localApi");
 
-    await expect(createLocalApi().dialogs.confirm("Delete this thread?")).resolves.toBe(false);
+    await expect(
+      createLocalApi().dialogs.confirm({ title: "Delete this thread?", confirmLabel: "Delete" }),
+    ).resolves.toBe(false);
   });
 
   it("delegates host capabilities and persistence to the desktop bridge", async () => {
@@ -130,7 +134,9 @@ describe("LocalApi", () => {
 
     await expect(api.contextMenu.show(items)).resolves.toBe("delete");
     requestConfirmDialogMock.mockReturnValue(undefined);
-    await expect(api.dialogs.confirm("Install update?")).resolves.toBe(false);
+    await expect(
+      api.dialogs.confirm({ title: "Restart to update", confirmLabel: "Restart now" }),
+    ).resolves.toBe(false);
     await expect(api.dialogs.pickFolder({ initialPath: "/tmp" })).resolves.toBe("/tmp/project");
     await expect(api.persistence.getClientSettings()).resolves.toEqual(DEFAULT_CLIENT_SETTINGS);
     await api.persistence.setClientSettings(DEFAULT_CLIENT_SETTINGS);

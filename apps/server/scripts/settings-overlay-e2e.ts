@@ -170,12 +170,14 @@ try {
       .click({ timeout: 2000 })
       .catch(() => {});
     await page.getByRole("button", { name: "Add project" }).first().click();
-    await page.getByRole("button", { name: "Local CAD file" }).click();
+    await page.getByRole("button", { name: "CAD file" }).click();
     await page.getByLabel("Folder").fill(folder);
     await page.getByRole("button", { name: "Scan" }).click();
     await page.getByText(stepName, { exact: true }).click({ timeout: 30_000 });
     await page.getByRole("button", { name: "Create project" }).click();
-    await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
+    await page
+      .getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ })
+      .waitFor({ state: "detached" });
     return { url: page.url() };
   });
   await run("draft-with-cad", async (page) => {

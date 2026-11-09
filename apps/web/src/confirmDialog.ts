@@ -1,21 +1,12 @@
-import type { ConfirmDialogOptions, ConfirmDialogVariant } from "@cadsense/contracts";
+import type { ConfirmDialogRequest } from "@cadsense/contracts";
 
 export type ConfirmDialogState =
   | { readonly status: "idle" }
-  | {
-      readonly status: "confirming";
-      readonly message: string;
-      readonly variant: ConfirmDialogVariant;
-    }
-  | {
-      readonly status: "closing";
-      readonly message: string;
-      readonly variant: ConfirmDialogVariant;
-    };
+  | { readonly status: "confirming"; readonly request: ConfirmDialogRequest }
+  | { readonly status: "closing"; readonly request: ConfirmDialogRequest };
 
 type PendingConfirmation = {
-  readonly message: string;
-  readonly variant: ConfirmDialogVariant;
+  readonly request: ConfirmDialogRequest;
   readonly resolve: (confirmed: boolean) => void;
 };
 
@@ -77,25 +68,18 @@ export function registerConfirmDialogHost(): () => void {
  * Requests a themed confirmation when a host is mounted. An undefined result
  * means no themed host is currently available.
  */
-export function requestConfirmDialog(
-  message: string,
-  options?: ConfirmDialogOptions,
-): Promise<boolean> | undefined {
+export function requestConfirmDialog(request: ConfirmDialogRequest): Promise<boolean> | undefined {
   if (registeredHostCount === 0) return undefined;
 
   const confirmation = new Promise<boolean>((resolve) => {
-    const pending = {
-      message,
-      variant: options?.variant ?? "default",
-      resolve,
-    } satisfies PendingConfirmation;
+    const pending = { request, resolve } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {
       queuedConfirmations.push(pending);
       return;
     }
 
     activeConfirmation = pending;
-    publish({ status: "confirming", message, variant: pending.variant });
+    publish({ status: "confirming", request });
   });
 
   return confirmation;
@@ -107,7 +91,7 @@ export function respondToConfirmDialog(confirmed: boolean): void {
   const confirmation = activeConfirmation;
   activeConfirmation = null;
   confirmation.resolve(confirmed);
-  publish({ status: "closing", message: state.message, variant: state.variant });
+  publish({ status: "closing", request: state.request });
 }
 
 export function completeConfirmDialogClose(): void {
@@ -120,7 +104,7 @@ export function completeConfirmDialogClose(): void {
   }
 
   activeConfirmation = next;
-  publish({ status: "confirming", message: next.message, variant: next.variant });
+  publish({ status: "confirming", request: next.request });
 }
 
 export function resetConfirmDialogForTests(): void {

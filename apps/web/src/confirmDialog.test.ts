@@ -9,6 +9,11 @@ import {
   respondToConfirmDialog,
 } from "./confirmDialog";
 
+/** A request whose title is `title`, so tests can tell queued confirmations apart. */
+function confirmation(title: string, variant: "default" | "destructive" = "default") {
+  return { title, confirmLabel: "Confirm", variant } as const;
+}
+
 function requireConfirmation(confirmation: Promise<boolean> | undefined): Promise<boolean> {
   if (!confirmation) {
     throw new Error("Expected a registered confirmation host.");
@@ -22,28 +27,26 @@ describe("confirm dialog coordinator", () => {
   });
 
   it("returns undefined until a themed host is mounted", () => {
-    expect(requestConfirmDialog("Confirm this action?")).toBeUndefined();
+    expect(requestConfirmDialog(confirmation("Confirm this action?"))).toBeUndefined();
     expect(readConfirmDialogState()).toEqual({ status: "idle" });
   });
 
   it("resolves a displayed confirmation and waits for its close transition", async () => {
     const unregister = registerConfirmDialogHost();
-    const confirmation = requireConfirmation(
-      requestConfirmDialog("Delete this thread?", { variant: "destructive" }),
+    const pending = requireConfirmation(
+      requestConfirmDialog(confirmation("Delete this thread?", "destructive")),
     );
 
     expect(readConfirmDialogState()).toEqual({
       status: "confirming",
-      message: "Delete this thread?",
-      variant: "destructive",
+      request: confirmation("Delete this thread?", "destructive"),
     });
 
     respondToConfirmDialog(true);
-    await expect(confirmation).resolves.toBe(true);
+    await expect(pending).resolves.toBe(true);
     expect(readConfirmDialogState()).toEqual({
       status: "closing",
-      message: "Delete this thread?",
-      variant: "destructive",
+      request: confirmation("Delete this thread?", "destructive"),
     });
 
     completeConfirmDialogClose();
@@ -53,22 +56,22 @@ describe("confirm dialog coordinator", () => {
 
   it("serializes concurrent confirmations", async () => {
     const unregister = registerConfirmDialogHost();
-    const first = requireConfirmation(requestConfirmDialog("Delete the project?"));
-    const second = requireConfirmation(requestConfirmDialog("Delete the saved data too?"));
+    const first = requireConfirmation(requestConfirmDialog(confirmation("Delete the project?")));
+    const second = requireConfirmation(
+      requestConfirmDialog(confirmation("Delete the saved data too?")),
+    );
 
     respondToConfirmDialog(false);
     await expect(first).resolves.toBe(false);
     expect(readConfirmDialogState()).toEqual({
       status: "closing",
-      message: "Delete the project?",
-      variant: "default",
+      request: confirmation("Delete the project?"),
     });
 
     completeConfirmDialogClose();
     expect(readConfirmDialogState()).toEqual({
       status: "confirming",
-      message: "Delete the saved data too?",
-      variant: "default",
+      request: confirmation("Delete the saved data too?"),
     });
 
     respondToConfirmDialog(true);
@@ -80,8 +83,10 @@ describe("confirm dialog coordinator", () => {
 
   it("cancels active and queued confirmations if the last host unmounts", async () => {
     const unregister = registerConfirmDialogHost();
-    const active = requireConfirmation(requestConfirmDialog("Delete the thread?"));
-    const queued = requireConfirmation(requestConfirmDialog("Delete the saved data too?"));
+    const active = requireConfirmation(requestConfirmDialog(confirmation("Delete the thread?")));
+    const queued = requireConfirmation(
+      requestConfirmDialog(confirmation("Delete the saved data too?")),
+    );
 
     unregister();
 
@@ -91,7 +96,7 @@ describe("confirm dialog coordinator", () => {
 
   it("ignores responses after the active dialog has been closed", () => {
     const unregister = registerConfirmDialogHost();
-    const confirmation = requireConfirmation(requestConfirmDialog("Continue?"));
+    const pending = requireConfirmation(requestConfirmDialog(confirmation("Continue?")));
 
     respondToConfirmDialog(true);
     respondToConfirmDialog(false);
@@ -99,6 +104,6 @@ describe("confirm dialog coordinator", () => {
 
     expect(readConfirmDialogState()).toEqual({ status: "idle" });
     unregister();
-    return expect(confirmation).resolves.toBe(true);
+    return expect(pending).resolves.toBe(true);
   });
 });
