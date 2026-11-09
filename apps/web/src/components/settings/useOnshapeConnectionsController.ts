@@ -224,10 +224,19 @@ export function useOnshapeConnectionsController(environmentId: EnvironmentId) {
       "cadsense could not remove this connection. Try again.",
       async () => {
         try {
-          const confirmed = await ensureLocalApi().dialogs.confirm(
-            `Remove "${connection.name}" and its saved credentials? Existing Onshape projects stay available offline, but future sync requires another compatible connection. This cannot be undone.`,
-            { variant: "destructive" },
-          );
+          const confirmed = await ensureLocalApi().dialogs.confirm({
+            title: `Remove ${connection.name}?`,
+            rows: [
+              { label: "Saved credentials", status: { label: "Deleted", tone: "destructive" } },
+              {
+                label: "Onshape projects",
+                detail: "Syncing needs another connection to the same account",
+                status: { label: "Kept", tone: "neutral" },
+              },
+            ],
+            confirmLabel: "Remove connection",
+            variant: "destructive",
+          });
           if (!confirmed) return { _tag: "Interrupted" } as const;
         } catch {
           return {

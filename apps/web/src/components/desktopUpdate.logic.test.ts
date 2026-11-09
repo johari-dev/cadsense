@@ -6,7 +6,7 @@ import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
-  getDesktopUpdateInstallConfirmationMessage,
+  getDesktopUpdateInstallConfirmation,
   getDesktopUpdateReleaseUrl,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
@@ -252,32 +252,35 @@ describe("desktop update UI helpers", () => {
     expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
   });
 
-  it("includes the downloaded version in the install confirmation copy", () => {
+  it("names the downloaded version in the install confirmation", () => {
     expect(
-      getDesktopUpdateInstallConfirmationMessage({
-        availableVersion: "1.1.0",
-        downloadedVersion: "1.1.1",
-      }),
-    ).toContain("Install update 1.1.1 and restart cadsense?");
+      getDesktopUpdateInstallConfirmation(
+        { availableVersion: "1.1.0", downloadedVersion: "1.1.1" },
+        0,
+      ),
+    ).toEqual({
+      title: "Restart to update",
+      description: "cadsense closes and reopens on 1.1.1.",
+      confirmLabel: "Restart now",
+      cancelLabel: "Later",
+    });
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {
     expect(
-      getDesktopUpdateInstallConfirmationMessage({
-        availableVersion: null,
-        downloadedVersion: null,
-      }),
-    ).toContain("Install update and restart cadsense?");
+      getDesktopUpdateInstallConfirmation({ availableVersion: null, downloadedVersion: null }, 0)
+        .description,
+    ).toBe("cadsense closes and reopens on the new version.");
   });
 
-  it("keeps the same install confirmation copy across desktop platforms", () => {
-    expect(
-      getDesktopUpdateInstallConfirmationMessage({
-        availableVersion: "1.1.0",
-        downloadedVersion: "1.1.0",
-      }),
-    ).toBe(
-      "Install update 1.1.0 and restart cadsense?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+  it("warns about running chats only when some are running", () => {
+    const state = { availableVersion: "1.1.0", downloadedVersion: "1.1.0" };
+    expect(getDesktopUpdateInstallConfirmation(state, 0).warning).toBeUndefined();
+    expect(getDesktopUpdateInstallConfirmation(state, 1).warning).toBe(
+      "1 chat is still running. Restarting stops it.",
+    );
+    expect(getDesktopUpdateInstallConfirmation(state, 3).warning).toBe(
+      "3 chats are still running. Restarting stops them.",
     );
   });
 });

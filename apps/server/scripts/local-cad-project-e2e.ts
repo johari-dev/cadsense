@@ -330,7 +330,7 @@ try {
       .click({ timeout: 2000 })
       .catch(() => {});
     await page.getByRole("button", { name: "Add project" }).first().click();
-    await page.getByRole("button", { name: "Local CAD file" }).click();
+    await page.getByRole("button", { name: "CAD file" }).click();
   });
   await run("folder-scanned", async (page) => {
     await page.getByLabel("Folder").fill(folder);
@@ -363,7 +363,9 @@ try {
   );
   await run("project-created", async (page) => {
     await page.getByRole("button", { name: "Create project" }).click();
-    await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
+    await page
+      .getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ })
+      .waitFor({ state: "detached" });
     return { url: page.url() };
   });
   // Everything up to the model is on the draft. No chat exists until the first message.
@@ -549,11 +551,11 @@ try {
   const addProject = async (page: Page, folder: string, file: string) => {
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Add project" }).first().click();
-    await page.getByRole("button", { name: "Local CAD file" }).click();
+    await page.getByRole("button", { name: "CAD file" }).click();
     await page.getByLabel("Folder").fill(folder);
     await page.getByRole("button", { name: "Scan" }).click();
     // The sidebar names each project's file too, so the file is picked inside the dialog.
-    const dialog = page.getByRole("dialog", { name: "Add project" });
+    const dialog = page.getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ });
     await dialog.getByText(file, { exact: true }).click({ timeout: 60_000 });
     await page.getByRole("button", { name: "Create project" }).click();
     await dialog.waitFor({ state: "detached" });
@@ -772,7 +774,7 @@ try {
     await run("solidworks-sample-folder-scanned", async (page) => {
       await page.goto(url, { waitUntil: "networkidle" });
       await page.getByRole("button", { name: "Add project" }).first().click();
-      await page.getByRole("button", { name: "Local CAD file" }).click();
+      await page.getByRole("button", { name: "CAD file" }).click();
       await page.getByLabel("Folder").fill(sample);
       await page.getByRole("button", { name: "Scan" }).click();
       await page.getByText(sampleAssembly, { exact: true }).waitFor({ timeout: 60_000 });
@@ -784,7 +786,9 @@ try {
     await run("solidworks-sample-model", async (page) => {
       await page.getByText(sampleAssembly, { exact: true }).click();
       await page.getByRole("button", { name: "Create project" }).click();
-      await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "detached" });
+      await page
+        .getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ })
+        .waitFor({ state: "detached" });
       await startThread(page);
       return rendered(page, sample);
     });
@@ -812,10 +816,10 @@ try {
     // The browser's context menu is a list of plain buttons, added last.
     await page.getByRole("button", { name: "Remove", exact: true }).last().click();
     await removalDialog.waitFor();
-    const checkbox = removalDialog.getByRole("checkbox");
-    if ((await checkbox.count()) !== 1) throw new Error("The dialog offers more than imported CAD");
-    await removalDialog.getByText("Delete imported CAD data").click();
-    if ((await checkbox.getAttribute("aria-checked")) !== "false")
+    const toggle = removalDialog.getByRole("switch");
+    if ((await toggle.count()) !== 1) throw new Error("The dialog offers more than imported CAD");
+    await removalDialog.getByText("Imported CAD data").click();
+    if ((await toggle.getAttribute("aria-checked")) !== "false")
       throw new Error("Could not choose to keep the imported CAD");
     return { dialog: (await removalDialog.innerText()).split("\n").filter(Boolean) };
   });
@@ -834,7 +838,7 @@ try {
     await retainedEntry.getByRole("button", { name: "Delete retained data" }).click();
     await removalDialog.waitFor();
     const cleanup = (await removalDialog.innerText()).split("\n").filter(Boolean);
-    if ((await removalDialog.getByRole("checkbox").count()) !== 1)
+    if ((await removalDialog.getByRole("switch").count()) !== 1)
       throw new Error("Deleting retained data offers more than imported CAD");
     await removalDialog.getByRole("button", { name: "Cancel" }).click();
     await removalDialog.waitFor({ state: "detached" });

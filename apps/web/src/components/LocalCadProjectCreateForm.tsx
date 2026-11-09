@@ -127,7 +127,7 @@ export function LocalCadProjectCreateForm(props: {
 
   return (
     <form
-      className={props.inline ? "space-y-4" : "space-y-4 overflow-y-auto p-5"}
+      className={props.inline ? "space-y-4" : "space-y-4 overflow-y-auto px-5 pb-5"}
       aria-label="Create local CAD project"
       noValidate
       onSubmit={async (event) => {
@@ -160,14 +160,11 @@ export function LocalCadProjectCreateForm(props: {
           installed on this computer.
         </p>
       ) : (
-        <div>
-          <h2 className="text-base font-medium">New local CAD project</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            On {props.environmentLabel}. Review a STEP, IGES, or SolidWorks file in a folder.
-            Nothing is uploaded, and you can sync again after saving. SolidWorks files need
-            SolidWorks installed on this computer.
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          On {props.environmentLabel}. Review a STEP, IGES, or SolidWorks file in a folder. Nothing
+          is uploaded, and you can sync again after saving. SolidWorks files need SolidWorks
+          installed on this computer.
+        </p>
       )}
       {!props.connected && (
         <p role="alert" className="text-sm text-destructive">

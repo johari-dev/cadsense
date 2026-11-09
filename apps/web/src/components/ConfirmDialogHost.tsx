@@ -17,40 +17,15 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
+import {
+  DialogLocation,
+  DialogRow,
+  DialogRowStatus,
+  DialogRows,
+  DialogWarning,
+} from "./ui/dialog-rows";
 
-type ConfirmationCopy = {
-  readonly title: string;
-  readonly description: string | null;
-};
-
-export function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
-  const normalizedMessage = message.trim();
-  const lines = normalizedMessage.split("\n");
-  const questionLineIndex = lines.findIndex((line) => line.trim().endsWith("?"));
-
-  if (questionLineIndex >= 0) {
-    const title = lines[questionLineIndex]!.trim();
-    const description = lines
-      .filter((_, index) => index !== questionLineIndex)
-      .join("\n")
-      .trim();
-    return { title, description: description || null };
-  }
-
-  const questionMarkIndex = normalizedMessage.indexOf("?");
-  if (questionMarkIndex >= 0) {
-    return {
-      title: normalizedMessage.slice(0, questionMarkIndex + 1).trim(),
-      description: normalizedMessage.slice(questionMarkIndex + 1).trim() || null,
-    };
-  }
-
-  return {
-    title: "Confirm action",
-    description: normalizedMessage || "This action requires your confirmation.",
-  };
-}
-
+/** Mounted once in the root layout. Shows each `requestConfirmDialog` request in turn. */
 export function ConfirmDialogHost() {
   const state = useSyncExternalStore(
     subscribeConfirmDialog,
@@ -60,10 +35,11 @@ export function ConfirmDialogHost() {
 
   useEffect(() => registerConfirmDialogHost(), []);
 
-  const copy = resolveConfirmDialogCopy(state.status === "idle" ? "" : state.message);
-  const confirmVariant = state.status === "idle" ? "default" : state.variant;
+  // The request stays rendered while the dialog animates closed.
+  const request = state.status === "idle" ? null : state.request;
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
+  const hasBody = request?.rows?.length || request?.warning;
 
   return (
     <AlertDialog
@@ -75,22 +51,41 @@ export function ConfirmDialogHost() {
         if (!open) completeConfirmDialogClose();
       }}
     >
-      <AlertDialogPopup className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{copy.title}</AlertDialogTitle>
-          {copy.description ? (
-            <AlertDialogDescription className="whitespace-pre-line">
-              {copy.description}
-            </AlertDialogDescription>
+      {request ? (
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{request.title}</AlertDialogTitle>
+            {request.location ? <DialogLocation>{request.location}</DialogLocation> : null}
+            {request.description ? (
+              <AlertDialogDescription>{request.description}</AlertDialogDescription>
+            ) : null}
+          </AlertDialogHeader>
+          {hasBody ? (
+            <div className="grid gap-3 px-5 pb-4">
+              {request.rows?.length ? (
+                <DialogRows>
+                  {request.rows.map((row) => (
+                    <DialogRow key={row.label} label={row.label} detail={row.detail}>
+                      {row.status ? (
+                        <DialogRowStatus tone={row.status.tone}>{row.status.label}</DialogRowStatus>
+                      ) : null}
+                    </DialogRow>
+                  ))}
+                </DialogRows>
+              ) : null}
+              {request.warning ? <DialogWarning>{request.warning}</DialogWarning> : null}
+            </div>
           ) : null}
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant={confirmVariant} onClick={onConfirm}>
-            Confirm
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogPopup>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="ghost" />}>
+              {request.cancelLabel ?? "Cancel"}
+            </AlertDialogClose>
+            <Button variant={request.variant ?? "default"} onClick={onConfirm}>
+              {request.confirmLabel}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      ) : null}
     </AlertDialog>
   );
 }

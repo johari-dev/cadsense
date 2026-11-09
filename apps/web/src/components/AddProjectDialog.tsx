@@ -1,10 +1,10 @@
 import { settingsLocation } from "./settings/settingsLocation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeProjectRef, scopeThreadRef } from "@cadsense/client-runtime/environment";
 import { squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
 import type { ProjectId } from "@cadsense/contracts";
-import { CubeIcon, FolderPlusIcon } from "~/lib/icons";
+import { CaretRightIcon, CubeIcon, FolderIcon } from "~/lib/icons";
 import { CAD_FILE_FILTERS } from "../cad/CadFilePrompt";
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -27,8 +27,8 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { OnshapeProjectCreateForm } from "./OnshapeProjectCreateForm";
 import { LocalCadProjectCreateForm } from "./LocalCadProjectCreateForm";
-import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
-import { Button } from "./ui/button";
+import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "./ui/dialog";
+import { DialogRows } from "./ui/dialog-rows";
 
 /** Native folder and file pickers browse the desktop app's local backend, so they need it. */
 function canPickNativelyOn(environment: EnvironmentPresentation | undefined) {
@@ -179,17 +179,22 @@ export function AddProjectDialog() {
         setOpen(next);
       }}
     >
-      <DialogPopup aria-label="Add project" className="p-0">
-        <DialogTitle className="px-5 pt-5">Add project</DialogTitle>
-        {environments.length > 1 && (
-          <label className="mx-5 mt-4 block text-sm">
-            Environment
+      <DialogPopup aria-label="Add project">
+        <DialogHeader className="flex-row items-center gap-3">
+          <DialogTitle className="flex-1">
+            {kind === "onshape"
+              ? "New Onshape project"
+              : kind === "local-cad"
+                ? "New CAD project"
+                : "Add project"}
+          </DialogTitle>
+          {environments.length > 1 && (
             <select
               aria-label="Project environment"
               disabled={busy}
               value={environment?.environmentId ?? ""}
               onChange={(event) => setSelectedId(event.target.value)}
-              className="mt-2 w-full rounded-md border bg-background p-2"
+              className="h-7 max-w-40 truncate rounded-md border border-input bg-transparent px-2 text-xs text-muted-foreground"
             >
               {environments.map((item) => (
                 <option key={item.environmentId} value={item.environmentId}>
@@ -197,8 +202,8 @@ export function AddProjectDialog() {
                 </option>
               ))}
             </select>
-          </label>
-        )}
+          )}
+        </DialogHeader>
         {kind === "onshape" && environment ? (
           <OnshapeProjectCreateForm
             key={environment.environmentId}
@@ -284,34 +289,32 @@ export function AddProjectDialog() {
             }}
           />
         ) : (
-          <div className="grid gap-3 p-5">
-            <Button
-              variant="outline"
-              className="h-auto justify-start gap-3 px-4 py-4"
-              disabled={busy || !canPickNatively}
-              onClick={() => void addFolder()}
-            >
-              <FolderPlusIcon className="size-5" />
-              Folder project
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto justify-start gap-3 px-4 py-4"
-              disabled={busy || !environment || environment.connection.phase !== "connected"}
-              onClick={() => setKind("local-cad")}
-            >
-              <CubeIcon className="size-5" />
-              Local CAD file
-            </Button>
-            <Button
-              variant="outline"
-              className="h-auto justify-start gap-3 px-4 py-4"
-              disabled={busy || !environment || environment.connection.phase !== "connected"}
-              onClick={() => setKind("onshape")}
-            >
-              <img src="/onshape.svg" alt="" className="size-5" />
-              Onshape project
-            </Button>
+          <div className="grid gap-3 px-5 pb-5">
+            <DialogRows>
+              <ProjectKindRow
+                icon={<CubeIcon className="size-4" />}
+                label="CAD file"
+                detail="A STEP, IGES or SolidWorks file"
+                disabled={busy || !environment || environment.connection.phase !== "connected"}
+                onClick={() => setKind("local-cad")}
+              />
+              <ProjectKindRow
+                icon={<img src="/onshape.svg" alt="" className="size-4" />}
+                label="Onshape document"
+                detail="Paste a link. Uses no API requests."
+                disabled={busy || !environment || environment.connection.phase !== "connected"}
+                onClick={() => setKind("onshape")}
+              />
+              <ProjectKindRow
+                icon={<FolderIcon className="size-4" />}
+                label="Folder"
+                detail={
+                  canPickNatively ? "Chat about files, with no CAD import" : "Needs the desktop app"
+                }
+                disabled={busy || !canPickNatively}
+                onClick={() => void addFolder()}
+              />
+            </DialogRows>
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -321,5 +324,32 @@ export function AddProjectDialog() {
         )}
       </DialogPopup>
     </Dialog>
+  );
+}
+
+/** One kind of project in the add-project chooser: an icon tile, a name, and one line on what it is. */
+function ProjectKindRow(props: {
+  icon: ReactNode;
+  label: string;
+  detail: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={props.disabled}
+      onClick={props.onClick}
+      className="flex w-full items-center gap-3 px-3 py-2.5 text-left outline-none hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50"
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent">
+        {props.icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{props.label}</span>
+        <span className="block text-xs text-muted-foreground">{props.detail}</span>
+      </span>
+      <CaretRightIcon className="size-4 shrink-0 text-tertiary-foreground" />
+    </button>
   );
 }

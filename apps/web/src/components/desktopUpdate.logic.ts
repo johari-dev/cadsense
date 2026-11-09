@@ -1,4 +1,8 @@
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@cadsense/contracts";
+import type {
+  ConfirmDialogRequest,
+  DesktopUpdateActionResult,
+  DesktopUpdateState,
+} from "@cadsense/contracts";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
@@ -102,11 +106,31 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
   return "Up to date";
 }
 
-export function getDesktopUpdateInstallConfirmationMessage(
+/**
+ * The confirmation before installing a downloaded update. Installing restarts the app, which
+ * stops `runningChatCount` chats, so the warning only shows when that count is above zero.
+ */
+export function getDesktopUpdateInstallConfirmation(
   state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
-): string {
+  runningChatCount: number,
+): ConfirmDialogRequest {
   const version = state.downloadedVersion ?? state.availableVersion;
-  return `Install update${version ? ` ${version}` : ""} and restart cadsense?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
+  return {
+    title: "Restart to update",
+    description: version
+      ? `cadsense closes and reopens on ${version}.`
+      : "cadsense closes and reopens on the new version.",
+    ...(runningChatCount > 0
+      ? {
+          warning:
+            runningChatCount === 1
+              ? "1 chat is still running. Restarting stops it."
+              : `${runningChatCount} chats are still running. Restarting stops them.`,
+        }
+      : {}),
+    confirmLabel: "Restart now",
+    cancelLabel: "Later",
+  };
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {

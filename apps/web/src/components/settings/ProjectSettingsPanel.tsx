@@ -52,6 +52,7 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { OnshapeProjectSettings } from "./OnshapeProjectSettings";
 import { CadProjectSettings } from "./CadProjectSettings";
 import { CadReviewLearnings } from "./CadReviewLearnings";
+import { projectRemovalConfirmation } from "../confirmations";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -209,18 +210,11 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
     );
     const confirmed = await settlePromise(() =>
       api.dialogs.confirm(
-        [
-          `Remove project "${project.title}"?`,
-          ...(project.onshapeSource ? [] : [`Path: ${project.workspaceRoot}`]),
-          ...(projectThreads.length > 0
-            ? [
-                `This permanently deletes ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}.`,
-              ]
-            : []),
-          "Files on disk are not touched.",
-          "This action cannot be undone.",
-        ].join("\n"),
-        { variant: "destructive" },
+        projectRemovalConfirmation({
+          title: project.title,
+          location: project.workspaceRoot,
+          threadCount: projectThreads.length,
+        }),
       ),
     );
     if (confirmed._tag === "Failure" || !confirmed.value) return;

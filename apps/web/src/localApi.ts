@@ -1,4 +1,4 @@
-import type { ConfirmDialogOptions, ContextMenuItem, LocalApi } from "@cadsense/contracts";
+import type { ContextMenuItem, LocalApi } from "@cadsense/contracts";
 
 import { requestConfirmDialog } from "./confirmDialog";
 import { dismissContextMenu, showContextMenuFallback } from "./contextMenuFallback";
@@ -18,9 +18,7 @@ function createBrowserLocalApi(): LocalApi {
         if (!window.desktopBridge) return null;
         return window.desktopBridge.pickFile(options);
       },
-      confirm: async (message, options?: ConfirmDialogOptions) => {
-        return requestConfirmDialog(message, options) ?? false;
-      },
+      confirm: async (request) => requestConfirmDialog(request) ?? false,
     },
     shell: {
       openExternal: async (url) => {

@@ -345,10 +345,10 @@ try {
       .click({ timeout: 2000 })
       .catch(() => {});
     await local.getByRole("button", { name: "Add project" }).first().click();
-    await local.getByRole("button", { name: "Local CAD file" }).click();
+    await local.getByRole("button", { name: "CAD file" }).click();
     await local.getByLabel("Folder").fill(folder);
     await local.getByRole("button", { name: "Scan" }).click();
-    const dialog = local.getByRole("dialog", { name: "Add project" });
+    const dialog = local.getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ });
     await dialog.getByText(stepName, { exact: true }).click({ timeout: 60_000 });
     await local.getByRole("button", { name: "Create project" }).click();
     await dialog.waitFor({ state: "detached" });

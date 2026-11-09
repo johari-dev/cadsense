@@ -15,6 +15,7 @@ import {
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
+import { projectRemovalConfirmation, threadDeleteConfirmation } from "./confirmations";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -91,6 +92,7 @@ import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
+import { readRunningDesktopChatCount } from "../state/runningChats";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
@@ -106,7 +108,7 @@ import { formatRelativeTime, formatRelativeTimeLabel } from "../timestampFormat"
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
-  getDesktopUpdateInstallConfirmationMessage,
+  getDesktopUpdateInstallConfirmation,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
   shouldShowArm64IntelBuildWarning,
@@ -262,16 +264,12 @@ interface SidebarThreadRowProps {
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
   jumpLabel: string | null;
-  appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
   renamingTitle: string;
   setRenamingTitle: (title: string) => void;
   startThreadRename: (threadKey: string, title: string) => void;
   renamingInputRef: React.RefObject<HTMLInputElement | null>;
   renamingCommittedRef: React.RefObject<boolean>;
-  confirmingArchiveThreadKey: string | null;
-  setConfirmingArchiveThreadKey: React.Dispatch<React.SetStateAction<string | null>>;
-  confirmArchiveButtonRefs: React.RefObject<Map<string, HTMLButtonElement>>;
   handleThreadClick: (
     event: React.MouseEvent,
     threadRef: ScopedThreadRef,
@@ -298,16 +296,12 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     orderedProjectThreadKeys,
     isActive,
     jumpLabel,
-    appSettingsConfirmThreadArchive,
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
     startThreadRename,
     renamingInputRef,
     renamingCommittedRef,
-    confirmingArchiveThreadKey,
-    setConfirmingArchiveThreadKey,
-    confirmArchiveButtonRefs,
     handleThreadClick,
     navigateToThread,
     handleMultiSelectContextMenu,
@@ -333,30 +327,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       lastVisitedAt,
     },
   });
-  const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
-  const threadMetaClassName = isConfirmingArchive
-    ? "pointer-events-none opacity-0"
-    : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
-      : "pointer-events-none";
-  const clearConfirmingArchive = useCallback(() => {
-    setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
-  }, [setConfirmingArchiveThreadKey, threadKey]);
-  const handleMouseLeave = useCallback(() => {
-    clearConfirmingArchive();
-  }, [clearConfirmingArchive]);
-  const handleBlurCapture = useCallback(
-    (event: React.FocusEvent<HTMLLIElement>) => {
-      const currentTarget = event.currentTarget;
-      requestAnimationFrame(() => {
-        if (currentTarget.contains(document.activeElement)) {
-          return;
-        }
-        clearConfirmingArchive();
-      });
-    },
-    [clearConfirmingArchive],
-  );
+  const threadMetaClassName = !isThreadRunning
+    ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
+    : "pointer-events-none";
   const handleRowClick = useCallback(
     (event: React.MouseEvent) => {
       handleThreadClick(event, threadRef, orderedProjectThreadKeys);
@@ -481,41 +454,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const handleRenameInputClick = useCallback((event: React.MouseEvent<HTMLInputElement>) => {
     event.stopPropagation();
   }, []);
-  const handleConfirmArchiveRef = useCallback(
-    (element: HTMLButtonElement | null) => {
-      if (element) {
-        confirmArchiveButtonRefs.current.set(threadKey, element);
-      } else {
-        confirmArchiveButtonRefs.current.delete(threadKey);
-      }
-    },
-    [confirmArchiveButtonRefs, threadKey],
-  );
   const stopPropagationOnPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       event.stopPropagation();
     },
     [],
-  );
-  const handleConfirmArchiveClick = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      clearConfirmingArchive();
-      void attemptArchiveThread(threadRef);
-    },
-    [attemptArchiveThread, clearConfirmingArchive, threadRef],
-  );
-  const handleStartArchiveConfirmation = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setConfirmingArchiveThreadKey(threadKey);
-      requestAnimationFrame(() => {
-        confirmArchiveButtonRefs.current.get(threadKey)?.focus();
-      });
-    },
-    [confirmArchiveButtonRefs, setConfirmingArchiveThreadKey, threadKey],
   );
   const handleArchiveImmediateClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -528,12 +471,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
   return (
-    <SidebarMenuSubItem
-      className="w-full"
-      data-thread-item
-      onMouseLeave={handleMouseLeave}
-      onBlurCapture={handleBlurCapture}
-    >
+    <SidebarMenuSubItem className="w-full" data-thread-item>
       <SidebarMenuSubButton
         render={rowButtonRender}
         size="sm"
@@ -586,56 +524,27 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           {/* A fixed column for the row's age, so every title has the same width whether
               or not the row is selected. Hover controls take the column's place. */}
           <div className="flex w-6 justify-end max-sm:w-20">
-            {isConfirmingArchive ? (
-              <button
-                ref={handleConfirmArchiveRef}
-                type="button"
-                data-thread-selection-safe
-                data-testid={`thread-archive-confirm-${thread.id}`}
-                aria-label={`Confirm archive ${thread.title}`}
-                className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-md bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
-                onPointerDown={stopPropagationOnPointerDown}
-                onClick={handleConfirmArchiveClick}
-              >
-                Confirm
-              </button>
-            ) : !isThreadRunning ? (
-              appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                  <button
-                    type="button"
-                    data-thread-selection-safe
-                    data-testid={`thread-archive-${thread.id}`}
-                    aria-label={`Archive ${thread.title}`}
-                    className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                    onPointerDown={stopPropagationOnPointerDown}
-                    onClick={handleStartArchiveConfirmation}
-                  >
-                    <ArchiveIcon className="size-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                        <button
-                          type="button"
-                          data-thread-selection-safe
-                          data-testid={`thread-archive-${thread.id}`}
-                          aria-label={`Archive ${thread.title}`}
-                          className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                          onPointerDown={stopPropagationOnPointerDown}
-                          onClick={handleArchiveImmediateClick}
-                        >
-                          <ArchiveIcon className="size-3.5" />
-                        </button>
-                      </div>
-                    }
-                  />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
-                </Tooltip>
-              )
+            {!isThreadRunning ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <button
+                        type="button"
+                        data-thread-selection-safe
+                        data-testid={`thread-archive-${thread.id}`}
+                        aria-label={`Archive ${thread.title}`}
+                        className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                        onPointerDown={stopPropagationOnPointerDown}
+                        onClick={handleArchiveImmediateClick}
+                      >
+                        <ArchiveIcon className="size-3.5" />
+                      </button>
+                    </div>
+                  }
+                />
+                <TooltipPopup side="top">Archive</TooltipPopup>
+              </Tooltip>
             ) : null}
             <span className={threadMetaClassName}>
               <span className="inline-flex items-center gap-1">
@@ -681,16 +590,12 @@ interface SidebarProjectThreadListProps {
   projectCwd: string;
   activeRouteThreadKey: string | null;
   threadJumpLabelByKey: ReadonlyMap<string, string>;
-  appSettingsConfirmThreadArchive: boolean;
   renamingThreadKey: string | null;
   renamingTitle: string;
   setRenamingTitle: (title: string) => void;
   startThreadRename: (threadKey: string, title: string) => void;
   renamingInputRef: React.RefObject<HTMLInputElement | null>;
   renamingCommittedRef: React.RefObject<boolean>;
-  confirmingArchiveThreadKey: string | null;
-  setConfirmingArchiveThreadKey: React.Dispatch<React.SetStateAction<string | null>>;
-  confirmArchiveButtonRefs: React.RefObject<Map<string, HTMLButtonElement>>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
   handleThreadClick: (
     event: React.MouseEvent,
@@ -733,16 +638,12 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     projectCwd,
     activeRouteThreadKey,
     threadJumpLabelByKey,
-    appSettingsConfirmThreadArchive,
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
     startThreadRename,
     renamingInputRef,
     renamingCommittedRef,
-    confirmingArchiveThreadKey,
-    setConfirmingArchiveThreadKey,
-    confirmArchiveButtonRefs,
     attachThreadListAutoAnimateRef,
     handleThreadClick,
     navigateToThread,
@@ -787,16 +688,12 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
               jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
-              appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
               renamingThreadKey={renamingThreadKey}
               renamingTitle={renamingTitle}
               setRenamingTitle={setRenamingTitle}
               startThreadRename={startThreadRename}
               renamingInputRef={renamingInputRef}
               renamingCommittedRef={renamingCommittedRef}
-              confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-              setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-              confirmArchiveButtonRefs={confirmArchiveButtonRefs}
               handleThreadClick={handleThreadClick}
               navigateToThread={navigateToThread}
               handleMultiSelectContextMenu={handleMultiSelectContextMenu}
@@ -853,6 +750,7 @@ interface SidebarProjectItemProps {
   newThreadShortcutLabel: string | null;
   handleNewThread: ReturnType<typeof useNewThreadHandler>;
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  offerArchiveUndo: ReturnType<typeof useThreadActions>["offerArchiveUndo"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
@@ -873,6 +771,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     newThreadShortcutLabel,
     handleNewThread,
     archiveThread,
+    offerArchiveUndo,
     deleteThread,
     threadJumpLabelByKey,
     attachThreadListAutoAnimateRef,
@@ -889,9 +788,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
-  );
-  const appSettingsConfirmThreadArchive = useClientSettings<boolean>(
-    (settings) => settings.confirmThreadArchive,
   );
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
@@ -990,14 +886,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
-  const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<SidebarProjectGroupMember | null>(
     null,
   );
   const [projectRenameTitle, setProjectRenameTitle] = useState("");
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
-  const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const memberProjectByScopedKey = useMemo(
     () =>
       new Map(
@@ -1008,21 +902,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     [project.memberProjects],
   );
-  const memberThreadCountByPhysicalKey = useMemo(() => {
-    const counts = new Map<string, number>(
-      project.memberProjects.map((member) => [member.physicalProjectKey, 0] as const),
-    );
-    for (const thread of projectThreads) {
-      const member = memberProjectByScopedKey.get(
-        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
-      );
-      if (!member) {
-        continue;
-      }
-      counts.set(member.physicalProjectKey, (counts.get(member.physicalProjectKey) ?? 0) + 1);
-    }
-    return counts;
-  }, [memberProjectByScopedKey, project.memberProjects, projectThreads]);
 
   const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() => {
     const lastVisitedAtByThreadKey = new Map(
@@ -1279,115 +1158,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
-      const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
-      const memberThreadCount = memberThreadCountByPhysicalKey.get(member.physicalProjectKey) ?? 0;
-      if (memberThreadCount > 0) {
-        const warningToastId = toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: "Project is not empty",
-            description: "Delete all threads in this project before removing it.",
-            actionVariant: "destructive",
-            actionProps: {
-              children: "Delete anyway",
-              onClick: () => {
-                void (async () => {
-                  toastManager.close(warningToastId);
-                  await new Promise<void>((resolve) => {
-                    window.setTimeout(resolve, 180);
-                  });
-
-                  const latestProjectThreads = Array.from(
-                    sidebarThreadByKeyRef.current.values(),
-                  ).filter(
-                    (thread) =>
-                      thread.environmentId === memberProjectRef.environmentId &&
-                      thread.projectId === memberProjectRef.projectId,
-                  );
-                  const confirmed = await api.dialogs.confirm(
-                    latestProjectThreads.length > 0
-                      ? [
-                          `Remove project "${member.title}" and delete its ${latestProjectThreads.length} thread${
-                            latestProjectThreads.length === 1 ? "" : "s"
-                          }?`,
-                          member.onshapeSource
-                            ? `Onshape URL: ${onshapeProjectUrl(member.onshapeSource)}`
-                            : `Path: ${member.workspaceRoot}`,
-                          ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
-                            : []),
-                          "This permanently clears conversation history for those threads.",
-                          "This removes only this project entry.",
-                          "This action cannot be undone.",
-                        ].join("\n")
-                      : [
-                          `Remove project "${member.title}"?`,
-                          member.onshapeSource
-                            ? `Onshape URL: ${onshapeProjectUrl(member.onshapeSource)}`
-                            : `Path: ${member.workspaceRoot}`,
-                          ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
-                            : []),
-                          "This removes only this project entry.",
-                        ].join("\n"),
-                    { variant: "destructive" },
-                  );
-                  if (!confirmed) {
-                    return;
-                  }
-
-                  const result = await removeProject(member, { force: true });
-                  if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-                    const error = squashAtomCommandFailure(result);
-                    toastManager.add(
-                      stackedThreadToast({
-                        type: "error",
-                        title: `Failed to remove "${member.title}"`,
-                        description:
-                          error instanceof Error
-                            ? error.message
-                            : "Unknown error removing project.",
-                      }),
-                    );
-                  }
-                })().catch((error) => {
-                  const message =
-                    error instanceof Error ? error.message : "Unknown error removing project.";
-
-                  console.error("Failed to remove project", {
-                    projectId: member.id,
-                    environmentId: member.environmentId,
-                    ...safeErrorLogAttributes(error),
-                  });
-                  toastManager.add(
-                    stackedThreadToast({
-                      type: "error",
-                      title: `Failed to remove "${member.title}"`,
-                      description: message,
-                    }),
-                  );
-                });
-              },
-            },
-          }),
-        );
-        return;
-      }
-
-      const message = [
-        `Remove project "${member.title}"?`,
-        member.onshapeSource
-          ? `Onshape URL: ${onshapeProjectUrl(member.onshapeSource)}`
-          : `Path: ${member.workspaceRoot}`,
-        ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
-        "This removes only this project entry.",
-      ].join("\n");
-      const confirmed = await api.dialogs.confirm(message, { variant: "destructive" });
+      const threadCount = Array.from(sidebarThreadByKeyRef.current.values()).filter(
+        (thread) => thread.environmentId === member.environmentId && thread.projectId === member.id,
+      ).length;
+      const confirmed = await api.dialogs.confirm(
+        projectRemovalConfirmation({
+          title: member.title,
+          location: member.workspaceRoot,
+          environmentLabel: member.environmentLabel,
+          threadCount,
+        }),
+      );
       if (!confirmed) {
         return;
       }
 
-      const result = await removeProject(member);
+      const result = await removeProject(member, { force: threadCount > 0 });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         const message = error instanceof Error ? error.message : "Unknown error removing project.";
@@ -1405,14 +1191,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         );
       }
     },
-    [
-      memberThreadCountByPhysicalKey,
-      removeProject,
-      removeCadProject,
-      router,
-      sidebarThreads,
-      activeRouteThreadKey,
-    ],
+    [removeProject, removeCadProject, router, sidebarThreads, activeRouteThreadKey],
   );
 
   const handleProjectButtonContextMenu = useCallback(
@@ -1642,13 +1421,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       if (clicked === "archive") {
-        if (appSettingsConfirmThreadArchive) {
-          const confirmed = await api.dialogs.confirm(
-            `Archive ${count} thread${count === 1 ? "" : "s"}?`,
-          );
-          if (!confirmed) return;
-        }
-
         const archiveOutcome = await archiveSelectedThreadEntries({
           entries: selectedThreadEntries,
           archive: ({ threadRef }, onArchived) => archiveThread(threadRef, { onArchived }),
@@ -1678,6 +1450,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           }
           return;
         }
+        offerArchiveUndo(
+          selectedThreadEntries.map(({ threadRef, thread }) => ({
+            ref: threadRef,
+            title: thread.title,
+          })),
+        );
         removeFromSelection(threadKeys);
         return;
       }
@@ -1685,13 +1463,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (clicked !== "delete") return;
 
       if (appSettingsConfirmThreadDelete) {
-        const confirmed = await api.dialogs.confirm(
-          [
-            `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-            "This permanently clears conversation history for these threads.",
-          ].join("\n"),
-          { variant: "destructive" },
-        );
+        const confirmed = await api.dialogs.confirm(threadDeleteConfirmation({ count }));
         if (!confirmed) return;
       }
 
@@ -1717,12 +1489,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       removeFromSelection(threadKeys);
     },
     [
-      appSettingsConfirmThreadArchive,
       appSettingsConfirmThreadDelete,
       archiveThread,
       clearSelection,
       deleteThread,
       markThreadUnread,
+      offerArchiveUndo,
       removeFromSelection,
     ],
   );
@@ -1824,8 +1596,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   const attemptArchiveThread = useCallback(
     async (threadRef: ScopedThreadRef) => {
+      const title = readThreadShell(threadRef)?.title ?? "thread";
       const result = await archiveThread(threadRef);
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      if (result._tag === "Success") {
+        offerArchiveUndo([{ ref: threadRef, title }]);
+        return;
+      }
+      if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         toastManager.add(
           stackedThreadToast({
@@ -1836,7 +1613,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         );
       }
     },
-    [archiveThread],
+    [archiveThread, offerArchiveUndo],
   );
 
   const cancelRename = useCallback(() => {
@@ -1998,13 +1775,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
       if (clicked !== "delete") return;
       if (appSettingsConfirmThreadDelete) {
-        const confirmed = await api.dialogs.confirm(
-          [
-            `Delete thread "${thread.title}"?`,
-            "This permanently clears conversation history for this thread.",
-          ].join("\n"),
-          { variant: "destructive" },
-        );
+        const confirmed = await api.dialogs.confirm(threadDeleteConfirmation(thread));
 
         if (!confirmed) {
           return;
@@ -2188,16 +1959,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         projectCwd={project.workspaceRoot}
         activeRouteThreadKey={activeRouteThreadKey}
         threadJumpLabelByKey={threadJumpLabelByKey}
-        appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
         renamingThreadKey={renamingThreadKey}
         renamingTitle={renamingTitle}
         setRenamingTitle={setRenamingTitle}
         startThreadRename={startThreadRename}
         renamingInputRef={renamingInputRef}
         renamingCommittedRef={renamingCommittedRef}
-        confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-        setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-        confirmArchiveButtonRefs={confirmArchiveButtonRefs}
         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
         handleThreadClick={handleThreadClick}
         navigateToThread={navigateToThread}
@@ -2529,6 +2296,7 @@ interface SidebarProjectsContentProps {
   handleProjectDragCancel: (event: DragCancelEvent) => void;
   handleNewThread: ReturnType<typeof useNewThreadHandler>;
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  offerArchiveUndo: ReturnType<typeof useThreadActions>["offerArchiveUndo"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
   expandedThreadListsByProject: ReadonlySet<string>;
@@ -2570,6 +2338,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     handleProjectDragCancel,
     handleNewThread,
     archiveThread,
+    offerArchiveUndo,
     deleteThread,
     sortedProjects,
     expandedThreadListsByProject,
@@ -2712,6 +2481,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         newThreadShortcutLabel={newThreadShortcutLabel}
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
+                        offerArchiveUndo={offerArchiveUndo}
                         deleteThread={deleteThread}
                         threadJumpLabelByKey={threadJumpLabelByKey}
                         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
@@ -2744,6 +2514,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 newThreadShortcutLabel={newThreadShortcutLabel}
                 handleNewThread={handleNewThread}
                 archiveThread={archiveThread}
+                offerArchiveUndo={offerArchiveUndo}
                 deleteThread={deleteThread}
                 threadJumpLabelByKey={threadJumpLabelByKey}
                 attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
@@ -2891,7 +2662,7 @@ export default function ThreadSidebar() {
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount);
   const updateSettings = useUpdateClientSettings();
   const handleNewThread = useNewThreadHandler();
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { archiveThread, deleteThread, offerArchiveUndo } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const routeTarget = useParams({
     strict: false,
@@ -3370,7 +3141,7 @@ export default function ThreadSidebar() {
       let confirmed = false;
       try {
         confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(desktopUpdateState),
+          getDesktopUpdateInstallConfirmation(desktopUpdateState, readRunningDesktopChatCount()),
         );
       } catch (error) {
         setDesktopUpdateActionPending(false);
@@ -3504,6 +3275,7 @@ export default function ThreadSidebar() {
           handleProjectDragCancel={handleProjectDragCancel}
           handleNewThread={handleNewThread}
           archiveThread={archiveThread}
+          offerArchiveUndo={offerArchiveUndo}
           deleteThread={deleteThread}
           sortedProjects={sortedProjects}
           expandedThreadListsByProject={expandedThreadListsByProject}

@@ -1004,7 +1004,33 @@ export interface DesktopPreviewBridge {
 
 export type ConfirmDialogVariant = "default" | "destructive";
 
-export interface ConfirmDialogOptions {
+/** A status pill on a confirmation row. `destructive` marks what the action deletes. */
+export interface ConfirmDialogRowStatus {
+  readonly label: string;
+  readonly tone: "neutral" | "destructive";
+}
+
+/** One fact in a confirmation, such as a thing a removal keeps or deletes. */
+export interface ConfirmDialogRow {
+  readonly label: string;
+  readonly detail?: string;
+  readonly status?: ConfirmDialogRowStatus;
+}
+
+/**
+ * What a confirmation shows. The confirm button names the action ("Delete thread", "Restart
+ * now"), so callers never fall back to a generic "Confirm".
+ */
+export interface ConfirmDialogRequest {
+  readonly title: string;
+  readonly description?: string;
+  /** A path or URL for the thing the action changes, shown in monospace under the title. */
+  readonly location?: string;
+  readonly rows?: ReadonlyArray<ConfirmDialogRow>;
+  /** A side effect worth stopping for, shown in a tinted box. */
+  readonly warning?: string;
+  readonly confirmLabel: string;
+  readonly cancelLabel?: string;
   readonly variant?: ConfirmDialogVariant;
 }
 
@@ -1023,7 +1049,7 @@ export interface LocalApi {
     pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
     /** Resolves null when cancelled, or when this host has no native file picker. */
     pickFile: (options?: PickFileOptions) => Promise<string | null>;
-    confirm: (message: string, options?: ConfirmDialogOptions) => Promise<boolean>;
+    confirm: (request: ConfirmDialogRequest) => Promise<boolean>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;
