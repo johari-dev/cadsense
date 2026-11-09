@@ -1558,6 +1558,11 @@ function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: bo
   });
 }
 
+// Size of the DMG window's canvas in points. The background SVGs in
+// apps/desktop/resources/dmg are drawn at this size (2x pixels), and the
+// installer window and icon positions in the DMG config are laid out on it.
+const DMG_CANVAS = { width: 540, height: 268 } as const;
+
 export const stageDesktopDmgBackground = Effect.fn("stageDesktopDmgBackground")(function* (
   stageResourcesDir: string,
   channel: "latest" | "nightly",
@@ -1571,8 +1576,8 @@ export const stageDesktopDmgBackground = Effect.fn("stageDesktopDmgBackground")(
   }
 
   for (const output of [
-    { suffix: "", width: 540, height: 380 },
-    { suffix: "@2x", width: 1080, height: 760 },
+    { suffix: "", width: DMG_CANVAS.width, height: DMG_CANVAS.height },
+    { suffix: "@2x", width: DMG_CANVAS.width * 2, height: DMG_CANVAS.height * 2 },
   ] as const) {
     const targetPath = path.join(
       stageResourcesDir,
@@ -1864,15 +1869,15 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       title: `${resolveDesktopProductName(version)} ${version} Installer`,
       background: `dmg/dmg-background-${updateChannel}.png`,
       window: {
-        width: 540,
-        // Finder counts its 32px title bar in the window bounds. The themed
-        // background itself is 380px tall, so add the chrome height here to
-        // keep the full canvas visible.
-        height: 412,
+        width: DMG_CANVAS.width,
+        // Finder counts its 32px title bar in the window bounds, so add the
+        // chrome height to keep the full canvas visible.
+        height: DMG_CANVAS.height + 32,
       },
+      // Icon centers, lined up with the drag arrow drawn in the background.
       contents: [
-        { x: 130, y: 220, type: "file" },
-        { x: 410, y: 220, type: "link", path: "/Applications" },
+        { x: 130, y: 90, type: "file" },
+        { x: 410, y: 90, type: "link", path: "/Applications" },
       ],
       iconSize: 80,
       iconTextSize: 12,
