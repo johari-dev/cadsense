@@ -32,7 +32,12 @@ export function OnshapeProjectCreateForm(props: {
   const [error, setError] = useState<string | null>(null);
   const catalog = useOnshapeConnectionsController(props.environmentId);
   const connections = catalog.connections;
-  const connection = connections.find((item) => item.connectionId === connectionId);
+  // A single saved connection needs no picker. Once the user has picked one, keep that
+  // choice so a removed connection is never silently swapped for another.
+  const onlyConnection =
+    connectionId === "" && connections.length === 1 ? connections[0] : undefined;
+  const connection =
+    onlyConnection ?? connections.find((item) => item.connectionId === connectionId);
 
   return (
     <form
@@ -118,26 +123,28 @@ export function OnshapeProjectCreateForm(props: {
           disabled={pending || !props.connected || catalog.interactionsDisabled}
           className="space-y-4"
         >
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor={`${id}-connection`}>
-              Connection
-            </label>
-            <select
-              id={`${id}-connection`}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-ring"
-              value={connection?.connectionId ?? ""}
-              onChange={(event) => setConnectionId(event.target.value)}
-            >
-              <option value="" disabled>
-                Select a connection
-              </option>
-              {connections.map((item) => (
-                <option key={item.connectionId} value={item.connectionId}>
-                  {item.name} · {item.host}
+          {!onlyConnection && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor={`${id}-connection`}>
+                Connection
+              </label>
+              <select
+                id={`${id}-connection`}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-ring"
+                value={connection?.connectionId ?? ""}
+                onChange={(event) => setConnectionId(event.target.value)}
+              >
+                <option value="" disabled>
+                  Select a connection
                 </option>
-              ))}
-            </select>
-          </div>
+                {connections.map((item) => (
+                  <option key={item.connectionId} value={item.connectionId}>
+                    {item.name} · {item.host}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor={`${id}-name`}>
               Project name
