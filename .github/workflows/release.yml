@@ -125,12 +125,30 @@ jobs:
             --current-tag "${{ steps.release_meta.outputs.tag }}" \
             --github-output
 
+  # Same split as ci.yml: the whole suite in one job took ~7 minutes on a
+  # standard runner and gated every publish. Server tests run one file at a
+  # time (fileParallelism: false), so they shard across runners instead.
   quality:
-    name: Release quality checks
+    name: Release ${{ matrix.name }}
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
+    strategy:
+      matrix:
+        include:
+          - name: check
+            electron: true
+            run: vp check && vp run typecheck
+          - name: tests
+            electron: true
+            run: vp run --parallel --concurrency-limit 4 --filter '!@cadsense/server' --filter '!@cadsense/monorepo' test
+          - name: server tests 1
+            run: vp run --filter @cadsense/server test --shard 1/3
+          - name: server tests 2
+            run: vp run --filter @cadsense/server test --shard 2/3
+          - name: server tests 3
+            run: vp run --filter @cadsense/server test --shard 3/3
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -149,16 +167,11 @@ jobs:
           run-install: true
 
       - name: Ensure Electron runtime is installed
+        if: matrix.electron
         run: vp run --filter @cadsense/desktop ensure:electron
 
-      - name: Check
-        run: vp check
-
-      - name: Typecheck
-        run: vp run typecheck
-
-      - name: Test
-        run: vp run test
+      - name: Run ${{ matrix.name }}
+        run: ${{ matrix.run }}
 
   build:
     name: Build ${{ matrix.label }}
@@ -252,23 +265,6 @@ jobs:
 
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
-
-      - name: Install Spectre-mitigated MSVC libs
-        if: matrix.platform == 'win'
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installPath = & $vswhere -products * -latest -property installationPath
-          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-          $proc = Start-Process -FilePath $setupExe `
-            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
-            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
-            -Wait -PassThru -NoNewWindow
-          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
-            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
-            Write-Error "Visual Studio Installer failed with exit code $code"
-            exit $code
-          }
 
       - name: Install ImageMagick
         if: matrix.platform == 'linux'
