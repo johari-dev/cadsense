@@ -574,12 +574,12 @@ try {
   // its file's ("arm"), and the sidebar row the removal and restore steps use (matched by the
   // folder's name) is still the first project's.
   const secondName = "exports/arm.step";
-  const addDialog = page.getByRole("dialog", { name: "Add project" });
+  const addDialog = page.getByRole("dialog", { name: /^(Add project|New (CAD|Onshape) project)$/ });
   /** Opens Add project, scans the bracket-rig folder, and picks `file` in the dialog. */
   const pickInFolder = async (page: Page, file: string) => {
     await page.goto(url, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Add project" }).first().click();
-    await page.getByRole("button", { name: "Local CAD file" }).click();
+    await page.getByRole("button", { name: "CAD file" }).click();
     await page.getByLabel("Folder").fill(folder);
     await page.getByRole("button", { name: "Scan" }).click();
     await addDialog.getByText(file, { exact: true }).click({ timeout: 60_000 });
