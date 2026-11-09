@@ -183,23 +183,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Releases ship macOS and Windows. macOS builds are signed and
-          # notarized with the Apple secrets (CSC_*, APPLE_API_*); without
-          # them they ship unsigned, and unsigned installs can never take an
-          # update. To bring Linux back, uncomment its entry here, the
-          # *.AppImage glob in both publish steps, and the publish_aur job.
+          # Releases ship macOS (Apple Silicon only) and Windows. macOS builds
+          # are signed and notarized with the Apple secrets (CSC_*,
+          # APPLE_API_*); without them they ship unsigned, and unsigned
+          # installs can never take an update. To bring Linux back, uncomment
+          # its entry here, the *.AppImage glob in both publish steps, and the
+          # publish_aur job.
           - label: macOS arm64
             runner: macos-26
             platform: mac
             target: dmg
             arch: arm64
             rust_target: aarch64-apple-darwin
-          - label: macOS x64
-            runner: macos-26
-            platform: mac
-            target: dmg
-            arch: x64
-            rust_target: x86_64-apple-darwin
           # - label: Linux x64
           #   runner: ubuntu-24.04
           #   platform: linux
@@ -432,13 +427,6 @@ jobs:
             done
           done
 
-          if [[ "${{ matrix.platform }}" == "mac" && "${{ matrix.arch }}" != "arm64" ]]; then
-            shopt -s nullglob
-            for manifest in release-publish/*-mac.yml; do
-              mv "$manifest" "${manifest%.yml}-${{ matrix.arch }}.yml"
-            done
-          fi
-
           # Enable if Windows arm64 builds are enabled.
           # Windows updater metadata is channel-specific (for example
           # "latest.yml" or "nightly.yml"). Suffix each per-arch copy so the
@@ -491,17 +479,6 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: release-assets
-
-      - name: Merge macOS updater manifests
-        run: |
-          shopt -s nullglob
-          for x64_manifest in release-assets/*-mac-x64.yml; do
-            arm64_manifest="${x64_manifest%-x64.yml}.yml"
-            if [[ -f "$arm64_manifest" ]]; then
-              node scripts/merge-update-manifests.ts --platform mac "$arm64_manifest" "$x64_manifest"
-              rm -f "$x64_manifest"
-            fi
-          done
 
       # - name: Merge Windows updater manifests
       #   run: |
