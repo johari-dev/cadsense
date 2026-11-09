@@ -46,6 +46,11 @@ function control(
 }
 const connectionId = OnshapeConnectionId.make("11111111-1111-4111-8111-111111111111");
 const connections = [{ connectionId, name: "Personal", host: "cad.onshape.com" }];
+const otherConnection = {
+  connectionId: OnshapeConnectionId.make("33333333-3333-4333-8333-333333333333"),
+  name: "Work",
+  host: "company.onshape.com",
+};
 const catalog = {
   connections,
   hasListData: true,
@@ -89,7 +94,36 @@ describe("Onshape project creation form", () => {
       });
     return { create, render, change, submit };
   }
+  it("hides the connection picker and uses the only saved connection", async () => {
+    const form = setup();
+    expect(control(form.render(), (props) => props.id === "test-connection")).toBeUndefined();
+    form.change("name", "CAD");
+    form.change("url", "https://cad.onshape.com/documents/example");
+    await form.submit();
+    expect(form.create).toHaveBeenCalledExactlyOnceWith({
+      title: "CAD",
+      url: "https://cad.onshape.com/documents/example",
+      connectionId,
+    });
+  });
+  it("asks for a connection when there is more than one", async () => {
+    state.catalog.mockReturnValue({ ...catalog, connections: [...connections, otherConnection] });
+    const form = setup();
+    expect(control(form.render(), (props) => props.id === "test-connection")).toBeDefined();
+    form.change("name", "CAD");
+    form.change("url", "https://cad.onshape.com/documents/example");
+    await form.submit();
+    expect(form.create).not.toHaveBeenCalled();
+    form.change("connection", otherConnection.connectionId);
+    await form.submit();
+    expect(form.create).toHaveBeenCalledExactlyOnceWith({
+      title: "CAD",
+      url: "https://cad.onshape.com/documents/example",
+      connectionId: otherConnection.connectionId,
+    });
+  });
   it("rejects blank fields and submits trimmed input using the chosen connection", async () => {
+    state.catalog.mockReturnValue({ ...catalog, connections: [...connections, otherConnection] });
     const form = setup();
     await form.submit();
     expect(form.create).not.toHaveBeenCalled();
@@ -111,6 +145,7 @@ describe("Onshape project creation form", () => {
     });
   });
   it("does not switch to another connection when the selected one is removed", async () => {
+    state.catalog.mockReturnValue({ ...catalog, connections: [...connections, otherConnection] });
     const form = setup();
     form.change("name", "CAD");
     form.change("url", "https://cad.onshape.com/documents/example");
@@ -126,6 +161,7 @@ describe("Onshape project creation form", () => {
     });
     await form.submit();
     expect(form.create).not.toHaveBeenCalled();
+    expect(control(form.render(), (props) => props.id === "test-connection")).toBeDefined();
   });
   it("prevents concurrent submits while a create is unresolved and while connections are mutating", async () => {
     const form = setup();
