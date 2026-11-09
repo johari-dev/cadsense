@@ -139,7 +139,8 @@ function SidebarControl() {
  * start below the bar. The rail is full height and its sidebar header hides while folded, so
  * without this its border cut through the macOS traffic lights and its empty top (the rail's
  * `pt-[var(--workspace-topbar-height)]`) could not drag the window. No bottom border: pages
- * without a bordered header (empty state, settings) would show it as a stray stub.
+ * without a bordered header (empty state, settings) would show it as a stray stub. It carries
+ * `surface-grain` like every surface that covers the body, or it reads as a flat dark patch.
  */
 function SidebarRailTitlebarCap() {
   const { isMobile, state } = useSidebar();
@@ -149,7 +150,7 @@ function SidebarRailTitlebarCap() {
     <div
       aria-hidden
       className={cn(
-        "fixed top-0 left-0 z-20 h-[var(--workspace-topbar-height)] w-(--sidebar-width-icon) bg-background",
+        "fixed top-0 left-0 z-20 h-[var(--workspace-topbar-height)] w-(--sidebar-width-icon) bg-background surface-grain",
         isElectron && "drag-region",
       )}
       data-sidebar-rail-titlebar=""
