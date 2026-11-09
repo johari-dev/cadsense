@@ -301,6 +301,9 @@ export function projectEvent(
             ...(payload.onshapeSource !== undefined
               ? { onshapeSource: payload.onshapeSource }
               : {}),
+            ...(payload.localCadSource !== undefined
+              ? { localCadSource: payload.localCadSource }
+              : {}),
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,

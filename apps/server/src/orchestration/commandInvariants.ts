@@ -120,26 +120,52 @@ export function requireProjectAbsent(input: {
   );
 }
 
-export function requireActiveProjectWorkspaceRootAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
+/** The folder and, for a local CAD project, the workspace-relative CAD file a project would hold. */
+export interface ProjectPlace {
   readonly workspaceRoot: string;
-  readonly exceptProjectId?: ProjectId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  const normalizedWorkspaceRoot = normalizeProjectPathForComparison(input.workspaceRoot);
-  const existingProject = input.readModel.projects.find(
+  readonly filePath?: string | undefined;
+  readonly exceptProjectId?: ProjectId | undefined;
+}
+
+/**
+ * The active project that `place` would collide with, if any. Projects in one folder coexist only
+ * when both review a CAD file and the files differ, so a project without a file (a plain folder
+ * project, or an Onshape project's managed folder) keeps its folder to itself. Files compare with
+ * the folder's case rule: case-insensitive on Windows drive and UNC paths.
+ */
+export function findConflictingProject<
+  T extends Pick<OrchestrationProject, "id" | "workspaceRoot" | "deletedAt" | "localCadSource">,
+>(projects: ReadonlyArray<T>, place: ProjectPlace): T | undefined {
+  const folder = normalizeProjectPathForComparison(place.workspaceRoot);
+  const file = (filePath: string) =>
+    normalizeProjectPathForComparison(`${place.workspaceRoot}/${filePath}`);
+  return projects.find(
     (project) =>
       project.deletedAt === null &&
-      normalizeProjectPathForComparison(project.workspaceRoot) === normalizedWorkspaceRoot &&
-      project.id !== input.exceptProjectId,
+      project.id !== place.exceptProjectId &&
+      normalizeProjectPathForComparison(project.workspaceRoot) === folder &&
+      (place.filePath === undefined ||
+        project.localCadSource === undefined ||
+        file(project.localCadSource.filePath) === file(place.filePath)),
   );
+}
+
+export function requireNoConflictingProject(
+  input: ProjectPlace & {
+    readonly readModel: OrchestrationReadModel;
+    readonly command: OrchestrationCommand;
+  },
+): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const existingProject = findConflictingProject(input.readModel.projects, input);
   if (existingProject === undefined) {
     return Effect.void;
   }
   return Effect.fail(
     invariantError(
       input.command.type,
-      `Active project '${existingProject.id}' already exists for workspace root '${normalizedWorkspaceRoot}'.`,
+      existingProject.localCadSource && input.filePath !== undefined
+        ? `Active project '${existingProject.id}' already reviews '${input.filePath}' in '${input.workspaceRoot}'.`
+        : `Active project '${existingProject.id}' already exists for workspace root '${input.workspaceRoot}'.`,
     ),
   );
 }

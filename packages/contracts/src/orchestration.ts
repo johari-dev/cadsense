@@ -1020,6 +1020,21 @@ export const OnshapeProjectSetConnectionCommand = Schema.Struct({
   connectionId: OnshapeConnectionId,
 });
 
+/**
+ * Server-only command that creates a local CAD project with its file in one step, so the decider
+ * can check the file against other projects in the folder. Produced after resolving the file.
+ */
+export const LocalCadProjectCreateCommand = Schema.Struct({
+  type: Schema.Literal("project.local-cad.create"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  defaultModelSelection: Schema.NullOr(ModelSelection),
+  localCadSource: LocalCadProjectSource,
+  createdAt: IsoDateTime,
+});
+
 /** Server-only command produced after resolving a CAD file inside a folder project's workspace. */
 export const LocalCadProjectSetCommand = Schema.Struct({
   type: Schema.Literal("project.local-cad.set"),
@@ -1132,6 +1147,7 @@ const InternalOrchestrationCommand = Schema.Union([
   OnshapeProjectCreateCommand,
   OnshapeProjectSetConnectionCommand,
   OnshapeProjectWorkspaceReadyCommand,
+  LocalCadProjectCreateCommand,
   LocalCadProjectSetCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1221,6 +1237,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
+  localCadSource: Schema.optionalKey(LocalCadProjectSource),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

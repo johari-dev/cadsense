@@ -308,7 +308,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })(
     );
 
     it.effect(
-      "imports a re-exported file and another file in the folder, each in a new review",
+      "imports a re-exported file in a new review, and another file in the folder as its own project",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
@@ -332,14 +332,23 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })(
 
           const other = path.join(folder.models, "other.step");
           yield* fs.copyFile(FIXTURE, other);
-          const switched = yield* openReady(reviews, { file: other });
-          const relinked = yield* projectFor(folder.root);
-          assert.strictEqual(relinked.id, before.id);
-          assert.strictEqual(relinked.localCadSource?.filePath, "other.step");
-          assert.notStrictEqual(switched.reviewId, reexported.reviewId);
+          const second = yield* openReady(reviews, { file: other });
+          assert.notStrictEqual(second.reviewId, reexported.reviewId);
+          // The folder now holds two projects. The first still reviews its own file.
+          const projects = yield* projectsUnder(folder.root);
+          assert.lengthOf(projects, 2);
+          const query = yield* ProjectionSnapshotQuery;
+          const shell = (filePath: string) =>
+            query
+              .getProjectShellById(
+                projects.find((project) => project.localCadSource?.filePath === filePath)!.id,
+              )
+              .pipe(Effect.map(Option.getOrThrow));
+          assert.strictEqual((yield* shell("part.step")).id, before.id);
           assert.isNotNull(
-            relinked.cad?.roots.find((root) => root.elementId === localCadElementId("other.step"))
-              ?.current,
+            (yield* shell("other.step")).cad?.roots.find(
+              (root) => root.elementId === localCadElementId("other.step"),
+            )?.current,
           );
         }).pipe(Effect.scoped),
     );

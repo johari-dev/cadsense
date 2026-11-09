@@ -11,7 +11,7 @@ import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { isElectron } from "../env";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { readLocalApi } from "../localApi";
-import { inferProjectTitleFromPath } from "../lib/projectPaths";
+import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
 import { newProjectId } from "../lib/utils";
 import { resolveDefaultProviderModelSelection } from "../providerInstances";
 import {
@@ -248,6 +248,12 @@ export function AddProjectDialog() {
             environmentLabel={environment.label}
             connected={environment.connection.phase === "connected"}
             pickFile={nativeCadFilePicker(environment)}
+            folderHasProject={(workspaceRoot) =>
+              findProjectByPath(
+                projects.filter((project) => project.environmentId === environment.environmentId),
+                workspaceRoot,
+              ) !== undefined
+            }
             onCancel={() => setKind(null)}
             onCreate={async (input) => {
               busyRef.current = true;
@@ -265,7 +271,7 @@ export function AddProjectDialog() {
                   },
                 });
                 if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-                // The server reuses an existing project for this folder, which may have chats.
+                // The server reuses the project that already reviews this file, which may have chats.
                 await openProject(result.value.projectId);
                 setOpen(false);
                 return null;

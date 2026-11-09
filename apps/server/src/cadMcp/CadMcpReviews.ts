@@ -13,7 +13,6 @@ import {
   type OnshapeProjectSource,
   onshapeStackOrigin,
 } from "@cadsense/contracts";
-import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -43,6 +42,7 @@ import { LocalCadProjects } from "../localCad/LocalCadProjects.ts";
 import { OnshapeConnections } from "../onshape/OnshapeConnections.ts";
 import { OnshapeProjects } from "../onshape/OnshapeProjects.ts";
 import * as OnshapeSourceUrl from "../onshape/OnshapeSourceUrl.ts";
+import { findConflictingProject } from "../orchestration/commandInvariants.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CAD_REVIEW_INSTRUCTIONS } from "../provider/CadReviewInstructions.ts";
@@ -99,6 +99,8 @@ const describeLocalCadError = (error: LocalCadError, paths: { file: string; fold
       return `${paths.file} is not inside ${paths.folder}. Pass a folder that contains the file, or leave folder out to use the file's own folder.`;
     case "unsupported-file":
       return `Cadsense opens ${LOCAL_CAD_FILE_EXTENSIONS.join(", ")} files. Export a STEP file from the CAD program and pass that.`;
+    case "folder-in-use":
+      return `${paths.folder} already has a Cadsense project with no CAD file. Ask the user to pick ${paths.file} in that project's CAD panel, or pass a different folder.`;
     default:
       return error.message;
   }
@@ -360,30 +362,27 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
   });
 
   /**
-   * The project for a local CAD file's folder, with that file linked: the folder's active project
-   * as is, the same project relinked with `setFile`, or a new one from `create`.
+   * The project that reviews a local CAD file: the folder's project for that file as is, or a new
+   * one from `create`. Never relinks another project, so a folder can hold one project per file.
    */
   const localProjectFor = Effect.fn("CadMcpReviews.localProjectFor")(function* (
     workspaceRoot: string,
     filePath: string,
     title: string,
   ) {
-    const folder = normalizeProjectPathForComparison(workspaceRoot);
-    const existing = (yield* query.getCommandReadModel()).projects.find(
-      (project) =>
-        project.deletedAt === null &&
-        normalizeProjectPathForComparison(project.workspaceRoot) === folder,
-    );
-    if (existing?.localCadSource?.filePath === filePath) return existing.id;
-    const linked = existing
-      ? yield* localCadProjects.setFile({ projectId: existing.id, filePath })
-      : yield* localCadProjects.create({
-          projectId: ProjectId.make(yield* uuid),
-          title,
-          workspaceRoot,
-          filePath,
-        });
-    return linked.projectId;
+    const existing = findConflictingProject((yield* query.getCommandReadModel()).projects, {
+      workspaceRoot,
+      filePath,
+    });
+    // Reopening a file needs no new import here; importLocalFile checks its revision.
+    if (existing?.localCadSource) return existing.id;
+    const created = yield* localCadProjects.create({
+      projectId: ProjectId.make(yield* uuid),
+      title,
+      workspaceRoot,
+      filePath,
+    });
+    return created.projectId;
   });
 
   /**

@@ -413,6 +413,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             workspaceRoot: event.payload.workspaceRoot,
             defaultModelSelection: event.payload.defaultModelSelection,
             onshapeSource: event.payload.onshapeSource ?? null,
+            ...(event.payload.localCadSource !== undefined
+              ? { localCadSource: event.payload.localCadSource }
+              : {}),
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,

@@ -875,30 +875,124 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })("local CAD proj
     }).pipe(Effect.scoped),
   );
 
-  it.effect("attaches to an existing folder project and rejects Onshape folders", () =>
+  it.effect("keeps one project per CAD file in a folder and never relinks another project", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const engineService = yield* OrchestrationEngineService;
+      const localCad = yield* LocalCadProjects;
+      const root = yield* makeFolder();
+      yield* fs.copyFile(FIXTURE, path.join(root, "models/arm.step"));
+      const create = (projectId: string, filePath: string) =>
+        localCad.create({
+          projectId: ProjectId.make(projectId),
+          title: projectId,
+          workspaceRoot: root,
+          filePath,
+        });
+
+      // A second file in the folder is a second project. The first keeps its file.
+      const robot = yield* create("local-cad-robot", "models/dm1.step");
+      const arm = yield* create("local-cad-arm", "models/arm.step");
+      assert.strictEqual(robot.projectId, "local-cad-robot");
+      assert.strictEqual(arm.projectId, "local-cad-arm");
+      assert.deepStrictEqual((yield* settle(robot.projectId)).localCadSource, {
+        filePath: "models/dm1.step",
+      });
+      assert.deepStrictEqual((yield* settle(arm.projectId)).localCadSource, {
+        filePath: "models/arm.step",
+      });
+
+      // The same file again opens its project, however the path is written.
+      const again = yield* create("local-cad-robot-again", path.join(root, "models/dm1.step"));
+      assert.strictEqual(again.projectId, robot.projectId);
+      assert.isTrue(
+        Option.isNone(
+          yield* (yield* ProjectionSnapshotQuery).getProjectShellById(
+            ProjectId.make("local-cad-robot-again"),
+          ),
+        ),
+      );
+
+      // Pointing a project at a file another project reviews fails and changes nothing.
+      const taken = yield* Effect.flip(
+        localCad.setFile({ projectId: arm.projectId, filePath: "models/dm1.step" }),
+      );
+      assert.strictEqual(taken.reason, "file-in-use");
+      assert.deepStrictEqual((yield* getProject(arm.projectId)).localCadSource, {
+        filePath: "models/arm.step",
+      });
+
+      // The decider holds the rule for callers that skip the service's check.
+      const duplicate = yield* Effect.flip(
+        engineService.dispatch({
+          type: "project.local-cad.create",
+          commandId: CommandId.make("local-cad-duplicate-file"),
+          projectId: ProjectId.make("local-cad-duplicate-file"),
+          title: "Duplicate",
+          workspaceRoot: root,
+          defaultModelSelection: null,
+          localCadSource: { filePath: "models/arm.step" },
+          createdAt: DateTime.formatIso(yield* DateTime.now),
+        }),
+      );
+      assert.include(String(duplicate), "already reviews");
+      const relink = yield* Effect.flip(
+        engineService.dispatch({
+          type: "project.local-cad.set",
+          commandId: CommandId.make("local-cad-relink-taken"),
+          projectId: arm.projectId,
+          localCadSource: { filePath: "models/dm1.step" },
+        }),
+      );
+      assert.include(String(relink), "already reviews");
+
+      // A plain folder project still needs a folder of its own.
+      const plain = yield* Effect.flip(
+        makeFolderProject(ProjectId.make("local-cad-plain-late"), root),
+      );
+      assert.include(String(plain), "already exists for workspace root");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("gives concurrent creates for one file the same project", () =>
+    Effect.gen(function* () {
+      const localCad = yield* LocalCadProjects;
+      const root = yield* makeFolder();
+      // Both calls may pass the service's check before either dispatches. The decider then
+      // rejects the second, and the service answers with the project that won.
+      const results = yield* Effect.all(
+        ["local-cad-race-a", "local-cad-race-b"].map((id) =>
+          localCad.create({
+            projectId: ProjectId.make(id),
+            title: id,
+            workspaceRoot: root,
+            filePath: "models/dm1.step",
+          }),
+        ),
+        { concurrency: "unbounded" },
+      );
+      assert.strictEqual(results[0]!.projectId, results[1]!.projectId);
+      const model = yield* (yield* ProjectionSnapshotQuery).getCommandReadModel();
+      assert.lengthOf(
+        model.projects.filter(
+          (project) => project.deletedAt === null && project.workspaceRoot === root,
+        ),
+        1,
+      );
+      yield* settle(results[0]!.projectId);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("leaves plain and Onshape folders to their own project", () =>
     Effect.gen(function* () {
       const engineService = yield* OrchestrationEngineService;
       const root = yield* makeFolder();
       const folderProjectId = ProjectId.make("local-cad-existing-folder");
-      yield* engineService.dispatch({
-        type: "project.create",
-        commandId: CommandId.make("local-cad-existing-folder"),
-        projectId: folderProjectId,
-        title: "Existing",
-        workspaceRoot: root,
-        createdAt: DateTime.formatIso(yield* DateTime.now),
-      });
-      const attached = yield* (yield* LocalCadProjects).create({
-        projectId: ProjectId.make("local-cad-would-duplicate"),
-        title: "Duplicate",
-        workspaceRoot: root,
-        filePath: "models/dm1.step",
-      });
-      assert.strictEqual(attached.projectId, folderProjectId);
-      const project = yield* settle(folderProjectId);
-      assert.strictEqual(project.title, "Existing");
-      assert.deepStrictEqual(project.localCadSource, { filePath: "models/dm1.step" });
-      assert.strictEqual(project.cad?.lastOutcome?.status, "succeeded");
+      yield* makeFolderProject(folderProjectId, root);
+      assert.strictEqual(yield* createError(root, "models/dm1.step"), "folder-in-use");
+      // The plain project keeps no file until its CAD panel links one.
+      assert.strictEqual((yield* getProject(folderProjectId)).localCadSource, undefined);
 
       const onshapeRoot = yield* makeFolder();
       yield* engineService.dispatch({
