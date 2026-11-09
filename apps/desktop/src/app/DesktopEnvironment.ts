@@ -102,7 +102,9 @@ function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: stageLabel ? `${APP_BASE_NAME} (${stageLabel})` : APP_BASE_NAME,
+    // Only dev builds carry the stage in the app name. Nightly keeps the plain
+    // name and shows its stage in the sidebar pill instead.
+    displayName: stageLabel === "Dev" ? `${APP_BASE_NAME} (${stageLabel})` : APP_BASE_NAME,
   };
 }
 

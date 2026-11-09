@@ -35,7 +35,7 @@ const makeEnvironment = (
   DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
 describe("DesktopEnvironment", () => {
-  it.effect("labels only development and nightly builds", () =>
+  it.effect("labels only development and nightly builds, naming only development", () =>
     Effect.gen(function* () {
       const release = yield* makeEnvironment();
       const nightly = yield* makeEnvironment({ appVersion: "0.0.36-nightly.20260906.1" });
@@ -51,7 +51,7 @@ describe("DesktopEnvironment", () => {
       assert.deepEqual(nightly.branding, {
         baseName: "Cadsense",
         stageLabel: "Nightly",
-        displayName: "Cadsense (Nightly)",
+        displayName: "Cadsense",
       });
       assert.deepEqual(development.branding, {
         baseName: "Cadsense",
