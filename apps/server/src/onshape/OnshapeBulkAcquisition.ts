@@ -36,7 +36,6 @@ import {
   parsePartStudioSnapshotDraft,
 } from "./OnshapeSnapshotManifest.ts";
 import { acquireSnapshotMetadata, onshapeDefinitionQuery } from "./OnshapeSnapshotMetadata.ts";
-import { OnshapeRecentElements } from "./OnshapeRecentElements.ts";
 import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
 export const ONSHAPE_BULK_TESSELLATION_PROFILE =
@@ -205,7 +204,6 @@ export const makeBulkAcquisition = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
   const state = yield* OnshapeSyncState;
   const store = yield* CadSnapshotStore;
-  const recent = yield* OnshapeRecentElements;
   /** Geometry for one batch of parts from one Part Studio, pinned to each part's revision. */
   const fetchSourceGeometry = Effect.fn(function* (
     source: OnshapeProjectSource,
@@ -293,11 +291,15 @@ export const makeBulkAcquisition = Effect.gen(function* () {
     });
     return { ...(yield* store.putAsset(bytes)), geometryKey: part.geometryKey, complexity };
   });
-  /** `definition` is the root assembly definition the caller already read at this revision. */
+  /**
+   * `definition` is the root assembly definition the caller already read at this revision.
+   * `discovered` is an element list discovery read before that definition, if any.
+   */
   return Effect.fn("OnshapeBulkAcquisition.acquire")(function* (
     context: CadSnapshotContext,
     source: OnshapeProjectSource,
     definition?: unknown,
+    discovered: Option.Option<unknown> = Option.none(),
   ) {
     const { root } = context;
     const progress = yield* CadProgressReporter;
@@ -403,15 +405,15 @@ export const makeBulkAcquisition = Effect.gen(function* () {
                   part.source.documentId === root.documentId && !reusable.has(part.geometryKey),
               )
             ) {
-              // With nothing to compare, revisions are only recorded, so the list discovery
-              // read moments ago can stand in. A studio changed since has a new revision, so
-              // the next sync cannot match it. Comparing needs this revision's own list.
-              const discovered =
+              // With nothing to compare, revisions are only recorded, so a list discovery read
+              // before this revision was pinned can stand in. A studio changed since has a new
+              // revision, so the next sync cannot match it. Comparing needs this revision's own.
+              const recorded =
                 last?.studios === undefined
-                  ? Option.flatMap(yield* recent.take(source), studioRevisions)
+                  ? Option.flatMap(discovered, studioRevisions)
                   : Option.none();
-              studios = Option.isSome(discovered)
-                ? discovered.value
+              studios = Option.isSome(recorded)
+                ? recorded.value
                 : Option.getOrUndefined(
                     studioRevisions(
                       yield* read({

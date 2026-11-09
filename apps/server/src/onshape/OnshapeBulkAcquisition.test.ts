@@ -107,6 +107,8 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
       batchFailure: undefined as OnshapeResponseError | undefined,
       batchMissingPart: false,
       failElements: false,
+      // Runs as the definition is read, which pins the sync's revision.
+      afterPin: undefined as (() => Effect.Effect<void>) | undefined,
     };
     // Root-document elements and their revisions, as the elements list reports them.
     const elements = [
@@ -167,7 +169,10 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
             if (options.failElements) return yield* new OnshapeRateLimitError({});
             return elements;
           }
-          if (request.path.includes("/assemblies/")) return fixture.definition;
+          if (request.path.includes("/assemblies/")) {
+            if (options.afterPin) yield* options.afterPin();
+            return fixture.definition;
+          }
           if (request.path.includes("/parts/")) {
             const elementId = /\/e\/([^/]+)/.exec(request.path)?.[1];
             return metadata.filter((part) => !elementId || part.elementId === elementId);
@@ -990,6 +995,27 @@ describe("bulk snapshot acquisition", () => {
             1,
           );
           assert.isFalse(requests.some(downloadsGeometry));
+        }),
+      3,
+    ),
+  );
+  it.effect("never records a discovery list read after the sync pinned its revision", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          // Another project discovers mid-sync and sees a studio edit after this revision.
+          const later = structuredClone(h.elements);
+          later.find((e) => e.elementType === "PARTSTUDIO")!.microversionId = "f".repeat(24);
+          h.options.afterPin = () => h.recent.remember(bulkInput.source, later);
+          yield* h.acquire();
+          h.options.afterPin = undefined;
+          // The workspace reaches that edit; its geometry must not come from the old snapshot.
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          editElement(h, "PARTSTUDIO");
+          const before = h.requests.length;
+          yield* h.acquire();
+          assert.isTrue(h.requests.slice(before).some(downloadsGeometry));
         }),
       3,
     ),
