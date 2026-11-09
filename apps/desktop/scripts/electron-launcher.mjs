@@ -21,13 +21,8 @@ export const APP_BUNDLE_ID = isDevelopment
   : "com.cadsense.cadsense";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["cadsense-dev"] : ["cadsense"];
 const LAUNCHER_VERSION = 15;
-const developmentMacIconPngPath = NodePath.join(
-  repoRoot,
-  "assets",
-  "dev",
-  "blueprint-macos-1024.png",
-);
-const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "prod", "black-macos-1024.png");
+// Development and production share the cadsense logo (assets/cadsense).
+const macIconPngPath = NodePath.join(repoRoot, "assets", "cadsense", "logo-1024.png");
 // oxlint-disable-next-line cadsense/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
@@ -167,7 +162,7 @@ function registerMacLauncherBundle(appBundlePath) {
 
 export function resolveMacLauncherIconPaths(runtimeDir, development = isDevelopment) {
   return {
-    sourceIconPath: development ? developmentMacIconPngPath : productionMacIconPngPath,
+    sourceIconPath: macIconPngPath,
     generatedIconPath: NodePath.join(runtimeDir, development ? "icon-dev.icns" : "icon-prod.icns"),
   };
 }

@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { POC_ICON_COPIES, syncBrandIcons } from "./sync-brand-icons.ts";
+import { PUBLIC_ICON_COPIES, syncBrandIcons } from "./sync-brand-icons.ts";
 
 const temporaryRoots: string[] = [];
 afterEach(async () => {
@@ -17,16 +17,16 @@ afterEach(async () => {
 async function originalIconsFixture() {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cadsense-icon-sync-"));
   temporaryRoots.push(root);
-  for (const source of new Set(POC_ICON_COPIES.map(([source]) => source))) {
+  for (const source of new Set(PUBLIC_ICON_COPIES.map(([source]) => source))) {
     await NodeFSP.mkdir(NodePath.dirname(NodePath.join(root, source)), { recursive: true });
     await NodeFSP.writeFile(NodePath.join(root, source), `original bytes of ${source}`);
   }
   return root;
 }
 
-describe("original PoC icons", () => {
+describe("public icon copies", () => {
   it("ships complete ICO image payloads in the canonical originals", async () => {
-    const originals = new Set(POC_ICON_COPIES.map(([source]) => source));
+    const originals = new Set(PUBLIC_ICON_COPIES.map(([source]) => source));
     for (const source of originals) {
       if (!source.endsWith(".ico")) continue;
       const bytes = await NodeFSP.readFile(new URL(`../${source}`, import.meta.url));
@@ -47,11 +47,11 @@ describe("original PoC icons", () => {
     }
   });
 
-  it("restores every brand and the development renderer without changing original bytes", async () => {
+  it("copies the logo into the web app without changing its bytes", async () => {
     const root = await originalIconsFixture();
-    expect(await syncBrandIcons(root, false)).toBe(17);
-    await expect(syncBrandIcons(root, true)).resolves.toBe(17);
-    for (const [source, target] of POC_ICON_COPIES) {
+    expect(await syncBrandIcons(root, false)).toBe(2);
+    await expect(syncBrandIcons(root, true)).resolves.toBe(2);
+    for (const [source, target] of PUBLIC_ICON_COPIES) {
       expect(await NodeFSP.readFile(NodePath.join(root, target))).toEqual(
         await NodeFSP.readFile(NodePath.join(root, source)),
       );
@@ -65,7 +65,7 @@ describe("original PoC icons", () => {
     const root = await originalIconsFixture();
     await syncBrandIcons(root, false);
     const changed = "apps/web/public/app-icon.png";
-    const missing = "assets/nightly/nightly-windows.ico";
+    const missing = "apps/web/public/favicon.ico";
     await NodeFSP.writeFile(NodePath.join(root, changed), "incorrect icon");
     await NodeFSP.rm(NodePath.join(root, missing));
     await expect(syncBrandIcons(root, true)).rejects.toThrow(changed);

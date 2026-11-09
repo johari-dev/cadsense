@@ -61,17 +61,10 @@ const resolveResourcePath = Effect.fn("desktop.assets.resolveResourcePath")(func
   return Option.none<string>();
 });
 
+// In a source checkout every channel uses the cadsense logo (assets/cadsense).
 const sourceTreeIconFileNames = {
-  dev: {
-    ico: "blueprint-windows.ico",
-    macPng: "blueprint-macos-1024.png",
-    universalPng: "blueprint-universal-1024.png",
-  },
-  prod: {
-    ico: "cadsense-black-windows.ico",
-    macPng: "black-macos-1024.png",
-    universalPng: "black-universal-1024.png",
-  },
+  ico: "windows.ico",
+  png: "logo-1024.png",
 } as const;
 
 function resolveSourceTreeIconPath(
@@ -79,15 +72,8 @@ function resolveSourceTreeIconPath(
   ext: keyof DesktopIconPaths,
 ): string | undefined {
   if (environment.isPackaged || ext === "icns") return undefined;
-  const brand = environment.isDevelopment ? "dev" : "prod";
-  const fileNames = sourceTreeIconFileNames[brand];
-  const fileName =
-    ext === "ico"
-      ? fileNames.ico
-      : environment.platform === "darwin"
-        ? fileNames.macPng
-        : fileNames.universalPng;
-  return environment.path.join(environment.rootDir, "assets", brand, fileName);
+  const fileName = ext === "ico" ? sourceTreeIconFileNames.ico : sourceTreeIconFileNames.png;
+  return environment.path.join(environment.rootDir, "assets", "cadsense", fileName);
 }
 
 const resolveIconPath = Effect.fn("desktop.assets.resolveIconPath")(function* (

@@ -1,25 +1,31 @@
+// The cadsense logo (see assets/cadsense/README.md). Every channel ships the same
+// artwork, so the per-channel keys below all point here; give a channel its own
+// file if its icon ever needs to differ.
+const CADSENSE_LOGO = {
+  png1024: "assets/cadsense/logo-1024.png",
+  png180: "assets/cadsense/logo-180.png",
+  faviconIco: "assets/cadsense/favicon.ico",
+  windowsIco: "assets/cadsense/windows.ico",
+} as const;
+
 export const BRAND_ASSET_PATHS = {
-  developmentIconComposerProject: "assets/dev/app-icon.icon",
-  developmentUniversalIconPng: "assets/dev/blueprint-universal-1024.png",
+  productionMacIconPng: CADSENSE_LOGO.png1024,
+  productionLinuxIconPng: CADSENSE_LOGO.png1024,
+  productionWindowsIconIco: CADSENSE_LOGO.windowsIco,
+  productionWebFaviconIco: CADSENSE_LOGO.faviconIco,
+  productionRendererAppIconPng: CADSENSE_LOGO.png180,
 
-  productionIconComposerProject: "assets/prod/app-icon.icon",
-  productionMacIconPng: "assets/prod/black-macos-1024.png",
-  productionLinuxIconPng: "assets/prod/black-universal-1024.png",
-  productionWindowsIconIco: "assets/prod/cadsense-black-windows.ico",
-  productionWebFaviconIco: "assets/prod/cadsense-black-web-favicon.ico",
-  productionRendererAppIconPng: "assets/prod/cadsense-black-renderer-app-icon-180.png",
+  nightlyMacIconPng: CADSENSE_LOGO.png1024,
+  nightlyLinuxIconPng: CADSENSE_LOGO.png1024,
+  nightlyWindowsIconIco: CADSENSE_LOGO.windowsIco,
+  nightlyWebFaviconIco: CADSENSE_LOGO.faviconIco,
+  nightlyRendererAppIconPng: CADSENSE_LOGO.png180,
 
-  nightlyIconComposerProject: "assets/nightly/app-icon.icon",
-  nightlyMacIconPng: "assets/nightly/nightly-macos-1024.png",
-  nightlyLinuxIconPng: "assets/nightly/nightly-universal-1024.png",
-  nightlyWindowsIconIco: "assets/nightly/nightly-windows.ico",
-  nightlyWebFaviconIco: "assets/nightly/nightly-web-favicon.ico",
-  nightlyRendererAppIconPng: "assets/nightly/nightly-renderer-app-icon-180.png",
-
-  developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
-  developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
-  developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
-  developmentRendererAppIconPng: "assets/dev/blueprint-renderer-app-icon-180.png",
+  developmentDesktopIconPng: CADSENSE_LOGO.png1024,
+  developmentUniversalIconPng: CADSENSE_LOGO.png1024,
+  developmentWindowsIconIco: CADSENSE_LOGO.windowsIco,
+  developmentWebFaviconIco: CADSENSE_LOGO.faviconIco,
+  developmentRendererAppIconPng: CADSENSE_LOGO.png180,
 } as const;
 
 export type WebAssetBrand = "development" | "nightly" | "production";
