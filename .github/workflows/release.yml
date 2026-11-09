@@ -170,23 +170,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Releases ship Windows only for now. To bring macOS or Linux back,
-          # uncomment its entries here, its asset globs in both publish steps
-          # (*.dmg + *.zip for macOS, *.AppImage for Linux), and, for Linux,
-          # the publish_aur job. Unsigned macOS installs can never take an
-          # update, so set up the Apple signing secrets before enabling it.
-          # - label: macOS arm64
-          #   runner: macos-26
-          #   platform: mac
-          #   target: dmg
-          #   arch: arm64
-          #   rust_target: aarch64-apple-darwin
-          # - label: macOS x64
-          #   runner: macos-26
-          #   platform: mac
-          #   target: dmg
-          #   arch: x64
-          #   rust_target: x86_64-apple-darwin
+          # Releases ship macOS and Windows. macOS builds are signed and
+          # notarized with the Apple secrets (CSC_*, APPLE_API_*); without
+          # them they ship unsigned, and unsigned installs can never take an
+          # update. To bring Linux back, uncomment its entry here, the
+          # *.AppImage glob in both publish steps, and the publish_aur job.
+          - label: macOS arm64
+            runner: macos-26
+            platform: mac
+            target: dmg
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+          - label: macOS x64
+            runner: macos-26
+            platform: mac
+            target: dmg
+            arch: x64
+            rust_target: x86_64-apple-darwin
           # - label: Linux x64
           #   runner: ubuntu-24.04
           #   platform: linux
@@ -548,6 +548,8 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
+            release-assets/*.dmg
+            release-assets/*.zip
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
@@ -565,6 +567,8 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
+            release-assets/*.dmg
+            release-assets/*.zip
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/*.yml
