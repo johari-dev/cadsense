@@ -69,21 +69,6 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Install Windows native build libraries
-        if: matrix.platform == 'win'
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installPath = & $vswhere -products * -latest -property installationPath
-          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-          $installer = Start-Process -FilePath $setupExe -WindowStyle Hidden `
-            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
-            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
-            -Wait -PassThru
-          if ($installer.ExitCode -ne 0 -and $installer.ExitCode -ne 3010) {
-            throw "Native build library installation failed: $($installer.ExitCode)"
-          }
-
       - name: Install Linux image tools
         if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y imagemagick xvfb
