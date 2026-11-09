@@ -27,7 +27,6 @@ import * as Transport from "../src/onshape/OnshapeTransport.ts";
 import * as Acquisition from "../src/onshape/OnshapeSnapshotAcquisition.ts";
 import * as SyncState from "../src/onshape/OnshapeSyncState.ts";
 import * as CadRoots from "../src/onshape/OnshapeCadRoots.ts";
-import * as RecentElements from "../src/onshape/OnshapeRecentElements.ts";
 import * as SourceUrl from "../src/onshape/OnshapeSourceUrl.ts";
 import { onshapePartStudioRequest } from "../src/onshape/OnshapeSnapshotMetadata.ts";
 import {
@@ -525,15 +524,11 @@ const program = Effect.gen(function* () {
   // Another project importing a different document shares only linked geometry.
   const rootDocumentKeys = new Set<string>();
   const hidesRootDocument = () => phase.startsWith("changed") || phase === "other-project";
-  // One instance, as on the server, so the cold sync can reuse discovery's element list.
-  const recent = yield* RecentElements.make;
   const roots = yield* CadRoots.make.pipe(
     Effect.provideService(Connections.OnshapeConnections, connections),
-    Effect.provideService(RecentElements.OnshapeRecentElements, recent),
   );
   const acquisition = yield* Acquisition.make.pipe(
     Effect.provideService(Connections.OnshapeConnections, connections),
-    Effect.provideService(RecentElements.OnshapeRecentElements, recent),
     Effect.provideService(Store.CadSnapshotStore, {
       ...store,
       findGeometry: (keys) =>

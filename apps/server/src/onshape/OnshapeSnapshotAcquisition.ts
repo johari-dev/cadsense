@@ -31,7 +31,6 @@ import { normalizeCadGeometry, CadGeometryError } from "../cad/CadGeometry.ts";
 import { applyOnshapeOpacity } from "./OnshapeGeometryAppearance.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 import { OnshapeConnections } from "./OnshapeConnections.ts";
-import { OnshapeRecentElements } from "./OnshapeRecentElements.ts";
 import {
   makeBulkAcquisition,
   ONSHAPE_BULK_TESSELLATION_PROFILE,
@@ -127,7 +126,6 @@ export const make = Effect.gen(function* () {
   const config = yield* Effect.serviceOption(ServerConfig);
   const crypto = yield* Crypto.Crypto;
   const acquireBulk = yield* makeBulkAcquisition;
-  const recent = yield* OnshapeRecentElements;
   const run = Effect.fn("OnshapeSnapshotAcquisition.acquire")(function* (
     input: OnshapeSnapshotAcquisitionInput,
   ) {
@@ -145,8 +143,6 @@ export const make = Effect.gen(function* () {
     const configuration = input.root.configuration || "default";
     const invalidResponse = () =>
       Effect.fail(new OnshapeSnapshotAcquisitionError({ reason: "invalid-response" }));
-    // Taken before the definition read below, so any list it holds predates this revision.
-    const discovered = source.workspaceType === "m" ? Option.none() : yield* recent.take(source);
     // A workspace or version assembly definition reports the microversion it evaluated, so
     // that one read both pins the revision and supplies the definition, even when unchanged.
     const definition =
@@ -193,8 +189,7 @@ export const make = Effect.gen(function* () {
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
-    if (source.workspaceType !== "m")
-      return yield* acquireBulk(context, source, definition, discovered);
+    if (source.workspaceType !== "m") return yield* acquireBulk(context, source, definition);
     yield* progress.step("reading");
     const base = `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${microversionId}/e/${root.elementId}`;
     const response = yield* read(

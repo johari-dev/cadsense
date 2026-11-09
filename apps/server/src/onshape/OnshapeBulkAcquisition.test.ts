@@ -5,6 +5,7 @@ import {
   OnshapeInvalidCredentialsError,
   OnshapeNetworkError,
   OnshapeRateLimitError,
+  ProjectId,
   OnshapeResponseError,
   type OnshapeConnectionError,
 } from "@cadsense/contracts";
@@ -26,7 +27,6 @@ import {
   type OnshapeReadRequest,
 } from "./OnshapeConnections.ts";
 import * as Acquisition from "./OnshapeSnapshotAcquisition.ts";
-import * as RecentElements from "./OnshapeRecentElements.ts";
 import * as SyncState from "./OnshapeSyncState.ts";
 import {
   bulkFixture,
@@ -107,8 +107,6 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
       batchFailure: undefined as OnshapeResponseError | undefined,
       batchMissingPart: false,
       failElements: false,
-      // Runs as the definition is read, which pins the sync's revision.
-      afterPin: undefined as (() => Effect.Effect<void>) | undefined,
     };
     // Root-document elements and their revisions, as the elements list reports them.
     const elements = [
@@ -169,13 +167,16 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
             if (options.failElements) return yield* new OnshapeRateLimitError({});
             return elements;
           }
-          if (request.path.includes("/assemblies/")) {
-            if (options.afterPin) yield* options.afterPin();
-            return fixture.definition;
-          }
+          if (request.path.includes("/assemblies/")) return fixture.definition;
           if (request.path.includes("/parts/")) {
             const elementId = /\/e\/([^/]+)/.exec(request.path)?.[1];
-            return metadata.filter((part) => !elementId || part.elementId === elementId);
+            // Studio metadata describes one revision of the document.
+            const revision = /\/m\/([^/]+)/.exec(request.path)?.[1];
+            return metadata.filter(
+              (part) =>
+                (!elementId || part.elementId === elementId) &&
+                (!revision || part.microversionId === revision),
+            );
           }
           return yield* Effect.die("Unexpected API request");
         }),
@@ -192,12 +193,16 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
               ? fixture.definition.parts[0]!.partId
               : decodeURIComponent(request.path.split("/partid/")[1]!.split("/gltf")[0]!);
             const requested = new Set(new URLSearchParams(request.query).getAll("partId"));
+            // A source export holds only the parts at the requested revision.
+            const atRevision = (part: (typeof fixture.definition.parts)[number]) =>
+              request.path.includes(`/m/${part.documentMicroversion}/`) ||
+              (part.documentVersion !== undefined &&
+                request.path.includes(`/v/${part.documentVersion}/`));
             const nodes = fixture.definition.parts.flatMap((part, i) =>
-              (
-                batch && !options.batchMissingPart
-                  ? requested.has(part.partId)
-                  : part.partId === partId
-              )
+              atRevision(part) &&
+              (batch && !options.batchMissingPart
+                ? requested.has(part.partId)
+                : part.partId === partId)
                 ? [i]
                 : [],
             );
@@ -221,10 +226,8 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
           return { bytes, contentType: "model/3mf" };
         }),
     });
-    // Discovery's element list lives for the server's lifetime, unlike the rebuilt services.
-    const recent = yield* RecentElements.make;
     // Rebuild both services for every attempt to test actual on-disk recovery, not an in-memory memo.
-    const acquire = () =>
+    const acquire = (input: Acquisition.OnshapeSnapshotAcquisitionInput = bulkInput) =>
       Effect.gen(function* () {
         const syncState = yield* SyncState.make.pipe(
           Effect.provideService(Store.CadSnapshotStore, store),
@@ -232,7 +235,6 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
         const acquisition = yield* Acquisition.make.pipe(
           Effect.provideService(OnshapeConnections, connections),
           Effect.provideService(SyncState.OnshapeSyncState, syncState),
-          Effect.provideService(RecentElements.OnshapeRecentElements, recent),
           Effect.provideService(Store.CadSnapshotStore, {
             ...store,
             publish: (manifest) =>
@@ -241,7 +243,7 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
                 : store.publish(manifest),
           }),
         );
-        return yield* acquisition.acquire(bulkInput).pipe(
+        return yield* acquisition.acquire(input).pipe(
           Effect.provideService(Clock.Clock, {
             ...clock,
             sleep: (duration) =>
@@ -254,7 +256,6 @@ const makeHarness = (count: number, studioOf: StudioOf) =>
       metadata,
       definition: fixture.definition,
       elements,
-      recent,
       bulkMetadata,
       readAsset: store.readAsset,
       requests,
@@ -292,7 +293,8 @@ const authorInRootDocument = (h: Harness) => {
 const advanceRevision = (h: Harness, microversion: string) => {
   h.definition.rootAssembly.documentMicroversion = microversion;
   for (const part of [...h.definition.parts, ...h.definition.rootAssembly.instances])
-    if (part.documentId === bulkInput.source.documentId) part.documentMicroversion = microversion;
+    if (part.documentId === bulkInput.source.documentId && !part.documentVersion)
+      part.documentMicroversion = microversion;
   for (const row of h.metadata) row.microversionId = microversion;
 };
 const editElement = (h: Harness, elementType: string) => {
@@ -976,84 +978,84 @@ describe("bulk snapshot acquisition", () => {
       3,
     ),
   );
-  it.effect("records discovery's element list on a first sync instead of reading it", () =>
+  it.effect("keeps the reuse baseline when the workspace moves during an export", () =>
     harness(
       (h) =>
         Effect.gen(function* () {
           authorInRootDocument(h);
-          yield* h.recent.remember(bulkInput.source, structuredClone(h.elements));
+          for (let studio = 1; studio < 5; studio++)
+            h.elements.push({
+              id: studioId(studio),
+              elementType: "PARTSTUDIO",
+              microversionId: studioId(studio),
+            });
+          const studios = h.elements.filter((e) => e.elementType === "PARTSTUDIO");
+          const original = studios.map((e) => e.microversionId);
           yield* h.acquire();
-          assert.isFalse(h.requests.some((r) => r.path.endsWith("/elements")));
-          // The recorded fingerprint matches the next revision's own read.
+          // Every studio changes, so the sync exports, and the workspace moves meanwhile.
+          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
+          for (const studio of studios) studio.microversionId = "f".repeat(24);
+          h.options.changedDuringExport = true;
+          const error = yield* h.acquire().pipe(Effect.flip);
+          assert.equal("reason" in error ? error.reason : null, "revision-changed");
+          h.options.changedDuringExport = false;
+          // Back at the published studio revisions, the first snapshot still applies.
+          advanceRevision(h, "cccccccccccccccccccccccc");
+          studios.forEach((studio, i) => (studio.microversionId = original[i]!));
+          const before = h.requests.length;
+          yield* h.acquire();
+          assert.isFalse(h.requests.slice(before).some(downloadsGeometry));
+        }),
+      5,
+      ownStudios,
+    ),
+  );
+  it.effect("keeps a root's baseline when another project stored every part first", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          authorInRootDocument(h);
+          const other = { ...bulkInput, projectId: ProjectId.make("bulk-test-other") };
+          yield* h.acquire();
+          yield* h.acquire(other);
+          // After an assembly edit, the other project stores this revision's parts first.
           advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
           editRootAssembly(h);
+          yield* h.acquire(other);
+          yield* h.acquire();
+          advanceRevision(h, "cccccccccccccccccccccccc");
           const before = h.requests.length;
           yield* h.acquire();
-          const requests = h.requests.slice(before);
-          assert.lengthOf(
-            requests.filter((r) => r.path.endsWith("/elements")),
-            1,
-          );
-          assert.isFalse(requests.some(downloadsGeometry));
+          assert.isFalse(h.requests.slice(before).some(downloadsGeometry));
         }),
       3,
     ),
   );
-  it.effect("never records a discovery list read after the sync pinned its revision", () =>
+  it.effect("keeps a versioned instance of a root-document part apart from the workspace one", () =>
     harness(
       (h) =>
         Effect.gen(function* () {
           authorInRootDocument(h);
-          // Another project discovers mid-sync and sees a studio edit after this revision.
-          const later = structuredClone(h.elements);
-          later.find((e) => e.elementType === "PARTSTUDIO")!.microversionId = "f".repeat(24);
-          h.options.afterPin = () => h.recent.remember(bulkInput.source, later);
-          yield* h.acquire();
-          h.options.afterPin = undefined;
-          // The workspace reaches that edit; its geometry must not come from the old snapshot.
+          // Part 2 is part 0 at a document version: same studio and part ID, other geometry.
+          for (const part of [h.definition.parts[2]!, h.definition.rootAssembly.instances[2]!]) {
+            part.partId = "part-0";
+            part.documentVersion = "7".repeat(24);
+            part.documentMicroversion = "5".repeat(24);
+          }
+          h.metadata[2]!.partId = "part-0";
+          h.metadata[2]!.microversionId = "5".repeat(24);
+          h.metadata[2]!.appearance.opacity = 127;
+          const first = yield* h.acquire();
           advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
-          editElement(h, "PARTSTUDIO");
-          const before = h.requests.length;
-          yield* h.acquire();
-          assert.isTrue(h.requests.slice(before).some(downloadsGeometry));
-        }),
-      3,
-    ),
-  );
-  it.effect("compares against an earlier snapshot with its own element list", () =>
-    harness(
-      (h) =>
-        Effect.gen(function* () {
-          authorInRootDocument(h);
-          yield* h.acquire();
-          // A list read before a Part Studio edit must not stand in for this revision's.
-          const stale = structuredClone(h.elements);
-          editElement(h, "PARTSTUDIO");
-          yield* h.recent.remember(bulkInput.source, stale);
-          advanceRevision(h, "aaaaaaaaaaaaaaaaaaaaaaaa");
-          const before = h.requests.length;
-          yield* h.acquire();
-          const requests = h.requests.slice(before);
-          assert.lengthOf(
-            requests.filter((r) => r.path.endsWith("/elements")),
-            1,
+          editRootAssembly(h);
+          const changed = yield* h.acquire();
+          assert.deepEqual(
+            changed.parts.map((part) => part.metadata?.appearance?.opacity),
+            first.parts.map((part) => part.metadata?.appearance?.opacity),
           );
-          assert.isTrue(requests.some(downloadsGeometry));
-        }),
-      3,
-    ),
-  );
-  it.effect("reads its own element list when discovery's is over two minutes old", () =>
-    harness(
-      (h) =>
-        Effect.gen(function* () {
-          authorInRootDocument(h);
-          yield* h.recent.remember(bulkInput.source, structuredClone(h.elements));
-          yield* TestClock.adjust("3 minutes");
-          yield* h.acquire();
-          assert.lengthOf(
-            h.requests.filter((r) => r.path.endsWith("/elements")),
-            1,
+          assert.deepEqual(
+            changed.assets.map((asset) => asset.sha256),
+            first.assets.map((asset) => asset.sha256),
           );
         }),
       3,

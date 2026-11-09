@@ -11,7 +11,6 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import { OnshapeConnections } from "./OnshapeConnections.ts";
-import { OnshapeRecentElements } from "./OnshapeRecentElements.ts";
 import { ONSHAPE_API_BASE_PATH } from "./OnshapeApiPolicy.ts";
 
 const MicroversionResponse = Schema.Struct({ microversion: OnshapeWorkspaceId });
@@ -63,7 +62,6 @@ export class OnshapeCadRoots extends Context.Service<
  */
 export const make = Effect.gen(function* () {
   const connections = yield* OnshapeConnections;
-  const recent = yield* OnshapeRecentElements;
   const discover: OnshapeCadRoots["Service"]["discover"] = Effect.fn("OnshapeCadRoots.discover")(
     function* <E = never, R = never>(
       source: OnshapeProjectSource,
@@ -95,8 +93,6 @@ export const make = Effect.gen(function* () {
         }
         ids.add(element.id);
       }
-      // The first sync after discovery records this list instead of reading it again.
-      if (source.workspaceType !== "m") yield* recent.remember(source, elements);
 
       // Nothing reads the catalog revision; it only changes with the listed elements. Like the
       // local catalog's, a workspace catalog's is a stand-in derived from element revisions.

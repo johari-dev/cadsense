@@ -102,6 +102,9 @@ const studioRevisions = (response: unknown) =>
   });
 type DraftPart = CadSnapshotDraft["parts"][number];
 type PartMetadata = NonNullable<DraftPart["metadata"]>;
+/** A part evaluated at the root document's workspace, whose geometry key changes with every edit. */
+const isWorkspacePart = (part: DraftPart, documentId: string) =>
+  part.source.documentId === documentId && part.source.documentVersion === null;
 const sourcePartKey = (part: DraftPart) =>
   JSON.stringify([
     part.source.elementId,
@@ -110,7 +113,7 @@ const sourcePartKey = (part: DraftPart) =>
   ]);
 /**
  * Geometry and metadata of the previous snapshot's parts whose sources did not change,
- * under this draft's geometry keys. Linked parts keep their keys. Root-document parts match
+ * under this draft's geometry keys. Versioned parts keep their keys. Workspace parts match
  * by studio, configuration, and part ID when their studio revision is unchanged.
  */
 const carryForward = (
@@ -126,20 +129,18 @@ const carryForward = (
     const asset = assets.get(part.geometryKey);
     if (!asset?.complexity || !part.metadata) continue;
     const entry = { asset, metadata: part.metadata };
-    byKey.set(part.geometryKey, entry);
-    if (part.source.documentId === previous.root.documentId)
-      bySource.set(sourcePartKey(part), entry);
+    if (isWorkspacePart(part, previous.root.documentId)) bySource.set(sourcePartKey(part), entry);
+    else byKey.set(part.geometryKey, entry);
   }
   const carried = new Map<string, { asset: CadGeometryAsset; metadata: PartMetadata }>();
   for (const part of draft.parts) {
     if (!part.geometryRequired) continue;
     const studio = part.source.elementId;
-    const entry =
-      part.source.documentId !== draft.root.documentId
-        ? byKey.get(part.geometryKey)
-        : current[studio] !== undefined && current[studio] === earlier[studio]
-          ? bySource.get(sourcePartKey(part))
-          : undefined;
+    const entry = !isWorkspacePart(part, draft.root.documentId)
+      ? byKey.get(part.geometryKey)
+      : current[studio] !== undefined && current[studio] === earlier[studio]
+        ? bySource.get(sourcePartKey(part))
+        : undefined;
     if (entry)
       carried.set(part.geometryKey, {
         asset: { ...entry.asset, geometryKey: part.geometryKey },
@@ -291,15 +292,11 @@ export const makeBulkAcquisition = Effect.gen(function* () {
     });
     return { ...(yield* store.putAsset(bytes)), geometryKey: part.geometryKey, complexity };
   });
-  /**
-   * `definition` is the root assembly definition the caller already read at this revision.
-   * `discovered` is an element list discovery read before that definition, if any.
-   */
+  /** `definition` is the root assembly definition the caller already read at this revision. */
   return Effect.fn("OnshapeBulkAcquisition.acquire")(function* (
     context: CadSnapshotContext,
     source: OnshapeProjectSource,
     definition?: unknown,
-    discovered: Option.Option<unknown> = Option.none(),
   ) {
     const { root } = context;
     const progress = yield* CadProgressReporter;
@@ -359,6 +356,8 @@ export const makeBulkAcquisition = Effect.gen(function* () {
           yield* entry.clear();
           checkpoint = null;
         }
+        // A failed export keeps the last published snapshot as this root's reuse baseline.
+        const abandonExport = () => (last === null ? entry.clear() : entry.write(last));
         const complete = Effect.fn(function* (draft: CadSnapshotDraft, assets: CadGeometryAsset[]) {
           yield* progress.step("saving");
           const partOrder = new Map(draft.parts.map((part, index) => [part.geometryKey, index]));
@@ -397,32 +396,22 @@ export const makeBulkAcquisition = Effect.gen(function* () {
           );
           let carried = new Map<string, { asset: CadGeometryAsset; metadata: PartMetadata }>();
           if (root.kind === "assembly") {
-            // Root-document keys change with every edit, so unchanged studios are found by
-            // their revisions instead.
+            // Workspace keys change with every edit, so unchanged studios are found by their
+            // revisions instead. Read them when a workspace part needs geometry, or to keep this
+            // root's baseline when another root already stored every part at this revision.
+            const workspace = required.filter((part) => isWorkspacePart(part, root.documentId));
             if (
-              required.some(
-                (part) =>
-                  part.source.documentId === root.documentId && !reusable.has(part.geometryKey),
-              )
-            ) {
-              // With nothing to compare, revisions are only recorded, so a list discovery read
-              // before this revision was pinned can stand in. A studio changed since has a new
-              // revision, so the next sync cannot match it. Comparing needs this revision's own.
-              const recorded =
-                last?.studios === undefined
-                  ? Option.flatMap(discovered, studioRevisions)
-                  : Option.none();
-              studios = Option.isSome(recorded)
-                ? recorded.value
-                : Option.getOrUndefined(
-                    studioRevisions(
-                      yield* read({
-                        path: `${ONSHAPE_API_BASE_PATH}/documents/d/${root.documentId}/m/${root.microversionId}/elements`,
-                        query: "withThumbnails=false",
-                      }).pipe(Effect.catchTag("OnshapeResponseError", () => Effect.succeed(null))),
-                    ),
-                  );
-            }
+              workspace.some((part) => !reusable.has(part.geometryKey)) ||
+              (workspace.length > 0 && last?.studios !== undefined)
+            )
+              studios = Option.getOrUndefined(
+                studioRevisions(
+                  yield* read({
+                    path: `${ONSHAPE_API_BASE_PATH}/documents/d/${root.documentId}/m/${root.microversionId}/elements`,
+                    query: "withThumbnails=false",
+                  }).pipe(Effect.catchTag("OnshapeResponseError", () => Effect.succeed(null))),
+                ),
+              );
             const previous =
               last === null
                 ? Option.none()
@@ -547,7 +536,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             }
             if (status.id !== checkpoint.translationId) return yield* invalid();
             if (status.requestState === "FAILED" || status.requestState === "CANCELLED") {
-              yield* entry.clear();
+              yield* abandonExport();
               return yield* new OnshapeExportError({ reason: "translation-failed" });
             }
             if (status.requestState === "DONE") {
@@ -572,7 +561,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
             root.originalRevision.kind === "w" &&
             (yield* pin()).microversion !== root.microversionId
           ) {
-            yield* entry.clear();
+            yield* abandonExport();
             return yield* new OnshapeExportError({ reason: "revision-changed" });
           }
           yield* progress.step("downloading", { done: 0 });

@@ -76,7 +76,6 @@ import { ServerActivation } from "./serverActivation.ts";
 import * as OnshapeConnections from "./onshape/OnshapeConnections.ts";
 import * as OnshapeProjects from "./onshape/OnshapeProjects.ts";
 import * as OnshapeCadRoots from "./onshape/OnshapeCadRoots.ts";
-import * as OnshapeRecentElements from "./onshape/OnshapeRecentElements.ts";
 import * as OnshapeSnapshotAcquisition from "./onshape/OnshapeSnapshotAcquisition.ts";
 import * as CadSnapshotStore from "./cad/CadSnapshotStore.ts";
 import * as CadUserOperations from "./cad/CadUserOperations.ts";
@@ -274,12 +273,7 @@ const LocalCadImportLayerLive = LocalCadImport.layer.pipe(
 const CadAcquisitionLayerLive = Layer.mergeAll(
   OnshapeSnapshotAcquisition.layer,
   LocalCadImportLayerLive,
-).pipe(
-  Layer.provideMerge(CadSnapshotStoreLayerLive),
-  Layer.provideMerge(OnshapeCadRoots.layer),
-  // One instance for discovery and acquisition, so a first sync reuses discovery's element list.
-  Layer.provideMerge(OnshapeRecentElements.layer),
-);
+).pipe(Layer.provideMerge(CadSnapshotStoreLayerLive), Layer.provideMerge(OnshapeCadRoots.layer));
 const CadViewingLayerLive = CadPanel.layer.pipe(
   Layer.provideMerge(CadViewing.layer),
   // cad_context compares a local file on disk with the model the agent reviews.

@@ -8,12 +8,10 @@ import {
 } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import { OnshapeConnections, type OnshapeConnectionsShape } from "./OnshapeConnections.ts";
 import * as CadRoots from "./OnshapeCadRoots.ts";
-import * as RecentElements from "./OnshapeRecentElements.ts";
 
 const source = OnshapeProjectSource.make({
   connectionId: OnshapeConnectionId.make("00000000-0000-4000-8000-000000000001"),
@@ -59,12 +57,8 @@ const makeHarness = Effect.fn(function* (options?: {
           : (options?.elementsResponse ?? elements);
       }),
   });
-  const recent = yield* RecentElements.make;
-  const service = yield* CadRoots.make.pipe(
-    Effect.provideService(OnshapeConnections, connections),
-    Effect.provideService(RecentElements.OnshapeRecentElements, recent),
-  );
-  return { service, requests, recent };
+  const service = yield* CadRoots.make.pipe(Effect.provideService(OnshapeConnections, connections));
+  return { service, requests };
 });
 
 describe("Onshape CAD root discovery", () => {
@@ -100,8 +94,6 @@ describe("Onshape CAD root discovery", () => {
           },
         ]);
         assert.strictEqual(input.configuration, "Size=Large & Color=Blue+White");
-        // A first sync right after discovery records this list instead of reading it.
-        assert.isTrue(Option.isSome(yield* harness.recent.take(input)));
         // The stand-in revision changes only with an element revision.
         revised[1]!.microversionId = "9".repeat(24);
         const edited = yield* harness.service.discover(input);
@@ -130,8 +122,6 @@ describe("Onshape CAD root discovery", () => {
       const requests = yield* Ref.get(harness.requests);
       assert.strictEqual(requests.length, 1);
       assert.include(requests[0]?.path ?? "", `/m/${source.workspaceId}/elements`);
-      // Microversion links never take the bulk path that records element lists.
-      assert.isTrue(Option.isNone(yield* harness.recent.take({ ...source, workspaceType: "m" })));
     }),
   );
 

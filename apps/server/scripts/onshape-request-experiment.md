@@ -65,7 +65,7 @@ ONSHAPE_OFFLINE=1 \
 ONSHAPE_SMALL_STUDIO=47d0b113a7c06b725c76e010 \
 ONSHAPE_LARGE_STUDIO=25e3986ee073450506a30894 \
 ONSHAPE_SUBASSEMBLY_ELEMENT=caa5a3d144d13386951c4f33 \
-ONSHAPE_ASSERT_PHASE_REQUESTS='discover=1,cold=10,unchanged=1,changed-assembly=2,changed-small-studio=4,changed-large-studio=5,changed-all-studios=7,other-project=7,subassembly=2' \
+ONSHAPE_ASSERT_PHASE_REQUESTS='discover=1,cold=11,unchanged=1,changed-assembly=2,changed-small-studio=4,changed-large-studio=5,changed-all-studios=7,other-project=7,subassembly=2' \
 ONSHAPE_ALLOW_BULK_METADATA=1 \
 ONSHAPE_ALLOW_RETESSELLATION=1 \
 ONSHAPE_BASELINE_MANIFEST='.cadsense/request-experiments/target-baseline-live/cold-manifest.json' \
