@@ -9,8 +9,9 @@ import {
   type LocalCadSourceCheckInput,
   type LocalCadSourceCheckResult,
   type ModelSelection,
+  type OrchestrationProject,
+  type ProjectId,
 } from "@cadsense/contracts";
-import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -20,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { CadUserOperations } from "../cad/CadUserOperations.ts";
+import { findConflictingProject, type ProjectPlace } from "../orchestration/commandInvariants.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { WorkspacePaths } from "../workspace/WorkspacePaths.ts";
@@ -39,15 +41,17 @@ export class LocalCadProjects extends Context.Service<
       input: LocalCadFilesListInput,
     ) => Effect.Effect<LocalCadFilesListResult, LocalCadError>;
     /**
-     * Points a folder project at a CAD file and starts importing it. Reuses the folder's existing
-     * project when there is one, so the result's project ID can differ from the requested one.
+     * Creates a project that reviews a CAD file and starts importing it. A folder can hold one
+     * project per CAD file. If a project already reviews this file, it is reused, so the result's
+     * project ID can differ from the requested one. A folder with a plain or Onshape project fails.
      */
     readonly create: (
       input: LocalCadProjectCreate,
     ) => Effect.Effect<LocalCadProjectCreateResult, LocalCadError>;
     /**
      * Points an existing folder project at a CAD file and starts importing it. Used by the CAD
-     * panel's file prompt, so it turns a plain folder project into a local CAD project.
+     * panel's file prompt, so it turns a plain folder project into a local CAD project. Fails with
+     * `file-in-use` when another project in the folder already reviews the file.
      */
     readonly setFile: (
       input: LocalCadProjectSetFileInput,
@@ -98,22 +102,28 @@ export const make = Effect.gen(function* () {
     return { workspaceRoot, ...scan };
   });
 
-  /** Links a resolved file to a folder project, then starts its import. */
-  const link = Effect.fn("LocalCadProjects.link")(function* (
-    projectId: LocalCadProjectCreateResult["projectId"],
-    filePath: string,
-  ) {
-    // The only invariant a folder project can fail here is an active run or import.
-    yield* engine
-      .dispatch({
-        type: "project.local-cad.set",
-        commandId: yield* commandId("set"),
-        projectId,
-        localCadSource: { filePath },
-      })
-      .pipe(Effect.mapError(() => new LocalCadError({ reason: "busy" })));
-    // The project is usable without the import, and the panel and settings offer Sync.
-    yield* operations
+  /** The error for a place another project holds: its Onshape folder, its plain folder, or its file. */
+  const conflictError = (project: Pick<OrchestrationProject, "onshapeSource" | "localCadSource">) =>
+    new LocalCadError({
+      reason: project.onshapeSource
+        ? "onshape-project"
+        : project.localCadSource
+          ? "file-in-use"
+          : "folder-in-use",
+    });
+
+  /**
+   * The active project that `place` collides with, from the latest model. After a failed dispatch
+   * this tells a lost race (another project took the file first) from a busy project.
+   */
+  const conflictFor = Effect.fn("LocalCadProjects.conflictFor")(function* (place: ProjectPlace) {
+    const model = yield* query.getCommandReadModel().pipe(Effect.mapError(failed));
+    return findConflictingProject(model.projects, place);
+  });
+
+  /** Starts importing a project's file. The project is usable without it; the panel offers Sync. */
+  const startImport = (projectId: ProjectId, filePath: string) =>
+    operations
       .start({
         projectId,
         kind: "sync",
@@ -124,37 +134,46 @@ export const make = Effect.gen(function* () {
         },
       })
       .pipe(
+        Effect.asVoid,
         Effect.catch((error) =>
           Effect.logWarning("Could not start the local CAD import", { projectId, error }),
         ),
       );
-  });
 
   const create = Effect.fn("LocalCadProjects.create")(function* (input: LocalCadProjectCreate) {
     const workspaceRoot = yield* normalizeFolder(input.workspaceRoot);
     const file = yield* withFiles(resolveLocalCadFile({ workspaceRoot, filePath: input.filePath }));
-    const model = yield* query.getCommandReadModel().pipe(Effect.mapError(failed));
-    const folder = normalizeProjectPathForComparison(workspaceRoot);
-    const existing = model.projects.find(
-      (project) =>
-        project.deletedAt === null &&
-        normalizeProjectPathForComparison(project.workspaceRoot) === folder,
-    );
-    if (existing?.onshapeSource) return yield* new LocalCadError({ reason: "onshape-project" });
-    const projectId = existing?.id ?? input.projectId;
-    if (!existing)
-      yield* engine
+    const place = { workspaceRoot, filePath: file.relativePath };
+    // A project that already reviews this file is the one to open. Any other conflict is the
+    // folder's plain or Onshape project, which keeps the folder to itself.
+    const existing = (yield* conflictFor(place)) ?? null;
+    if (existing && !existing.localCadSource) return yield* conflictError(existing);
+    let projectId = existing?.id ?? input.projectId;
+    if (!existing) {
+      const created = yield* engine
         .dispatch({
-          type: "project.create",
+          type: "project.local-cad.create",
           commandId: yield* commandId("project-create"),
           projectId,
           title: input.title,
           workspaceRoot,
           defaultModelSelection: input.defaultModelSelection ?? null,
+          localCadSource: { filePath: file.relativePath },
           createdAt: DateTime.formatIso(yield* DateTime.now),
         })
-        .pipe(Effect.mapError(failed));
-    yield* link(projectId, file.relativePath);
+        .pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!created) {
+        // Another create for this file or folder won the race.
+        const winner = yield* conflictFor(place);
+        if (!winner) return yield* failed();
+        if (!winner.localCadSource) return yield* conflictError(winner);
+        projectId = winner.id;
+      }
+    }
+    yield* startImport(projectId, file.relativePath);
     return { projectId };
   });
 
@@ -164,10 +183,29 @@ export const make = Effect.gen(function* () {
     const project = yield* query.getProjectShellById(input.projectId).pipe(Effect.mapError(failed));
     if (Option.isNone(project)) return yield* new LocalCadError({ reason: "project-not-found" });
     if (project.value.onshapeSource) return yield* new LocalCadError({ reason: "onshape-project" });
-    const file = yield* withFiles(
-      resolveLocalCadFile({ workspaceRoot: project.value.workspaceRoot, filePath: input.filePath }),
-    );
-    yield* link(input.projectId, file.relativePath);
+    const { workspaceRoot } = project.value;
+    const file = yield* withFiles(resolveLocalCadFile({ workspaceRoot, filePath: input.filePath }));
+    const place = { workspaceRoot, filePath: file.relativePath, exceptProjectId: input.projectId };
+    const taken = yield* conflictFor(place);
+    if (taken) return yield* conflictError(taken);
+    yield* engine
+      .dispatch({
+        type: "project.local-cad.set",
+        commandId: yield* commandId("set"),
+        projectId: input.projectId,
+        localCadSource: { filePath: file.relativePath },
+      })
+      .pipe(
+        Effect.catch(() =>
+          // A project that took the file since the check above, or else an active run or import.
+          conflictFor(place).pipe(
+            Effect.flatMap((winner) =>
+              Effect.fail(winner ? conflictError(winner) : new LocalCadError({ reason: "busy" })),
+            ),
+          ),
+        ),
+      );
+    yield* startImport(input.projectId, file.relativePath);
     return { projectId: input.projectId };
   });
 

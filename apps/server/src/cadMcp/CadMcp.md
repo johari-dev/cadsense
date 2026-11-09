@@ -49,11 +49,12 @@ way: `claude -p "Review my intake: <url or path>" --allowedTools mcp__cadsense` 
 - With `file`, it opens a [local CAD project](../localCad/LocalCad.md) and needs no key. A relative
   path resolves against the server's working directory, which MCP clients set to their own. The
   project folder is `folder` if given, else the file's own directory, and must contain the file.
-  `folder` is for an assembly whose files sit in sibling directories. The folder's active project is
-  reused; if it links a different file, `cad_open` links this one the way the CAD panel's file prompt
-  does (`localCad.projects.setFile`). Otherwise it creates the project the way the Local CAD file
-  dialog does (`localCad.projects.create`). Both start the import. When the file's bytes match its
-  current snapshot, nothing is imported, in this process or a later one.
+  `folder` is for an assembly whose files sit in sibling directories. A folder holds one project per
+  CAD file. The project that already reviews this file in this folder is reused. Otherwise
+  `cad_open` creates one the way the Local CAD file dialog does (`localCad.projects.create`), which
+  starts the import. It never relinks another project. A folder with a project that has no CAD file
+  fails as `folder-in-use`. When the file's bytes match its current snapshot, nothing is imported,
+  in this process or a later one.
 - Either way, `cad_open` returns `importing` after 45 seconds so clients with a 60 second tool limit
   can call again. The next call joins the running import instead of starting another, and reports its
   failure reason if it failed. Each opened review is a new chat with a synthetic turn ID
@@ -95,8 +96,6 @@ way: `claude -p "Review my intake: <url or path>" --allowedTools mcp__cadsense` 
   geometry.
 - Checking whether a local file changed reads the whole file once per `cad_open`. Files over the
   512 MiB import limit are not read; their import fails with that reason.
-- A second `file` in a folder whose import is still running is refused as `busy` until that import
-  ends.
 - It is not published to npm yet. Run it from a checkout.
 
 ## Verify

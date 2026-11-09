@@ -13,6 +13,9 @@ const fileSize = (bytes: number) =>
   bytes < 1024 ** 2
     ? `${Math.max(1, Math.ceil(bytes / 1024))} KiB`
     : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+/** A CAD file's name without its folder or extension: "exports/Arm.SLDASM" gives "Arm". */
+const fileStem = (filePath: string) =>
+  (filePath.split(/[\\/]/).at(-1) ?? filePath).replace(/\.[^.]+$/, "");
 const errorMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error && cause.message ? cause.message : fallback;
 
@@ -23,12 +26,17 @@ const errorMessage = (cause: unknown, fallback: string) =>
  * folder path, which the server resolves, and lists its STEP, IGES, and SolidWorks files to choose
  * from. `inline` fits the form inside onboarding's checklist: no heading or padding, and Continue
  * instead of Create project. The Back button shows only with `onCancel`.
+ *
+ * The name defaults to the folder's. When `folderHasProject` says the folder already has a project,
+ * it defaults to the chosen file's name instead, so two projects from one folder read differently
+ * in the sidebar.
  */
 export function LocalCadProjectCreateForm(props: {
   environmentId: EnvironmentId;
   environmentLabel: string;
   connected: boolean;
   pickFile: (() => Promise<string | null>) | null;
+  folderHasProject?: (workspaceRoot: string) => boolean;
   inline?: boolean;
   onCancel?: () => void;
   onCreate: (input: {
@@ -58,6 +66,13 @@ export function LocalCadProjectCreateForm(props: {
   const selection = props.pickFile
     ? picked && pickedFolder && { workspaceRoot: pickedFolder, filePath: picked }
     : listing && filePath && { workspaceRoot: listing.workspaceRoot, filePath };
+  const folder = props.pickFile ? pickedFolder : (listing?.workspaceRoot ?? null);
+  const defaultTitle = !folder
+    ? ""
+    : selection && props.folderHasProject?.(folder)
+      ? fileStem(selection.filePath)
+      : inferProjectTitleFromPath(folder);
+  const shownTitle = titleEdited ? title : defaultTitle;
 
   const scan = async (workspaceRoot: string) => {
     const ticket = ++scanTicketRef.current;
@@ -84,7 +99,6 @@ export function LocalCadProjectCreateForm(props: {
             ? result.value.files[0]!.path
             : null,
       );
-      if (!titleEdited) setTitle(inferProjectTitleFromPath(result.value.workspaceRoot));
     } finally {
       setScanning(false);
     }
@@ -98,8 +112,6 @@ export function LocalCadProjectCreateForm(props: {
       if (!file) return;
       setPicked(file);
       setError(null);
-      const folder = getBrowseParentPath(file);
-      if (!titleEdited && folder) setTitle(inferProjectTitleFromPath(folder));
     } finally {
       setPicking(false);
     }
@@ -125,7 +137,7 @@ export function LocalCadProjectCreateForm(props: {
           setError("Choose the CAD file to review.");
           return;
         }
-        if (!title.trim()) {
+        if (!shownTitle.trim()) {
           setError("Enter a project name.");
           return;
         }
@@ -133,7 +145,7 @@ export function LocalCadProjectCreateForm(props: {
         setPending(true);
         setError(null);
         try {
-          setError(await props.onCreate({ title: title.trim(), ...selection }));
+          setError(await props.onCreate({ title: shownTitle.trim(), ...selection }));
         } catch {
           setError("Could not create the local CAD project. Try again.");
         } finally {
@@ -278,7 +290,7 @@ export function LocalCadProjectCreateForm(props: {
             </label>
             <Input
               id={`${id}-name`}
-              value={title}
+              value={shownTitle}
               onChange={(event) => {
                 setTitle(event.target.value);
                 setTitleEdited(true);

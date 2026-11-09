@@ -65,7 +65,7 @@ export const LocalCadProjectCreateInput = Schema.Struct({
 export type LocalCadProjectCreateInput = typeof LocalCadProjectCreateInput.Type;
 
 export const LocalCadProjectCreateResult = Schema.Struct({
-  /** The requested ID, or the existing folder project's ID when the CAD file was attached to it. */
+  /** The requested ID, or the ID of the project that already reviews this file. */
   projectId: ProjectId,
 });
 export type LocalCadProjectCreateResult = typeof LocalCadProjectCreateResult.Type;
@@ -104,6 +104,8 @@ export const LocalCadErrorReason = Schema.Literals([
   "outside-folder",
   "unsupported-file",
   "onshape-project",
+  "folder-in-use",
+  "file-in-use",
   "project-not-found",
   "busy",
   "operation-failed",
@@ -125,6 +127,10 @@ export class LocalCadError extends Schema.TaggedErrorClass<LocalCadError>()("Loc
         return "Choose a STEP, IGES, or SolidWorks file.";
       case "onshape-project":
         return "That folder belongs to an Onshape project.";
+      case "folder-in-use":
+        return "That folder has a project with no CAD file. Open it and use Pick a file in the CAD panel.";
+      case "file-in-use":
+        return "Another project already reviews that file.";
       case "project-not-found":
         return "That project no longer exists.";
       case "busy":

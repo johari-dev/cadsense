@@ -11,9 +11,10 @@ through the SolidWorks installed on the machine (see [SolidWorks files](#solidwo
    its path where there is no picker (a browser, or a remote environment).
 2. The dialog lists the STEP and IGES files under it (`localCad.files.list`). Pick one. The project
    name defaults to the folder name.
-3. `localCad.projects.create` sets the project's `localCadSource` to that file and starts a sync.
-   If the folder already belongs to a folder project, that project gets the CAD file instead of a
-   duplicate being made. Onshape projects are rejected.
+3. `localCad.projects.create` creates a project whose `localCadSource` is that file, in one
+   `project.local-cad.create` command, and starts a sync. A folder holds one project per CAD file
+   (see [Projects in one folder](#projects-in-one-folder)), so a second assembly in the folder gets
+   its own project. If a project already reviews the file, that project opens instead.
 4. The new chat opens with the CAD panel loading. The sync result also carries the folder's file
    list, so project settings can switch to another file without a separate catalog refresh.
 5. After editing and re-exporting the file, Sync in the CAD panel header or project settings imports
@@ -61,8 +62,25 @@ Removing a local CAD project, from the sidebar or project settings, goes through
 2. The project leaves the sidebar. Its threads, captures, and comments stay. Imported CAD that the
    user deletes goes right away, after the project's open viewers close.
 3. Settings > CAD storage lists the removed project. It can delete the kept CAD later, or restore
-   the project. Restore refuses while another active project uses the folder. A project restored
-   without its CAD shows the file prompt, so the file can be imported again.
+   the project. Restore refuses while another active project reviews the same file, or while the
+   folder has a project with no CAD file. A project restored without its CAD shows the file prompt,
+   so the file can be imported again.
+
+### Projects in one folder
+
+A folder holds one project per CAD file, the way an Onshape document holds one project per
+element. `findConflictingProject` in `commandInvariants.ts` decides it, and the decider checks it on
+create, `project.local-cad.set`, restore, and a folder change:
+
+- Two projects share a folder only when both review a CAD file and the files differ. A project with
+  no CAD file, and an Onshape project's managed folder, keep the folder to themselves.
+- A file is its path inside the folder. Paths compare the way folders do: without case on Windows
+  drive and UNC paths, with case elsewhere, including `/mnt/c` under WSL. The same file reached
+  through a different folder, or through a symlink, is a different project.
+- Nothing relinks another project. Adding a file that has a project opens that project. When two
+  creates for one file race, the decider rejects the second and the service returns the first.
+- Projects in one folder share its design brief (`cadsense.json` or `DESIGN.md`) and run agents in
+  the same folder. Review learnings stay per project.
 
 `project.delete` rejects a local CAD project, as it rejects a ready Onshape project, so removal is
 the only way to take one out of the sidebar. The `project.onshape.remove`, `.cleanup.request`,
@@ -110,14 +128,18 @@ and cancelling terminates the worker.
 | File changed on disk since its snapshot               | Panel Sync reads Sync changes; `cad_context` says so         |
 | File saved again with the same bytes                  | Still `unchanged`; no prompt                                 |
 | Repeated sibling names (three bolts)                  | Distinct, stable occurrence paths                            |
-| Folder already used by a folder project               | That project gets the CAD source                             |
+| File already reviewed by a project in the folder      | That project opens; nothing is created or relinked           |
+| Another file in a folder with a local CAD project     | A new project for that file                                  |
+| Folder used by a project with no CAD file             | `folder-in-use`; its CAD panel's Pick a file links one       |
+| Pick a file chooses a file another project reviews    | `file-in-use`; the project keeps its file                    |
 | Folder used by an Onshape project                     | `onshape-project`                                            |
 | Agent run or CAD operation active                     | `busy`                                                       |
 | `project.delete` on a local CAD project               | Rejected; it is removed through CAD storage                  |
 | Removal or cleanup asks to delete the folder          | Rejected; only an Onshape managed workspace can be deleted   |
 | Removed with its imported CAD kept                    | Snapshots kept until restore, or a later delete in storage   |
 | Removed with its imported CAD deleted                 | Its viewers close and its snapshots are removed right away   |
-| Restore while another project uses the folder         | Rejected until that project is removed                       |
+| Restore while another project reviews the file        | Rejected until that project is removed                       |
+| Restore while the folder has a project with no file   | Rejected until that project is removed                       |
 
 ## SolidWorks files
 
@@ -326,8 +348,9 @@ Run it on the same file before and after a change to compare.
 
 `apps/server/scripts/local-cad-project-e2e.ts` runs the dev app on a fresh data directory and drives
 headless Chromium through the dialog, the first import, the CAD panel and its heading's Open file,
-a re-export with Sync, project settings, and a removal from the sidebar that keeps the imported
-CAD, then a restore from CAD storage. With `--ask` and `--model` it also sends a prompt to a real
+a re-export with Sync, project settings, a second file in the folder that gets its own project,
+the first file added again (which opens its chat), and a removal from the sidebar that keeps the
+imported CAD, then a restore from CAD storage while the second project shares the folder. With `--ask` and `--model` it also sends a prompt to a real
 agent. With `--solidworks` it converts real SolidWorks files, one project folder per case,
 including a part converted while a user's SolidWorks session is open and must stay open. It keeps a
 screenshot per step, the dev log, and `summary.json` under `--out`. It starts from a corrupt file so

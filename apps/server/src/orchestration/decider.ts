@@ -18,7 +18,7 @@ import {
   listThreadsByProjectId,
   requireActiveOnshapeProjectSourceAbsent,
   requireActiveProject,
-  requireActiveProjectWorkspaceRootAbsent,
+  requireNoConflictingProject,
   requireProject,
   requireProjectAbsent,
   requireThread,
@@ -180,11 +180,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         } else {
           if (storage.cleanupPending)
             return yield* fail("Finish pending cleanup before restoring this project.");
-          // Another project may have taken the folder while this one was removed.
-          yield* requireActiveProjectWorkspaceRootAbsent({
+          // Another project may have taken the folder or the file while this one was removed.
+          yield* requireNoConflictingProject({
             readModel,
             command,
             workspaceRoot: project.workspaceRoot,
+            filePath: project.localCadSource?.filePath,
+            exceptProjectId: project.id,
           });
           if (project.onshapeSource)
             yield* requireActiveOnshapeProjectSourceAbsent({
@@ -395,16 +397,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       ];
     }
     case "project.create":
-    case "project.onshape.create": {
+    case "project.onshape.create":
+    case "project.local-cad.create": {
       yield* requireProjectAbsent({
         readModel,
         command,
         projectId: command.projectId,
       });
-      yield* requireActiveProjectWorkspaceRootAbsent({
+      yield* requireNoConflictingProject({
         readModel,
         command,
         workspaceRoot: command.workspaceRoot,
+        filePath:
+          command.type === "project.local-cad.create" ? command.localCadSource.filePath : undefined,
         exceptProjectId: command.projectId,
       });
       if (command.type === "project.onshape.create") {
@@ -436,6 +441,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 },
               }
             : {}),
+          ...(command.type === "project.local-cad.create"
+            ? { localCadSource: command.localCadSource }
+            : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -455,10 +463,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             detail: `Project '${command.projectId}' has a server-managed Onshape workspace.`,
           });
         }
-        yield* requireActiveProjectWorkspaceRootAbsent({
+        yield* requireNoConflictingProject({
           readModel,
           command,
           workspaceRoot: command.workspaceRoot,
+          filePath: project.localCadSource?.filePath,
           exceptProjectId: command.projectId,
         });
       }
@@ -548,6 +557,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Project '${command.projectId}' is an Onshape project.`,
         });
       }
+      // Another project in the folder may already review this file.
+      yield* requireNoConflictingProject({
+        readModel,
+        command,
+        workspaceRoot: project.workspaceRoot,
+        filePath: command.localCadSource.filePath,
+        exceptProjectId: project.id,
+      });
       yield* requireProjectCadIdle({
         readModel,
         command,

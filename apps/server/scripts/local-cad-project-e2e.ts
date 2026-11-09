@@ -4,7 +4,8 @@
  * a fresh data directory, then drives headless Chromium through the whole flow, ending with removing
  * the project from the sidebar and restoring it from CAD storage, and keeps the evidence under --out:
  *
- *   bracket-rig/         the project folder: the STEP file, an older export, and a corrupt file
+ *   bracket-rig/         the project folder: the STEP file, an older export, a corrupt file, and
+ *                        a second assembly added later, which gets a project of its own
  *   NN-*.png             a screenshot after each step
  *   dev.log              dev runner, server, and web output
  *   summary.json         step timings and what each step observed
@@ -502,29 +503,44 @@ try {
     NodeFS.readFileSync(NodePath.join(out, "dev.log"), "utf8").match(
       /Converted a SolidWorks file with SolidWorks/g,
     )?.length ?? 0;
-  /** The last CAD outcome of the project in `folder`, read from the dev database. */
-  const lastOutcome = (folder: string) => {
+  /** The active projects in `folder` with their title, linked file, and CAD state, from the dev database. */
+  const folderProjects = (folder: string) => {
     const db = new NodeSqlite.DatabaseSync(NodePath.join(out, "home/userdata/state.sqlite"), {
       readOnly: true,
     });
     try {
-      const row = db
-        .prepare("SELECT cad_json AS cad FROM projection_projects WHERE workspace_root = ?")
-        .get(folder);
-      const cad = typeof row?.cad === "string" ? JSON.parse(row.cad) : null;
-      return cad?.lastOutcome as
-        | { operationId: string; status: string; reason?: string }
-        | undefined;
+      return db
+        .prepare(
+          "SELECT title, local_cad_source_json AS source, cad_json AS cad FROM projection_projects WHERE workspace_root = ? AND deleted_at IS NULL",
+        )
+        .all(folder)
+        .map((row) => ({
+          title: String(row.title),
+          file:
+            typeof row.source === "string"
+              ? (JSON.parse(row.source) as { filePath: string }).filePath
+              : null,
+          lastOutcome: (typeof row.cad === "string" ? JSON.parse(row.cad) : null)?.lastOutcome as
+            | { operationId: string; status: string; reason?: string }
+            | undefined,
+        }));
     } finally {
       db.close();
     }
   };
-  /** Waits up to 20 minutes for the folder's next CAD outcome after `after`. */
-  const settled = (folder: string, after?: string) =>
+  /**
+   * The last CAD outcome of the project in `folder`, or of the one reviewing `file` there when the
+   * folder holds one project per file.
+   */
+  const lastOutcome = (folder: string, file?: string) =>
+    folderProjects(folder).find((project) => file === undefined || project.file === file)
+      ?.lastOutcome;
+  /** Waits up to 20 minutes for the next CAD outcome after `after` in `folder` (and `file`). */
+  const settled = (folder: string, after?: string, file?: string) =>
     waitFor(
       `the import in ${NodePath.basename(folder)}`,
       () => {
-        const latest = lastOutcome(folder);
+        const latest = lastOutcome(folder, file);
         return latest && latest.operationId !== after ? latest : undefined;
       },
       20 * 60_000,
@@ -550,6 +566,63 @@ try {
     await page.waitForTimeout(8000);
     return { outcome, components: await componentCount() };
   };
+
+  // A second assembly exported into the same folder gets a project of its own. The first project
+  // keeps its file and chat. The folder already has a project, so the second one's name defaults to
+  // its file's ("arm"), and the sidebar row the removal and restore steps use (matched by the
+  // folder's name) is still the first project's.
+  const secondName = "exports/arm.step";
+  const addDialog = page.getByRole("dialog", { name: "Add project" });
+  /** Opens Add project, scans the bracket-rig folder, and picks `file` in the dialog. */
+  const pickInFolder = async (page: Page, file: string) => {
+    await page.goto(url, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Add project" }).first().click();
+    await page.getByRole("button", { name: "Local CAD file" }).click();
+    await page.getByLabel("Folder").fill(folder);
+    await page.getByRole("button", { name: "Scan" }).click();
+    await addDialog.getByText(file, { exact: true }).click({ timeout: 60_000 });
+  };
+  await run("second-file-own-project", async (page) => {
+    NodeFS.copyFileSync(step, NodePath.join(folder, secondName));
+    await pickInFolder(page, secondName);
+    const defaultName = await page.getByLabel("Project name").inputValue();
+    if (defaultName !== "arm") throw new Error(`The name defaulted to ${defaultName}`);
+    await page.getByRole("button", { name: "Create project" }).click();
+    await addDialog.waitFor({ state: "detached" });
+    await startThread(page);
+    const outcome = await settled(folder, undefined, secondName);
+    if (outcome.status !== "succeeded") throw new Error(`Import failed: ${outcome.reason}`);
+    await page.getByRole("button", { name: secondName, exact: true }).waitFor({ timeout: 120_000 });
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    await page.waitForTimeout(5000);
+    const projects = folderProjects(folder).map(({ title, file }) => ({ title, file }));
+    if (projects.length !== 2) throw new Error(`The folder has ${projects.length} projects`);
+    if (!projects.some((project) => project.file === stepName))
+      throw new Error("The first project lost its file");
+    const sidebar = (await page.locator('[data-sidebar="menu-button"]').allInnerTexts())
+      .map((text) => text.replaceAll("\n", " ").trim())
+      .filter((text) => text.startsWith("arm ") || text.includes(NodePath.basename(folder)));
+    if (sidebar.length < 2) throw new Error(`The sidebar shows ${JSON.stringify(sidebar)}`);
+    return { url: page.url(), defaultName, projects, sidebar };
+  });
+  // Adding the first file again opens its project's chat. Nothing is created or relinked, and the
+  // unchanged file is not imported again.
+  await run("same-file-opens-existing", async (page) => {
+    const before = { outcome: lastOutcome(folder, stepName), manifests: manifests().length };
+    await pickInFolder(page, stepName);
+    await page.getByRole("button", { name: "Create project" }).click();
+    await addDialog.waitFor({ state: "detached" });
+    const chat = new URL(threadUrl).pathname;
+    await page.waitForURL((next) => next.pathname === chat, { timeout: 30_000 });
+    const outcome = await settled(folder, before.outcome?.operationId, stepName);
+    const projects = folderProjects(folder).map(({ title, file }) => ({ title, file }));
+    if (projects.length !== 2) throw new Error(`The folder has ${projects.length} projects`);
+    if (manifests().length !== before.manifests)
+      throw new Error("The unchanged file imported again");
+    await openRightPanel(page);
+    await panel.locator("canvas").first().waitFor({ timeout: 120_000 });
+    return { url: page.url(), outcome, projects };
+  });
 
   const solidworksDir = values.solidworks;
   if (solidworksDir !== undefined) {
@@ -782,6 +855,7 @@ try {
       chat: (await page.locator("main").first().innerText()).slice(0, 200),
     };
   });
+  // The arm project still shares the folder, and restore allows that because its file differs.
   await run("restored", async (page) => {
     await page.goto(new URL("?settings=archived#cad-storage", url).href, {
       waitUntil: "networkidle",
