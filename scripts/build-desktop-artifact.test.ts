@@ -67,6 +67,7 @@ import {
   WSL_RUNTIME_ARCHIVE_HASH_NAME,
   WSL_RUNTIME_ARCHIVE_NAME,
   WSL_RUNTIME_EXTRA_RESOURCES,
+  WINDOWS_NSIS_INCLUDE,
   wslRuntimeArchiveTarTarget,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
@@ -598,7 +599,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         },
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
-      assert.deepStrictEqual(win.nsis, { differentialPackage: true });
+      assert.deepStrictEqual(win.nsis, {
+        differentialPackage: true,
+        include: WINDOWS_NSIS_INCLUDE,
+      });
       // Native binaries and helper executables cannot load from inside an
       // asar; everything else stays packed. The Claude SDK platform packages
       // and .bin shims never ship.

@@ -800,6 +800,9 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
   ];
 }
 
+// NSIS customizations, staged with the rest of apps/desktop/resources. It
+// hardcodes resources\resource-monitor\<resourceMonitorExecutableName("win")>.
+export const WINDOWS_NSIS_INCLUDE = "apps/desktop/resources/installer.nsh";
 export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
@@ -1895,7 +1898,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // Keep blockmap-based differential downloads enabled while changing the
     // installed file topology. The optimization is in the payload shape, not
     // in trading update bandwidth for install speed.
-    buildConfig.nsis = { differentialPackage: true };
+    // installer.nsh replaces the stock running-app check, which spent ~6s of
+    // each upgrade starting PowerShell (see the file header).
+    buildConfig.nsis = { differentialPackage: true, include: WINDOWS_NSIS_INCLUDE };
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: "icon.ico",
