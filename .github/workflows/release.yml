@@ -464,15 +464,6 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@cadsense/scripts...
-
       - name: Download all desktop artifacts
         uses: actions/download-artifact@v8
         with:
@@ -480,6 +471,8 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      # Re-enabling this also needs a Setup Vite+ step above with
+      # `run-install` filtered to @cadsense/scripts.
       # - name: Merge Windows updater manifests
       #   run: |
       #     shopt -s nullglob
