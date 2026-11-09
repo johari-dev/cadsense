@@ -58,12 +58,15 @@ describe("branding", () => {
 });
 
 describe("branding logic", () => {
-  it.each(["", "Latest", "Alpha"])("omits release stage %s from the display name", (stageLabel) => {
-    expect(formatAppDisplayName({ baseName: "Cadsense", stageLabel })).toBe("Cadsense");
-  });
-  it.each(["Dev", "Nightly"])("preserves the %s stage", (stageLabel) => {
-    expect(formatAppDisplayName({ baseName: "Cadsense", stageLabel })).toBe(
-      `Cadsense (${stageLabel})`,
+  it.each(["", "Latest", "Alpha", "Nightly"])(
+    "omits stage %s from the display name",
+    (stageLabel) => {
+      expect(formatAppDisplayName({ baseName: "Cadsense", stageLabel })).toBe("Cadsense");
+    },
+  );
+  it("preserves the Dev stage", () => {
+    expect(formatAppDisplayName({ baseName: "Cadsense", stageLabel: "Dev" })).toBe(
+      "Cadsense (Dev)",
     );
   });
   it("returns Nightly for nightly primary server versions", () => {
@@ -83,7 +86,7 @@ describe("branding logic", () => {
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616.12",
       }),
-    ).toBe("Cadsense (Nightly)");
+    ).toBe("Cadsense");
   });
 
   it("keeps the fallback display name for stable primary server versions", () => {

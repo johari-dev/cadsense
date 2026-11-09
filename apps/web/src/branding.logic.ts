@@ -4,12 +4,11 @@ export function formatAppDisplayName(input: {
   readonly baseName: string;
   readonly stageLabel: string;
 }): string {
-  const stage = input.stageLabel.trim().toLowerCase();
-  if (stage === "" || stage === "latest" || stage === "alpha") {
-    return input.baseName;
-  }
-
-  return `${input.baseName} (${input.stageLabel})`;
+  // Only dev builds carry the stage in the app name. Release and nightly
+  // builds use the plain name; nightly shows its stage in the sidebar pill.
+  return input.stageLabel.trim().toLowerCase() === "dev"
+    ? `${input.baseName} (${input.stageLabel})`
+    : input.baseName;
 }
 
 export function resolveServerBackedAppStageLabel(input: {
