@@ -45,7 +45,8 @@ export function ThreadStatusLabel({
             status.pulse ? "animate-status-pulse" : ""
           }`}
         />
-        <span className="hidden md:inline">{status.label}</span>
+        {/* A pulsing dot already says "in progress"; the tooltip carries the label. */}
+        {status.pulse ? null : <span className="hidden md:inline">{status.label}</span>}
       </TooltipTrigger>
       <TooltipPopup side="top">{status.label}</TooltipPopup>
     </Tooltip>
