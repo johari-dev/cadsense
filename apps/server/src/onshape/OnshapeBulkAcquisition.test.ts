@@ -629,6 +629,27 @@ describe("bulk snapshot acquisition", () => {
       3,
     ),
   );
+  it.effect("fetches composite parts from source geometry instead of the archive", () =>
+    harness(
+      (h) =>
+        Effect.gen(function* () {
+          // 3MF exports paint composite faces that inherit a constituent body color with a
+          // fixed near-white, so composites must come from the source part geometry.
+          h.definition.parts[1]!.bodyType = "composite";
+          h.metadata[1]!.bodyType = "composite";
+          const result = yield* h.acquire();
+          assert.lengthOf(result.assets, 3);
+          const fallback = h.requests.filter((r) => r.path.includes("/partid/"));
+          assert.lengthOf(fallback, 1);
+          assert.include(fallback[0]!.path, "/partid/part-1/gltf");
+          assert.lengthOf(
+            h.requests.filter((r) => r.path.includes("/partstudios/")),
+            0,
+          );
+        }),
+      3,
+    ),
+  );
   for (const fault of ["too-large", "timeout", "missing-part"] as const) {
     it.effect(`falls back only for unresolved geometry after a ${fault} studio batch`, () =>
       harness(

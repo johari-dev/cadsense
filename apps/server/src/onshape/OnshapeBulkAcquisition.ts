@@ -36,7 +36,8 @@ import {
 import { acquireSnapshotMetadata } from "./OnshapeSnapshotMetadata.ts";
 import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
-export const ONSHAPE_BULK_TESSELLATION_PROFILE = "onshape-3mf-coarse-meters-z-up-opacity-v3";
+export const ONSHAPE_BULK_TESSELLATION_PROFILE =
+  "onshape-3mf-coarse-meters-z-up-opacity-composite-source-v4";
 export const ONSHAPE_TRANSLATION_MAX_POLLS = 24;
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{24}$/));
 const Translation = Schema.Struct({
@@ -269,11 +270,15 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         }
         const bytes = yield* entry.readDownload(checkpoint);
         const geometry = yield* Effect.try({
-          // Keep uniquely identified archive geometry. Only ambiguous or omitted
-          // sources need the pinned Part Studio fallback below.
+          // Keep uniquely identified archive geometry. Only ambiguous, omitted, or
+          // composite sources need the pinned Part Studio fallback below.
           try: () => readOnshapeThreeMf(checkpoint.draft, bytes, undefined, true),
           catch: geometryFailure,
         });
+        // 3MF exports paint composite faces that inherit a constituent body color with a
+        // fixed near-white, so composites always use source part geometry instead.
+        const fromArchive = (part: CadSnapshotDraft["parts"][number]) =>
+          geometry.has(part.geometryKey) && part.metadata?.bodyType !== "composite";
         const draft = checkpoint.draft;
         const budget = yield* Effect.try({
           try: () => createCadSceneBudget(draft.nodes),
@@ -282,7 +287,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         const assets: CadGeometryAsset[] = [];
         const missingStudios = new Map<string, CadSnapshotDraft["parts"][number][]>();
         for (const part of draft.parts) {
-          if (!part.geometryRequired || geometry.has(part.geometryKey)) continue;
+          if (!part.geometryRequired || fromArchive(part)) continue;
           const key = snapshotPartStudioKey(part.source);
           const parts = missingStudios.get(key) ?? [];
           parts.push(part);
@@ -290,7 +295,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         }
         // Process missing studios together so only one batch download stays in memory.
         const orderedParts = [
-          ...draft.parts.filter((part) => !part.geometryRequired || geometry.has(part.geometryKey)),
+          ...draft.parts.filter((part) => !part.geometryRequired || fromArchive(part)),
           ...[...missingStudios.values()].flat(),
         ];
         let missingBatch:
@@ -300,7 +305,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         for (const part of orderedParts) {
           if (!part.geometryRequired) continue;
           yield* progress.step("building", { done: assets.length, total: required });
-          const extracted = geometry.has(part.geometryKey)
+          const extracted = fromArchive(part)
             ? yield* Effect.try({
                 try: () => geometry.extract(part.geometryKey),
                 catch: geometryFailure,
