@@ -235,6 +235,21 @@ export const onshapePartStudioRequest = Effect.fn(function* (
   };
 });
 
+/** Query for the root definition read, shared by the pinned and bulk acquisition paths. */
+export const onshapeDefinitionQuery = (kind: CadSnapshotRoot["kind"], configuration: string) => {
+  const query = new URLSearchParams({ configuration });
+  if (kind === "assembly") {
+    query.set("includeNonSolids", "true");
+    query.set("excludeSuppressed", "false");
+    query.set("includeMateFeatures", "false");
+    query.set("includeMateConnectors", "false");
+  } else {
+    query.set("withThumbnails", "false");
+    query.set("includePropertyDefaults", "false");
+  }
+  return query;
+};
+
 /** Read expanded BOM appearance, material, and mass once; fetch studio metadata only for unresolved sources. */
 export const acquireSnapshotMetadata = <E, R>(
   input: CadSnapshotDraft,

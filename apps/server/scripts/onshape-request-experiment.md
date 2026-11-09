@@ -6,21 +6,23 @@ server. `onshape-geometry-fidelity.mjs` compares stored assets through Three.js.
 
 ## Environment variables
 
-| Variable                         | Meaning                                                                                                        |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `ONSHAPE_SOURCE_URL`             | Required Onshape element URL.                                                                                  |
-| `ONSHAPE_EXPERIMENT_DIR`         | Required artifact directory. Use fresh storage for a cold run.                                                 |
-| `ONSHAPE_OFFLINE=1`              | Replay only. Missing responses fail without network access.                                                    |
-| `ONSHAPE_REPLAY_READS_DIR`       | Colon-separated recording directories on Linux.                                                                |
-| `ONSHAPE_CREDENTIAL_FILE`        | Required for live runs. JSON secret containing `accessKeyId` and `secretKey`.                                  |
-| `ONSHAPE_REQUEST_BUDGET`         | Request-attempt limit, including connection verification. Default `160`.                                       |
-| `ONSHAPE_ASSERT_MAX_REQUESTS`    | Maximum cold-import count. Unchanged sync must use one request and reuse the snapshot.                         |
-| `ONSHAPE_BASELINE_MANIFEST`      | Optional baseline for metadata, topology, identity, ordering, and triangle assertions.                         |
-| `ONSHAPE_ALLOW_BULK_METADATA=1`  | Permits recorded null optional studio metadata and absent suppressed-part metadata.                            |
-| `ONSHAPE_ALLOW_RETESSELLATION=1` | Records triangle-count differences without failing acquisition comparison. Requires a separate geometry audit. |
-| `ONSHAPE_UNCHANGED_ONLY=1`       | Runs only the one-request unchanged-sync check.                                                                |
-| `ONSHAPE_STATE_DIR`              | Optional existing experiment state, for resume or unchanged-only checks.                                       |
-| `ONSHAPE_INJECT_BATCH_FAILURE`   | Offline fault injection: `too-large`, `timeout`, or `missing-part`. Requires recordings for fallback requests. |
+| Variable                                       | Meaning                                                                                                                       |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `ONSHAPE_SOURCE_URL`                           | Required Onshape element URL.                                                                                                 |
+| `ONSHAPE_EXPERIMENT_DIR`                       | Required artifact directory. Use fresh storage for a cold run.                                                                |
+| `ONSHAPE_OFFLINE=1`                            | Replay only. Missing responses fail without network access.                                                                   |
+| `ONSHAPE_REPLAY_READS_DIR`                     | Colon-separated recording directories on Linux.                                                                               |
+| `ONSHAPE_CREDENTIAL_FILE`                      | Required for live runs. JSON secret containing `accessKeyId` and `secretKey`.                                                 |
+| `ONSHAPE_REQUEST_BUDGET`                       | Request-attempt limit, including connection verification. Default `160`.                                                      |
+| `ONSHAPE_ASSERT_PHASE_REQUESTS`                | Per-phase request limits, such as `discover=1,cold=10`. An unchanged sync must always use one request and reuse the snapshot. |
+| `ONSHAPE_SMALL_STUDIO`, `ONSHAPE_LARGE_STUDIO` | Optional Part Studio element IDs. Each adds a phase that simulates an edit to that studio.                                    |
+| `ONSHAPE_SUBASSEMBLY_ELEMENT`                  | Optional subassembly element ID. Adds a phase that syncs it as a root at the same revision.                                   |
+| `ONSHAPE_BASELINE_MANIFEST`                    | Optional baseline for metadata, topology, identity, ordering, and triangle assertions.                                        |
+| `ONSHAPE_ALLOW_BULK_METADATA=1`                | Permits recorded null optional studio metadata and absent suppressed-part metadata.                                           |
+| `ONSHAPE_ALLOW_RETESSELLATION=1`               | Records triangle-count differences without failing acquisition comparison. Requires a separate geometry audit.                |
+| `ONSHAPE_UNCHANGED_ONLY=1`                     | Runs only the one-request unchanged-sync check.                                                                               |
+| `ONSHAPE_STATE_DIR`                            | Optional existing experiment state, for resume or unchanged-only checks.                                                      |
+| `ONSHAPE_INJECT_BATCH_FAILURE`                 | Offline fault injection: `too-large`, `timeout`, or `missing-part`. Requires recordings for fallback requests.                |
 
 Comparisons remap geometry keys across tessellation profiles and normalize negative
 zero in transforms. All other source and placement values remain exact. Replay
@@ -48,6 +50,33 @@ ONSHAPE_REPLAY_READS_DIR='.cadsense/request-experiments/bom-targeted-live' \
 Expected: nine cold requests, one unchanged request, zero network calls, unchanged
 review identities, and recorded triangle-count differences. An eight-request limit
 makes this replay fail. Replay timing does not measure network or export latency.
+
+## Changed-sync replay
+
+Runs catalog discovery, then cold, unchanged, edit, other-project, and subassembly phases from
+the November 9 live recording, offline. Edit phases rewrite the stored checkpoint to another
+revision and hide cached root-document geometry, because a real edit gives those parts new
+keys. An assembly edit keeps every studio revision; a studio edit replaces that studio's.
+
+```bash
+ONSHAPE_SOURCE_URL='https://cad.onshape.com/documents/09b200c27afe613145d0d59f/w/5aa10df555892630f7d012b9/e/8b00bbb271a79c94ff741d94' \
+ONSHAPE_EXPERIMENT_DIR='.cadsense/request-experiments/reproduce-changed' \
+ONSHAPE_OFFLINE=1 \
+ONSHAPE_SMALL_STUDIO=47d0b113a7c06b725c76e010 \
+ONSHAPE_LARGE_STUDIO=25e3986ee073450506a30894 \
+ONSHAPE_SUBASSEMBLY_ELEMENT=caa5a3d144d13386951c4f33 \
+ONSHAPE_ASSERT_PHASE_REQUESTS='discover=1,cold=11,unchanged=1,changed-assembly=2,changed-small-studio=4,changed-large-studio=5,changed-all-studios=7,other-project=7,subassembly=2' \
+ONSHAPE_ALLOW_BULK_METADATA=1 \
+ONSHAPE_ALLOW_RETESSELLATION=1 \
+ONSHAPE_BASELINE_MANIFEST='.cadsense/request-experiments/target-baseline-live/cold-manifest.json' \
+ONSHAPE_REPLAY_READS_DIR='.cadsense/request-experiments/target-v6-live' \
+	node apps/server/scripts/onshape-request-experiment.ts
+```
+
+Expected: every phase within its limit and no metadata, topology, or identity differences.
+Refetched studios use the synchronous tessellation, so their triangle counts differ. The
+September recordings predate the workspace definition read and no longer replay, and their
+`ONSHAPE_ASSERT_MAX_REQUESTS` command is historical.
 
 ## Geometry checks
 

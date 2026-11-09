@@ -48,6 +48,7 @@ import {
 
 import {
   acquireSnapshotMetadata,
+  onshapeDefinitionQuery,
   onshapePartStudioRequest,
   OnshapeSnapshotAcquisitionError,
 } from "./OnshapeSnapshotMetadata.ts";
@@ -58,6 +59,9 @@ export { OnshapeSnapshotAcquisitionError } from "./OnshapeSnapshotMetadata.ts";
 export const ONSHAPE_TESSELLATION_PROFILE = "onshape-gltf-chord-0.0005-angle-0.1-opacity-v2";
 const decodeMicroversion = Schema.decodeUnknownEffect(
   Schema.Struct({ microversion: OnshapeWorkspaceId }),
+);
+const decodeDefinitionMicroversion = Schema.decodeUnknownEffect(
+  Schema.Struct({ rootAssembly: Schema.Struct({ documentMicroversion: OnshapeWorkspaceId }) }),
 );
 const geometryFailure = (error: unknown) =>
   new CadGeometryError({
@@ -136,23 +140,37 @@ export const make = Effect.gen(function* () {
         query,
       });
     });
+    const configuration = input.root.configuration || "default";
+    const invalidResponse = () =>
+      Effect.fail(new OnshapeSnapshotAcquisitionError({ reason: "invalid-response" }));
+    // A workspace or version assembly definition reports the microversion it evaluated, so
+    // that one read both pins the revision and supplies the definition, even when unchanged.
+    const definition =
+      source.workspaceType !== "m" && input.root.kind === "assembly"
+        ? yield* read(
+            `${ONSHAPE_API_BASE_PATH}/assemblies/d/${source.documentId}/${source.workspaceType}/${source.workspaceId}/e/${input.root.elementId}`,
+            onshapeDefinitionQuery("assembly", configuration).toString(),
+          )
+        : undefined;
     const microversionId =
       source.workspaceType === "m"
         ? source.workspaceId
-        : (yield* read(
-            `${ONSHAPE_API_BASE_PATH}/documents/d/${source.documentId}/${source.workspaceType}/${source.workspaceId}/currentmicroversion`,
-          ).pipe(
-            Effect.flatMap(decodeMicroversion),
-            Effect.catchTag("SchemaError", () =>
-              Effect.fail(new OnshapeSnapshotAcquisitionError({ reason: "invalid-response" })),
-            ),
-          )).microversion;
+        : definition !== undefined
+          ? (yield* decodeDefinitionMicroversion(definition).pipe(
+              Effect.catchTag("SchemaError", invalidResponse),
+            )).rootAssembly.documentMicroversion
+          : (yield* read(
+              `${ONSHAPE_API_BASE_PATH}/documents/d/${source.documentId}/${source.workspaceType}/${source.workspaceId}/currentmicroversion`,
+            ).pipe(
+              Effect.flatMap(decodeMicroversion),
+              Effect.catchTag("SchemaError", invalidResponse),
+            )).microversion;
     const root: CadSnapshotRoot = {
       host: source.host,
       documentId: source.documentId,
       elementId: input.root.elementId,
       kind: input.root.kind,
-      configuration: input.root.configuration || "default",
+      configuration,
       originalRevision: { kind: source.workspaceType, id: source.workspaceId },
       microversionId,
       tessellationProfile:
@@ -171,20 +189,13 @@ export const make = Effect.gen(function* () {
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
-    if (source.workspaceType !== "m") return yield* acquireBulk(context, source);
+    if (source.workspaceType !== "m") return yield* acquireBulk(context, source, definition);
     yield* progress.step("reading");
     const base = `${ONSHAPE_API_BASE_PATH}/${root.kind === "assembly" ? "assemblies" : "parts"}/d/${root.documentId}/m/${microversionId}/e/${root.elementId}`;
-    const query = new URLSearchParams({ configuration: root.configuration });
-    if (root.kind === "assembly") {
-      query.set("includeNonSolids", "true");
-      query.set("excludeSuppressed", "false");
-      query.set("includeMateFeatures", "false");
-      query.set("includeMateConnectors", "false");
-    } else {
-      query.set("withThumbnails", "false");
-      query.set("includePropertyDefaults", "false");
-    }
-    const response = yield* read(base, query.toString());
+    const response = yield* read(
+      base,
+      onshapeDefinitionQuery(root.kind, root.configuration).toString(),
+    );
     let draft = yield* root.kind === "assembly"
       ? parseAssemblySnapshotDraft(context, response)
       : parsePartStudioSnapshotDraft(context, response);

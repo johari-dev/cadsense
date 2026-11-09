@@ -12,12 +12,13 @@ import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/unstable/http";
 import {
   CadSnapshotManifest,
+  OnshapeElementId,
   OnshapeConnectionCreateInput,
   ProjectId,
   type CadGeometryAsset,
 } from "@cadsense/contracts";
 import { ServerSecretStore } from "../src/auth/ServerSecretStore.ts";
-import { layerTest } from "../src/config.ts";
+import { layerTest, ServerConfig } from "../src/config.ts";
 import { SqlitePersistenceMemory } from "../src/persistence/Layers/Sqlite.ts";
 import * as Store from "../src/cad/CadSnapshotStore.ts";
 import * as Connections from "../src/onshape/OnshapeConnections.ts";
@@ -25,6 +26,7 @@ import * as Signer from "../src/onshape/OnshapeRequestSigner.ts";
 import * as Transport from "../src/onshape/OnshapeTransport.ts";
 import * as Acquisition from "../src/onshape/OnshapeSnapshotAcquisition.ts";
 import * as SyncState from "../src/onshape/OnshapeSyncState.ts";
+import * as CadRoots from "../src/onshape/OnshapeCadRoots.ts";
 import * as SourceUrl from "../src/onshape/OnshapeSourceUrl.ts";
 import { onshapePartStudioRequest } from "../src/onshape/OnshapeSnapshotMetadata.ts";
 import {
@@ -517,12 +519,26 @@ const program = Effect.gen(function* () {
   const syncState = yield* SyncState.make.pipe(
     Effect.provideService(Store.CadSnapshotStore, store),
   );
+  // A real workspace edit gives every root-document part a new geometry key, so the
+  // changed phase hides those cached assets. Linked, versioned geometry stays cached.
+  // Another project importing a different document shares only linked geometry.
+  const rootDocumentKeys = new Set<string>();
+  const hidesRootDocument = () => phase.startsWith("changed") || phase === "other-project";
+  const roots = yield* CadRoots.make.pipe(
+    Effect.provideService(Connections.OnshapeConnections, connections),
+  );
   const acquisition = yield* Acquisition.make.pipe(
     Effect.provideService(Connections.OnshapeConnections, connections),
-    Effect.provideService(Store.CadSnapshotStore, store),
+    Effect.provideService(Store.CadSnapshotStore, {
+      ...store,
+      findGeometry: (keys) =>
+        store.findGeometry(
+          hidesRootDocument() ? keys.filter((key) => !rootDocumentKeys.has(key)) : keys,
+        ),
+    }),
     Effect.provideService(SyncState.OnshapeSyncState, syncState),
   );
-  const input: Acquisition.OnshapeSnapshotAcquisitionInput = {
+  const baseInput: Acquisition.OnshapeSnapshotAcquisitionInput = {
     projectId: ProjectId.make("onshape-request-experiment"),
     source,
     root: { elementId: source.elementId, kind: "assembly", configuration: source.configuration },
@@ -541,8 +557,65 @@ const program = Effect.gen(function* () {
     geometryBytes: number;
     complexity: Array<CadGeometryAsset["complexity"]>;
   }> = [];
-  for (const name of unchangedOnly ? ["unchanged"] : ["cold", "unchanged"]) {
+  const { stateDir } = yield* ServerConfig;
+  // Optional phases need element IDs from the source document.
+  const smallStudio = process.env.ONSHAPE_SMALL_STUDIO;
+  const largeStudio = process.env.ONSHAPE_LARGE_STUDIO;
+  const subassembly = process.env.ONSHAPE_SUBASSEMBLY_ELEMENT;
+  const phases = unchangedOnly
+    ? ["unchanged"]
+    : [
+        "cold",
+        "unchanged",
+        "changed-assembly",
+        ...(smallStudio ? ["changed-small-studio"] : []),
+        ...(largeStudio ? ["changed-large-studio"] : []),
+        "changed-all-studios",
+        "other-project",
+        ...(subassembly ? ["subassembly"] : []),
+      ];
+  // A first Sync click discovers the catalog, then syncs.
+  let discoverRequests = 0;
+  if (!unchangedOnly) {
+    phase = "discover";
+    const before = requests.length;
+    yield* roots.discover(source);
+    discoverRequests = requests.length - before;
+    console.log(JSON.stringify({ phase, requests: discoverRequests }));
+  }
+  for (const name of phases) {
     phase = name;
+    const input =
+      name === "other-project"
+        ? { ...baseInput, projectId: ProjectId.make("onshape-request-experiment-other") }
+        : name === "subassembly"
+          ? {
+              ...baseInput,
+              root: { ...baseInput.root, elementId: OnshapeElementId.make(subassembly!) },
+            }
+          : baseInput;
+    if (name.startsWith("changed")) {
+      // Make the completed checkpoint describe another revision, so this one runs as an edit.
+      // An assembly edit keeps every studio revision; a studio edit changes that studio's.
+      const syncDirectory = NodePath.join(stateDir, "onshape-sync");
+      for (const file of yield* Effect.promise(() => NodeFSP.readdir(syncDirectory))) {
+        if (!file.endsWith(".json")) continue;
+        const path = NodePath.join(syncDirectory, file);
+        const checkpoint = JSON.parse(yield* Effect.promise(() => NodeFSP.readFile(path, "utf8")));
+        if (checkpoint.phase !== "complete" || checkpoint.studios === undefined) continue;
+        checkpoint.revisionKey = "0".repeat(64);
+        const edited =
+          name === "changed-small-studio"
+            ? [smallStudio!]
+            : name === "changed-large-studio"
+              ? [largeStudio!]
+              : name === "changed-all-studios"
+                ? Object.keys(checkpoint.studios)
+                : [];
+        for (const studio of edited) checkpoint.studios[studio] = "1".repeat(64);
+        yield* Effect.promise(() => NodeFSP.writeFile(path, JSON.stringify(checkpoint)));
+      }
+    }
     const before = requests.length;
     const start = performance.now();
     const manifest = yield* acquisition.acquire(input);
@@ -553,7 +626,8 @@ const program = Effect.gen(function* () {
         { mode: 0o600 },
       ),
     );
-    if (baseline) {
+    // Another root has its own scene, so only the main root compares with the baseline.
+    if (baseline && name !== "subassembly") {
       const migratedKeys = new Map(
         baseline.parts.map((part) => [
           part.geometryKey,
@@ -565,6 +639,7 @@ const program = Effect.gen(function* () {
       );
       const expected: CadSnapshotManifest = {
         ...baseline,
+        projectId: input.projectId,
         root: { ...baseline.root, tessellationProfile: manifest.root.tessellationProfile },
         parts: baseline.parts.map((part) => ({
           ...part,
@@ -656,6 +731,10 @@ const program = Effect.gen(function* () {
       )
         return yield* Effect.die(`Snapshot differs from baseline; see ${name}-comparison.json.`);
     }
+    if (name === "cold")
+      for (const part of manifest.parts)
+        if (part.source.documentId === manifest.root.documentId)
+          rootDocumentKeys.add(part.geometryKey);
     const summary = {
       phase,
       requests: requests.length - before,
@@ -676,7 +755,7 @@ const program = Effect.gen(function* () {
     yield* Effect.promise(() =>
       NodeFSP.writeFile(
         NodePath.join(directory, "summary.json"),
-        JSON.stringify(summaries, null, 2),
+        JSON.stringify({ discoverRequests, phases: summaries }, null, 2),
         {
           mode: 0o600,
         },
@@ -688,11 +767,23 @@ const program = Effect.gen(function* () {
       return yield* Effect.die("Unchanged sync must use one request.");
     return;
   }
-  const requestLimit = Number(process.env.ONSHAPE_ASSERT_MAX_REQUESTS ?? Infinity);
-  if (summaries[0]!.requests > requestLimit)
-    return yield* Effect.die(
-      `Cold import used ${summaries[0]!.requests} requests; target ${requestLimit}.`,
-    );
+  // Per-phase request limits, such as "discover=1,cold=10,changed-assembly=2".
+  const limits = new Map(
+    (process.env.ONSHAPE_ASSERT_PHASE_REQUESTS ?? "")
+      .split(",")
+      .filter(Boolean)
+      .map((entry) => {
+        const [name, limit] = entry.split("=");
+        return [name!, Number(limit)] as const;
+      }),
+  );
+  const counts = [{ phase: "discover", requests: discoverRequests }, ...summaries];
+  for (const [name, limit] of limits) {
+    const count = counts.find((summary) => summary.phase === name);
+    if (!count) return yield* Effect.die(`No ${name} phase ran.`);
+    if (count.requests > limit)
+      return yield* Effect.die(`${name} used ${count.requests} requests; target ${limit}.`);
+  }
   if (summaries[1]!.requests !== 1 || summaries[0]!.snapshotId !== summaries[1]!.snapshotId)
     return yield* Effect.die("Unchanged sync must reuse the snapshot with one request.");
 });

@@ -15,12 +15,15 @@ import { CadSnapshotStore, CadSnapshotStoreError } from "../cad/CadSnapshotStore
 import { MAX_ASSEMBLY_EXPORT_BYTES } from "../cad/CadGeometry.ts";
 
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{24}$/));
+// Revision of each root-document Part Studio, keyed by element ID; see OnshapeBulkAcquisition.
+const studios = Schema.optionalKey(Schema.Record(Schema.String, CadHash));
 export const OnshapeSyncCheckpoint = Schema.Union([
   Schema.Struct({
     phase: Schema.Literal("exporting"),
     revisionKey: CadHash,
     draft: CadSnapshotDraft,
     translationId: Id,
+    studios,
   }),
   Schema.Struct({
     phase: Schema.Literal("downloaded"),
@@ -28,11 +31,13 @@ export const OnshapeSyncCheckpoint = Schema.Union([
     draft: CadSnapshotDraft,
     sha256: CadHash,
     byteLength: Schema.Int.check(Schema.isGreaterThan(0)),
+    studios,
   }),
   Schema.Struct({
     phase: Schema.Literal("complete"),
     revisionKey: CadHash,
     snapshotId: CadSnapshotId,
+    studios,
   }),
 ]);
 export type OnshapeSyncCheckpoint = typeof OnshapeSyncCheckpoint.Type;
@@ -56,6 +61,7 @@ export interface OnshapeSyncEntry {
     draft: CadSnapshotDraft,
     revisionKey: string,
     bytes: Uint8Array,
+    studios?: Readonly<Record<string, string>>,
   ) => Effect.Effect<
     Extract<OnshapeSyncCheckpoint, { phase: "downloaded" }>,
     CadSnapshotStoreError
@@ -163,7 +169,7 @@ export const make = Effect.gen(function* () {
                 return yield* corrupt();
               return bytes;
             }),
-          saveDownload: (draft, revisionKey, bytes) =>
+          saveDownload: (draft, revisionKey, bytes, studios) =>
             Effect.gen(function* () {
               if (bytes.length === 0 || bytes.length > MAX_EXPORT_BYTES) return yield* corrupt();
               yield* writeFile(downloadPath, bytes);
@@ -173,6 +179,7 @@ export const make = Effect.gen(function* () {
                 draft,
                 sha256: digest(bytes),
                 byteLength: bytes.length,
+                ...(studios === undefined ? {} : { studios }),
               };
               yield* write(checkpoint);
               return checkpoint;
