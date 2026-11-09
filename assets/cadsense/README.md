@@ -11,7 +11,6 @@ dimension lines, rim, and paper texture are unchanged. The ICO files hold PNG-en
 entries: 16, 32, and 48 px for the favicon, plus 24, 64, 128, and 256 px for Windows.
 The marketing site's icons in `apps/marketing/public` are exported from the same render.
 
-Development, nightly, and production share this CS artwork. Run
-`vp run icons:export` to copy the exports to existing desktop and renderer paths,
-or `vp run icons:check` to verify byte-for-byte consistency. The legacy Icon
-Composer projects/exporter are not used by these commands.
+Development, nightly, and production share this CS artwork and use these files
+directly. Run `vp run icons:export` to refresh the web app's copies in
+`apps/web/public`, or `vp run icons:check` to verify they match byte for byte.
