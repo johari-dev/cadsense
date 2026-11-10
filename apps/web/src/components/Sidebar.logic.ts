@@ -474,15 +474,46 @@ export function resolveSidebarThreadTitle(title: string, projectName: string): s
 }
 
 /**
+ * What a thread row's second line says, or null for a one-line row. Only chats that need a
+ * look get the extra height: a running chat shows its current plan step, and a chat with open
+ * CAD comments shows how many, how many block, and how many the model has since outdated.
+ */
+export type SidebarThreadRowDetail =
+  | {
+      readonly kind: "progress";
+      readonly step: string;
+      readonly completedSteps: number;
+      readonly totalSteps: number;
+    }
+  | ({ readonly kind: "comments" } & NonNullable<SidebarThreadSummary["cadComments"]>);
+
+export function resolveSidebarThreadRowDetail(
+  thread: Pick<SidebarThreadSummary, "planProgress" | "cadComments">,
+): SidebarThreadRowDetail | null {
+  // planProgress is cleared when the turn settles, so its presence means the chat is running.
+  if (thread.planProgress) return { kind: "progress", ...thread.planProgress };
+  if (thread.cadComments && thread.cadComments.open > 0) {
+    return { kind: "comments", ...thread.cadComments };
+  }
+  return null;
+}
+
+/**
  * A thread row under its project: a 36px hitbox as wide as the project header, with the title
- * inset (ps-11.5) to line up with the project name past its thumbnail.
+ * inset (ps-11.5) to line up with the project name past its thumbnail. A row with a second
+ * line (see resolveSidebarThreadRowDetail) becomes a two-column grid: title and age on top, and
+ * the detail line spanning the full width below.
  */
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
+  hasDetail?: boolean;
 }): string {
-  const baseClassName =
-    "h-9 w-full translate-x-0 cursor-pointer justify-start gap-2 rounded-md ps-11.5 pe-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+  const baseClassName = cn(
+    "h-9 w-full translate-x-0 cursor-pointer justify-start gap-2 rounded-md ps-11.5 pe-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+    input.hasDetail &&
+      "grid h-auto min-h-9 grid-cols-[minmax(0,1fr)_auto] content-center gap-x-2 gap-y-0.5 py-1.5",
+  );
 
   if (input.isSelected && input.isActive) {
     return cn(

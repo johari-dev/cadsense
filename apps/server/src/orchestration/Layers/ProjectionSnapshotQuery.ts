@@ -30,7 +30,11 @@ import {
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import { readCadSessionIndexes } from "../../cad/CadSessionPersistence.ts";
-import { readProjectCadReviewLearnings } from "../../cad/CadCommentPersistence.ts";
+import {
+  readOpenCadCommentSummaries,
+  readProjectCadReviewLearnings,
+  readThreadOpenCadCommentSummary,
+} from "../../cad/CadCommentPersistence.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -1823,6 +1827,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       .pipe(
         Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
           Effect.gen(function* () {
+            // Read after the transaction: a comment event newer than the snapshot sequence
+            // re-sends that thread's shell, so counts that run ahead of the snapshot are harmless.
+            const cadComments = yield* readOpenCadCommentSummaries().pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getShellSnapshot:readOpenCadCommentSummaries:query",
+                  "ProjectionSnapshotQuery.getShellSnapshot:readOpenCadCommentSummaries:decodeRows",
+                ),
+              ),
+            );
             let updatedAt: string | null = null;
             for (const row of projectRows) {
               updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -1884,6 +1899,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                         row.threadId,
                       ),
                       planProgress: threadPlanProgress.getThreadPlanProgress(row.threadId),
+                      cadComments: cadComments.get(row.threadId) ?? null,
                     } satisfies OrchestrationThreadShell)
                   : Result.failVoid,
               ),
@@ -2164,7 +2180,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
-      const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
+      const [threadRow, latestTurnRow, sessionRow, cadComments] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2186,6 +2202,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadShellById:getSession:query",
               "ProjectionSnapshotQuery.getThreadShellById:getSession:decodeRow",
+            ),
+          ),
+        ),
+        readThreadOpenCadCommentSummary(threadId).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadShellById:readOpenCadCommentSummary:query",
+              "ProjectionSnapshotQuery.getThreadShellById:readOpenCadCommentSummary:decodeRows",
             ),
           ),
         ),
@@ -2219,6 +2244,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threadRow.value.threadId,
         ),
         planProgress: threadPlanProgress.getThreadPlanProgress(threadRow.value.threadId),
+        cadComments,
       } satisfies OrchestrationThreadShell);
     });
 

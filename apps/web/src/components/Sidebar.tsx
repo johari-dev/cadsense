@@ -5,11 +5,13 @@ import {
   ArchiveIcon,
   ArrowsDownUpIcon as ArrowUpDownIcon,
   CaretRightIcon as ChevronRightIcon,
+  ChatCircleIcon,
   FolderPlusIcon,
   GlobeIcon as Globe2Icon,
   SpinnerIcon as LoaderIcon,
   GearSixIcon as SettingsIcon,
   NotePencilIcon as SquarePenIcon,
+  WarningCircleIcon,
   WarningIcon as TriangleAlertIcon,
 } from "~/lib/icons";
 import { ThreadStatusLabel } from "./ThreadStatusIndicators";
@@ -161,8 +163,10 @@ import {
   resolveProjectStatusIndicator,
   describeProjectSource,
   type ProjectSourceDescription,
+  resolveSidebarThreadRowDetail,
   resolveSidebarThreadTitle,
   resolveThreadRowClassName,
+  type SidebarThreadRowDetail,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
@@ -291,6 +295,72 @@ interface SidebarThreadRowProps {
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
 }
 
+/**
+ * A thread row's second line: the running plan step in the row's status color, or the chat's
+ * open CAD comments with blocking and outdated counts called out.
+ */
+function SidebarThreadRowDetailLine({
+  detail,
+  statusColorClass,
+}: {
+  detail: SidebarThreadRowDetail;
+  statusColorClass: string | undefined;
+}) {
+  if (detail.kind === "progress") {
+    return (
+      <span
+        className={`flex min-w-0 items-center gap-1 text-xs ${statusColorClass ?? "text-tertiary-foreground"}`}
+      >
+        <span className="truncate">{detail.step}</span>
+        {detail.totalSteps > 0 ? (
+          <span className="shrink-0 tabular-nums">
+            · {detail.completedSteps}/{detail.totalSteps}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+  // The line fits about 20 characters at the narrowest sidebar, so outdated findings show as the
+  // comments card's amber warning icon and a count; the tooltip spells everything out.
+  const summary = [
+    `${detail.open} open ${detail.open === 1 ? "finding" : "findings"}`,
+    detail.blockers > 0 ? `${detail.blockers} blocking` : null,
+    detail.outdated > 0 ? `${detail.outdated} outdated by a newer model revision` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={summary}
+            className="flex min-w-0 items-center gap-1 text-xs text-tertiary-foreground tabular-nums"
+          />
+        }
+      >
+        <ChatCircleIcon className="size-3 shrink-0" />
+        <span className="truncate">
+          {detail.open} open
+          {detail.blockers > 0 ? (
+            <>
+              {" · "}
+              <span className="text-destructive-foreground">{detail.blockers} blocking</span>
+            </>
+          ) : null}
+        </span>
+        {detail.outdated > 0 ? (
+          <span className="flex shrink-0 items-center gap-0.5 text-warning">
+            <WarningCircleIcon className="size-3" />
+            {detail.outdated}
+          </span>
+        ) : null}
+      </TooltipTrigger>
+      <TooltipPopup side="right">{summary}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
   const {
     orderedProjectThreadKeys,
@@ -327,6 +397,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       lastVisitedAt,
     },
   });
+  const rowDetail = resolveSidebarThreadRowDetail(thread);
   const threadMetaClassName = !isThreadRunning
     ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
     : "pointer-events-none";
@@ -480,6 +551,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
+          hasDetail: rowDetail !== null,
         })} relative isolate`}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
@@ -571,6 +643,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             </span>
           </div>
         </div>
+        {/* Spans both grid columns, so it runs under the age column too. */}
+        {rowDetail ? (
+          <div className="col-span-2 min-w-0">
+            <SidebarThreadRowDetailLine
+              detail={rowDetail}
+              statusColorClass={threadStatus?.colorClass}
+            />
+          </div>
+        ) : null}
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   );

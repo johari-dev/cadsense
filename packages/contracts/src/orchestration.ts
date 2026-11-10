@@ -505,6 +505,18 @@ export const OrchestrationProjectShell = Schema.Struct({
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
+/**
+ * A chat's open CAD comments, for its sidebar row. Resolved and dismissed findings need no
+ * action, so they are not counted. `outdated` counts open findings whose targets a newer
+ * snapshot invalidated.
+ */
+export const ThreadCadCommentSummary = Schema.Struct({
+  open: NonNegativeInt,
+  blockers: NonNegativeInt,
+  outdated: NonNegativeInt,
+});
+export type ThreadCadCommentSummary = typeof ThreadCadCommentSummary.Type;
+
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -547,6 +559,8 @@ export const OrchestrationThreadShell = Schema.Struct({
       }),
     ),
   ),
+  /** Null when the chat has no open CAD comments. Optional so old servers/clients interop. */
+  cadComments: Schema.optional(Schema.NullOr(ThreadCadCommentSummary)),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 

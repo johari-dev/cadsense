@@ -501,10 +501,9 @@ const makeWsRpcLayer = (
       const toShellStreamEvent = (
         event: OrchestrationEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
+        // Comment events fall through to the default thread refetch: they change the
+        // shell's open comment counts.
         switch (event.type) {
-          case "thread.cad-comments-committed":
-          case "thread.cad-comment-reviewed":
-          case "thread.cad-comments-outdated":
           case "thread.cad-context-ensured":
           case "thread.cad-view-set":
           case "thread.cad-user-view-set":
