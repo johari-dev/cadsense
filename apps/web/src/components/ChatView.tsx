@@ -3921,6 +3921,7 @@ function ChatViewContent(props: ChatViewProps) {
           relativePath={rightPanelFile?.relativePath ?? null}
           revealLine={rightPanelFile?.revealLine ?? null}
           revealRequestId={rightPanelFile?.revealRequestId ?? 0}
+          hideExplorer={rightPanelFile?.hideExplorer ?? false}
           onOpenFile={openFileSurface}
           onCloseFile={closeFileSurface}
           onPendingChange={handleFilePendingChange}

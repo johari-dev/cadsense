@@ -1,4 +1,5 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { DesignBriefTitleButton } from "~/components/designBrief/DesignBriefEntry";
 import {
   CadSnapshotManifest,
   isSolidWorksFile,
@@ -894,7 +895,8 @@ export function CadPanel({
     !project.localCadSource &&
     !compact &&
     cadSyncPlan(project, shownRootId) !== null;
-  // The header row: the scene picker, with the Sync button for the shown root after it.
+  // The header row: the scene picker, the Sync button for the shown root, and the design
+  // brief button once the brief is filled in.
   const scenePicker = !compact && (
     <>
       <CadScenePicker
@@ -957,6 +959,7 @@ export function CadPanel({
           />
         }
       />
+      <DesignBriefTitleButton project={project} threadRef={threadRef} />
     </>
   );
   return (

@@ -25,12 +25,18 @@
  * copied to <out>/folder, a fresh data directory gets a local CAD project for it, and the review
  * starts once the import finishes.
  *
+ * --workspace <new dir> (with --home) points the copied project at its own empty workspace, so
+ * parallel runs never share one, and a directory outside any git repo keeps repo CLAUDE.md and
+ * AGENTS.md files away from the agent. --brief <file> copies a design brief into the workspace as
+ * DESIGN.md (and into <out>/brief.md); it needs --workspace or --folder.
+ *
  * --codex-home sets the Codex instance's CODEX_HOME, for a model provider configured there. The web
  * app must be built first (`pnpm --filter @cadsense/web build`) because Chromium loads its render
  * page.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeUtil from "node:util";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -78,6 +84,8 @@ const { values } = NodeUtil.parseArgs({
     out: { type: "string" },
     "codex-home": { type: "string" },
     "timeout-minutes": { type: "string" },
+    workspace: { type: "string" },
+    brief: { type: "string" },
   },
 });
 const provider = values.provider;
@@ -89,8 +97,11 @@ if (
   !values.out
 )
   throw new Error(
-    "Usage: --home <data dir> | --folder <dir> --file <path in it>, --provider codex|claudeAgent --model <id> --prompt-file <file> --out <dir> [--effort <level>] [--codex-home <dir>] [--timeout-minutes <n>]",
+    "Usage: --home <data dir> [--workspace <new dir>] | --folder <dir> --file <path in it>, --provider codex|claudeAgent --model <id> --prompt-file <file> --out <dir> [--brief <file>] [--effort <level>] [--codex-home <dir>] [--timeout-minutes <n>]",
   );
+if (values.workspace && !values.home) throw new Error("--workspace needs --home.");
+if (values.brief && !values.workspace && !values.folder)
+  throw new Error("--brief needs --workspace or --folder.");
 
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
@@ -103,6 +114,27 @@ if (values.home) {
 } else {
   NodeFS.mkdirSync(home);
   NodeFS.cpSync(NodePath.resolve(values.folder!), folder!, { recursive: true });
+}
+const workspace = values.workspace ? NodePath.resolve(values.workspace) : folder;
+if (values.workspace) {
+  if (NodeFS.existsSync(workspace!)) throw new Error(`${workspace} already exists.`);
+  NodeFS.mkdirSync(workspace!, { recursive: true });
+  // The copied database still names the source's workspace; repoint its one project here.
+  const db = new NodeSqlite.DatabaseSync(NodePath.join(home, "userdata", "state.sqlite"));
+  const roots = db.prepare("select workspace_root from projection_projects").all();
+  const from = roots[0]?.workspace_root;
+  if (roots.length !== 1 || typeof from !== "string")
+    throw new Error(`--workspace expects one project in the home, found ${roots.length}.`);
+  db.prepare("update projection_projects set workspace_root = ?").run(workspace!);
+  db.prepare("update orchestration_events set payload_json = replace(payload_json, ?, ?)").run(
+    from,
+    workspace!,
+  );
+  db.close();
+}
+if (values.brief) {
+  NodeFS.copyFileSync(NodePath.resolve(values.brief), NodePath.join(workspace!, "DESIGN.md"));
+  NodeFS.copyFileSync(NodePath.resolve(values.brief), NodePath.join(out, "brief.md"));
 }
 if (values["codex-home"]) {
   const settingsPath = NodePath.join(home, "userdata", "settings.json");
@@ -252,6 +284,9 @@ const run = Effect.gen(function* () {
     provider,
     model: values.model,
     effort: values.effort ?? "default",
+    designBrief: values.brief
+      ? { file: NodePath.basename(values.brief), bytes: NodeFS.statSync(values.brief).size }
+      : null,
     turnState: state,
     durationSeconds,
     assistantMessages: assistant.length,
