@@ -9,7 +9,8 @@ import {
   CadViewState,
   type OrchestrationEvent,
   type ProjectId,
-  type ThreadId,
+  ThreadCadCommentSummary,
+  ThreadId,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -52,6 +53,33 @@ export const readThreadCadCommentCaptureViews = Effect.fn("readThreadCadCommentC
       WHERE c.thread_id=${threadId} AND json_extract(target.value,'$.kind')='point'`;
     const views = yield* decodeViews(rows.map((r) => r.view));
     return Object.fromEntries(rows.map((r, i) => [r.captureId, views[i]!]));
+  },
+);
+const OpenCadCommentSummaryRow = Schema.Struct({
+  threadId: ThreadId,
+  ...ThreadCadCommentSummary.fields,
+});
+const decodeSummaryRows = Schema.decodeUnknownEffect(Schema.Array(OpenCadCommentSummaryRow));
+const summaryMap = (rows: readonly (typeof OpenCadCommentSummaryRow.Type)[]) =>
+  new Map(rows.map(({ threadId, ...summary }) => [threadId, summary] as const));
+/** Open comment counts for every chat that has any, for the sidebar's shell snapshot. */
+export const readOpenCadCommentSummaries = Effect.fn("readOpenCadCommentSummaries")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql`SELECT thread_id AS "threadId", COUNT(*) AS open,
+      COUNT(CASE WHEN json_extract(record_json,'$.severity')='blocker' THEN 1 END) AS blockers,
+      COUNT(CASE WHEN json_extract(record_json,'$.outdated') IS NOT NULL THEN 1 END) AS outdated
+    FROM projection_cad_comments WHERE json_extract(record_json,'$.state')='open' GROUP BY thread_id`;
+  return summaryMap(yield* decodeSummaryRows(rows));
+});
+/** One chat's open comment counts, or null when it has none. Uses the thread_id index. */
+export const readThreadOpenCadCommentSummary = Effect.fn("readThreadOpenCadCommentSummary")(
+  function* (threadId: ThreadId) {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql`SELECT thread_id AS "threadId", COUNT(*) AS open,
+        COUNT(CASE WHEN json_extract(record_json,'$.severity')='blocker' THEN 1 END) AS blockers,
+        COUNT(CASE WHEN json_extract(record_json,'$.outdated') IS NOT NULL THEN 1 END) AS outdated
+      FROM projection_cad_comments WHERE thread_id=${threadId} AND json_extract(record_json,'$.state')='open' GROUP BY thread_id`;
+    return summaryMap(yield* decodeSummaryRows(rows)).get(threadId) ?? null;
   },
 );
 /** Oldest first, matching the order agents see them in the review guidance. */
