@@ -1597,7 +1597,11 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
-              if (input.resource._tag === "attachment" || input.resource._tag === "cad-thumbnail") {
+              if (
+                input.resource._tag === "attachment" ||
+                input.resource._tag === "cad-thumbnail" ||
+                input.resource._tag === "cad-backdrop"
+              ) {
                 return yield* issueAssetUrl({ resource: input.resource });
               }
               if (input.resource._tag === "project-favicon") {

@@ -578,6 +578,126 @@
     var(--app-scrollbar-width) 100%;
 }
 
+/* The new thread backdrop (components/chat/DraftHeroBackdrop.tsx). Nothing here repaints while
+   the view is idle: the dot ripple plays once, and the pointer light changes only when the
+   pointer moves. */
+@property --draft-hero-ripple {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 130%;
+}
+@keyframes draft-hero-ripple {
+  from {
+    --draft-hero-ripple: 0%;
+  }
+  to {
+    --draft-hero-ripple: 130%;
+  }
+}
+
+/* The chat's messages, arriving as the new thread view settles into a chat: they wait for the
+   backdrop to thin out, so the first message never lands on top of the model. */
+@keyframes draft-hero-settle-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@utility draft-hero-settle-in {
+  animation: draft-hero-settle-in 200ms ease-out 80ms both;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Art inside the backdrop. A pane under 560px tall has no room for it above the hero. */
+@utility draft-hero-art {
+  @container (height < 560px) {
+    display: none;
+  }
+}
+
+/* The model fades out toward the hero: gone 300px above the pane's bottom, where the headline
+   starts, and solid a further 26% of the pane's height above that. */
+@utility draft-hero-fade {
+  -webkit-mask-image: linear-gradient(to top, transparent 300px, black calc(300px + 26%));
+  mask-image: linear-gradient(to top, transparent 300px, black calc(300px + 26%));
+}
+
+/* The same fade for the sheet dots, a little longer because dots read fainter than a model. */
+@utility draft-hero-dots-fade {
+  -webkit-mask-image: linear-gradient(to top, transparent 300px, black calc(300px + 34%));
+  mask-image: linear-gradient(to top, transparent 300px, black calc(300px + 34%));
+}
+
+/* The faint dot grid. It is revealed outward from the hero once, then stays. */
+@utility draft-hero-dots {
+  background: radial-gradient(
+      color-mix(in srgb, var(--foreground) 20%, transparent) 1px,
+      transparent 1.4px
+    )
+    0 0 / 24px 24px;
+  -webkit-mask-image: radial-gradient(
+    circle farthest-corner at 50% 100%,
+    black calc(var(--draft-hero-ripple) - 20%),
+    transparent var(--draft-hero-ripple)
+  );
+  mask-image: radial-gradient(
+    circle farthest-corner at 50% 100%,
+    black calc(var(--draft-hero-ripple) - 20%),
+    transparent var(--draft-hero-ripple)
+  );
+  animation: draft-hero-ripple 1.4s cubic-bezier(0.25, 0.6, 0.3, 1) both;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Brighter dots over the same grid, shown only through a mask: `-ripple` is the ring that
+   leads the reveal and ends off screen, `-light` is a spot that follows the pointer. */
+@utility draft-hero-dots-bright {
+  background: radial-gradient(
+      color-mix(in srgb, var(--foreground) 70%, transparent) 1px,
+      transparent 1.5px
+    )
+    0 0 / 24px 24px;
+}
+@utility draft-hero-dots-ripple {
+  -webkit-mask-image: radial-gradient(
+    circle farthest-corner at 50% 100%,
+    transparent calc(var(--draft-hero-ripple) - 16%),
+    black calc(var(--draft-hero-ripple) - 5%),
+    transparent var(--draft-hero-ripple)
+  );
+  mask-image: radial-gradient(
+    circle farthest-corner at 50% 100%,
+    transparent calc(var(--draft-hero-ripple) - 16%),
+    black calc(var(--draft-hero-ripple) - 5%),
+    transparent var(--draft-hero-ripple)
+  );
+  animation: draft-hero-ripple 1.4s cubic-bezier(0.25, 0.6, 0.3, 1) both;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@utility draft-hero-dots-light {
+  -webkit-mask-image: radial-gradient(
+    circle 180px at var(--draft-hero-pointer-x, -999px) var(--draft-hero-pointer-y, -999px),
+    black,
+    transparent
+  );
+  mask-image: radial-gradient(
+    circle 180px at var(--draft-hero-pointer-x, -999px) var(--draft-hero-pointer-y, -999px),
+    black,
+    transparent
+  );
+}
+
 /* Stage-channel art needs a mask and pseudo-element gradient, so keep the
    behavior composable without tying it to the global components layer. */
 @utility sidebar-stage-backdrop {
