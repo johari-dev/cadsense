@@ -20,6 +20,12 @@ export interface RightPanelFile {
   revealLine: number | null;
   /** Bumped on every open so re-opening the same line scrolls to it again. */
   revealRequestId: number;
+  /** Opens the file without the file explorer beside it, as the design brief does. */
+  hideExplorer: boolean;
+}
+
+export interface OpenFileOptions {
+  readonly hideExplorer?: boolean;
 }
 
 /** The parts a part drawing shows, from one CAD snapshot. */
@@ -49,7 +55,12 @@ interface RightPanelStoreState {
   open: (ref: ScopedThreadRef, section: Exclude<RightPanelSection, "browser">) => void;
   openDrawing: (ref: ScopedThreadRef, drawing: Omit<RightPanelDrawing, "requestId">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string) => void;
-  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  openFile: (
+    ref: ScopedThreadRef,
+    relativePath: string,
+    line?: number,
+    options?: OpenFileOptions,
+  ) => void;
   closeFile: (ref: ScopedThreadRef) => void;
   /** Drops browser state for sessions that no longer exist. */
   reconcileBrowser: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
@@ -121,7 +132,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             section: "browser",
             browserTabId: tabId,
           })),
-        openFile: (ref, relativePath, line) =>
+        openFile: (ref, relativePath, line, options) =>
           update(ref, (current) => ({
             ...current,
             isOpen: true,
@@ -130,6 +141,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               relativePath,
               revealLine: normalizeRevealLine(line),
               revealRequestId: (current.file?.revealRequestId ?? 0) + 1,
+              hideExplorer: options?.hideExplorer ?? false,
             },
           })),
         closeFile: (ref) =>

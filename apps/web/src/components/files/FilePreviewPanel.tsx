@@ -57,6 +57,8 @@ interface FilePreviewPanelProps {
   threadRef: ScopedThreadRef;
   revealLine: number | null;
   revealRequestId: number;
+  /** Shows this open without the file explorer until the user asks for it. */
+  hideExplorer: boolean;
   onOpenFile: (relativePath: string) => void;
   /** Leaves the open file and goes back to the file tree. */
   onCloseFile: () => void;
@@ -237,7 +239,19 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
       ?.scrollIntoView({ block: "nearest", inline: "end" });
   }, [props.relativePath]);
 
+  // A file opened without the explorer (the design brief) keeps the saved preference untouched;
+  // the toggle reveals the explorer for that open only.
+  const [explorerShownFor, setExplorerShownFor] = useState<number | null>(null);
+  const explorerVisible = props.hideExplorer
+    ? explorerShownFor === props.revealRequestId
+    : explorerOpen;
   const toggleExplorer = () => {
+    if (props.hideExplorer) {
+      setExplorerShownFor((current) =>
+        current === props.revealRequestId ? null : props.revealRequestId,
+      );
+      return;
+    }
     setExplorerOpen((current) => {
       const next = !current;
       try {
@@ -366,9 +380,9 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
             <TooltipTrigger
               render={
                 <Toggle
-                  pressed={explorerOpen}
+                  pressed={explorerVisible}
                   onPressedChange={toggleExplorer}
-                  aria-label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+                  aria-label={explorerVisible ? "Hide file explorer" : "Show file explorer"}
                   variant="ghost"
                   size="sm"
                 />
@@ -377,7 +391,7 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
               <FolderTree className="size-3.5" />
             </TooltipTrigger>
             <TooltipPopup>
-              {explorerOpen ? "Hide file explorer" : "Show file explorer"}
+              {explorerVisible ? "Hide file explorer" : "Show file explorer"}
             </TooltipPopup>
           </Tooltip>
           <Tooltip>
@@ -472,7 +486,7 @@ export default function FilePreviewPanel(props: FilePreviewPanelProps) {
             )
           ) : null}
         </div>
-        {explorerOpen || props.relativePath === null ? (
+        {explorerVisible || props.relativePath === null ? (
           <aside
             className={cn(
               "flex min-h-0 shrink-0 bg-background",
