@@ -9,7 +9,7 @@ import {
 } from "@cadsense/contracts";
 import { useState, type ReactNode } from "react";
 
-import { ArrowSquareOutIcon, EyeIcon, EyeSlashIcon, FileIcon } from "~/lib/icons";
+import { ArrowLeftIcon, ArrowSquareOutIcon, EyeIcon, EyeSlashIcon, FileIcon } from "~/lib/icons";
 import { newProjectId } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { resolveDefaultProviderModelSelection } from "../../providerInstances";
@@ -147,14 +147,16 @@ export function AddCadStep({
   if (step === "key") {
     return (
       <div key="key" className="onboarding-enter-x">
-        <button
-          type="button"
-          className="text-muted-foreground text-xs underline decoration-foreground/30 underline-offset-2 hover:text-foreground"
+        <Button
+          size="compact"
+          variant="ghost-muted"
+          className="-ml-2"
           onClick={() => setStep("link")}
         >
+          <ArrowLeftIcon aria-hidden />
           Back
-        </button>
-        <p className="mt-1.5 font-medium text-sm">Let Cadsense read your Onshape documents</p>
+        </Button>
+        <p className="mt-1 font-medium text-sm">Let Cadsense read your Onshape documents</p>
         {/* A key only works on the Onshape stack it was made on. */}
         {linkStack !== null && linkStack !== ONSHAPE_PUBLIC_STACK_ORIGIN ? (
           <p className="mt-1 text-muted-foreground text-xs">
@@ -246,24 +248,20 @@ export function AddCadStep({
               {keyError}
             </p>
           ) : null}
-          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button type="submit" disabled={pending}>
               {pending ? "Connecting…" : "Connect and add CAD"}
             </Button>
-            <p className="text-tertiary-foreground text-xs">
-              Stuck?{" "}
-              <button
-                type="button"
-                className="underline decoration-foreground/30 underline-offset-2 hover:text-foreground"
-                onClick={() => {
-                  setStep("link");
-                  setSource("file");
-                }}
-              >
-                Use a file on this computer
-              </button>{" "}
-              instead.
-            </p>
+            <Button
+              variant="ghost-muted"
+              onClick={() => {
+                setStep("link");
+                setSource("file");
+              }}
+            >
+              <FileIcon aria-hidden />
+              Use a file instead
+            </Button>
           </div>
         </form>
       </div>
