@@ -6,7 +6,7 @@ import type { RightPanelSection } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { RIGHT_PANEL_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { holdInspection } from "./sidebarInspection";
@@ -106,7 +106,7 @@ export function RightPanel(props: RightPanelProps) {
           // controls a few pixels higher and the cluster jumps on open.
           props.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
           ownsDesktopTitleBar && "wco:pr-[calc(var(--workspace-native-controls-inset)+6rem)]",
-          props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+          props.mode === "inline" && props.maximized && RIGHT_PANEL_TITLEBAR_INSET_CLASS,
         )}
         data-right-panel-header
       >
