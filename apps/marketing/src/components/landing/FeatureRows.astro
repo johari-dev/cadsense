@@ -1,0 +1,222 @@
+---
+// "How it works": four numbered rows, each with its copy beside a panel of real app captures.
+// Each capture is /landing/capture-<name>.webp, placed by the class of the same name below. They
+// load lazily, so nothing here competes with the hero for bandwidth.
+// A link to `#faq-…` is a question's id in Faq.astro; following it also opens that question.
+const rows = [
+  {
+    title: "Every comment lands on the exact part",
+    body: "Click a comment and the camera goes there, with anything in the way ghosted out. Each one is rated blocker, concern, question or nit, so you know what to fix first.",
+    link: { label: "How comments are rated", href: "#faq-ratings" },
+    captures: [
+      { name: "viewer", width: 620, height: 370, alt: "A disc transfer in the viewer with pins 1a and 1b on two belts" },
+      { name: "comment", width: 319, height: 476, alt: "Comment 1: the 11 inch disc will not fit between belts that sit 10.1 inches apart" },
+    ],
+  },
+  {
+    title: "Argue with it, and it remembers",
+    body: "Resolve, discuss or dismiss each comment. Discuss starts a chat about it. A dismiss reason becomes a rule every later review reads, so the same false alarm doesn't come back.",
+    link: { label: "What happens to a wrong comment", href: "#faq-wrong" },
+    captures: [
+      { name: "triage", width: 338, height: 488, alt: "Comment 7, a question about a belt clamp, with a dismiss reason being typed" },
+      { name: "ask", width: 420, height: 112, alt: "The chat box: ask about this model or describe a change" },
+    ],
+  },
+  {
+    title: "It drives the viewer itself",
+    body: "The agent finds parts, ghosts and isolates them, cuts sections, explodes the assembly and measures gaps. It posts a thumbnail of each view it checked.",
+    link: { label: "Which CAD it reads", href: "#faq-cad" },
+    captures: [
+      { name: "section", width: 654, height: 460, alt: "A telescoping arm sectioned at the pivot, where a bearing flange hits the gearbox face" },
+      { name: "tools", width: 754, height: 72, alt: "Viewer tools: fit, section, explode, click to draw" },
+    ],
+  },
+  {
+    title: "Review reads CAD. Cadsense also writes it",
+    body: "Pick a part and get a drawing sheet with views, dimensions and hole callouts. Right-click a plate and Cadsense plans its router cuts, with a timeline you can play and a DXF to export.",
+    link: { label: "What comes next", href: "#soon" },
+    captures: [
+      { name: "cam", width: 1180, height: 698, alt: "The CAM view with a plate toolpath, a timeline and an operations table" },
+      { name: "drawing", width: 920, height: 720, alt: "A drawing sheet for a round shaft with dimensions and a thread callout" },
+    ],
+  },
+] as const;
+---
+
+<section class="band" id="how">
+  <div class="frame">
+    <h2><span>From first sync to design review.</span> A first pass on every revision, before your mentor sees it.</h2>
+    {
+      rows.map(({ title, body, link, captures }, index) => (
+        <div class:list={["row", { flip: index % 2 === 1 }]}>
+          <div class="copy">
+            <p class="number">{String(index + 1).padStart(2, "0")}</p>
+            <h3>{title}</h3>
+            <p>{body}</p>
+            <a class="more" href={link.href}>
+              {link.label} <span aria-hidden="true">›</span>
+            </a>
+          </div>
+          <div class:list={["panel", { cream: index % 2 === 1 }]}>
+            {captures.map(({ name, ...image }) => (
+              <img class:list={["capture", name]} src={`/landing/capture-${name}.webp`} loading="lazy" decoding="async" {...image} />
+            ))}
+          </div>
+        </div>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 11fr);
+    align-items: center;
+    gap: 88px;
+    margin-top: 88px;
+  }
+
+  .row.flip {
+    grid-template-columns: minmax(0, 11fr) minmax(0, 5fr);
+  }
+
+  .row.flip .copy {
+    order: 2;
+  }
+
+  .number {
+    margin: 0;
+    font-size: 42px;
+    line-height: 1;
+    letter-spacing: -0.05em;
+    color: color-mix(in oklab, var(--text) 34%, transparent);
+  }
+
+  h3 {
+    margin: 22px 0 0;
+    font-size: 25px;
+    font-weight: 500;
+    line-height: 1.12;
+    letter-spacing: -0.035em;
+  }
+
+  .copy p:not(.number) {
+    margin: 16px 0 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  .copy .more {
+    display: inline-block;
+    margin-top: 14px;
+  }
+
+  /* The panel is the app's dark surface with the app itself dimmed behind the captures, and a glow
+     rising from its bottom edge: blue on odd rows, cream on even ones. */
+  .panel {
+    position: relative;
+    aspect-ratio: 710 / 610;
+    overflow: hidden;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-panel);
+    background: #151617;
+  }
+
+  .panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: url("/landing/app-review.webp") left top / 190% auto no-repeat;
+    opacity: 0.1;
+    filter: grayscale(1) blur(1.5px);
+  }
+
+  .panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(60% 46% at 58% 108%, rgb(72 132 230 / 0.3), transparent);
+  }
+
+  .panel.cream::after {
+    background: radial-gradient(60% 46% at 42% 108%, rgb(226 214 176 / 0.2), transparent);
+  }
+
+  /* The image's width and height attributes give it its shape; each class below only places it. */
+  .capture {
+    position: absolute;
+    z-index: 1;
+    height: auto;
+    border-radius: var(--round-card);
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 0.1),
+      0 24px 54px -12px rgb(0 0 0 / 0.75);
+  }
+
+  .viewer {
+    left: 6%;
+    top: 9%;
+    width: 66%;
+  }
+
+  .comment {
+    right: 6%;
+    top: 19%;
+    width: 43%;
+  }
+
+  .triage {
+    left: 8%;
+    top: 8%;
+    width: 46%;
+  }
+
+  .ask {
+    right: 5%;
+    bottom: 10%;
+    width: 58%;
+  }
+
+  .section {
+    left: 7%;
+    top: 9%;
+    width: 78%;
+  }
+
+  /* The toolbar alone, captured as its own element with its own border, so it gets no ring. Its
+     corners are 9.375 px on a 377 by 36 px bar; as percentages they stay right at any size. */
+  .tools {
+    left: 28%;
+    top: 80%;
+    width: 53%;
+    border-radius: 2.49% / 26.2%;
+    box-shadow: 0 24px 54px -12px rgb(0 0 0 / 0.75);
+  }
+
+  .cam {
+    left: 6%;
+    top: 8%;
+    width: 88%;
+  }
+
+  .drawing {
+    right: 5%;
+    bottom: 6%;
+    width: 45%;
+  }
+
+  @media (max-width: 900px) {
+    .row,
+    .row.flip {
+      grid-template-columns: 1fr;
+      gap: 28px;
+      margin-top: 64px;
+    }
+
+    .row.flip .copy {
+      order: 0;
+    }
+  }
+</style>

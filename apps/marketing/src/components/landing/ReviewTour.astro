@@ -1,0 +1,292 @@
+---
+// A camera tour of an elevator cascade, flying between four real review findings. The video is on
+// the left and the findings are a list on the right: clicking one flies the camera there, and the
+// highlighted row follows the camera when it moves by itself. The comment's text is only in that
+// list. On the video, amber pins mark the parts it is about. /landing/tour-track.json says, for every
+// video frame, where each pin sits, so the pins ride with the parts.
+// Nothing here loads until the tour is within a screen of the viewport, so it does not compete with
+// the hero. The video plays only while it is on screen. Readers who prefer reduced motion get a
+// still that changes when they pick a finding.
+import CommentTag from "./CommentTag.astro";
+
+// In the order the tour visits them. `pins` must match the pin names in the track.
+const findings = [
+  {
+    pins: ["15a"],
+    severity: "blocker",
+    title: "Pulley bore won't fit the hex shaft",
+    detail: "The custom pulleys have a 3/8 in round bore but sit on 1/2 in hex shafts. The pulley won't go on.",
+  },
+  {
+    pins: ["14a", "14b"],
+    severity: "blocker",
+    title: "Standoffs run through both 40T gears",
+    detail: "Each 1 in standoff sits 0.67 in from a gear shaft. The 40T gears reach 1.05 in.",
+  },
+  {
+    pins: ["1a"],
+    severity: "blocker",
+    title: "40T gears grind into the clamp plate",
+    detail: "The gears stick out about 1/16 in past the carriage tube and hit the new plate.",
+  },
+  {
+    pins: ["6"],
+    severity: "concern",
+    title: "Spacers pass through the gearbox",
+    detail: "Four 2.25 in spacers on long screws pass right through the right gearbox body.",
+  },
+] as const;
+---
+
+<section class="band" id="tour">
+  <div class="frame flush">
+    <div class="pad head">
+      <h2><span>Four findings on a cascade.</span> Click one and the camera goes there.</h2>
+      <p>This is how a review reads in the app. Each comment sits on its part, and anything in the way is ghosted out.</p>
+    </div>
+    <div class="tour">
+      <div class="stage" data-tour-stage>
+        <img class="poster" src="/landing/tour-poster.webp" alt="" width="1200" height="900" loading="lazy" decoding="async" />
+        <video muted loop playsinline disablepictureinpicture preload="none" aria-label="The camera flying over an elevator cascade between four flagged problems">
+          <source src="/landing/tour.mp4" type="video/mp4" />
+          <source src="/landing/tour.webm" type="video/webm" />
+        </video>
+        {
+          findings
+            .flatMap(({ pins }) => pins)
+            .map((pin) => (
+              <span class="pin" data-pin={pin}>
+                {pin}
+              </span>
+            ))
+        }
+      </div>
+      <div class="list">
+        {
+          findings.map(({ pins, severity, title, detail }, index) => (
+            <button class="finding" type="button" data-jump aria-pressed={index === 0}>
+              <CommentTag pins={pins} severity={severity} />
+              <b>{title}</b>
+              <small>{detail}</small>
+            </button>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // One entry per video frame: the finding on screen, how visible its highlight is (0 to 1), and
+  // where each pin sits (% of the stage). `holds` is the frame each finding rests on.
+  type Frame = readonly [finding: number, show: number, pins: Record<string, readonly [x: number, y: number]>];
+  interface Track {
+    readonly frames: readonly Frame[];
+    readonly holds: readonly number[];
+  }
+
+  const TRACK_URL = "/landing/tour-track.json";
+  const FPS = 30;
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  async function mount(stage: HTMLElement) {
+    const video = stage.querySelector("video");
+    if (!video) return;
+    const track: Track = await fetch(TRACK_URL).then((response) => response.json());
+
+    const pins = [...stage.querySelectorAll<HTMLElement>("[data-pin]")];
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>("[data-jump]")];
+    let placedFrame = -1;
+    let shownFinding = -1;
+
+    // Puts the pins where the current video frame needs them and marks that frame's finding in the list.
+    const place = (force = false) => {
+      const index = Math.min(track.frames.length - 1, Math.max(0, Math.floor(video.currentTime * FPS + 0.001)));
+      const frame = track.frames[index];
+      if (!frame || (index === placedFrame && !force)) return;
+      placedFrame = index;
+      const [finding, show, positions] = frame;
+
+      for (const pin of pins) {
+        const at = positions[pin.dataset.pin ?? ""];
+        if (!at || show < 0.02) {
+          pin.style.visibility = "hidden";
+          continue;
+        }
+        pin.style.visibility = "visible";
+        pin.style.opacity = String(show);
+        pin.style.left = `${at[0]}%`;
+        pin.style.top = `${at[1]}%`;
+      }
+
+      if (finding !== shownFinding) {
+        shownFinding = finding;
+        buttons.forEach((button, i) => button.setAttribute("aria-pressed", String(i === finding)));
+      }
+    };
+
+    // One placement per displayed frame, and none while the video is paused.
+    let following = false;
+    const follow = () => {
+      place();
+      following = !video.paused;
+      if (following) requestAnimationFrame(follow);
+    };
+    video.addEventListener("play", () => {
+      if (!following) follow();
+    });
+    video.addEventListener("seeked", () => place(true));
+    window.addEventListener("resize", () => place(true));
+
+    buttons.forEach((button, i) =>
+      button.addEventListener("click", () => {
+        const hold = track.holds[i];
+        if (hold === undefined) return;
+        video.currentTime = (hold + 0.5) / FPS;
+        if (!reduceMotion) void video.play().catch(() => {});
+      }),
+    );
+
+    if (reduceMotion) {
+      // The video never plays, so nothing else would load it, and a finding could not be shown.
+      video.preload = "auto";
+      video.load();
+    } else {
+      new IntersectionObserver(([entry]) => {
+        if (entry?.isIntersecting) void video.play().catch(() => {});
+        else video.pause();
+      }).observe(stage);
+    }
+    place(true);
+  }
+
+  const stage = document.querySelector<HTMLElement>("[data-tour-stage]");
+  if (stage) {
+    const nearby = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        nearby.disconnect();
+        void mount(stage);
+      },
+      { rootMargin: "100% 0px" },
+    );
+    nearby.observe(stage);
+  }
+</script>
+
+<style>
+  .tour {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    border-top: 1px solid var(--divide);
+  }
+
+  /* The stage must stay 4:3, the video's shape, or the pins drift off the parts. */
+  .stage {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: #141415;
+  }
+
+  /* The video has no poster of its own. Until it loads it is see-through, and the still under it shows. */
+  .poster,
+  video {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .pin {
+    position: absolute;
+    z-index: 2;
+    translate: -50% -50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 28px;
+    padding: 0 8px;
+    border: 3px solid #1a1a1a;
+    border-radius: var(--round-pill);
+    background: var(--flag);
+    color: #0a0a0a;
+    font: 500 12px/1 var(--sans);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.6);
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .list {
+    display: grid;
+    grid-template-rows: repeat(4, 1fr);
+    border-left: 1px solid var(--divide);
+  }
+
+  .finding:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .finding {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 18px 28px;
+    border: 0;
+    border-bottom: 1px solid var(--divide);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color var(--ease),
+      box-shadow var(--ease);
+  }
+
+  .finding:last-child {
+    border-bottom: 0;
+  }
+
+  /* Hover previews the selected state: the same bar on the left edge, grey until it is picked. */
+  .finding:hover {
+    background: var(--tint);
+    box-shadow: inset 2px 0 0 var(--line-hover);
+  }
+
+  .finding[aria-pressed="true"] {
+    background: var(--row);
+    box-shadow: inset 2px 0 0 var(--flag);
+  }
+
+  .finding b {
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+
+  .finding small {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    .tour {
+      grid-template-columns: 1fr;
+    }
+
+    .list {
+      border-left: 0;
+      border-top: 1px solid var(--divide);
+    }
+
+    .finding {
+      padding: 18px 20px;
+    }
+  }
+</style>

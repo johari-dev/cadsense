@@ -49,9 +49,9 @@ const providers = [
     justify-items: center;
     gap: 14px;
     padding: 34px 16px 30px;
-    background: var(--chrome);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    background: var(--elev);
+    border: 1px solid var(--divide);
+    border-radius: var(--round-card);
   }
 
   .track {
@@ -59,9 +59,9 @@ const providers = [
     display: grid;
     grid-template-columns: 1fr 1fr;
     padding: 4px;
-    background: #0b0b0b;
-    border: 1px solid var(--border);
-    border-radius: 999px;
+    background: var(--page);
+    border: 1px solid var(--divide);
+    border-radius: var(--round-control);
   }
 
   .thumb {
@@ -70,9 +70,9 @@ const providers = [
     bottom: 4px;
     left: 4px;
     width: calc(50% - 4px);
-    background: var(--surface-raised);
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
+    background: var(--raise);
+    border: 1px solid var(--line-hover);
+    border-radius: var(--round-tile);
     transition: transform 520ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
@@ -90,7 +90,7 @@ const providers = [
     padding: 9px 18px;
     font-size: 15px;
     font-weight: 500;
-    color: var(--text-dim);
+    color: var(--dim);
     transition: color 360ms ease;
   }
 
@@ -113,8 +113,8 @@ const providers = [
 
   .models {
     display: grid;
-    font: 12.5px var(--font-mono);
-    color: var(--text-muted);
+    font-size: 13px;
+    color: var(--text-2);
   }
 
   .models span {

@@ -36,6 +36,8 @@ export default defineConfig({
       "**/routeTree.gen.ts",
       "apps/web/src/lib/vendor/qrcodegen.ts",
       "*.icon/**",
+      // Generated per-frame data for the landing page's camera tour.
+      "apps/marketing/public/landing/tour-track.json",
     ],
     sortPackageJson: {},
     overrides: [

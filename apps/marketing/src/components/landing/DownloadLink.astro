@@ -1,0 +1,72 @@
+---
+// The primary call to action: a white button that downloads Cadsense for the visitor's own platform.
+// Its icon sits before the label and is that platform's logo. SiteLayout marks the platform on <html>
+// before the first paint. Linux, phones, tablets and anything else without a build get a plain
+// download arrow.
+// The link starts out pointing at the downloads page. Once the build on offer is known, a script
+// points it straight at that build's installer for the platform. It stays on the downloads page when
+// there is no installer for the platform or GitHub cannot be reached.
+import PlatformIcon from "../PlatformIcon.astro";
+---
+
+<a class="button primary" href="/download" data-download-link>
+  <PlatformIcon platform="mac" class="icon mac" />
+  <PlatformIcon platform="windows" class="icon windows" />
+  <svg class="icon arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"></path>
+  </svg>
+  Download Cadsense
+</a>
+
+<script>
+  import { DOWNLOADS, fetchOfferedRelease } from "../../lib/releases";
+
+  const links = document.querySelectorAll<HTMLAnchorElement>("[data-download-link]");
+  const mine = DOWNLOADS.find(({ platform }) => platform === document.documentElement.dataset.platform);
+  if (mine) {
+    fetchOfferedRelease()
+      .then((release) => {
+        const url = release?.assets[mine.platform];
+        if (!url) return;
+        for (const link of links) {
+          link.href = url;
+          link.setAttribute("aria-label", `Download Cadsense for ${mine.name}`);
+        }
+      })
+      // The links keep pointing at the downloads page.
+      .catch(() => {});
+  }
+</script>
+
+<style>
+  /* All three icons are in the page. Exactly one shows: the logo SiteLayout's `data-platform` names,
+     or the arrow when that platform has no logo here. */
+  .icon {
+    display: none;
+  }
+
+  .arrow,
+  :global([data-platform="mac"]) .mac,
+  :global([data-platform="windows"]) .windows {
+    display: block;
+  }
+
+  :global([data-platform="mac"]) .arrow,
+  :global([data-platform="windows"]) .arrow {
+    display: none;
+  }
+
+  /* The Apple logo's weight sits low in its box, so it is lifted to line up with the label. */
+  .mac {
+    translate: 0 -1px;
+  }
+
+  /* An arrow moves the way it points on hover. A logo stays still. */
+  .button:hover .icon:not(.arrow) {
+    translate: none;
+  }
+
+  .button:hover .mac {
+    translate: 0 -1px;
+  }
+</style>

@@ -1,0 +1,137 @@
+---
+// The art behind the landing page's headline: Hokusai's Great Wave drawn as coloured text on one
+// canvas. Place it right after the nav (marked `data-site-nav`) inside a positioned wrapper: the art
+// stays hidden behind the nav row, fades in under it, and fades out again further down.
+//
+// The script is inline and synchronous on purpose. It paints while the document is still being
+// parsed, so the art is part of the first paint and never arrives after it. That is why it is plain
+// JavaScript and not a bundled module, why the grid travels inside the HTML, and why it draws with
+// the system's monospace font and not a web font. The grid comes from scripts/hero-wave.ts.
+import grid from "../../assets/hero-wave.txt?raw";
+---
+
+<canvas class="wave" data-hero-wave aria-hidden="true"></canvas>
+
+<script is:inline define:vars={{ grid }}>
+  // Each cell's position in CODE is colour * 16 + level, where level 0 is empty and 15 is full.
+  const CODE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  // Blue ink, pale wash, unprinted paper (foam), toned paper (sky).
+  const COLOURS = ["#3f8fff", "#8fbdfa", "#f6ecd0", "#c7a868"];
+  // Strong cells get a heavy glyph and faint ones a dot. The rest spell these words, so the picture
+  // reads by weight as well as by colour.
+  const HEAVY = "#@%&8$MW";
+  const FAINT = ".:-";
+  const WORDS =
+    "cadsense.review onshape.sync step.open blocker concern question nit section.cut explode ghost measure.gap pin.1a rev.2 resolve discuss dismiss featurescript dxf ";
+  // A row of monospace text is this many times taller than one character is wide.
+  const LINE = 1.8;
+  const MAX_CANVAS_PIXELS = 8_000_000;
+
+  const rows = grid.trimEnd().split("\n");
+  const cols = rows[0].length;
+  const canvas = document.querySelector("[data-hero-wave]");
+  const nav = document.querySelector("[data-site-nav]");
+  const context = canvas.getContext("2d");
+  let paintedFor = 0;
+
+  function paint() {
+    const pageWidth = document.documentElement.clientWidth;
+    if (pageWidth === paintedFor) return;
+    paintedFor = pageWidth;
+
+    // The art is 118% of the page width (up to a 2600 px page; past that its sides fade) and pulled
+    // left until its right edge meets the page's, which moves the bright foam off most of the
+    // headline. The wave's crest starts 9% of the way down the print, so that much empty sky goes
+    // above the top of the page and the crest lands about 40 px under the nav.
+    //
+    // On a phone that same size would show only the wave's far-left tail, because the crest spans
+    // 6% to 50% of the print's width. So below 900 px (the hero's own mobile breakpoint) the art is
+    // sized so that span fills the page, and it is centred on the crest, at 28% of the print.
+    const narrow = pageWidth < 900;
+    const base = Math.min(2600, Math.max(pageWidth, 1100));
+    const width = narrow ? pageWidth * 2.3 : base * 1.18;
+    const cell = width / cols;
+    const height = rows.length * cell * LINE;
+    const navBottom = nav.getBoundingClientRect().bottom + window.scrollY;
+    const top = navBottom + 40 - 0.09 * height;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.style.marginLeft = `${narrow ? 0.22 * width : -0.085 * base}px`;
+    canvas.style.top = `${top}px`;
+    canvas.style.setProperty("--clear", `${navBottom - top}px`);
+    canvas.style.setProperty("--edge", pageWidth > base ? "6%" : "0%");
+
+    const scale = Math.min(window.devicePixelRatio, 2, Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    context.scale(scale, scale);
+    context.font = `${(cell / 0.6).toFixed(2)}px ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace`;
+    context.textBaseline = "top";
+
+    // This runs before the first paint, so it draws in as few calls as it can. Neighbouring cells with
+    // the same value become one run, drawn as one rectangle and one string. letterSpacing stretches
+    // the font's own advance to exactly one cell, so every glyph still lands on the grid. Browsers
+    // without it get runs of one cell. Runs are grouped by value, so the canvas changes colour and
+    // opacity once per value.
+    const spaced = "letterSpacing" in context;
+    if (spaced) context.letterSpacing = `${cell - context.measureText("M").width}px`;
+    const groups = Array.from(CODE, () => []);
+    rows.forEach((line, row) => {
+      let run;
+      for (let col = 0; col < line.length; col++) {
+        const value = CODE.indexOf(line[col]);
+        const level = value & 15;
+        // A different shift per row, so the words do not line up into stripes.
+        const k = col + row * 37;
+        const glyph = level >= 12 ? HEAVY[k % HEAVY.length] : level <= 3 ? FAINT[k % FAINT.length] : WORDS[k % WORDS.length];
+        if (level === 0 || glyph === " ") {
+          run = undefined;
+        } else if (spaced && run?.value === value) {
+          run.text += glyph;
+        } else {
+          run = { value, x: col * cell, y: row * cell * LINE, text: glyph };
+          groups[value].push(run);
+        }
+      }
+    });
+    // A faint wash of each cell's colour goes under its glyph. Thin letters alone lose their colour,
+    // and the wash is what lets the wave read as blue and the foam as cream from a distance.
+    groups.forEach((runs, value) => {
+      context.fillStyle = COLOURS[value >> 4];
+      context.globalAlpha = (0.2 * (value & 15)) / 15;
+      for (const { x, y, text } of runs) context.fillRect(x, y, text.length * cell + 0.5, cell * LINE + 0.5);
+    });
+    groups.forEach((runs, value) => {
+      context.fillStyle = COLOURS[value >> 4];
+      context.globalAlpha = Math.min(1, 0.25 + (value & 15) / 15);
+      for (const { x, y, text } of runs) context.fillText(text, x, y);
+    });
+  }
+
+  paint();
+  let resizeTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(paint, 150);
+  });
+</script>
+
+<style>
+  /* The script sets the size, the position and two variables. --clear is the canvas y of the nav's
+     bottom edge: the art is hidden above it and fades in over the next 90 px. --edge fades the
+     sides, and is only non-zero on pages wider than the art can grow. */
+  .wave {
+    position: absolute;
+    left: 50%;
+    translate: -50% 0;
+    z-index: 0;
+    opacity: 0.8;
+    pointer-events: none;
+    --fade: linear-gradient(transparent var(--clear, 80px), #000 calc(var(--clear, 80px) + 90px), #000 42%, transparent);
+    --sides: linear-gradient(90deg, transparent, #000 var(--edge, 0%), #000 calc(100% - var(--edge, 0%)), transparent);
+    -webkit-mask-image: var(--fade), var(--sides);
+    mask-image: var(--fade), var(--sides);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+</style>

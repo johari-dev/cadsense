@@ -1,0 +1,117 @@
+---
+// What happens across revisions, as a two-by-two grid. Each icon is the inside of a 24 px SVG.
+const points = [
+  {
+    title: "Revision two checks revision one",
+    body: "Sync a new revision and Cadsense looks at what it flagged first, then reviews only what changed.",
+    icon: '<path d="M20 11a8 8 0 0 0-14-4.5L4 8.5M4 4v4.5h4.5M4 13a8 8 0 0 0 14 4.5l2-2M20 20v-4.5h-4.5"/>',
+  },
+  {
+    title: "Outdated comments say so",
+    body: "Comments on parts that moved or got deleted are marked outdated, and it can propose resolving the ones you fixed.",
+    icon: '<path d="M12 21c-4-4-6-7.5-6-11a6 6 0 0 1 12 0c0 3.5-2 7-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+  },
+  {
+    title: "It checks against your standards",
+    body: "Each part is checked against your design standards and earlier comments, not a generic list.",
+    icon: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  },
+  {
+    title: "From one mechanism to the whole robot",
+    body: "The same viewer loads a full competition robot. The one in the launch post has 1,362 components.",
+    icon: '<path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
+  },
+] as const;
+---
+
+<section class="band" id="why">
+  <div class="frame flush">
+    <div class="pad head">
+      <h2><span>A first pass, not a replacement.</span> Your mentor's hours go to the hard calls.</h2>
+      <p>
+        Every revision takes a mentor hours to review by hand. Cadsense does the first pass on each one.
+      </p>
+    </div>
+    <div class="grid">
+      {
+        points.map(({ title, body, icon }) => (
+          <div>
+            <i>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={icon} />
+            </i>
+            <b>{title}</b>
+            <p>{body}</p>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-top: 1px solid var(--divide);
+  }
+
+  .grid div {
+    padding: 30px 28px 36px;
+    border-bottom: 1px solid var(--divide);
+  }
+
+  .grid div:nth-child(odd) {
+    border-right: 1px solid var(--divide);
+  }
+
+  .grid div:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  i {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-tile);
+    background: var(--row);
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  b {
+    display: block;
+    margin-top: 22px;
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  .grid p {
+    margin: 12px 0 0;
+    max-width: 27rem;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+
+    .grid div,
+    .grid div:nth-last-child(-n + 2) {
+      border-right: 0;
+      border-bottom: 1px solid var(--divide);
+    }
+
+    .grid div:last-child {
+      border-bottom: 0;
+    }
+  }
+</style>

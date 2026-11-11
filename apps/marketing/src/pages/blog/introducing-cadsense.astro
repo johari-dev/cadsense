@@ -279,45 +279,50 @@ const gap = {
 </PostLayout>
 
 <style>
+  /* The post is one reading column, in the site's theme (layouts/SiteLayout.astro). Headings use the
+     home page's weight and tight tracking. Body text is a step softer than headings, and captions
+     and other secondary lines use the site's second text colour. */
   .post {
+    --measure: 680px;
+    --body: #d9dce1;
     max-width: var(--measure);
     margin: 0 auto;
-    padding: 24px 20px 0;
+    padding: 0 20px;
+    color: var(--body);
   }
 
   .post-head {
-    margin: 32px 0 28px;
-    padding-bottom: 24px;
-    border-bottom: 1px solid var(--border);
+    margin: 0 0 32px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--divide);
   }
 
   .kicker {
-    margin: 0 0 14px;
-    font: 12px var(--font-mono);
-    letter-spacing: 0.02em;
-    color: var(--text-muted);
+    margin: 0 0 16px;
+    font-size: 14px;
+    color: var(--text-2);
   }
 
   h1 {
-    margin: 0 0 16px;
-    font-size: clamp(30px, 5vw, 42px);
-    line-height: 1.12;
-    letter-spacing: -0.02em;
-    font-weight: 600;
+    margin: 0 0 18px;
+    font-size: clamp(2.4rem, 5vw, 3.4rem);
+    font-weight: 500;
+    line-height: 1.04;
+    letter-spacing: -0.045em;
     color: var(--text);
   }
 
   .dek {
-    margin: 0 0 18px;
-    font-size: 19px;
-    line-height: 1.55;
-    color: #c9c9c9;
+    margin: 0 0 20px;
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--text-2);
   }
 
   .byline {
     margin: 0;
     font-size: 14px;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   .post > p,
@@ -333,68 +338,62 @@ const gap = {
     margin-bottom: 6px;
   }
 
+  .post li::marker {
+    color: var(--dim);
+  }
+
   .post b {
     color: var(--text);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   h2 {
-    margin: 64px 0 16px;
-    font-size: 26px;
-    line-height: 1.25;
-    letter-spacing: -0.01em;
-    font-weight: 600;
+    margin: 72px 0 16px;
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1.12;
+    letter-spacing: -0.04em;
     color: var(--text);
     scroll-margin-top: 72px;
   }
 
-
   h3 {
-    margin: 36px 0 8px;
+    margin: 40px 0 8px;
     font-size: 20px;
-    font-weight: 600;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
     color: var(--text);
   }
 
-  blockquote {
-    margin: 0 0 18px;
-    padding: 2px 0 2px 16px;
-    border-left: 2px solid #4a4a4a;
-    font-size: 17px;
-    line-height: 1.65;
-    color: #d6d6d6;
-  }
-
-  blockquote p {
-    margin: 0;
-  }
-
   code {
-    font: 15px var(--font-mono);
-    background: #141414;
-    border: 1px solid var(--border);
-    border-radius: 4px;
     padding: 1px 5px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-chip);
+    background: var(--elev);
+    font: 15px var(--mono);
   }
 
   figure {
-    margin: 32px 0;
+    margin: 36px 0;
   }
 
   figure img {
     width: 100%;
     height: auto;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: #262626;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-card);
+    background: var(--elev);
   }
 
   figcaption {
-    margin-top: 10px;
-    font: 13px/1.55 var(--font-mono);
-    color: var(--text-muted);
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-2);
   }
 
+  /* Figures wider than the reading column, centred on it. */
   .wide,
   .wide-sm {
     width: min(1080px, calc(100vw - 32px));
@@ -406,14 +405,14 @@ const gap = {
     width: min(860px, calc(100vw - 32px));
   }
 
-
-  /* The box reaches past the column so its text lines up with the body text around it. */
+  /* The one feature that is not built yet, set apart as a card. The card reaches past the column so
+     its text lines up with the body text around it. */
   .soon-section {
-    position: relative;
-    margin: 56px -25px 24px;
-    padding: 28px 24px 8px;
-    border: 1px dashed rgba(253, 230, 138, 0.55);
-    border-radius: 8px;
+    margin: 64px -25px 24px;
+    padding: 26px 24px 8px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-card);
+    background: var(--elev);
   }
 
   .soon-section > h2 {
@@ -421,15 +420,11 @@ const gap = {
   }
 
   .soon-tag {
-    position: absolute;
-    top: -11px;
-    left: 18px;
-    padding: 2px 10px;
-    font: 600 11.5px var(--font-mono);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--marker);
-    background: var(--canvas);
+    display: block;
+    margin-bottom: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent);
   }
 
   .narrow {
@@ -437,21 +432,14 @@ const gap = {
     margin-inline: auto;
   }
 
-  @media (max-width: 760px) {
-    .soon-section {
-      margin-inline: -12px;
-      padding-inline: 11px;
-    }
-  }
-
   /* Screenshots of GitHub review comments, stacked in one card with GitHub's dark background. */
   .reviews {
     display: grid;
     gap: 1px;
     overflow: hidden;
-    background: var(--border);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-card);
+    background: var(--divide);
   }
 
   .reviews img {
@@ -461,6 +449,8 @@ const gap = {
     background: #0d1117;
   }
 
+  /* Two lists side by side: what tools check, and what mentors check. The second is the one Cadsense
+     adds, so its border takes the accent. */
   .gap {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -469,50 +459,35 @@ const gap = {
   }
 
   .gap > div {
-    padding: 14px 16px;
-    background: var(--chrome);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    padding: 18px 20px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-card);
+    background: var(--elev);
+  }
+
+  .gap > div:last-child {
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
   }
 
   .gap h3 {
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     font-size: 15px;
+    letter-spacing: -0.01em;
   }
 
   .gap ul {
     margin: 0;
     padding-left: 18px;
-    font-size: 15.5px;
+    font-size: 15px;
     line-height: 1.6;
   }
 
-  .gap > div:last-child {
-    border-color: rgba(253, 230, 138, 0.45);
-  }
-
-  .pair {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  .post > .status {
-    margin: -2px 0 12px;
-    font: 12.5px var(--font-mono);
-    color: var(--text-dim);
-  }
-
-  .status a {
-    color: var(--text-muted);
-  }
-
-
   @media (max-width: 760px) {
+    .soon-section {
+      margin-inline: -12px;
+      padding-inline: 11px;
+    }
 
-
-
-    .pair,
     .gap {
       grid-template-columns: 1fr;
     }

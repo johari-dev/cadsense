@@ -2,7 +2,8 @@
 // Bar chart of the October 24 model sweep: the same disc-transfer prompt on the same Cadsense build
 // (main at e9b277e6f), medium effort, three runs per model, only the model changed. Runs were graded
 // blind against the eight-problem answer key with the rubric in apps/server/src/cad/CadReviewEvaluation.md.
-// Each bar is the mean problems found per run: solid for the known problems, amber for credible extras.
+// Each bar is the mean problems found per run: solid for the known problems, in the provider's own
+// colour, and the site's accent blue for credible extras.
 interface Run {
   readonly model: string;
   readonly provider: "claude" | "codex";
@@ -53,14 +54,13 @@ const pct = (value: number) => `${(value / domain) * 100}%`;
     }
   </div>
   <figcaption>
-    Solid is the eight known problems the model found, amber is credible extras beyond the key.
+    Solid is the eight known problems the model found, blue is credible extras beyond the key.
   </figcaption>
 </figure>
 
 <style>
   .chart {
-    max-width: var(--measure);
-    margin: 32px auto;
+    margin: 36px 0;
   }
 
   .rows {
@@ -81,13 +81,14 @@ const pct = (value: number) => `${(value / domain) * 100}%`;
   }
 
   .name {
-    font: 500 15px var(--font-sans);
+    font-size: 15px;
+    font-weight: 500;
     color: var(--text);
   }
 
   .meta {
-    font: 11.5px var(--font-mono);
-    color: var(--text-dim);
+    font-size: 12px;
+    color: var(--text-2);
   }
 
   .track {
@@ -111,25 +112,27 @@ const pct = (value: number) => `${(value / domain) * 100}%`;
   }
 
   .known.codex {
-    background: #e2e2e2;
+    background: #d9dce1;
   }
 
   .extra {
     border-radius: 0 3px 3px 0;
-    background: var(--marker);
-    opacity: 0.9;
+    background: var(--accent);
   }
 
   .value {
-    font: 600 14px var(--font-mono);
+    font-size: 14px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
     color: var(--text);
     text-align: right;
   }
 
   figcaption {
     margin-top: 16px;
-    font: 15px/1.6 var(--font-sans);
-    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-2);
   }
 
   @media (max-width: 520px) {

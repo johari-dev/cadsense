@@ -1,0 +1,122 @@
+---
+// What Cadsense works with, as two capsules of logos: the CAD it reads, then the agent plans it runs
+// on. They are separate capsules because they are different kinds of thing. The capsules have no
+// visible labels; each carries its meaning for screen readers.
+// Place and align the row from the parent with a class: <WorksWith class="works" />.
+const cad = [
+  { name: "Onshape", icon: "/landing/onshape.svg" },
+  { name: "SolidWorks", icon: "/landing/solidworks.svg" },
+] as const;
+const agents = [
+  { name: "Claude Code", icon: "/harnesses/claude-ai-icon.svg" },
+  { name: "Codex", icon: "/harnesses/openai_dark.svg" },
+] as const;
+
+// `rest` carries the caller's class and its scoped-style attribute.
+const { class: className, ...rest } = Astro.props;
+---
+
+<div class:list={["capsules", className]} {...rest}>
+  <div class="capsule glass" role="group" aria-label="CAD Cadsense reads">
+    {
+      cad.map(({ name, icon }) => (
+        <span class="item">
+          <i>
+            <img src={icon} alt="" width="15" height="15" />
+          </i>
+          {name}
+        </span>
+      ))
+    }
+    <span class="item">
+      <i>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6 3h8l4 4v14H6z"></path>
+          <path d="M14 3v4h4"></path>
+          <path d="M12 10.5l3 1.5v3L12 16.5 9 15v-3z"></path>
+          <path d="M9 12l3 1.5 3-1.5M12 13.5v3"></path>
+        </svg>
+      </i>
+      STEP files
+    </span>
+  </div>
+  <div class="capsule glass" role="group" aria-label="Agent plans Cadsense runs on">
+    {
+      agents.map(({ name, icon }) => (
+        <span class="item">
+          <i>
+            <img src={icon} alt="" width="15" height="15" />
+          </i>
+          {name}
+        </span>
+      ))
+    }
+  </div>
+</div>
+
+<style>
+  .capsules {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .capsule {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 16px;
+    padding: 7px 16px 7px 8px;
+    border-radius: var(--round-control);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .item i {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-chip);
+    background: var(--row);
+  }
+
+  .item img {
+    width: 15px;
+    height: 15px;
+    object-fit: contain;
+  }
+
+  .item svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Tighter on a phone, so the three CAD items stay on one row down to a 360 px screen. */
+  @media (max-width: 480px) {
+    .capsule {
+      gap: 8px;
+      padding: 6px 10px 6px 6px;
+      font-size: 12px;
+    }
+
+    .item {
+      gap: 5px;
+    }
+
+    .item i {
+      width: 22px;
+      height: 22px;
+    }
+  }
+</style>

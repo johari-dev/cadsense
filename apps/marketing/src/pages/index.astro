@@ -1,146 +1,132 @@
 ---
-// Placeholder home page until the real marketing site exists: the app's spinning loading mark, the
-// Cadsense wordmark from the pitch deck, and a coming-soon line. Standalone on purpose; the shared
-// Layout still carries T3 Code's nav and links.
-import Analytics from "@vercel/analytics/astro";
+// The Cadsense landing page. The document shell, theme, nav and footer are shared with the rest of
+// the site (layouts/SiteLayout.astro). This file lays the sections out and owns the few styles they
+// share. Each section is a component in components/landing.
+import Closing from "../components/landing/Closing.astro";
+import ComingSoon from "../components/landing/ComingSoon.astro";
+import Faq from "../components/landing/Faq.astro";
+import FeatureRows from "../components/landing/FeatureRows.astro";
+import FeatureScript from "../components/landing/FeatureScript.astro";
+import Hero from "../components/landing/Hero.astro";
+import HeroWave from "../components/landing/HeroWave.astro";
+import ReviewTour from "../components/landing/ReviewTour.astro";
+import Revisions from "../components/landing/Revisions.astro";
+import SectionRail from "../components/landing/SectionRail.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteLayout from "../layouts/SiteLayout.astro";
 
-const title = "Cadsense";
-const description = "Automated CAD review. Marketing site coming soon.";
+const title = "Cadsense: accelerate CAD review for FRC teams";
+const description =
+  "Cadsense does the first pass on every CAD revision, before your mentor sees it. Claude Code or Codex reviews Onshape, SolidWorks and STEP models and pins each comment to the exact part.";
+
+// Each id is set on its section's root element.
+const sections = [
+  { id: "overview", label: "Overview" },
+  { id: "tour", label: "Tour" },
+  { id: "how", label: "How it works" },
+  { id: "featurescript", label: "FeatureScript" },
+  { id: "why", label: "Revisions" },
+  { id: "soon", label: "Coming soon" },
+  { id: "faq", label: "FAQ" },
+  { id: "download", label: "Download" },
+] as const;
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title}</title>
-    <meta name="description" content={description} />
-    <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
-    <meta property="og:image" content="/cadsense-icon.png" />
-    <link rel="icon" href="/cadsense-icon.png" type="image/png" />
-    <link rel="apple-touch-icon" href="/cadsense-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700&display=swap"
-      rel="stylesheet"
-    />
-    <Analytics />
-  </head>
-  <body>
-    <main>
-      <span class="mark" data-spin role="img" aria-label="Cadsense logo">
-        <img class="trail trail-far" src="/cadsense-logo.webp" alt="" aria-hidden="true" />
-        <img class="trail" src="/cadsense-logo.webp" alt="" aria-hidden="true" />
-        <img class="logo" src="/cadsense-logo.webp" alt="" aria-hidden="true" />
-      </span>
-      <h1>Cadsense</h1>
-      <p>Marketing site coming soon</p>
-    </main>
-  </body>
-</html>
+<SiteLayout title={title} description={description}>
+  <!-- The app screenshot's tag comes after the hero art's data, so start its download from the head. -->
+  <link
+    slot="head"
+    rel="preload"
+    as="image"
+    href="/landing/app-review.webp"
+    imagesrcset="/landing/app-review.webp 1440w, /landing/app-review-2880w.webp 2880w"
+    imagesizes="(min-width: 1240px) 1172px, calc(100vw - 60px)"
+    fetchpriority="high"
+  />
 
-<script>
-  // The app's loading spin (apps/web/public/loading-logo.css): one 3 s spring rotation with two
-  // blurred trail copies, here followed by a pause. Each spin is its own Web Animation, so nothing
-  // animates between spins, and readers who prefer reduced motion get a still logo.
-  const spring =
-    "linear(0, 0.03794, 0.13688, 0.27536, 0.43407, 0.59674, 0.75062, 0.8866, 0.99899, 1.08514, 1.14495, 1.18022, 1.19415, 1.19072, 1.17423, 1.14895, 1.11876, 1.08702, 1.05638, 1.02882, 1.00562, 0.98744, 0.97442, 0.96632, 0.96255, 0.96239, 0.965, 0.96954, 0.97523, 0.98139, 0.98745, 0.99301, 0.99778, 1.00159, 1.00439, 1.00622, 1.00717, 1.00738, 1.007, 1.0062, 1.00514, 1.00395, 1.00276, 1.00164, 1.00067, 0.99987, 0.99927, 0.99887, 0.99864, 0.99856, 0.99861, 0.99874, 0.99894, 0.99917, 0.9994, 0.99962, 0.99982, 0.99999, 1.00011, 1.0002, 1)";
-  const SPIN_MS = 3000;
-  const PAUSE_MS = 4500;
-  const rotate: Keyframe[] = [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }];
-  const trailFade: Keyframe[] = [
-    { opacity: 0, offset: 0 },
-    { opacity: 0.22, offset: 0.08 },
-    { opacity: 0.22, offset: 0.22 },
-    { opacity: 0.1, offset: 0.35 },
-    { opacity: 0, offset: 0.5 },
-    { opacity: 0, offset: 1 },
-  ];
+  <!-- The hero art's script reads the nav's position as the page is parsed, so the nav comes first. -->
+  <div class="top" id="overview">
+    <SiteNav />
+    <HeroWave />
+    <Hero />
+  </div>
 
-  const mark = document.querySelector<HTMLElement>("[data-spin]");
-  const [far, near, logo] = mark ? [...mark.querySelectorAll("img")] : [];
+  <main>
+    <ReviewTour />
+    <FeatureRows />
+    <FeatureScript />
+    <Revisions />
+    <ComingSoon />
+    <Faq />
+    <Closing />
+  </main>
 
-  const spin = () => {
-    if (!document.hidden && far && near && logo) {
-      logo.animate(rotate, { duration: SPIN_MS, easing: spring });
-      for (const [trail, delay] of [[near, 35], [far, 70]] as const) {
-        trail.animate(rotate, { duration: SPIN_MS, easing: spring, delay });
-        trail.animate(trailFade, { duration: SPIN_MS, delay });
-      }
-    }
-    setTimeout(spin, SPIN_MS + PAUSE_MS);
-  };
-
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) setTimeout(spin, 600);
-</script>
+  <SiteFooter />
+  <SectionRail sections={sections} />
+</SiteLayout>
 
 <style is:global>
-  html,
-  body {
-    height: 100%;
-    margin: 0;
+  /* Styles the landing sections share. `pad` gives a heading the frame's padding inside a flush frame. */
+  main > .band:first-child {
+    margin-top: 96px;
   }
 
-  body {
-    background: #111113;
-    color-scheme: dark;
-    font-family: "Bricolage Grotesque", system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
+  .pad {
+    padding: 104px 58px 64px;
+  }
+
+  /* A section heading in two tones: wrap the first sentence in a span to dim it. */
+  h2 {
+    margin: 0;
+    max-width: 15.5em;
+    font-size: clamp(1.9rem, 2.9vw, 2.6rem);
+    font-weight: 500;
+    line-height: 1.06;
+    letter-spacing: -0.04em;
+  }
+
+  h2 span {
+    color: var(--dim);
+  }
+
+  /* A heading on the left with a short paragraph on the right. */
+  .head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 48px;
+  }
+
+  .head p {
+    margin: 0;
+    max-width: 24rem;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    main > .band:first-child {
+      margin-top: 56px;
+    }
+
+    .pad {
+      padding: 64px 20px 40px;
+    }
+
+    .head {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 20px;
+    }
   }
 </style>
 
 <style>
-  main {
-    display: grid;
-    place-content: center;
-    justify-items: center;
-    min-height: 100%;
-    padding: 24px;
-    box-sizing: border-box;
-    text-align: center;
-  }
-
-  .mark {
-    display: inline-grid;
-    place-items: center;
-    width: clamp(88px, 14vw, 128px);
-    height: clamp(88px, 14vw, 128px);
-    isolation: isolate;
-  }
-
-  .mark > img {
-    grid-area: 1 / 1;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    transform-origin: 50% 50%;
-  }
-
-  /* Blur is static and confined to the icon; only transform and opacity animate. */
-  .trail {
-    filter: blur(1px);
-    opacity: 0;
-    will-change: transform, opacity;
-  }
-
-  .trail-far {
-    filter: blur(1.8px);
-  }
-
-  h1 {
-    margin: 22px 0 0;
-    font-size: clamp(48px, 9vw, 84px);
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: -0.02em;
-    color: #eff0ea;
-  }
-
-  p {
-    margin: 14px 0 0;
-    font-size: clamp(17px, 2.2vw, 21px);
-    font-weight: 400;
-    color: #90a9c3;
+  /* Holds the hero art, which is positioned against this box and clipped by it. */
+  .top {
+    position: relative;
+    overflow: hidden;
   }
 </style>
