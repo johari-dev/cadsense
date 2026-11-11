@@ -1,0 +1,83 @@
+---
+// FeatureScript: Cadsense runs it locally, so the agent can test what it writes. The capture is the
+// current app previewing a bolt-circle script on a plate: its inputs on the left, the six holes it
+// cut, and the run's result along the bottom. It sits in the same tray as the hero's app window.
+---
+
+<section class="band" id="featurescript">
+  <div class="frame">
+    <div class="head">
+      <h2><span>FeatureScript the agent can run.</span> It tests what it writes before anything touches Onshape.</h2>
+      <p>
+        Cadsense runs FeatureScript locally on Onshape's own standard library. Any <code>.fs</code> file in a
+        project gets a live preview with Onshape-style inputs, and it updates right away.
+      </p>
+    </div>
+
+    <figure>
+      <div class="tray">
+        <img
+          src="/landing/featurescript-preview-1200w.webp"
+          srcset="/landing/featurescript-preview-1200w.webp 1200w, /landing/featurescript-preview-2400w.webp 2400w"
+          sizes="(min-width: 1240px) 1104px, calc(100vw - 52px)"
+          width="1200"
+          height="720"
+          loading="lazy"
+          decoding="async"
+          alt="The Cadsense FeatureScript preview: a bolt-circle script with inputs for hole count, circle diameter and hole diameter, and a plate with six holes cut in it. The run reports OK."
+        />
+      </div>
+      <figcaption>A bolt-circle script previewed on a plate. Pick a face and it cuts the holes.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<style>
+  code {
+    padding: 1px 5px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-chip);
+    background: var(--elev);
+    font: 13px var(--mono);
+  }
+
+  figure {
+    margin: 56px 0 0;
+  }
+
+  .tray {
+    padding: 10px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-panel);
+    background: var(--elev);
+  }
+
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: var(--round-card);
+  }
+
+  figcaption {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    figure {
+      margin-top: 36px;
+    }
+
+    .tray {
+      padding: 6px;
+      border-radius: var(--round-card);
+    }
+
+    img {
+      border-radius: var(--round-chip);
+    }
+  }
+</style>

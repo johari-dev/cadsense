@@ -1,0 +1,102 @@
+---
+// A column of tick marks on the right edge, one per page section. The tick for the section in view
+// is longer, and each tick shows its section's name on hover. It only shows on wide screens.
+interface Props {
+  readonly sections: readonly { readonly id: string; readonly label: string }[];
+}
+
+const { sections } = Astro.props;
+---
+
+<nav class="rail" aria-label="Page sections" data-section-rail>
+  {
+    sections.map(({ id, label }, index) => (
+      <a href={`#${id}`} aria-current={index === 0 ? "location" : undefined}>
+        <span>{label}</span>
+        <i />
+      </a>
+    ))
+  }
+</nav>
+
+<script>
+  // Marks the tick of the section nearest the upper third of the viewport.
+  const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-section-rail] a")];
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const { isIntersecting, target } of entries) {
+        if (!isIntersecting) continue;
+        for (const link of links) {
+          if (link.hash === `#${target.id}`) link.setAttribute("aria-current", "location");
+          else link.removeAttribute("aria-current");
+        }
+      }
+    },
+    { rootMargin: "-18% 0px -62% 0px" },
+  );
+  for (const link of links) {
+    const section = document.getElementById(link.hash.slice(1));
+    if (section) observer.observe(section);
+  }
+</script>
+
+<style>
+  .rail {
+    position: fixed;
+    right: 16px;
+    top: 50%;
+    translate: 0 -50%;
+    z-index: 30;
+    display: none;
+  }
+
+  a {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    height: 20px;
+  }
+
+  i {
+    display: block;
+    width: 14px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--dim);
+    transition:
+      width var(--ease),
+      background-color var(--ease);
+  }
+
+  a:hover i {
+    width: 20px;
+  }
+
+  a[aria-current] i {
+    width: 28px;
+    background: var(--text);
+  }
+
+  span {
+    padding: 3px 8px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-chip);
+    background: var(--page);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-2);
+    opacity: 0;
+    transition: opacity var(--ease);
+  }
+
+  a:hover span {
+    opacity: 1;
+  }
+
+  @media (min-width: 1500px) {
+    .rail {
+      display: block;
+    }
+  }
+</style>

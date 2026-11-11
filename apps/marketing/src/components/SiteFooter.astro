@@ -1,0 +1,80 @@
+---
+// The site's footer: the logo, centred beside two columns of links. It is a band with a frame, so its
+// side borders carry on from the page above it.
+import { GITHUB_REPOSITORY_URL, LAUNCH_POST_PATH } from "../lib/site";
+---
+
+<footer class="band">
+  <div class="frame footer">
+    <a class="brand" href="/">
+      <img src="/landing/logo.webp" alt="" width="22" height="22" />
+      Cadsense
+    </a>
+    <div class="columns">
+      <div>
+        <h4>Product</h4>
+        <a href="/download">All downloads</a>
+        <a href="/#how">How it works</a>
+        <a href="/#faq">FAQ</a>
+      </div>
+      <div>
+        <h4>Read</h4>
+        <a href={LAUNCH_POST_PATH}>Launch post</a>
+        <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 40px;
+    padding: 56px 58px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+
+  .brand {
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  .columns {
+    display: flex;
+    gap: 72px;
+  }
+
+  h4 {
+    margin: 0 0 14px;
+    font: 400 10px/1.6 var(--mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .columns a {
+    display: block;
+    width: fit-content;
+    margin-top: 10px;
+    color: var(--text);
+    transition: color var(--ease);
+  }
+
+  .columns a:hover {
+    color: var(--accent);
+  }
+
+  @media (max-width: 900px) {
+    .footer {
+      padding: 44px 20px;
+    }
+
+    .columns {
+      gap: 40px;
+    }
+  }
+</style>

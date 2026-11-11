@@ -1,0 +1,236 @@
+---
+// Product questions as an accordion, with the heading on the left. The first answer starts open.
+// Each arrow points right while its answer is closed and down while it is open. A short script slides
+// the answer open and shut. Without the script, or for readers who prefer reduced motion, the answers
+// still open and close, just at once.
+// Each question has an id. A link to it, such as <a href="#faq-ratings">, closes the other questions,
+// opens that one and scrolls it to the middle of the screen. Clicking a question itself only toggles
+// that question.
+const questions = [
+  {
+    id: "faq-what",
+    question: "What is Cadsense?",
+    answer: "A desktop app for FRC teams. Claude Code or Codex reviews your CAD the way a mentor would, and pins each comment to the exact part.",
+  },
+  {
+    id: "faq-subscription",
+    question: "Does it need another AI subscription?",
+    answer: "No. Reviews run on the Claude Code or Codex plan you already have, including ChatGPT's free tier.",
+  },
+  {
+    id: "faq-cad",
+    question: "Which CAD does it read?",
+    answer: "Onshape documents, SolidWorks parts and assemblies, and STEP files. Onshape syncs through the Onshape API, SolidWorks opens in the copy already on your computer, and STEP opens from disk.",
+  },
+  {
+    id: "faq-ratings",
+    question: "How are comments rated?",
+    answer: "Blocker, concern, question or nit. A blocker means fix it before you cut. A nit is a small cleanup.",
+  },
+  {
+    id: "faq-revisions",
+    question: "What happens when we change the design?",
+    answer: "Sync the new revision. Cadsense checks whether the problems it flagged were fixed, then reviews only what changed.",
+  },
+  {
+    id: "faq-wrong",
+    question: "What if a comment is wrong?",
+    answer: "Dismiss it with a reason. The reason becomes a rule every later review reads, so the same false alarm doesn't come back.",
+  },
+] as const;
+---
+
+<section class="band" id="faq">
+  <div class="frame split">
+    <h2>FAQ</h2>
+    <div class="list">
+      {
+        questions.map(({ id, question, answer }, index) => (
+          <details id={id} open={index === 0} data-faq>
+            <summary>{question}</summary>
+            <div class="answer">
+              <p>{answer}</p>
+            </div>
+          </details>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<script>
+  const DURATION_MS = 240;
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const running = new WeakMap<HTMLDetailsElement, Animation>();
+
+  // Open, and not on its way shut.
+  const isOpen = (details: HTMLDetailsElement) => details.open && !details.classList.contains("closing");
+
+  // Slides an answer open or shut. Asking for the state it is already in does nothing.
+  function setOpen(details: HTMLDetailsElement, open: boolean) {
+    const answer = details.querySelector<HTMLElement>(".answer");
+    if (!answer || open === isOpen(details)) return;
+    if (reduceMotion) {
+      details.open = open;
+      return;
+    }
+    // An answer that is still closing opens again from where it is.
+    const from = details.open ? answer.getBoundingClientRect().height : 0;
+    const fromOpacity = details.open ? getComputedStyle(answer).opacity : "0";
+    running.get(details)?.cancel();
+    // The browser only renders the answer while `open` is set, so it stays set until a close ends.
+    // `closing` turns the arrow at once, without waiting for that.
+    details.open = true;
+    details.classList.toggle("closing", !open);
+    const animation = answer.animate(
+      { height: [`${from}px`, `${open ? answer.scrollHeight : 0}px`], opacity: [fromOpacity, open ? "1" : "0"] },
+      { duration: DURATION_MS, easing: "cubic-bezier(0.3, 0.7, 0.2, 1)" },
+    );
+    running.set(details, animation);
+    animation.onfinish = () => {
+      if (open) return;
+      details.open = false;
+      details.classList.remove("closing");
+    };
+  }
+
+  const question = (id: string) => {
+    const target = document.getElementById(id);
+    return target instanceof HTMLDetailsElement && target.matches("[data-faq]") ? target : null;
+  };
+
+  const questions = [...document.querySelectorAll<HTMLDetailsElement>("[data-faq]")];
+  for (const details of questions) {
+    details.querySelector("summary")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      setOpen(details, !isOpen(details));
+    });
+  }
+
+  // Shows one question alone, near the middle of the screen. The others shut at once, with no
+  // animation: they are off screen when a link is followed, and their height has to be settled before
+  // the scroll is aimed.
+  function showOnly(linked: HTMLDetailsElement, behavior: ScrollBehavior) {
+    for (const details of questions) {
+      if (details === linked) continue;
+      running.get(details)?.cancel();
+      details.classList.remove("closing");
+      details.open = false;
+    }
+    setOpen(linked, true);
+    // "start" lands in the middle of the screen, because of the question's scroll margin (see the styles).
+    linked.scrollIntoView({ block: "start", behavior });
+  }
+
+  // Arriving on a question's link, and going back or forward to one. The page is already there, so
+  // the scroll is instant.
+  const showLinked = () => {
+    const linked = question(location.hash.slice(1));
+    if (linked) showOnly(linked, "instant");
+  };
+  showLinked();
+  // The browser makes its own jump to the link once the page has loaded, so settle again after it.
+  window.addEventListener("load", showLinked, { once: true });
+  window.addEventListener("hashchange", showLinked);
+
+  // Following a link on this page. This script does the scrolling, so the browser's own jump is
+  // stopped and the address is updated by hand.
+  document.addEventListener("click", (event) => {
+    const link = event.target instanceof Element ? event.target.closest("a") : null;
+    const linked = link?.pathname === location.pathname ? question(link.hash.slice(1)) : null;
+    if (!link || !linked) return;
+    event.preventDefault();
+    history.pushState(null, "", link.hash);
+    showOnly(linked, reduceMotion ? "instant" : "smooth");
+  });
+</script>
+
+<style>
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 11fr);
+    gap: 88px;
+  }
+
+  .list {
+    border-top: 1px solid var(--divide);
+  }
+
+  /* A scroll to a question stops with it near the middle of the screen, not at the top: the margin
+     is half the viewport, less about half the height of an open question. The browser's own jump to
+     a question's link and the script's scroll both use it, so they land in the same place. */
+  details {
+    scroll-margin-top: calc(50vh - 4rem);
+    border-bottom: 1px solid var(--divide);
+  }
+
+  summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    list-style: none;
+    transition: color var(--ease);
+  }
+
+  summary:hover {
+    color: var(--accent);
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* The arrow: two sides of a small square. Turned this way it points right. */
+  summary::after {
+    content: "";
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-right: 10px;
+    border-right: 1.5px solid var(--text-2);
+    border-bottom: 1.5px solid var(--text-2);
+    rotate: -45deg;
+    transition:
+      rotate 0.24s cubic-bezier(0.3, 0.7, 0.2, 1),
+      border-color var(--ease);
+  }
+
+  summary:hover::after {
+    border-color: var(--accent);
+  }
+
+  /* A quarter turn points it down. `closing` is set by the script while an answer slides shut. */
+  details[open]:not(.closing) summary::after {
+    rotate: 45deg;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    summary::after {
+      transition: none;
+    }
+  }
+
+  /* Clips the answer while the script changes its height. */
+  .answer {
+    overflow: hidden;
+  }
+
+  .answer p {
+    margin: 0;
+    padding: 0 40px 22px 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    .split {
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+  }
+</style>

@@ -1,0 +1,75 @@
+---
+// The amber pin badges and severity mark that head a CAD comment, drawn as the app draws them.
+// Usage: <CommentTag pins={["14a", "14b"]} severity="blocker" />
+interface Props {
+  readonly pins: readonly string[];
+  readonly severity: "blocker" | "concern" | "question" | "nit";
+}
+
+const { pins, severity } = Astro.props;
+---
+
+<span class="tag">
+  {pins.map((pin) => <span class="pin">{pin}</span>)}
+  <span class:list={["severity", severity]}>{severity}</span>
+</span>
+
+<style>
+  .tag {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pin {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: var(--round-pill);
+    background: var(--flag);
+    color: #0a0a0a;
+    font: 500 11px/1 var(--sans);
+  }
+
+  .severity {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-2);
+  }
+
+  /* Each mark is a mask, so it takes its severity's colour. */
+  .severity::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    background: var(--colour);
+    -webkit-mask: var(--mark) center / contain no-repeat;
+    mask: var(--mark) center / contain no-repeat;
+  }
+
+  .blocker {
+    --colour: var(--error);
+    --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23000' stroke-width='1.5' d='M5.5 1.8h5l3.7 3.7v5l-3.7 3.7h-5L1.8 10.5v-5z'/%3E%3Cpath stroke='%23000' stroke-width='1.5' stroke-linecap='round' d='M8 4.8v3.6M8 10.9v.1'/%3E%3C/svg%3E");
+  }
+
+  .concern {
+    --colour: var(--warning);
+    --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round' d='M8 2.2 14.4 13.4H1.6z'/%3E%3Cpath stroke='%23000' stroke-width='1.5' stroke-linecap='round' d='M8 6.4v3M8 11.4v.1'/%3E%3C/svg%3E");
+  }
+
+  .question {
+    --colour: var(--question);
+    --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M6.2 6.3a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1M8 11.3v.1'/%3E%3C/svg%3E");
+  }
+
+  .nit {
+    --colour: var(--nit);
+    --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.5'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3C/svg%3E");
+  }
+</style>

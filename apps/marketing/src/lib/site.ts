@@ -1,4 +1,6 @@
-export const GITHUB_REPOSITORY_URL = "https://github.com/pingdotgg/cadsense";
+export const GITHUB_REPOSITORY_URL = "https://github.com/johari-dev/cadsense";
+
+export const LAUNCH_POST_PATH = "/blog/introducing-cadsense";
 
 export const IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/cadsense-remote-claude-more/id6787819824";

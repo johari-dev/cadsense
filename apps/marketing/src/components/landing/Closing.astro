@@ -1,0 +1,131 @@
+---
+// The last call to action, with real review comments scattered around it as the app's comment chips.
+// The chips are decoration: they hide from assistive tech, and from pages too narrow to hold them.
+import CommentTag from "./CommentTag.astro";
+import DownloadLink from "./DownloadLink.astro";
+
+// Three down the left edge, then three down the right.
+const comments = [
+  { pin: "15a", severity: "blocker", title: "Pulley bore won't fit the hex shaft" },
+  { pin: "1", severity: "concern", title: "Inboard belts sit in the disc's path" },
+  { pin: "3", severity: "nit", title: "Bellypan sits inside the frame tubes" },
+  { pin: "2", severity: "concern", title: "Bearing flange hits the MAXPlanetary face" },
+  { pin: "7", severity: "question", title: "Is this clamp made for a 12 mm HTD belt?" },
+  { pin: "6", severity: "concern", title: "Spacers pass through the gearbox" },
+] as const;
+---
+
+<section class="band" id="download">
+  <div class="closing">
+    {
+      comments.map(({ pin, severity, title }) => (
+        <div class="chip" aria-hidden="true">
+          <CommentTag pins={[pin]} severity={severity} />
+          {title}
+        </div>
+      ))
+    }
+    <h2><span>Run it before your next design review.</span> Point it at the revision you're about to show your mentor.</h2>
+    <p>A desktop app for FRC teams. Runs on the Claude Code or Codex plan you already have, including ChatGPT's free tier.</p>
+    <div class="actions">
+      <DownloadLink />
+      <a class="button" href="/download">All downloads</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .closing {
+    position: relative;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 170px 24px 180px;
+    text-align: center;
+  }
+
+  h2 {
+    margin: 0 auto;
+    max-width: 13em;
+  }
+
+  p {
+    margin: 26px auto 0;
+    max-width: 26rem;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 34px;
+  }
+
+  .chip {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    width: 268px;
+    padding: 13px 15px;
+    border: 1px solid #333334;
+    border-radius: var(--round-card);
+    background: #1c1c1d;
+    box-shadow: 0 16px 36px -14px rgb(0 0 0 / 0.6);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: left;
+  }
+
+  .chip:nth-child(1) {
+    left: 4%;
+    top: 13%;
+    rotate: -4deg;
+  }
+
+  .chip:nth-child(2) {
+    left: 1.5%;
+    top: 43%;
+    rotate: 3deg;
+  }
+
+  .chip:nth-child(3) {
+    left: 6%;
+    top: 72%;
+    rotate: -2deg;
+  }
+
+  .chip:nth-child(4) {
+    right: 4%;
+    top: 11%;
+    rotate: 3deg;
+  }
+
+  .chip:nth-child(5) {
+    right: 1.5%;
+    top: 42%;
+    rotate: -3deg;
+  }
+
+  .chip:nth-child(6) {
+    right: 6%;
+    top: 72%;
+    rotate: 4deg;
+  }
+
+  @media (max-width: 1240px) {
+    .chip {
+      display: none;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .closing {
+      padding: 96px 20px 104px;
+    }
+  }
+</style>

@@ -1,0 +1,234 @@
+---
+// The one feature that is not in the app yet: FRC RAG. The section shows a real FRC RAG answer,
+// rebuilt in HTML from the screenshot in the launch post, so it is sharp and in the page's colours.
+// The words are the tool's own. The picture is the intake from team 694's 2020 technical binder,
+// which is the source the answer cites.
+// The answer sits on a dark panel with a blue glow, like the panels in FeatureRows.
+---
+
+<section class="band" id="soon">
+  <div class="frame">
+    <div class="head">
+      <h2><span>Coming soon.</span> Feedback grounded in what other teams built.</h2>
+      <p>
+        The reviewer will draw on FRC RAG, which answers from 64 technical binders written over 10+ years of FRC. When
+        it flags a problem, it will show how other teams already solved it.
+      </p>
+    </div>
+
+    <figure>
+      <div class="art">
+        <div class="chat">
+          <p class="question">How have teams made an efficient transfer to bring balls from an intake to a shooter?</p>
+          <p class="reasoned"><i></i>Reasoned for a few seconds</p>
+          <div class="answer">
+            <h3>How teams typically transfer power cells from an intake to a shooter</h3>
+            <blockquote>
+              &ldquo;The 694-2020 design shows the intake itself &ndash; a roller-based system that feeds balls into an
+              indexer. The transfer from that indexer to the shooter is a natural extension of the same
+              principles.&rdquo;
+            </blockquote>
+            <img
+              class="source"
+              src="/landing/frc-rag-intake.webp"
+              alt="A CAD render of team 694's 2020 intake: rollers between two plates, on a four-bar linkage"
+              width="520"
+              height="326"
+              loading="lazy"
+              decoding="async"
+            />
+            <ul>
+              <li>rollers + polycarbonate plates</li>
+              <li>four-bar linkage that deploys the <span class="keep">intake <span class="cite">1</span></span></li>
+            </ul>
+            <p>
+              Below is a practical, step-by-step guide that many teams use (or can adapt) to make this
+              transfer <b>efficient, reliable, and easy to tune</b>.
+            </p>
+            <p class="next">1. Design Overview</p>
+          </div>
+        </div>
+      </div>
+      <figcaption>FRC RAG on its own today, answering from team 694&rsquo;s 2020 binder.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<style>
+  figure {
+    margin: 56px 0 0;
+  }
+
+  .art {
+    position: relative;
+    padding: 56px 24px 0;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-panel);
+    overflow: hidden;
+    background: #151617;
+  }
+
+  /* A blue glow rising from the bottom edge, behind the answer. */
+  .art::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(60% 46% at 50% 108%, rgb(72 132 230 / 0.3), transparent);
+  }
+
+  /* The answer runs on past what is shown, so the window meets the bottom of the card, and the
+     heading of the answer's next part fades out under a rule. */
+  .chat {
+    position: relative;
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 24px 26px 0;
+    border: 1px solid #333334;
+    border-bottom: 0;
+    border-radius: var(--round-card) var(--round-card) 0 0;
+    background: #17181a;
+    box-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.7);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  .question {
+    width: fit-content;
+    max-width: 78%;
+    margin: 0 0 22px auto;
+    padding: 10px 14px;
+    border-radius: var(--round-card);
+    background: var(--tint);
+  }
+
+  .reasoned {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 18px;
+    padding: 9px 12px;
+    border: 1px solid var(--divide);
+    border-radius: var(--round-tile);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .reasoned i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* A chevron at the far end, as on the collapsed reasoning row in FRC RAG. */
+  .reasoned::after {
+    content: "";
+    width: 6px;
+    height: 6px;
+    margin: 0 4px 3px auto;
+    border-right: 1.5px solid var(--text-2);
+    border-bottom: 1.5px solid var(--text-2);
+    rotate: 45deg;
+  }
+
+  .answer {
+    -webkit-mask-image: linear-gradient(#000 84%, transparent);
+    mask-image: linear-gradient(#000 84%, transparent);
+  }
+
+  h3 {
+    margin: 0 0 14px;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  blockquote {
+    margin: 0 0 18px;
+    padding-left: 14px;
+    border-left: 2px solid var(--line-hover);
+    font-style: italic;
+    color: var(--text-2);
+  }
+
+  .source {
+    display: block;
+    width: 220px;
+    height: auto;
+    margin: 0 auto 18px;
+    border-radius: var(--round-tile);
+  }
+
+  ul {
+    margin: 0 0 14px;
+    padding-left: 18px;
+  }
+
+  li::marker {
+    color: var(--dim);
+  }
+
+  /* Keeps the citation mark on the same line as the word before it. */
+  .keep {
+    white-space: nowrap;
+  }
+
+  /* The citation mark that points at the binder. */
+  .cite {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    margin-left: 4px;
+    padding: 0 5px;
+    border-radius: var(--round-chip);
+    background: var(--tint);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    vertical-align: 1px;
+  }
+
+  .answer p {
+    margin: 0;
+  }
+
+  .answer .next {
+    margin-top: 22px;
+    padding: 20px 0 14px;
+    border-top: 1px solid var(--divide);
+    font-size: 18px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  b {
+    font-weight: 500;
+  }
+
+  figcaption {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  @media (max-width: 900px) {
+    figure {
+      margin-top: 36px;
+    }
+
+    .art {
+      padding: 28px 12px 0;
+    }
+
+    .chat {
+      padding: 18px 16px 0;
+    }
+
+    .question {
+      max-width: 92%;
+    }
+  }
+</style>
