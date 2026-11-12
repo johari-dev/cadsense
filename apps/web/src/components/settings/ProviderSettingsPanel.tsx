@@ -17,6 +17,7 @@ import {
 } from "@cadsense/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@cadsense/contracts/settings";
 import {
+  DotsThreeIcon as EllipsisIcon,
   LaptopIcon,
   SpinnerIcon as LoaderIcon,
   MonitorIcon,
@@ -27,7 +28,7 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { resolveAppModelSelectionState } from "../../modelSelection";
+import { readInstanceCustomModels, resolveAppModelSelectionState } from "../../modelSelection";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import {
   useEnvironments,
@@ -42,10 +43,12 @@ import {
   connectionPhasePingClassName,
 } from "../ConnectionStatusDot";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { ScrollArea } from "../ui/scroll-area";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { ProviderCustomModelsDialog } from "./ProviderCustomModelsDialog";
 import { DRIVER_OPTIONS, type DriverOption } from "./providerDriverMeta";
 import { providerSettingsTabClassName } from "./providerSettingsTabs";
 import { getProviderSummary, getProviderVersionLabel } from "./providerStatus";
@@ -253,6 +256,9 @@ function EnvironmentProviderSettings({
     reportFailure: false,
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const [customModelsInstanceId, setCustomModelsInstanceId] = useState<ProviderInstanceId | null>(
+    null,
+  );
   const pendingSetups = useAtomValue(pendingProviderSetupsAtom);
   const refreshingRef = useRef(false);
   const textGenInstanceId = resolveAppModelSelectionState(settings, serverProviders).instanceId;
@@ -316,6 +322,8 @@ function EnvironmentProviderSettings({
       liveProvider: serverProviders.find((provider) => provider.instanceId === instanceId),
     };
   });
+  const customModelsRow = rows.find((row) => row.instanceId === customModelsInstanceId);
+  const customModelsInstance = customModelsRow?.instance;
 
   return (
     <SettingsSection
@@ -374,8 +382,49 @@ function EnvironmentProviderSettings({
                   )
           }
           onSetup={(action) => void runSetup(instanceId, action, option.label)}
+          {...(instance === undefined
+            ? {}
+            : { onEditCustomModels: () => setCustomModelsInstanceId(instanceId) })}
         />
       ))}
+      {customModelsRow === undefined || customModelsInstance === undefined ? null : (
+        <ProviderCustomModelsDialog
+          key={customModelsRow.instanceId}
+          label={customModelsRow.option.label}
+          open
+          onOpenChange={(open) => {
+            if (!open) setCustomModelsInstanceId(null);
+          }}
+          initialModels={readInstanceCustomModels(
+            settings,
+            customModelsRow.instanceId,
+            customModelsRow.option.value,
+          )}
+          listedModels={
+            new Set(
+              (customModelsRow.liveProvider?.models ?? [])
+                .filter((model) => !model.isCustom)
+                .map((model) => model.slug),
+            )
+          }
+          onChange={(customModels) => {
+            const config =
+              typeof customModelsInstance.config === "object" &&
+              customModelsInstance.config !== null
+                ? customModelsInstance.config
+                : {};
+            updateSettings(
+              buildProviderInstanceUpdatePatch({
+                settings,
+                instanceId: customModelsRow.instanceId,
+                instance: { ...customModelsInstance, config: { ...config, customModels } },
+                driver: customModelsRow.option.value,
+                isDefault: true,
+              }),
+            );
+          }}
+        />
+      )}
     </SettingsSection>
   );
 }
@@ -411,6 +460,7 @@ function ProviderRow({
   pendingSetup,
   onEnabledChange,
   onSetup,
+  onEditCustomModels,
 }: {
   readonly option: DriverOption;
   readonly enabled: boolean;
@@ -418,6 +468,8 @@ function ProviderRow({
   readonly pendingSetup: ServerProviderSetupAction | undefined;
   readonly onEnabledChange: ((enabled: boolean) => void) | undefined;
   readonly onSetup: (action: ServerProviderSetupAction) => void;
+  /** Opens the custom models dialog; absent when there is no stored config to edit. */
+  readonly onEditCustomModels?: () => void;
 }) {
   const Icon = option.icon;
   const installed = liveProvider?.installed === true;
@@ -481,6 +533,28 @@ function ProviderRow({
             >
               {pendingSetup === "signOut" ? "Signing out…" : "Sign out"}
             </Button>
+          ) : null}
+          {onEditCustomModels ? (
+            // Out of the way on purpose: custom models are only for gateways
+            // that serve models they do not list.
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 text-muted-foreground hover:text-foreground sm:size-7"
+                    aria-label={`More ${option.label} settings`}
+                  />
+                }
+              >
+                <EllipsisIcon className="size-3.5" />
+              </MenuTrigger>
+              <MenuPopup align="end" className="min-w-36">
+                <MenuItem onClick={onEditCustomModels}>Custom models…</MenuItem>
+              </MenuPopup>
+            </Menu>
           ) : null}
           {/* A provider can only be turned on once its CLI is installed. */}
           <Switch
