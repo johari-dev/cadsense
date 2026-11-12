@@ -438,9 +438,7 @@ try {
     );
     // Both clicks run before either save is acknowledged, like a fast double removal.
     await customModelsDialog.evaluate((dialog) => {
-      for (const button of dialog.querySelectorAll<HTMLButtonElement>(
-        'button[aria-label^="Remove "]',
-      )) {
+      for (const button of dialog.querySelectorAll('button[aria-label^="Remove "]')) {
         button.click();
       }
     });
