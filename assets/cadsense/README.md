@@ -11,6 +11,14 @@ dimension lines, rim, and paper texture are unchanged. The ICO files hold PNG-en
 entries: 16, 32, and 48 px for the favicon, plus 24, 64, 128, and 256 px for Windows.
 The marketing site's icons in `apps/marketing/public` are exported from the same render.
 
+`Cadsense.icon` is the macOS 26 app icon, made for Icon Composer. Light mode shows
+`logo-1024.png` unchanged. The mac build copies it into the bundle as `Assets/logo.png`,
+so copy it there yourself before you open the bundle in Icon Composer (git ignores it).
+Dark, clear, and tinted modes hide that layer and show `Assets/cs.svg`, the CS outline
+traced from the ceramic render. Dark mode fills it with a white-to-blue gradient over
+the system's dark background. Clear and tinted fill it with gray, and macOS colors it.
+Builds compile the bundle with `actool`, so mac packaging needs Xcode 26 or newer.
+
 Development, nightly, and production share this CS artwork and use these files
 directly. Run `vp run icons:export` to refresh the web app's copies in
 `apps/web/public`, or `vp run icons:check` to verify they match byte for byte.
