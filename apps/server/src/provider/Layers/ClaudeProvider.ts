@@ -32,8 +32,12 @@ import {
 } from "../providerSnapshot.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
-import type { ClaudeGatewayModel, ClaudeGatewayModels } from "../Drivers/ClaudeGateway.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
+import {
+  formatUnlistedGatewayMessage,
+  type GatewayModel,
+  type GatewayModels,
+} from "../GatewayModels.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
@@ -52,7 +56,7 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
  */
 function claudeGatewayProviderModels(
   catalog: ClaudeModelCatalog,
-  gatewayModels: ReadonlyArray<ClaudeGatewayModel>,
+  gatewayModels: ReadonlyArray<GatewayModel>,
 ): ReadonlyArray<ServerProviderModel> {
   return gatewayModels.map(
     (gatewayModel) =>
@@ -416,7 +420,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
-  resolveGatewayModels?: () => Effect.Effect<ClaudeGatewayModels | undefined>,
+  resolveGatewayModels?: () => Effect.Effect<GatewayModels | undefined>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -532,7 +536,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     gatewayModels?._tag === "Listed"
       ? undefined
       : gatewayModels?._tag === "Unlisted"
-        ? `Could not list models from ${gatewayModels.baseUrl}, so the picker shows Claude models.`
+        ? formatUnlistedGatewayMessage(gatewayModels.baseUrl, "Claude")
         : formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
   const capabilities = resolveCapabilities

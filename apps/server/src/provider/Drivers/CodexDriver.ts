@@ -45,6 +45,7 @@ import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { listGatewayModels } from "../GatewayModels.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { installScriptCommand, type ProviderSetupCommands } from "../providerSetup.ts";
 import {
@@ -108,6 +109,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
+      const httpClient = yield* HttpClient.HttpClient;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const processEnv = mergeProviderInstanceEnvironment(environment);
@@ -174,7 +176,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // updates. Pre-provide the check's services so it fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
       const checkProvider = Effect.zipWith(
-        checkCodexProviderStatus(effectiveConfig, undefined, processEnv),
+        checkCodexProviderStatus(effectiveConfig, undefined, processEnv, (gateway) =>
+          listGatewayModels(gateway).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
+        ),
         modelManifest.current,
         (draft, manifest) =>
           stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
