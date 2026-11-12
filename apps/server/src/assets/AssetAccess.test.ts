@@ -402,4 +402,38 @@ describe("AssetAccess", () => {
       ).toBeNull();
     }).pipe(Effect.provide(testLayer)),
   );
+
+  // A backdrop that resolved to the thumbnail's file would put an opaque tile behind the new
+  // thread view, and one issued before it exists would stop the CAD panel from capturing it.
+  it.effect("issues CAD backdrop capabilities for the backdrop file, never the thumbnail", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const snapshotId = "00000000-0000-4000-8000-000000000002";
+      const resource = { _tag: "cad-backdrop", snapshotId } as const;
+
+      const thumbnails = path.join(config.stateDir, "cad", "thumbnails");
+      yield* fileSystem.makeDirectory(thumbnails, { recursive: true });
+      yield* fileSystem.writeFile(path.join(thumbnails, `${snapshotId}.webp`), new Uint8Array([1]));
+      const missing = yield* issueAssetUrl({ resource }).pipe(Effect.flip);
+      expect(missing._tag).toBe("AssetCadThumbnailNotFoundError");
+
+      const directory = path.join(config.stateDir, "cad", "backdrops");
+      const backdropPath = path.join(directory, `${snapshotId}.webp`);
+      yield* fileSystem.makeDirectory(directory, { recursive: true });
+      yield* fileSystem.writeFile(backdropPath, new Uint8Array([1, 2, 3]));
+      const result = yield* issueAssetUrl({ resource });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      expect(
+        yield* resolveAsset(suffix.slice(0, separatorIndex), suffix.slice(separatorIndex + 1)),
+      ).toEqual({ kind: "file", path: backdropPath });
+
+      yield* fileSystem.remove(backdropPath);
+      expect(
+        yield* resolveAsset(suffix.slice(0, separatorIndex), suffix.slice(separatorIndex + 1)),
+      ).toBeNull();
+    }).pipe(Effect.provide(testLayer)),
+  );
 });

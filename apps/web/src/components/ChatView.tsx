@@ -200,6 +200,7 @@ import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import { useProject, useThread, useThreadRefs, useThreadShell } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { DraftHeroBackdrop } from "./chat/DraftHeroBackdrop";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -264,6 +265,7 @@ import {
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
+import { useLingeringPresence } from "~/hooks/useLingeringPresence";
 import { usePanelPresence } from "~/hooks/usePanelPresence";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
@@ -880,7 +882,12 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const rightPanelOpen = rightPanelState.isOpen;
   // Each chat keeps its own panel state, so moving between chats snaps the panel to the new chat's.
-  const rightPanelPresence = usePanelPresence(rightPanelOpen, routeThreadKey);
+  // New thread views are one place to the user, whichever project they show, so switching project
+  // there slides the panel the way its toggle does.
+  const rightPanelPresence = usePanelPresence(
+    rightPanelOpen,
+    routeKind === "draft" ? "draft" : routeThreadKey,
+  );
   useEffect(() => {
     if (!rightPanelPresence.present) {
       setMaximizedRightPanelThreadKey((key) => (key === routeThreadKey ? null : key));
@@ -1618,6 +1625,15 @@ function ChatViewContent(props: ChatViewProps) {
     attachDraftHeroComposerAnchorRef,
     captureDraftHeroComposerRect,
   ] = useDraftHeroLayoutTransition(isDraftHeroState);
+  // The live model beside the chat replaces the backdrop, and the hero rises to the pane's
+  // middle. A sheet covers the chat instead of sharing the row with it, so it changes neither.
+  const draftHeroModelOnScreen =
+    rightPanelOpen && rightPanelSection === "cad" && !shouldUseRightPanelSheet;
+  // The hero text stays through the settle into a chat, fading while the composer docks.
+  const draftHeroLingering = useLingeringPresence(
+    isDraftHeroState,
+    DRAFT_HERO_TRANSITION_DURATION_MS,
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   // Prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
@@ -4031,7 +4047,12 @@ function ChatViewContent(props: ChatViewProps) {
               />
             </div>
             {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "relative flex min-h-0 flex-1 flex-col",
+                draftHeroLingering && !isDraftHeroState && "draft-hero-settle-in",
+              )}
+            >
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 agentPanelModel={agentPanelModel}
@@ -4093,13 +4114,20 @@ function ChatViewContent(props: ChatViewProps) {
               )}
             </div>
 
-            {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
+            <DraftHeroBackdrop
+              project={activeProject ?? null}
+              shown={isDraftHeroState}
+              modelOnScreen={draftHeroModelOnScreen}
+            />
+            {/* Input bar — the hero while a draft has no messages, docked at the bottom otherwise.
+                The hero sits 3.25rem above the pane's bottom, over the backdrop. The overlay is a
+                size container so the hero can measure the pane (cqh) when it rises. */}
             <div
               ref={setComposerOverlayElement}
               data-chat-composer-overlay="true"
               className={
                 isDraftHeroState
-                  ? "pointer-events-none absolute inset-0 z-20 flex items-center pt-56"
+                  ? "pointer-events-none absolute inset-0 z-20 flex items-end pb-13 [container-type:size]"
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
               }
             >
@@ -4111,7 +4139,19 @@ function ChatViewContent(props: ChatViewProps) {
               )}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
-                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
+                className={cn(
+                  "w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]",
+                  // With the live model on screen the hero rises until the composer's middle is
+                  // 7rem below the pane's, the centered spot it had before the backdrop. 50cqh is
+                  // half the overlay's content box, which its 3.25rem bottom padding shortens, so
+                  // the rise is 50cqh + 1.625rem - (3.25rem + 7rem) - half the hero's own height.
+                  // The move shares the right panel's slide timing (PreviewPanelShell).
+                  isDraftHeroState &&
+                    "transition-[translate] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+                  isDraftHeroState &&
+                    draftHeroModelOnScreen &&
+                    "-translate-y-[max(0px,calc(50cqh-8.625rem-50%))]",
+                )}
               >
                 {/* The composer's width, which its attached drawers (banners, the sync pill) inset
                     from so they line up with it in either layout. */}
@@ -4123,9 +4163,16 @@ function ChatViewContent(props: ChatViewProps) {
                       : "[--chat-composer-max-width:42.5rem]",
                   )}
                 >
-                  {isDraftHeroState ? (
-                    <div className="absolute inset-x-0 bottom-full z-0">
-                      <div className="pb-8 group-has-[.chat-composer-shoulder-tab]/composer-stack:pb-4">
+                  {draftHeroLingering ? (
+                    // After a send the hero text rides the docking composer and fades out. It
+                    // takes no input on the way.
+                    <div className="absolute inset-x-0 bottom-full z-0" inert={!isDraftHeroState}>
+                      <div
+                        className={cn(
+                          "pb-8 transition-opacity duration-150 ease-out group-has-[.chat-composer-shoulder-tab]/composer-stack:pb-4 motion-reduce:transition-none",
+                          isDraftHeroState ? "opacity-100" : "opacity-0",
+                        )}
+                      >
                         <DraftHeroHeadline
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
@@ -4135,9 +4182,12 @@ function ChatViewContent(props: ChatViewProps) {
                           }}
                         />
                       </div>
-                      <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                      {isDraftHeroState ? (
+                        <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                      ) : null}
                     </div>
-                  ) : (
+                  ) : null}
+                  {isDraftHeroState ? null : (
                     <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                   )}
                   {shownThreadSyncPhase && !activeEnvironmentUnavailable ? (
@@ -4147,7 +4197,8 @@ function ChatViewContent(props: ChatViewProps) {
                     <div
                       className={cn(
                         "chat-composer-glass-shell relative mx-auto w-full",
-                        "max-w-(--chat-composer-max-width)",
+                        // The composer widens as it docks, in step with its move.
+                        "max-w-(--chat-composer-max-width) transition-[max-width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                       )}
                     >

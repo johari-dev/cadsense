@@ -1,19 +1,9 @@
 import { scopedProjectKey, scopeProjectRef } from "@cadsense/client-runtime/environment";
 import type { ScopedProjectRef } from "@cadsense/contracts";
-import {
-  CaretDownIcon,
-  CubeIcon,
-  FolderPlusIcon,
-  ScanIcon,
-  StackIcon,
-  PencilSimpleIcon,
-} from "~/lib/icons";
+import { CaretDownIcon, FolderPlusIcon, ScanIcon, StackIcon, PencilSimpleIcon } from "~/lib/icons";
 import { useCallback, useMemo } from "react";
 
 import { Button } from "../ui/button";
-import { singleCadModelName } from "~/cad/cadModelName";
-import { useModelThumbnail } from "~/cad/modelThumbnails";
-import type { Project } from "~/types";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useProjects } from "~/state/entities";
@@ -59,7 +49,8 @@ interface DraftHeroHeadlineProps {
 /**
  * The draft hero above the composer: a headline whose project name opens a project
  * switcher, a one-line lede, and the starting tasks. Other projects live in the sidebar
- * and the switcher, so the hero does not repeat them.
+ * and the switcher, so the hero does not repeat them. The project's model is drawn behind
+ * it by DraftHeroBackdrop, so the text carries a canvas-colored halo to stay readable.
  */
 export function DraftHeroHeadline({
   activeProjectRef,
@@ -85,7 +76,6 @@ export function DraftHeroHeadline({
     [orderedProjects],
   );
   const canChooseProject = orderedProjects.length > 0;
-  const activeProject = projectByKey.get(activeProjectKey);
 
   const projectSelector = canChooseProject ? (
     <Menu>
@@ -146,8 +136,7 @@ export function DraftHeroHeadline({
 
   return (
     <div className="mx-auto w-full max-w-3xl text-center">
-      {activeProject?.cad?.enabled ? <ProjectModelPreview project={activeProject} /> : null}
-      <h1 className="font-semibold text-[26px] text-foreground leading-8 tracking-tight">
+      <h1 className="font-semibold text-[26px] text-foreground leading-8 tracking-tight [text-shadow:0_1px_14px_var(--background),0_0_28px_var(--background)]">
         {activeProjectTitle ? (
           projectSelector
         ) : canChooseProject ? (
@@ -156,7 +145,7 @@ export function DraftHeroHeadline({
           <>Start with a project</>
         )}
       </h1>
-      <p className="mt-3 text-sm text-muted-foreground">
+      <p className="mt-3 text-sm text-muted-foreground [text-shadow:0_1px_14px_var(--background),0_0_28px_var(--background)]">
         Review the model, inspect parts, or plan a change.
       </p>
       {activeProjectTitle ? (
@@ -178,38 +167,6 @@ export function DraftHeroHeadline({
         </div>
       ) : (
         <div className="mt-4">{projectSelector}</div>
-      )}
-    </div>
-  );
-}
-
-/**
- * The active project's model above the headline: the thumbnail the server saved when the CAD
- * panel first rendered this snapshot, otherwise a viewport-colored tile with the model's name.
- * Never loads CAD just to draw it.
- */
-function ProjectModelPreview({ project }: { readonly project: Project }) {
-  const snapshotId = project.cad?.roots.find((root) => root.current)?.current?.snapshotId;
-  const thumbnail = useModelThumbnail(project.environmentId, snapshotId).url;
-  const modelName = singleCadModelName(project.cad);
-
-  return (
-    <div
-      aria-hidden
-      className="mx-auto mb-6 flex h-33 w-44 flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-(--cad-viewport-background) shadow-sm"
-    >
-      {thumbnail ? (
-        // Thumbnails are square on the viewport color, so `contain` blends into the tile.
-        <img src={thumbnail} alt="" className="size-full object-contain" />
-      ) : (
-        <>
-          <CubeIcon className="size-8 text-tertiary-foreground" weight="thin" />
-          {modelName ? (
-            <span className="max-w-full truncate px-3 text-muted-foreground text-xs">
-              {modelName}
-            </span>
-          ) : null}
-        </>
       )}
     </div>
   );
