@@ -25,9 +25,9 @@
  *           CODEX_OSS_PORT pointing at the proxy. --codex-config custom instead declares a
  *           [model_providers.local] entry whose base_url is the proxy.
  *
- * Thread titles are generated with the "Text generation model" setting, which defaults to
- * DEFAULT_TEXT_GENERATION_MODEL on Codex. A fresh install keeps that default, so those requests
- * still ask the gateway for it and fail. They are recorded but not counted against the turns.
+ * Each chat should also get a generated title. Titles use the "Text generation model" setting,
+ * whose default (a Codex model) the gateway does not serve, so this checks that title generation
+ * falls back to a model the gateway lists.
  *
  * Every CLAUDE_*, ANTHROPIC_*, CODEX_* and OPENAI_* variable is removed from the environment
  * first, so this machine's real accounts and config are never read. The real Claude and Codex
@@ -43,7 +43,6 @@ import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
-import { DEFAULT_TEXT_GENERATION_MODEL } from "@cadsense/contracts";
 import { chromium, type Page } from "playwright-core";
 
 const { values } = NodeUtil.parseArgs({
@@ -310,13 +309,26 @@ const runTurn = async (page: Page) => {
     if (Date.now() > deadline) throw new Error("Sending never started a turn");
     if (!(await composer.innerText()).trim()) {
       await composer.click();
-      await page.keyboard.type("Reply with the single word: pong");
+      await page.keyboard.type(prompt);
     }
     await page.getByRole("button", { name: "Send message" }).click();
     await stop.waitFor({ timeout: 5_000 }).catch(() => {});
   }
   await stop.waitFor({ state: "detached", timeout: 5 * 60_000 });
 };
+const prompt = "Reply with the single word: pong";
+/** The open chat's title once title generation replaces the first message. */
+const generatedTitle = (page: Page) =>
+  waitFor("title generation to rename the chat", async () => {
+    const label = await page
+      .getByRole("button", { name: /^Thread actions for / })
+      .first()
+      .getAttribute("aria-label")
+      .catch(() => null);
+    const title = label?.replace(/^Thread actions for /, "");
+    return title && title !== prompt ? title : undefined;
+  });
+const titles: Record<string, string> = {};
 const requestsTo = (path: string) =>
   requests()
     .split("\n")
@@ -359,7 +371,8 @@ try {
   await run("claude-turn", async (page) => {
     await pickerModelsOn(page, "Claude");
     await runTurn(page);
-    return { requests: requestsTo("/v1/messages") };
+    titles.Claude = await generatedTitle(page);
+    return { title: titles.Claude, requests: requestsTo("/v1/messages") };
   });
   await run("codex-turn", async (page) => {
     await page
@@ -368,7 +381,8 @@ try {
       .click({ force: true });
     await pickerModelsOn(page, "Codex");
     await runTurn(page);
-    return { requests: requestsTo("/v1/responses") };
+    titles.Codex = await generatedTitle(page);
+    return { title: titles.Codex, requests: requestsTo("/v1/responses") };
   });
   for (const [cli, path] of [
     ["Claude", "/v1/messages"],
@@ -380,15 +394,12 @@ try {
       turnRequests.some((line) => line.includes(`model=${turnModel} status=200`)),
       { turnRequests },
     );
-    const titleModel = `model=${DEFAULT_TEXT_GENERATION_MODEL} `;
     check(
-      `no ${cli} request asked the gateway for a built-in model, besides title generation`,
-      !turnRequests.some((line) => /model=(claude-|gpt-)/.test(line) && !line.includes(titleModel)),
-      {
-        turnRequests,
-        titleGenerationRequests: turnRequests.filter((line) => line.includes(titleModel)),
-      },
+      `no ${cli} request asked the gateway for a built-in model`,
+      !turnRequests.some((line) => /model=(claude-|gpt-)/.test(line)),
+      { turnRequests },
     );
+    check(`the ${cli} chat got a generated title`, Boolean(titles[cli]), { title: titles[cli] });
   }
   check("the page had no errors", pageErrors.length === 0, { pageErrors });
 } finally {
