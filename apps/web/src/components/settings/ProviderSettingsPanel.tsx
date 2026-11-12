@@ -259,6 +259,10 @@ function EnvironmentProviderSettings({
   const [customModelsInstanceId, setCustomModelsInstanceId] = useState<ProviderInstanceId | null>(
     null,
   );
+  // Each provider's last custom models list sent to the server, kept until the
+  // saved settings match it. Reopening the dialog before a save lands starts
+  // from this, so the next edit cannot overwrite the unacknowledged one.
+  const sentCustomModels = useRef(new Map<ProviderInstanceId, ReadonlyArray<string>>());
   const pendingSetups = useAtomValue(pendingProviderSetupsAtom);
   const refreshingRef = useRef(false);
   const textGenInstanceId = resolveAppModelSelectionState(settings, serverProviders).instanceId;
@@ -324,6 +328,16 @@ function EnvironmentProviderSettings({
   });
   const customModelsRow = rows.find((row) => row.instanceId === customModelsInstanceId);
   const customModelsInstance = customModelsRow?.instance;
+  const currentCustomModels = (row: (typeof rows)[number]): ReadonlyArray<string> => {
+    const saved = readInstanceCustomModels(settings, row.instanceId, row.option.value);
+    const sent = sentCustomModels.current.get(row.instanceId);
+    if (sent === undefined) return saved;
+    if (sent.length === saved.length && sent.every((model, index) => model === saved[index])) {
+      sentCustomModels.current.delete(row.instanceId);
+      return saved;
+    }
+    return sent;
+  };
 
   return (
     <SettingsSection
@@ -395,19 +409,16 @@ function EnvironmentProviderSettings({
           onOpenChange={(open) => {
             if (!open) setCustomModelsInstanceId(null);
           }}
-          initialModels={readInstanceCustomModels(
-            settings,
-            customModelsRow.instanceId,
-            customModelsRow.option.value,
-          )}
+          initialModels={currentCustomModels(customModelsRow)}
           listedModels={
             new Set(
               (customModelsRow.liveProvider?.models ?? [])
                 .filter((model) => !model.isCustom)
-                .map((model) => model.slug),
+                .flatMap((model) => [model.slug, ...(model.aliases ?? [])]),
             )
           }
           onChange={(customModels) => {
+            sentCustomModels.current.set(customModelsRow.instanceId, customModels);
             const config =
               typeof customModelsInstance.config === "object" &&
               customModelsInstance.config !== null
