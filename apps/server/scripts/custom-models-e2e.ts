@@ -25,7 +25,8 @@
  * the model then shows in the Claude tab of the composer's picker and a turn on it reaches the
  * gateway; removing it takes it out of the picker again; two removals clicked in the same tick,
  * before the first save comes back, both stick; and with the server's replies held back, adding a
- * name, closing the dialog, reopening it and adding another keeps both.
+ * name, closing the dialog, reopening it and adding another keeps both; and a name another window
+ * adds after this window's save has landed shows up when this window reopens the dialog.
  *
  * Every CLAUDE_*, ANTHROPIC_*, CODEX_* and OPENAI_* variable is removed from the environment, and
  * Codex gets an empty CODEX_HOME, so this machine's real accounts and config are never read. The
@@ -493,6 +494,48 @@ try {
     "names added across a close and reopen, before the first save lands, are both kept",
     JSON.stringify(savedCustomModels()) === '["pending-a","pending-b"]',
     { saved: savedCustomModels() },
+  );
+  let reopenedAfterOtherWindow = "";
+  await run("other-window-edit", async (page) => {
+    // This window's save lands while its dialog is closed.
+    await openCustomModels(page);
+    holdServerReplies = true;
+    await modelInput.fill("this-window");
+    await modelInput.press("Enter");
+    await customModelsDialog.getByRole("button", { name: "Remove this-window" }).waitFor();
+    await customModelsDialog.getByRole("button", { name: "Done" }).click();
+    await customModelsDialog.waitFor({ state: "detached" });
+    holdServerReplies = false;
+    for (const reply of heldServerReplies.splice(0)) reply();
+    await waitFor("this window's save", () =>
+      JSON.stringify(savedCustomModels()).includes("this-window") ? true : undefined,
+    );
+    // Another window adds a name.
+    const other = await browser.newPage();
+    await other.goto(`${url}?settings=providers`, { waitUntil: "networkidle" });
+    await other.getByRole("button", { name: "More Claude settings" }).click({ timeout: 60_000 });
+    await other.getByRole("menuitem", { name: "Custom models…" }).click();
+    const otherInput = other
+      .getByRole("dialog", { name: "Claude custom models" })
+      .getByRole("textbox", { name: "Model name" });
+    await otherInput.fill("other-window");
+    await otherInput.press("Enter");
+    await waitFor("the other window's save", () =>
+      JSON.stringify(savedCustomModels()).includes("other-window") ? true : undefined,
+    );
+    await other.close();
+    await page.waitForTimeout(2_000);
+    // This window reopens the dialog.
+    await page.getByRole("button", { name: "More Claude settings" }).click();
+    await page.getByRole("menuitem", { name: "Custom models…" }).click();
+    await customModelsDialog.waitFor();
+    reopenedAfterOtherWindow = await customModelsDialog.innerText();
+    return { dialog: reopenedAfterOtherWindow, saved: savedCustomModels() };
+  });
+  check(
+    "a name another window added shows when this window reopens the dialog",
+    reopenedAfterOtherWindow.includes("other-window"),
+    { dialog: reopenedAfterOtherWindow, saved: savedCustomModels() },
   );
   check("the page had no errors", pageErrors.length === 0, { pageErrors });
 } finally {
