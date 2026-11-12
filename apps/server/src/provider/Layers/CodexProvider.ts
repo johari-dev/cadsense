@@ -560,6 +560,14 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   > = probeCodexAppServerProvider,
   environment?: NodeJS.ProcessEnv,
   listGateway?: (gateway: CodexGateway) => Effect.Effect<GatewayModels>,
+  /**
+   * Marks `model/list`'s entries legacy or current. Applied before a gateway
+   * list replaces them, so a gateway's own ids (which no catalog knows) are
+   * never folded away as legacy.
+   */
+  classifyModels: (
+    models: ReadonlyArray<ServerProviderModel>,
+  ) => ReadonlyArray<ServerProviderModel> = (models) => models,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
@@ -642,6 +650,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const snapshot = probeResult.success.value;
+  const listedModels = classifyModels(snapshot.models);
   const accountStatus = accountProbeStatus(snapshot.account);
   // A gateway's own list replaces the OpenAI models, which it cannot serve.
   const gatewayModels =
@@ -649,14 +658,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const models =
     gatewayModels?._tag === "Listed"
       ? appendCustomCodexModels(
-          codexGatewayModels(
-            gatewayModels.models,
-            snapshot.models,
-            snapshot.gateway?.configuredModel,
-          ),
+          codexGatewayModels(gatewayModels.models, listedModels, snapshot.gateway?.configuredModel),
           codexSettings.customModels,
         )
-      : snapshot.models;
+      : listedModels;
   const message =
     accountStatus.message ??
     (gatewayModels?._tag === "Unlisted"

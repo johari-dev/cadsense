@@ -73,21 +73,19 @@ const hasModelCapabilities = (model: ServerProvider["models"][number]): boolean 
   (model.capabilities?.optionDescriptors?.length ?? 0) > 0;
 
 /**
- * Combine a provider's earlier model list with a new one. A list from a
- * `ready` check is complete, so models it leaves out are dropped: a Claude
- * gateway's models replace the bundled catalog the pending snapshot listed.
- * Any other list may be partial (Codex reports only custom models while
- * signed out), so earlier models it leaves out are kept.
+ * Combine a provider's earlier model list with a new one. A list that names
+ * any built-in model is the provider's full list, so models it leaves out are
+ * dropped: a Claude gateway's models replace the bundled catalog the pending
+ * snapshot listed, whatever the check's status. A list of only custom models,
+ * or none, is partial (Codex reports just its custom models while signed
+ * out), so earlier built-in models are kept. Earlier custom models the new
+ * list leaves out are always dropped: settings own that list, and every
+ * snapshot carries all of it.
  */
 const mergeProviderModels = (
   previousModels: ReadonlyArray<ServerProvider["models"][number]>,
   nextModels: ReadonlyArray<ServerProvider["models"][number]>,
-  nextIsComplete: boolean,
 ): ReadonlyArray<ServerProvider["models"][number]> => {
-  if (nextModels.length === 0 && previousModels.length > 0) {
-    return previousModels;
-  }
-
   const previousBySlug = new Map(previousModels.map((model) => [model.slug, model] as const));
   const mergedModels = nextModels.map((model) => {
     const previousModel = previousBySlug.get(model.slug);
@@ -99,11 +97,14 @@ const mergeProviderModels = (
       capabilities: previousModel.capabilities,
     };
   });
-  if (nextIsComplete) {
+  if (nextModels.some((model) => !model.isCustom)) {
     return mergedModels;
   }
   const nextSlugs = new Set(nextModels.map((model) => model.slug));
-  return [...mergedModels, ...previousModels.filter((model) => !nextSlugs.has(model.slug))];
+  return [
+    ...mergedModels,
+    ...previousModels.filter((model) => !model.isCustom && !nextSlugs.has(model.slug)),
+  ];
 };
 
 export const mergeProviderSnapshot = (
@@ -114,11 +115,7 @@ export const mergeProviderSnapshot = (
     ? nextProvider
     : {
         ...nextProvider,
-        models: mergeProviderModels(
-          previousProvider.models,
-          nextProvider.models,
-          nextProvider.status === "ready",
-        ),
+        models: mergeProviderModels(previousProvider.models, nextProvider.models),
       };
 
 export const mergeProviderSnapshots = (

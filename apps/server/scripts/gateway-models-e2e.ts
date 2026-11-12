@@ -25,6 +25,10 @@
  *           CODEX_OSS_PORT pointing at the proxy. --codex-config custom instead declares a
  *           [model_providers.local] entry whose base_url is the proxy.
  *
+ * Codex also starts with one custom model saved in settings. A custom model is never marked legacy,
+ * so this checks that the gateway's own models are not marked legacy either: the picker would fold
+ * them under "More models" and show only the custom one.
+ *
  * Each chat should also get a generated title. Titles use the "Text generation model" setting,
  * whose default (a Codex model) the gateway does not serve, so this checks that title generation
  * falls back to a model the gateway lists.
@@ -104,6 +108,7 @@ NodeFS.writeFileSync(
   `${JSON.stringify(gatewayModels, null, 2)}\n`,
 );
 const turnModel = values.model ?? gatewayModels[0];
+const codexCustomModel = "e2e-custom-model";
 if (!turnModel) throw new Error(`${gateway.href} lists no models. Pull one first.`);
 
 /** Forwards everything to the gateway and logs each request's model and response status. */
@@ -162,6 +167,12 @@ NodeFS.writeFileSync(
         `base_url = "${proxyUrl}/v1"`,
         ``,
       ].join("\n"),
+);
+// The server's settings file under the dev runner's home, seeded with one Codex custom model.
+NodeFS.mkdirSync(NodePath.join(out, "home", "userdata"), { recursive: true });
+NodeFS.writeFileSync(
+  NodePath.join(out, "home", "userdata", "settings.json"),
+  `${JSON.stringify({ providers: { codex: { customModels: [codexCustomModel] } } }, null, 2)}\n`,
 );
 const env: NodeJS.ProcessEnv = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !/^(CLAUDE|ANTHROPIC|CODEX|OPENAI)/.test(key)),
@@ -294,7 +305,12 @@ const pickerModelsOn = (page: Page, tab: "Claude" | "Codex") =>
       // A row reads "<model name>" then its shortcut hint, one per line.
       const rows = (await pickerRows.allInnerTexts()).map((text) => text.trim().split("\n")[0]!);
       // The first snapshot is the built-in list; wait for the probe that asks the gateway.
-      return rows.some((row) => gatewayModels.includes(row)) ? rows : undefined;
+      // A "More models" toggle means models were folded away as legacy, which the checks report.
+      const folded = await page
+        .locator("[data-model-picker-content]")
+        .getByText(/^More models/)
+        .count();
+      return folded > 0 || rows.some((row) => gatewayModels.includes(row)) ? rows : undefined;
     },
     180_000,
   );
@@ -356,17 +372,33 @@ try {
       pickerModels = await pickerModelsOn(page, tab);
       return { rows: pickerModels };
     });
+    const customModels = tab === "Codex" ? [codexCustomModel] : [];
     check(
-      `the ${tab} tab lists every model the gateway lists`,
-      gatewayModels.every((id) => pickerModels.includes(id)),
-      { gatewayModels, pickerModels },
+      `the ${tab} tab lists every model the gateway lists, none folded away`,
+      [...gatewayModels, ...customModels].every((id) => pickerModels.includes(id)),
+      { gatewayModels, customModels, pickerModels },
     );
     check(
       `the ${tab} tab lists no built-in models the gateway does not serve`,
-      pickerModels.every((row) => gatewayModels.includes(row)),
+      pickerModels.every((row) => gatewayModels.includes(row) || customModels.includes(row)),
       { pickerModels },
     );
   }
+
+  // The picker only folds legacy rows while the selected model is not one of them, so select the
+  // custom model and look again.
+  let codexRowsWithCustomSelected: string[] = [];
+  await run("codex-picker-custom-selected", async (page) => {
+    await pickerModelsOn(page, "Codex");
+    await pickerRows.filter({ hasText: codexCustomModel }).first().click();
+    codexRowsWithCustomSelected = await pickerModelsOn(page, "Codex");
+    return { rows: codexRowsWithCustomSelected };
+  });
+  check(
+    "with the custom model selected, the Codex tab still lists every gateway model",
+    gatewayModels.every((id) => codexRowsWithCustomSelected.includes(id)),
+    { gatewayModels, rows: codexRowsWithCustomSelected },
+  );
 
   await run("claude-turn", async (page) => {
     await pickerModelsOn(page, "Claude");

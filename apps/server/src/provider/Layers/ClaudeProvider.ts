@@ -42,6 +42,7 @@ import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
   formatClaudeVersionUpgradeMessage,
+  resolveClaudeCatalogModel,
   resolveClaudeModelsForVersion,
 } from "../ClaudeModelCatalog.ts";
 
@@ -50,23 +51,28 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 });
 
 /**
- * Picker entries for a gateway's models. An id that is exactly a catalog slug
- * (a proxy in front of Anthropic) keeps the catalog's name and options; any
- * other id is passed through as a plain model.
+ * Picker entries for a gateway's models. An id the catalog knows, by slug or
+ * alias (a proxy in front of Anthropic lists dated ids such as
+ * `claude-haiku-4-5-20251001`), becomes that catalog entry, so it keeps its
+ * name and options and title generation still finds Haiku. Any other id is
+ * passed through as a plain model.
  */
 function claudeGatewayProviderModels(
   catalog: ClaudeModelCatalog,
   gatewayModels: ReadonlyArray<GatewayModel>,
 ): ReadonlyArray<ServerProviderModel> {
-  return gatewayModels.map(
-    (gatewayModel) =>
-      catalog.models.find((entry) => entry.model.slug === gatewayModel.id)?.model ?? {
-        slug: gatewayModel.id,
-        name: gatewayModel.displayName ?? gatewayModel.id,
-        isCustom: false,
-        capabilities: DEFAULT_CLAUDE_MODEL_CAPABILITIES,
-      },
-  );
+  const seen = new Set<string>();
+  return gatewayModels.flatMap((gatewayModel) => {
+    const model = resolveClaudeCatalogModel(catalog, gatewayModel.id)?.model ?? {
+      slug: gatewayModel.id,
+      name: gatewayModel.displayName ?? gatewayModel.id,
+      isCustom: false,
+      capabilities: DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+    };
+    if (seen.has(model.slug)) return [];
+    seen.add(model.slug);
+    return [model];
+  });
 }
 
 const CLAUDE_PRESENTATION = {
