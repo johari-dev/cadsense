@@ -72,9 +72,17 @@ const loadProviders = (
 const hasModelCapabilities = (model: ServerProvider["models"][number]): boolean =>
   (model.capabilities?.optionDescriptors?.length ?? 0) > 0;
 
+/**
+ * Combine a provider's earlier model list with a new one. A list from a
+ * `ready` check is complete, so models it leaves out are dropped: a Claude
+ * gateway's models replace the bundled catalog the pending snapshot listed.
+ * Any other list may be partial (Codex reports only custom models while
+ * signed out), so earlier models it leaves out are kept.
+ */
 const mergeProviderModels = (
   previousModels: ReadonlyArray<ServerProvider["models"][number]>,
   nextModels: ReadonlyArray<ServerProvider["models"][number]>,
+  nextIsComplete: boolean,
 ): ReadonlyArray<ServerProvider["models"][number]> => {
   if (nextModels.length === 0 && previousModels.length > 0) {
     return previousModels;
@@ -91,6 +99,9 @@ const mergeProviderModels = (
       capabilities: previousModel.capabilities,
     };
   });
+  if (nextIsComplete) {
+    return mergedModels;
+  }
   const nextSlugs = new Set(nextModels.map((model) => model.slug));
   return [...mergedModels, ...previousModels.filter((model) => !nextSlugs.has(model.slug))];
 };
@@ -103,7 +114,11 @@ export const mergeProviderSnapshot = (
     ? nextProvider
     : {
         ...nextProvider,
-        models: mergeProviderModels(previousProvider.models, nextProvider.models),
+        models: mergeProviderModels(
+          previousProvider.models,
+          nextProvider.models,
+          nextProvider.status === "ready",
+        ),
       };
 
 export const mergeProviderSnapshots = (

@@ -1,6 +1,7 @@
 import {
   type ClaudeSettings,
   type ModelCapabilities,
+  type ServerProviderModel,
   type ServerProviderSlashCommand,
 } from "@cadsense/contracts";
 import * as DateTime from "effect/DateTime";
@@ -31,6 +32,7 @@ import {
 } from "../providerSnapshot.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import type { ClaudeGatewayModel, ClaudeGatewayModels } from "../Drivers/ClaudeGateway.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -42,6 +44,26 @@ import {
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
+
+/**
+ * Picker entries for a gateway's models. An id that is exactly a catalog slug
+ * (a proxy in front of Anthropic) keeps the catalog's name and options; any
+ * other id is passed through as a plain model.
+ */
+function claudeGatewayProviderModels(
+  catalog: ClaudeModelCatalog,
+  gatewayModels: ReadonlyArray<ClaudeGatewayModel>,
+): ReadonlyArray<ServerProviderModel> {
+  return gatewayModels.map(
+    (gatewayModel) =>
+      catalog.models.find((entry) => entry.model.slug === gatewayModel.id)?.model ?? {
+        slug: gatewayModel.id,
+        name: gatewayModel.displayName ?? gatewayModel.id,
+        isCustom: false,
+        capabilities: DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+      },
+  );
+}
 
 const CLAUDE_PRESENTATION = {
   displayName: "Claude",
@@ -394,6 +416,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
+  resolveGatewayModels?: () => Effect.Effect<ClaudeGatewayModels | undefined>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -495,12 +518,22 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  // A gateway's own list replaces the Claude catalog: catalog slugs mean
+  // nothing to Ollama or LM Studio, and the CLI sends the slug unchanged.
+  const gatewayModels = resolveGatewayModels ? yield* resolveGatewayModels() : undefined;
   const models = providerModelsFromSettings(
-    resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+    gatewayModels?._tag === "Listed"
+      ? claudeGatewayProviderModels(modelCatalog, gatewayModels.models)
+      : resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
+  const statusMessage =
+    gatewayModels?._tag === "Listed"
+      ? undefined
+      : gatewayModels?._tag === "Unlisted"
+        ? `Could not list models from ${gatewayModels.baseUrl}, so the picker shows Claude models.`
+        : formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
@@ -577,7 +610,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         ...(capabilities.email ? { email: capabilities.email } : {}),
         ...(authMetadata ? authMetadata : {}),
       },
-      ...(versionUpgradeMessage ? { message: versionUpgradeMessage } : {}),
+      ...(statusMessage ? { message: statusMessage } : {}),
     },
   });
 });

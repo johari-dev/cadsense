@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { discoverClaudeSkills, skillOverrideSettingsPaths } from "./ClaudeSkills.ts";
+import { discoverClaudeSkills, claudeSettingsPaths } from "./ClaudeSkills.ts";
 
 const writeSkill = Effect.fn(function* (
   skillsDir: string,
@@ -498,7 +498,7 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
         ["darwin", "/Library/Application Support/ClaudeCode/managed-settings.json"],
         ["linux", "/etc/claude-code/managed-settings.json"],
       ] as const) {
-        const paths = skillOverrideSettingsPaths(path, "/home/.claude", "/workspace", platform, {});
+        const paths = claudeSettingsPaths(path, "/home/.claude", "/workspace", platform, {});
         assert.deepEqual(paths, [
           path.join("/home/.claude", "settings.json"),
           path.join("/workspace", ".claude", "settings.json"),
@@ -508,26 +508,19 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
       }
 
       assert.deepEqual(
-        skillOverrideSettingsPaths(path, "/home/.claude", undefined, "win32", {
+        claudeSettingsPaths(path, "/home/.claude", undefined, "win32", {
           PROGRAMDATA: "C:/ProgramData",
         }).at(-1),
         path.join("C:/ProgramData", "ClaudeCode", "managed-settings.json"),
       );
-      assert.deepEqual(skillOverrideSettingsPaths(path, "/home/.claude", undefined, "win32", {}), [
+      assert.deepEqual(claudeSettingsPaths(path, "/home/.claude", undefined, "win32", {}), [
         path.join("/home/.claude", "settings.json"),
       ]);
 
       // Only the repository root's local file joins in, after the
       // workspace's own local file so it wins.
       assert.deepEqual(
-        skillOverrideSettingsPaths(
-          path,
-          "/home/.claude",
-          "/repo/packages/app",
-          "linux",
-          {},
-          "/repo",
-        ),
+        claudeSettingsPaths(path, "/home/.claude", "/repo/packages/app", "linux", {}, "/repo"),
         [
           path.join("/home/.claude", "settings.json"),
           path.join("/repo/packages/app", ".claude", "settings.json"),
@@ -537,15 +530,12 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
         ],
       );
       // A workspace that is the root itself is not read twice.
-      assert.deepEqual(
-        skillOverrideSettingsPaths(path, "/home/.claude", "/repo", "linux", {}, "/repo"),
-        [
-          path.join("/home/.claude", "settings.json"),
-          path.join("/repo", ".claude", "settings.json"),
-          path.join("/repo", ".claude", "settings.local.json"),
-          "/etc/claude-code/managed-settings.json",
-        ],
-      );
+      assert.deepEqual(claudeSettingsPaths(path, "/home/.claude", "/repo", "linux", {}, "/repo"), [
+        path.join("/home/.claude", "settings.json"),
+        path.join("/repo", ".claude", "settings.json"),
+        path.join("/repo", ".claude", "settings.local.json"),
+        "/etc/claude-code/managed-settings.json",
+      ]);
     }),
   );
 

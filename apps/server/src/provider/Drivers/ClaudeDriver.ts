@@ -47,6 +47,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { discoverClaudeGatewayModels } from "./ClaudeGateway.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { installScriptCommand, type ProviderSetupCommands } from "../providerSetup.ts";
 import {
@@ -101,6 +102,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { cwd } = yield* ServerConfig;
+      const httpClient = yield* HttpClient.HttpClient;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const modelCatalog = modelManifest.current.pipe(Effect.map(resolveClaudeModelCatalog));
@@ -110,9 +112,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
-      // Sign in and out with the instance's CLAUDE_CONFIG_DIR so the
-      // credentials land, and get removed, where this instance reads them.
-      const authEnv = yield* makeClaudeEnvironment(effectiveConfig, processEnv).pipe(
+      // The CLI's environment for this instance, with its CLAUDE_CONFIG_DIR.
+      // Sign in and out with it so the credentials land, and get removed,
+      // where this instance reads them.
+      const claudeEnv = yield* makeClaudeEnvironment(effectiveConfig, processEnv).pipe(
         Effect.provideService(Path.Path, path),
       );
       const setupCommands: ProviderSetupCommands = {
@@ -121,8 +124,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           posix: { url: "https://claude.ai/install.sh", shell: "bash" },
           windowsUrl: "https://claude.ai/install.ps1",
         }),
-        signIn: { executable: effectiveConfig.binaryPath, args: ["auth", "login"], env: authEnv },
-        signOut: { executable: effectiveConfig.binaryPath, args: ["auth", "logout"], env: authEnv },
+        signIn: { executable: effectiveConfig.binaryPath, args: ["auth", "login"], env: claudeEnv },
+        signOut: {
+          executable: effectiveConfig.binaryPath,
+          args: ["auth", "logout"],
+          env: claudeEnv,
+        },
       };
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
       const stampIdentity = withInstanceIdentity({
@@ -176,6 +183,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                 processEnv,
                 cwd,
                 resolveClaudeModelCatalog(manifest),
+                // Asked on every check, so a model pulled into Ollama shows
+                // up on the next refresh.
+                () =>
+                  discoverClaudeGatewayModels(effectiveConfig, claudeEnv, cwd).pipe(
+                    Effect.provideService(FileSystem.FileSystem, fileSystem),
+                    Effect.provideService(Path.Path, path),
+                    Effect.provideService(HttpClient.HttpClient, httpClient),
+                  ),
               ),
             ),
             Effect.map(stampIdentity),
