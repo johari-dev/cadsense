@@ -24,7 +24,8 @@
  * providerInstances.claudeAgent.config.customModels; a name the picker already lists is refused;
  * the model then shows in the Claude tab of the composer's picker and a turn on it reaches the
  * gateway; removing it takes it out of the picker again; two removals clicked in the same tick,
- * before the first save comes back, both stick.
+ * before the first save comes back, both stick; and with the server's replies held back, adding a
+ * name, closing the dialog, reopening it and adding another keeps both.
  *
  * Every CLAUDE_*, ANTHROPIC_*, CODEX_* and OPENAI_* variable is removed from the environment, and
  * Codex gets an empty CODEX_HOME, so this machine's real accounts and config are never read. The
@@ -231,6 +232,17 @@ const browser = await chromium.launch({
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// Holds the app server's WebSocket replies while `holdServerReplies` is set, so a step can act
+// before a save is acknowledged, as on a slow connection.
+let holdServerReplies = false;
+const heldServerReplies: Array<() => void> = [];
+await page.routeWebSocket(/\/ws(\?.*)?$/, (socket) => {
+  const server = socket.connectToServer();
+  server.onMessage((message) => {
+    if (holdServerReplies) heldServerReplies.push(() => socket.send(message));
+    else socket.send(message);
+  });
+});
 const pageErrors: string[] = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
 let shots = 0;
@@ -339,21 +351,29 @@ try {
     { saved: savedCustomModels() },
   );
 
-  // A Claude slug the picker already lists: the first one in the bundled model manifest.
-  const listedModel = /"slug":\s*"(claude-[^"]+)"/.exec(
-    NodeFS.readFileSync(
-      NodePath.join(repo, "apps/server/src/provider/model-manifest.json"),
-      "utf8",
-    ),
-  )?.[1];
-  if (!listedModel) throw new Error("No Claude model in the bundled manifest");
+  // A Claude slug the picker already lists, and one of its aliases: the first catalog entry with
+  // an alias in the bundled model manifest.
+  const manifestEntry =
+    /"slug":\s*"(claude-[^"]+)",\s*"name":\s*"[^"]*",[^}]*?"aliases":\s*\[\s*"([^"]+)"/s.exec(
+      NodeFS.readFileSync(
+        NodePath.join(repo, "apps/server/src/provider/model-manifest.json"),
+        "utf8",
+      ),
+    );
+  const [, listedModel, listedAlias] = manifestEntry ?? [];
+  if (!listedModel || !listedAlias)
+    throw new Error("No aliased Claude model in the bundled manifest");
   await run("listed-model-refused", async () => {
-    await modelInput.fill(listedModel);
-    await modelInput.press("Enter");
-    return { alert: await customModelsDialog.getByRole("alert").innerText() };
+    const alerts: string[] = [];
+    for (const name of [listedModel, listedAlias]) {
+      await modelInput.fill(name);
+      await modelInput.press("Enter");
+      alerts.push(await customModelsDialog.getByRole("alert").innerText());
+    }
+    return { alerts };
   });
   check(
-    `a model the picker already lists (${listedModel}) is refused`,
+    `a model the picker already lists (${listedModel}) and its alias (${listedAlias}) are refused`,
     JSON.stringify(savedCustomModels()) === JSON.stringify([customModel]),
     { saved: savedCustomModels() },
   );
@@ -448,6 +468,30 @@ try {
   check(
     "two removals clicked before the first save is acknowledged both stick",
     JSON.stringify(savedCustomModels()) === "[]",
+    { saved: savedCustomModels() },
+  );
+  await run("reopen-before-save-lands", async (page) => {
+    await openCustomModels(page);
+    holdServerReplies = true;
+    for (const slug of ["pending-a", "pending-b"]) {
+      await modelInput.fill(slug);
+      await modelInput.press("Enter");
+      await customModelsDialog.getByRole("button", { name: `Remove ${slug}` }).waitFor();
+      await customModelsDialog.getByRole("button", { name: "Done" }).click();
+      await customModelsDialog.waitFor({ state: "detached" });
+      await page.getByRole("button", { name: "More Claude settings" }).click();
+      await page.getByRole("menuitem", { name: "Custom models…" }).click();
+      await customModelsDialog.waitFor();
+    }
+    const shownWhileHeld = await customModelsDialog.innerText();
+    holdServerReplies = false;
+    for (const reply of heldServerReplies.splice(0)) reply();
+    await page.waitForTimeout(3_000);
+    return { shownWhileHeld, saved: savedCustomModels() };
+  });
+  check(
+    "names added across a close and reopen, before the first save lands, are both kept",
+    JSON.stringify(savedCustomModels()) === '["pending-a","pending-b"]',
     { saved: savedCustomModels() },
   );
   check("the page had no errors", pageErrors.length === 0, { pageErrors });
