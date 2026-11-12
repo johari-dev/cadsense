@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { CADSENSE_DESIGN_BRIEF_TEMPLATE } from "@cadsense/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -107,6 +108,29 @@ it.effect("treats an empty brief as no brief", () =>
   run(
     Effect.gen(function* () {
       assert.isNull(yield* readCadDesignBrief(yield* workspace({ "DESIGN.md": " \n\n " })));
+    }),
+  ),
+);
+
+it.effect("treats the untouched template as no brief", () =>
+  run(
+    Effect.gen(function* () {
+      const root = yield* workspace({ "DESIGN.md": CADSENSE_DESIGN_BRIEF_TEMPLATE });
+      assert.isNull(yield* readCadDesignBrief(root));
+    }),
+  ),
+);
+
+it.effect("sends only the student's sentences from a partly filled template", () =>
+  run(
+    Effect.gen(function* () {
+      const text = `${CADSENSE_DESIGN_BRIEF_TEMPLATE}The elevator motor rides on the first stage.\n`;
+      const root = yield* workspace({ "DESIGN.md": text });
+      assert.deepEqual(yield* readCadDesignBrief(root), {
+        path: "DESIGN.md",
+        bytes: text.length,
+        content: "The elevator motor rides on the first stage.",
+      });
     }),
   ),
 );

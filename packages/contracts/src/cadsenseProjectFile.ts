@@ -7,6 +7,23 @@ export const CADSENSE_PROJECT_FILE_NAME = "cadsense.json";
 /** Workspace-relative path of the design brief read on CAD reviews unless `designBrief` overrides it. */
 export const CADSENSE_DESIGN_BRIEF_DEFAULT_PATH = "DESIGN.md";
 
+/**
+ * Starting contents of a new design brief. The questions sit in one HTML comment, which the brief
+ * reader strips, so only the student's own sentences reach agents and an untouched template counts
+ * as no brief. See CadDesignBriefSpec.md in apps/server/src/cad.
+ */
+export const CADSENSE_DESIGN_BRIEF_TEMPLATE = `<!--
+Write below this note. Skip any question you cannot answer.
+
+What is this mechanism, what does it do, and what did you base it on?
+
+What moves, what does it ride on, and what is supposed to move with it?
+
+What is missing, or only a stand-in? Name the parts. "Most bolts are not in yet" is enough. "Everything is WIP" is not.
+-->
+
+`;
+
 /** Public URL of the published JSON Schema for {@link CadsenseProjectFile}. */
 export const CADSENSE_PROJECT_FILE_SCHEMA_URL = "https://cadsense.app/schema/cadsense.json";
 

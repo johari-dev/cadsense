@@ -3,6 +3,7 @@ import {
   CADSENSE_PROJECT_FILE_NAME,
 } from "@cadsense/contracts";
 import { parseCadsenseProjectFile } from "@cadsense/shared/cadsenseProjectFile";
+import { stripDesignBriefComments } from "@cadsense/shared/designBrief";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -21,9 +22,12 @@ export interface CadDesignBrief {
   readonly content: string;
 }
 
-/** Trim the brief and cap it at the byte limit, telling the agent when content was cut. */
+/**
+ * Strip HTML comments, trim, and cap the brief at the byte limit, telling the agent when content
+ * was cut. The template's questions live in a comment, so only the student's sentences survive.
+ */
 function capDesignBrief(raw: Uint8Array): string {
-  const text = new TextDecoder().decode(raw).trim();
+  const text = stripDesignBriefComments(new TextDecoder().decode(raw));
   const encoded = new TextEncoder().encode(text);
   if (encoded.byteLength <= CAD_DESIGN_BRIEF_MAX_BYTES) return text;
   // Streaming decode drops a UTF-8 sequence split by the cut instead of emitting U+FFFD.

@@ -38,6 +38,7 @@ import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project } from "../../types";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { DesignBriefSettings } from "../designBrief/DesignBriefEntry";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -311,6 +312,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
           {hasCadSource(project) && (
             <>
               <CadProjectSettings project={project} runActive={cadRunActive} />
+              <DesignBriefSettings project={project} />
               <CadReviewLearnings project={project} />
             </>
           )}
