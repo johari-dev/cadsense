@@ -259,10 +259,13 @@ function EnvironmentProviderSettings({
   const [customModelsInstanceId, setCustomModelsInstanceId] = useState<ProviderInstanceId | null>(
     null,
   );
-  // Each provider's last custom models list sent to the server, kept until the
-  // saved settings match it. Reopening the dialog before a save lands starts
-  // from this, so the next edit cannot overwrite the unacknowledged one.
-  const sentCustomModels = useRef(new Map<ProviderInstanceId, ReadonlyArray<string>>());
+  // Custom models saves still on their way, per provider: the saved list they
+  // started from, then each list sent since (the last is the newest). The
+  // dialog opens on the newest, so an edit made before a save lands cannot
+  // overwrite it. The loop after `rows` drops an entry once it is settled.
+  const sentCustomModels = useRef(
+    new Map<ProviderInstanceId, ReadonlyArray<ReadonlyArray<string>>>(),
+  );
   const pendingSetups = useAtomValue(pendingProviderSetupsAtom);
   const refreshingRef = useRef(false);
   const textGenInstanceId = resolveAppModelSelectionState(settings, serverProviders).instanceId;
@@ -328,16 +331,22 @@ function EnvironmentProviderSettings({
   });
   const customModelsRow = rows.find((row) => row.instanceId === customModelsInstanceId);
   const customModelsInstance = customModelsRow?.instance;
-  const currentCustomModels = (row: (typeof rows)[number]): ReadonlyArray<string> => {
-    const saved = readInstanceCustomModels(settings, row.instanceId, row.option.value);
-    const sent = sentCustomModels.current.get(row.instanceId);
-    if (sent === undefined) return saved;
-    if (sent.length === saved.length && sent.every((model, index) => model === saved[index])) {
+  const savedCustomModels = (row: (typeof rows)[number]) =>
+    readInstanceCustomModels(settings, row.instanceId, row.option.value);
+  // Runs on every render, dialog open or not. An entry is dropped once the
+  // saved list is the newest one sent (acknowledged), or is a list this window
+  // never had (another window changed it), so saved settings win again.
+  for (const row of rows) {
+    const history = sentCustomModels.current.get(row.instanceId);
+    if (history === undefined) continue;
+    const saved = savedCustomModels(row);
+    const index = history.findLastIndex((models) => sameModelList(models, saved));
+    if (index === -1 || index === history.length - 1) {
       sentCustomModels.current.delete(row.instanceId);
-      return saved;
     }
-    return sent;
-  };
+  }
+  const currentCustomModels = (row: (typeof rows)[number]): ReadonlyArray<string> =>
+    sentCustomModels.current.get(row.instanceId)?.at(-1) ?? savedCustomModels(row);
 
   return (
     <SettingsSection
@@ -418,7 +427,10 @@ function EnvironmentProviderSettings({
             )
           }
           onChange={(customModels) => {
-            sentCustomModels.current.set(customModelsRow.instanceId, customModels);
+            const history = sentCustomModels.current.get(customModelsRow.instanceId) ?? [
+              savedCustomModels(customModelsRow),
+            ];
+            sentCustomModels.current.set(customModelsRow.instanceId, [...history, customModels]);
             const config =
               typeof customModelsInstance.config === "object" &&
               customModelsInstance.config !== null
@@ -438,6 +450,10 @@ function EnvironmentProviderSettings({
       )}
     </SettingsSection>
   );
+}
+
+function sameModelList(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+  return left.length === right.length && left.every((model, index) => model === right[index]);
 }
 
 /**
