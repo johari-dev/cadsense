@@ -120,7 +120,8 @@ export function claudeManagedSettingsPath(
 }
 
 /**
- * Settings files Claude Code merges for `skillOverrides`, in increasing
+ * Settings files Claude Code merges (read here for `skillOverrides`, and by
+ * `ClaudeGateway` for `env`), in increasing
  * precedence: user, project, project-local, then the administrator's managed
  * policy, which wins outright. When the workspace sits inside a git
  * repository, the repository root's `settings.local.json` is read too and
@@ -131,7 +132,7 @@ export function claudeManagedSettingsPath(
  * switched off is reported disabled rather than dropped, so the picker can
  * grey it out instead of silently losing it.
  */
-export function skillOverrideSettingsPaths(
+export function claudeSettingsPaths(
   path: Path.Path,
   configDirPath: string,
   cwd: string | undefined,
@@ -159,7 +160,7 @@ export function skillOverrideSettingsPaths(
  * boundary Claude Code walks up to for project settings. `undefined` outside
  * a repository.
  */
-const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
+export const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
   cwd: string,
 ): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -230,7 +231,7 @@ const readSkillOverrides = Effect.fn("readSkillOverrides")(function* (
   const overridesByName = new Map<string, SkillOverride>();
   const repositoryRoot = cwd === undefined ? undefined : yield* findRepositoryRoot(cwd);
 
-  for (const settingsPath of skillOverrideSettingsPaths(
+  for (const settingsPath of claudeSettingsPaths(
     path,
     configDirPath,
     cwd,
@@ -273,7 +274,7 @@ const readSkillOverrides = Effect.fn("readSkillOverrides")(function* (
  * `CLAUDE_CONFIG_DIR` by `makeClaudeEnvironment`), then a `CLAUDE_CONFIG_DIR`
  * already present in the process environment, then `~/.claude`.
  */
-const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
+export const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   environment: NodeJS.ProcessEnv,
   cwd?: string,

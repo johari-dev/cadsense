@@ -1,6 +1,7 @@
 import {
   type ClaudeSettings,
   type ModelCapabilities,
+  type ServerProviderModel,
   type ServerProviderSlashCommand,
 } from "@cadsense/contracts";
 import * as DateTime from "effect/DateTime";
@@ -33,15 +34,63 @@ import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
 import {
+  formatUnlistedGatewayMessage,
+  type GatewayModel,
+  type GatewayModels,
+} from "../GatewayModels.ts";
+import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
   formatClaudeVersionUpgradeMessage,
+  resolveClaudeCatalogModel,
   resolveClaudeModelsForVersion,
 } from "../ClaudeModelCatalog.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
+
+/**
+ * Picker entries for a gateway's models.
+ *
+ * An id the catalog knows, by slug or alias (a proxy in front of Anthropic
+ * lists dated ids such as `claude-haiku-4-5-20251001`), becomes that catalog
+ * entry, so it keeps its name and options and title generation still finds
+ * Haiku. Those entries come first, in catalog order and limited to
+ * `supportedModels` (the ones this CLI version can run), as without a gateway.
+ *
+ * Any other id is passed through as a plain model. When the gateway also
+ * serves catalog models, those extra ids are marked legacy, which the picker
+ * folds under "More models": a proxy in front of Anthropic lists dozens of
+ * dated ids and aliases next to the curated models. A gateway with no catalog
+ * models (Ollama, LM Studio) lists its own models unfolded.
+ */
+function claudeGatewayProviderModels(
+  catalog: ClaudeModelCatalog,
+  supportedModels: ReadonlyArray<ServerProviderModel>,
+  gatewayModels: ReadonlyArray<GatewayModel>,
+): ReadonlyArray<ServerProviderModel> {
+  const servedSlugs = new Set<string>();
+  const others: Array<ServerProviderModel> = [];
+  for (const gatewayModel of gatewayModels) {
+    const catalogModel = resolveClaudeCatalogModel(catalog, gatewayModel.id)?.model;
+    if (catalogModel) {
+      servedSlugs.add(catalogModel.slug);
+      continue;
+    }
+    others.push({
+      slug: gatewayModel.id,
+      name: gatewayModel.displayName ?? gatewayModel.id,
+      isCustom: false,
+      capabilities: DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+    });
+  }
+  const served = supportedModels.filter((model) => servedSlugs.has(model.slug));
+  return [
+    ...served,
+    ...(served.length > 0 ? others.map((model) => ({ ...model, isLegacy: true })) : others),
+  ];
+}
 
 const CLAUDE_PRESENTATION = {
   displayName: "Claude",
@@ -394,6 +443,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
+  resolveGatewayModels?: () => Effect.Effect<GatewayModels | undefined>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -495,12 +545,29 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  // A gateway's own list replaces the Claude catalog: catalog slugs mean
+  // nothing to Ollama or LM Studio, and the CLI sends the slug unchanged.
+  const gatewayModels = resolveGatewayModels ? yield* resolveGatewayModels() : undefined;
+  const supportedModels = resolveClaudeModelsForVersion(modelCatalog, parsedVersion);
+  const builtInModels =
+    gatewayModels?._tag === "Listed"
+      ? claudeGatewayProviderModels(modelCatalog, supportedModels, gatewayModels.models)
+      : supportedModels;
   const models = providerModelsFromSettings(
-    resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+    builtInModels,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
+  // The upgrade hint is about catalog models, so a gateway that lists none does not get it.
+  // Checked before the version filter: a gateway whose only catalog models need a newer CLI
+  // is the case the hint exists for.
+  const statusMessage =
+    gatewayModels?._tag === "Unlisted"
+      ? formatUnlistedGatewayMessage(gatewayModels.baseUrl, "Claude")
+      : gatewayModels?._tag === "Listed" &&
+          !gatewayModels.models.some((model) => resolveClaudeCatalogModel(modelCatalog, model.id))
+        ? undefined
+        : formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
@@ -577,7 +644,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         ...(capabilities.email ? { email: capabilities.email } : {}),
         ...(authMetadata ? authMetadata : {}),
       },
-      ...(versionUpgradeMessage ? { message: versionUpgradeMessage } : {}),
+      ...(statusMessage ? { message: statusMessage } : {}),
     },
   });
 });

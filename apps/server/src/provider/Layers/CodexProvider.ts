@@ -35,6 +35,12 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { type CodexGateway, resolveCodexGateway } from "../Drivers/CodexGateway.ts";
+import {
+  formatUnlistedGatewayMessage,
+  type GatewayModel,
+  type GatewayModels,
+} from "../GatewayModels.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
@@ -49,6 +55,8 @@ export interface CodexAppServerProviderSnapshot {
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
+  /** Set when the configured `model_provider` is a local or custom gateway. */
+  readonly gateway?: CodexGateway;
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -395,15 +403,19 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models] = yield* Effect.all(
+  const [skillsResponse, models, configRead] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      // Not in the generated bindings; only the provider fields are decoded.
+      // A CLI without `config/read` just gets no gateway.
+      client.raw.request("config/read", {}).pipe(Effect.orElseSucceed(() => undefined)),
     ],
     { concurrency: "unbounded" },
   );
+  const gateway = resolveCodexGateway(configRead, environment);
 
   return {
     account: accountResponse,
@@ -412,8 +424,36 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       appendCustomCodexModels(models, input.customModels ?? []),
     ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
+    ...(gateway ? { gateway } : {}),
   } satisfies CodexAppServerProviderSnapshot;
 });
+
+/**
+ * Picker entries for a gateway's models. An id `model/list` also reported (a
+ * proxy in front of OpenAI) keeps that entry's name, options and default. The
+ * model Codex is configured to use, when the gateway serves it, becomes the
+ * only default for new chats.
+ */
+function codexGatewayModels(
+  gatewayModels: ReadonlyArray<GatewayModel>,
+  listedModels: ReadonlyArray<ServerProviderModel>,
+  configuredModel: string | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  const servesConfiguredModel = gatewayModels.some((model) => model.id === configuredModel);
+  return gatewayModels.map((gatewayModel) => {
+    const model = listedModels.find(
+      (listed) => !listed.isCustom && listed.slug === gatewayModel.id,
+    ) ?? {
+      slug: gatewayModel.id,
+      name: gatewayModel.displayName ?? gatewayModel.id,
+      isCustom: false,
+      capabilities: null,
+    };
+    if (!servesConfiguredModel) return model;
+    const { isDefault: _isDefault, ...rest } = model;
+    return gatewayModel.id === configuredModel ? { ...rest, isDefault: true } : rest;
+  });
+}
 
 const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] => {
   const models = new Set<string>();
@@ -519,6 +559,15 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   > = probeCodexAppServerProvider,
   environment?: NodeJS.ProcessEnv,
+  listGateway?: (gateway: CodexGateway) => Effect.Effect<GatewayModels>,
+  /**
+   * Marks `model/list`'s entries legacy or current. Applied before a gateway
+   * list replaces them, so a gateway's own ids (which no catalog knows) are
+   * never folded away as legacy.
+   */
+  classifyModels: (
+    models: ReadonlyArray<ServerProviderModel>,
+  ) => ReadonlyArray<ServerProviderModel> = (models) => models,
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
@@ -601,13 +650,29 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const snapshot = probeResult.success.value;
+  const listedModels = classifyModels(snapshot.models);
   const accountStatus = accountProbeStatus(snapshot.account);
+  // A gateway's own list replaces the OpenAI models, which it cannot serve.
+  const gatewayModels =
+    snapshot.gateway && listGateway ? yield* listGateway(snapshot.gateway) : undefined;
+  const models =
+    gatewayModels?._tag === "Listed"
+      ? appendCustomCodexModels(
+          codexGatewayModels(gatewayModels.models, listedModels, snapshot.gateway?.configuredModel),
+          codexSettings.customModels,
+        )
+      : listedModels;
+  const message =
+    accountStatus.message ??
+    (gatewayModels?._tag === "Unlisted"
+      ? formatUnlistedGatewayMessage(gatewayModels.baseUrl, "Codex")
+      : undefined);
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,
     enabled: codexSettings.enabled,
     checkedAt,
-    models: snapshot.models,
+    models,
     skills: snapshot.skills,
     slashCommands: [
       {
@@ -621,7 +686,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       version: snapshot.version ?? null,
       status: accountStatus.status,
       auth: accountStatus.auth,
-      ...(accountStatus.message ? { message: accountStatus.message } : {}),
+      ...(message ? { message } : {}),
     },
   });
 });
