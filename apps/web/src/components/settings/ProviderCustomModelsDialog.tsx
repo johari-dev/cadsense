@@ -1,6 +1,6 @@
 import { normalizeCustomModelSlug } from "@cadsense/shared/model";
 import { XIcon } from "~/lib/icons";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { MAX_CUSTOM_MODEL_COUNT, MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button } from "../ui/button";
@@ -33,58 +33,41 @@ function rejectCustomModel(
 /**
  * Edits one provider's custom models: names added to its model picker for a
  * gateway that serves models it does not list. Each add or remove is saved
- * through `onChange` right away, like the provider switches. Mount it when
- * opening: it keeps the list it was opened with as its own state, so a
- * second edit made before the first save comes back builds on the first
- * instead of on the stale saved list.
+ * through `onChange` right away, like the provider switches. Render it only
+ * while it should be open.
  */
 export function ProviderCustomModelsDialog({
   label,
-  open,
-  onOpenChange,
-  initialModels,
+  models,
   listedModels,
   onChange,
+  onClose,
 }: {
   readonly label: string;
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-  readonly initialModels: ReadonlyArray<string>;
-  /** Models the provider already reports, which need no custom entry. */
+  readonly models: ReadonlyArray<string>;
+  /** Models and aliases the provider already reports, which need no custom entry. */
   readonly listedModels: ReadonlySet<string>;
   readonly onChange: (models: ReadonlyArray<string>) => void;
+  readonly onClose: () => void;
 }) {
-  const [models, setModels] = useState(initialModels);
-  // Read by handlers instead of `models`: two clicks in one tick share a
-  // render, so only the ref sees the first click's result.
-  const latestModels = useRef(initialModels);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | undefined>();
 
-  const save = (next: ReadonlyArray<string>) => {
-    latestModels.current = next;
-    setModels(next);
-    onChange(next);
-  };
   const add = () => {
     const slug = normalizeCustomModelSlug(draft);
     if (!slug) return;
-    const rejection = rejectCustomModel(slug, latestModels.current, listedModels);
+    const rejection = rejectCustomModel(slug, models, listedModels);
     setError(rejection);
     if (rejection) return;
-    save([...latestModels.current, slug]);
+    onChange([...models, slug]);
     setDraft("");
   };
 
   return (
     <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          setDraft("");
-          setError(undefined);
-        }
-        onOpenChange(next);
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
     >
       <DialogPopup className="max-w-md">
@@ -108,7 +91,7 @@ export function ProviderCustomModelsDialog({
                     variant="ghost-muted"
                     size="icon-xs"
                     aria-label={`Remove ${slug}`}
-                    onClick={() => save(latestModels.current.filter((model) => model !== slug))}
+                    onClick={() => onChange(models.filter((model) => model !== slug))}
                   >
                     <XIcon className="size-3" />
                   </Button>

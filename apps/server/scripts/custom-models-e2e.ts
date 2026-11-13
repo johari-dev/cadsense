@@ -23,10 +23,11 @@
  * Checks: "⋯" > "Custom models…" on the Claude row opens the dialog; a name is added and saved in
  * providerInstances.claudeAgent.config.customModels; a name the picker already lists is refused;
  * the model then shows in the Claude tab of the composer's picker and a turn on it reaches the
- * gateway; removing it takes it out of the picker again; two removals clicked in the same tick,
- * before the first save comes back, both stick; and with the server's replies held back, adding a
- * name, closing the dialog, reopening it and adding another keeps both; and a name another window
- * adds after this window's save has landed shows up when this window reopens the dialog.
+ * gateway; removing it takes it out of the picker again. With the server's replies held back,
+ * like a slow connection: two removals in a row both stick; adding a name, closing the dialog,
+ * reopening it and adding another keeps both. And a name another window adds shows up when this
+ * window reopens the dialog. The held-reply steps rely on the settings hooks applying saves the
+ * server has not answered yet.
  *
  * Every CLAUDE_*, ANTHROPIC_*, CODEX_* and OPENAI_* variable is removed from the environment, and
  * Codex gets an empty CODEX_HOME, so this machine's real accounts and config are never read. The
@@ -457,17 +458,19 @@ try {
     await waitFor("both names to save", () =>
       JSON.stringify(savedCustomModels()) === '["rapid-a","rapid-b"]' ? true : undefined,
     );
-    // Both clicks run before either save is acknowledged, like a fast double removal.
-    await customModelsDialog.evaluate((dialog) => {
-      for (const button of dialog.querySelectorAll('button[aria-label^="Remove "]')) {
-        button.click();
-      }
-    });
+    // With the server's replies held, the second removal is made before the first is answered.
+    holdServerReplies = true;
+    for (const slug of ["rapid-a", "rapid-b"]) {
+      await customModelsDialog.getByRole("button", { name: `Remove ${slug}` }).click();
+    }
+    await customModelsDialog.getByText("No custom models yet.").waitFor();
+    holdServerReplies = false;
+    for (const reply of heldServerReplies.splice(0)) reply();
     await page.waitForTimeout(3_000);
     return { saved: savedCustomModels(), dialog: await customModelsDialog.innerText() };
   });
   check(
-    "two removals clicked before the first save is acknowledged both stick",
+    "two removals made before the first save is answered both stick",
     JSON.stringify(savedCustomModels()) === "[]",
     { saved: savedCustomModels() },
   );

@@ -259,13 +259,6 @@ function EnvironmentProviderSettings({
   const [customModelsInstanceId, setCustomModelsInstanceId] = useState<ProviderInstanceId | null>(
     null,
   );
-  // Custom models saves still on their way, per provider: the saved list they
-  // started from, then each list sent since (the last is the newest). The
-  // dialog opens on the newest, so an edit made before a save lands cannot
-  // overwrite it. The loop after `rows` drops an entry once it is settled.
-  const sentCustomModels = useRef(
-    new Map<ProviderInstanceId, ReadonlyArray<ReadonlyArray<string>>>(),
-  );
   const pendingSetups = useAtomValue(pendingProviderSetupsAtom);
   const refreshingRef = useRef(false);
   const textGenInstanceId = resolveAppModelSelectionState(settings, serverProviders).instanceId;
@@ -331,22 +324,6 @@ function EnvironmentProviderSettings({
   });
   const customModelsRow = rows.find((row) => row.instanceId === customModelsInstanceId);
   const customModelsInstance = customModelsRow?.instance;
-  const savedCustomModels = (row: (typeof rows)[number]) =>
-    readInstanceCustomModels(settings, row.instanceId, row.option.value);
-  // Runs on every render, dialog open or not. An entry is dropped once the
-  // saved list is the newest one sent (acknowledged), or is a list this window
-  // never had (another window changed it), so saved settings win again.
-  for (const row of rows) {
-    const history = sentCustomModels.current.get(row.instanceId);
-    if (history === undefined) continue;
-    const saved = savedCustomModels(row);
-    const index = history.findLastIndex((models) => sameModelList(models, saved));
-    if (index === -1 || index === history.length - 1) {
-      sentCustomModels.current.delete(row.instanceId);
-    }
-  }
-  const currentCustomModels = (row: (typeof rows)[number]): ReadonlyArray<string> =>
-    sentCustomModels.current.get(row.instanceId)?.at(-1) ?? savedCustomModels(row);
 
   return (
     <SettingsSection
@@ -412,13 +389,13 @@ function EnvironmentProviderSettings({
       ))}
       {customModelsRow === undefined || customModelsInstance === undefined ? null : (
         <ProviderCustomModelsDialog
-          key={customModelsRow.instanceId}
           label={customModelsRow.option.label}
-          open
-          onOpenChange={(open) => {
-            if (!open) setCustomModelsInstanceId(null);
-          }}
-          initialModels={currentCustomModels(customModelsRow)}
+          onClose={() => setCustomModelsInstanceId(null)}
+          models={readInstanceCustomModels(
+            settings,
+            customModelsRow.instanceId,
+            customModelsRow.option.value,
+          )}
           listedModels={
             new Set(
               (customModelsRow.liveProvider?.models ?? [])
@@ -427,10 +404,6 @@ function EnvironmentProviderSettings({
             )
           }
           onChange={(customModels) => {
-            const history = sentCustomModels.current.get(customModelsRow.instanceId) ?? [
-              savedCustomModels(customModelsRow),
-            ];
-            sentCustomModels.current.set(customModelsRow.instanceId, [...history, customModels]);
             const config =
               typeof customModelsInstance.config === "object" &&
               customModelsInstance.config !== null
@@ -450,10 +423,6 @@ function EnvironmentProviderSettings({
       )}
     </SettingsSection>
   );
-}
-
-function sameModelList(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
-  return left.length === right.length && left.every((model, index) => model === right[index]);
 }
 
 /**
