@@ -39,14 +39,18 @@ export type ReviewerStage =
   | { readonly kind: "needsSignIn" }
   | { readonly kind: "signingIn" }
   | { readonly kind: "signInFailed"; readonly reason: string }
-  | { readonly kind: "ready" };
+  /** `signedIn` is false for a reviewer that runs without an account, such as a local model. */
+  | { readonly kind: "ready"; readonly signedIn: boolean };
 
+/**
+ * Whether a reviewer can run a review now: the rule the model picker uses. A signed-in account
+ * makes a provider ready, and so does a CLI that needs none, such as Codex pointed at a local
+ * model provider. Asking that user to sign in to ChatGPT would send them to an account they do
+ * not use.
+ */
 export function isReviewerReady(provider: ServerProvider | undefined): boolean {
   return (
-    provider !== undefined &&
-    provider.enabled &&
-    provider.installed &&
-    provider.auth.status === "authenticated"
+    provider !== undefined && provider.enabled && provider.installed && provider.status === "ready"
   );
 }
 
@@ -62,7 +66,9 @@ export function reviewerStage(provider: ServerProvider | undefined): ReviewerSta
   if (provider === undefined) return { kind: "checking" };
   const setup = provider.setup?.action === "signOut" ? undefined : provider.setup;
   if (setup?.status === "running" && setup.action === "install") return { kind: "installing" };
-  if (isReviewerReady(provider)) return { kind: "ready" };
+  if (isReviewerReady(provider)) {
+    return { kind: "ready", signedIn: provider.auth.status === "authenticated" };
+  }
   if (setup?.status === "running") return { kind: "signingIn" };
   if (setup?.status === "failed") {
     const reason = setup.reason ?? "The command did not finish.";
