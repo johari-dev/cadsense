@@ -42,36 +42,34 @@ const decodeClaudeSettingsEnv = Schema.decodeUnknownEffect(ClaudeSettingsEnv);
  * same variable exported in the shell, and Ollama's and OpenRouter's setup
  * guides use either place.
  */
-export const resolveClaudeEffectiveEnvironment = Effect.fn("resolveClaudeEffectiveEnvironment")(
-  function* (
-    config: Pick<ClaudeSettings, "homePath">,
-    environment: NodeJS.ProcessEnv,
-    cwd: string | undefined,
-  ): Effect.fn.Return<NodeJS.ProcessEnv, never, FileSystem.FileSystem | Path.Path> {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const platform = yield* HostProcessPlatform;
-    const configDirPath = yield* resolveClaudeConfigDirPath(config, environment, cwd);
-    const repositoryRoot = cwd === undefined ? undefined : yield* findRepositoryRoot(cwd);
+const resolveClaudeEffectiveEnvironment = Effect.fn("resolveClaudeEffectiveEnvironment")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  environment: NodeJS.ProcessEnv,
+  cwd: string | undefined,
+): Effect.fn.Return<NodeJS.ProcessEnv, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const platform = yield* HostProcessPlatform;
+  const configDirPath = yield* resolveClaudeConfigDirPath(config, environment, cwd);
+  const repositoryRoot = cwd === undefined ? undefined : yield* findRepositoryRoot(cwd);
 
-    const merged: NodeJS.ProcessEnv = { ...environment };
-    for (const settingsPath of claudeSettingsPaths(
-      path,
-      configDirPath,
-      cwd,
-      platform,
-      environment,
-      repositoryRoot,
-    )) {
-      const settings = yield* fileSystem.readFileString(settingsPath).pipe(
-        Effect.flatMap(decodeClaudeSettingsEnv),
-        Effect.orElseSucceed(() => undefined),
-      );
-      Object.assign(merged, settings?.env);
-    }
-    return merged;
-  },
-);
+  const merged: NodeJS.ProcessEnv = { ...environment };
+  for (const settingsPath of claudeSettingsPaths(
+    path,
+    configDirPath,
+    cwd,
+    platform,
+    environment,
+    repositoryRoot,
+  )) {
+    const settings = yield* fileSystem.readFileString(settingsPath).pipe(
+      Effect.flatMap(decodeClaudeSettingsEnv),
+      Effect.orElseSucceed(() => undefined),
+    );
+    Object.assign(merged, settings?.env);
+  }
+  return merged;
+});
 
 function isFlagSet(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase() ?? "";
@@ -85,7 +83,7 @@ function isFlagSet(value: string | undefined): boolean {
  * same credentials the CLI would: `ANTHROPIC_AUTH_TOKEN` as a bearer token and
  * `ANTHROPIC_API_KEY` as `x-api-key`.
  */
-export function resolveClaudeGateway(environment: NodeJS.ProcessEnv): Gateway | undefined {
+function resolveClaudeGateway(environment: NodeJS.ProcessEnv): Gateway | undefined {
   const rawBaseUrl = environment.ANTHROPIC_BASE_URL?.trim();
   if (!rawBaseUrl) return undefined;
   if (THIRD_PARTY_BACKEND_FLAGS.some((flag) => isFlagSet(environment[flag]))) return undefined;

@@ -175,29 +175,26 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide the check's services so it fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
-      const checkProvider = modelManifest.current
-        .pipe(
-          Effect.flatMap((manifest) =>
-            checkCodexProviderStatus(
-              effectiveConfig,
-              undefined,
-              processEnv,
-              (gateway) =>
-                listGatewayModels(gateway).pipe(
-                  Effect.provideService(HttpClient.HttpClient, httpClient),
-                ),
-              // Classified inside the check, before a gateway list replaces
-              // `model/list`; see `checkCodexProviderStatus`.
-              (models) => ModelManifest.classifyModels(models, manifest, DRIVER_KIND),
-            ),
+      const checkProvider = modelManifest.current.pipe(
+        Effect.flatMap((manifest) =>
+          checkCodexProviderStatus(
+            effectiveConfig,
+            undefined,
+            processEnv,
+            (gateway) =>
+              listGatewayModels(gateway).pipe(
+                Effect.provideService(HttpClient.HttpClient, httpClient),
+              ),
+            // Classified inside the check, before a gateway list replaces
+            // `model/list`; see `checkCodexProviderStatus`.
+            (models) => ModelManifest.classifyModels(models, manifest, DRIVER_KIND),
           ),
-          Effect.map(stampIdentity),
-        )
-        .pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-        );
+        ),
+        Effect.map(stampIdentity),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
       const snapshot = yield* makeManagedServerProvider<CodexSettings>({
         setupCommands,
         getSettings: Effect.succeed(effectiveConfig),

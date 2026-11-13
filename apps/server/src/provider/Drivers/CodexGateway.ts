@@ -43,8 +43,7 @@ const CodexConfigRead = Schema.Struct({
     ),
   }),
 });
-export type CodexConfigRead = typeof CodexConfigRead.Type;
-export const decodeCodexConfigRead = Schema.decodeUnknownOption(CodexConfigRead);
+const decodeCodexConfigRead = Schema.decodeUnknownOption(CodexConfigRead);
 
 /** A gateway plus the model Codex is configured to use on it. */
 export interface CodexGateway extends Gateway {

@@ -79,22 +79,8 @@ const resolveInstance = (
     ),
   );
 
-/** A provider that can run a turn right now: the model picker's rule. */
-const isReadyProvider = (provider: ServerProvider): boolean =>
-  provider.enabled && isProviderAvailable(provider) && provider.status === "ready";
-
 const servesModel = (provider: ServerProvider, model: string): boolean =>
   provider.models.some((entry) => entry.slug === model || entry.aliases?.includes(model));
-
-/** The provider's usual cheap title model, when it still lists it. */
-const cheapTitleModel = (provider: ServerProvider): string | undefined => {
-  const titleModel = DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[provider.driver];
-  return titleModel && servesModel(provider, titleModel) ? titleModel : undefined;
-};
-
-/** The provider's default model (a gateway's configured model), else its first. */
-const defaultModel = (provider: ServerProvider): string | undefined =>
-  (provider.models.find((entry) => entry.isDefault) ?? provider.models[0])?.slug;
 
 /**
  * The model titles are generated with. The "Text generation model" setting
@@ -102,51 +88,39 @@ const defaultModel = (provider: ServerProvider): string | undefined =>
  * ready but no longer lists the model (pointed at a local gateway such as
  * Ollama, which lists only its own models, so the default `gpt-5.6-luna`
  * would fail), or it is disabled, unavailable or in error (not installed,
- * signed out). Then titles use, in order:
- *
- *  1. a ready provider's usual cheap title model (`gpt-5.6-luna`,
- *     `claude-haiku-4-5`), the setting's provider first, then settings order;
- *  2. the chat's own model, when its provider is ready and lists it. A
- *     gateway list has no cheap title model and its first entry may not
- *     support tools, which the Claude CLI needs for structured output;
- *  3. a ready provider's default or first model, in the same order.
+ * signed out). Titles then run on the chat's provider: its usual cheap title
+ * model (`gpt-5.6-luna`, `claude-haiku-4-5`) when it lists one, else the
+ * chat's own model, which the chat is about to prove works. The chat's
+ * options (reasoning effort and so on) are not carried over.
  *
  * A provider still being checked keeps the setting, so a startup probe never
- * moves titles to another provider. With nothing ready the setting is kept
- * and fails as before.
+ * moves titles elsewhere.
  */
-export function resolveTextGenerationModelSelection(
+function resolveTextGenerationModelSelection(
   selection: ModelSelection,
   providers: ReadonlyArray<ServerProvider>,
-  chatSelection?: ModelSelection,
+  chatSelection: ModelSelection | undefined,
 ): ModelSelection {
-  const findProvider = (instanceId: ModelSelection["instanceId"]) =>
-    providers.find((provider) => provider.instanceId === instanceId);
-  const selected = findProvider(selection.instanceId);
-  if (selected?.enabled && isProviderAvailable(selected) && selected.status !== "error") {
-    if (selected.status !== "ready" || servesModel(selected, selection.model)) return selection;
+  const selected = providers.find((provider) => provider.instanceId === selection.instanceId);
+  if (
+    selected?.enabled &&
+    isProviderAvailable(selected) &&
+    selected.status !== "error" &&
+    (selected.status !== "ready" || servesModel(selected, selection.model))
+  ) {
+    return selection;
   }
-
-  const ready = [
-    ...(selected && isReadyProvider(selected) ? [selected] : []),
-    ...providers.filter((provider) => provider !== selected && isReadyProvider(provider)),
-  ];
-  const pickFrom = (choose: (provider: ServerProvider) => string | undefined) => {
-    for (const provider of ready) {
-      const model = choose(provider);
-      if (model) return createModelSelection(provider.instanceId, model);
-    }
-    return undefined;
-  };
-  const chatProvider = chatSelection ? findProvider(chatSelection.instanceId) : undefined;
-  const chatModel =
-    chatSelection &&
-    chatProvider &&
-    isReadyProvider(chatProvider) &&
-    servesModel(chatProvider, chatSelection.model)
-      ? chatSelection
-      : undefined;
-  return pickFrom(cheapTitleModel) ?? chatModel ?? pickFrom(defaultModel) ?? selection;
+  const chatProvider = providers.find(
+    (provider) => provider.instanceId === chatSelection?.instanceId,
+  );
+  if (!chatSelection || !chatProvider) return selection;
+  const cheapTitleModel = DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[chatProvider.driver];
+  return createModelSelection(
+    chatProvider.instanceId,
+    cheapTitleModel && servesModel(chatProvider, cheapTitleModel)
+      ? cheapTitleModel
+      : chatSelection.model,
+  );
 }
 
 export const makeTextGenerationFromRegistry = (
