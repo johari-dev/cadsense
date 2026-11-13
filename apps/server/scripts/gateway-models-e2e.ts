@@ -13,7 +13,8 @@
  *   summary.json          each check with pass/fail and the values it compared
  *
  *   node apps/server/scripts/gateway-models-e2e.ts --out .cadsense/gateway-e2e/run \
- *     [--gateway http://127.0.0.1:11434] [--model qwen3:0.6b] [--codex-config builtin|custom|none]
+ *     [--gateway http://127.0.0.1:11434] [--model qwen3:0.6b] [--codex-config builtin|custom|none] \
+ *     [--catalog-model claude-opus-5-5]
  *
  * --gateway is an Ollama-compatible endpoint serving both Anthropic's /v1/messages and OpenAI's
  * /v1/responses (default: Ollama on its usual port), and --model the one to run turns with
@@ -26,6 +27,11 @@
  *           CODEX_OSS_PORT pointing at the proxy. --codex-config custom instead declares a
  *           [model_providers.local] entry whose base_url is the proxy. --codex-config none leaves
  *           Codex unconfigured and signed out, like a Claude-only setup, and skips its checks.
+ *
+ * --catalog-model makes the gateway's model list, as Claude sees it, also name that Claude catalog
+ * model, like a proxy in front of Anthropic that lists the curated models next to dated ids and
+ * its own aliases. The Claude tab must then show the catalog model and fold the gateway's other
+ * models under "More models", where they can still be picked.
  *
  * Claude's turn must declare the CAD tools in full: Claude Code otherwise defers MCP tools behind
  * ToolSearch, and a local model that never searches only sees their names.
@@ -62,11 +68,12 @@ const { values } = NodeUtil.parseArgs({
     gateway: { type: "string" },
     model: { type: "string" },
     "codex-config": { type: "string" },
+    "catalog-model": { type: "string" },
   },
 });
 if (!values.out) {
   throw new Error(
-    "Usage: --out <dir> [--gateway <url>] [--model <id>] [--codex-config builtin|custom|none]",
+    "Usage: --out <dir> [--gateway <url>] [--model <id>] [--codex-config builtin|custom|none] [--catalog-model <slug>]",
   );
 }
 const codexConfigKind = values["codex-config"] ?? "builtin";
@@ -74,6 +81,7 @@ if (codexConfigKind !== "builtin" && codexConfigKind !== "custom" && codexConfig
   throw new Error("--codex-config must be builtin, custom or none");
 }
 const tabs = codexConfigKind === "none" ? (["Claude"] as const) : (["Claude", "Codex"] as const);
+const catalogModel = values["catalog-model"];
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
 NodeFS.mkdirSync(out, { recursive: true });
@@ -150,8 +158,25 @@ const proxy = NodeHttp.createServer((request, response) => {
           requestLog,
           `${request.method} ${request.url} model=${model} tools=${tools.length} cad=${cadTools} status=${upstreamResponse.statusCode}\n`,
         );
-        response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
-        upstreamResponse.pipe(response);
+        // Only Claude's listing sends anthropic-version, so Codex still sees the gateway's own list.
+        const addCatalogModel =
+          catalogModel !== undefined &&
+          request.method === "GET" &&
+          request.url?.startsWith("/v1/models") === true &&
+          request.headers["anthropic-version"] !== undefined;
+        if (!addCatalogModel) {
+          response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+          upstreamResponse.pipe(response);
+          return;
+        }
+        const listed: Buffer[] = [];
+        upstreamResponse.on("data", (chunk: Buffer) => listed.push(chunk));
+        upstreamResponse.on("end", () => {
+          const list = JSON.parse(Buffer.concat(listed).toString("utf8")) as { data: unknown[] };
+          list.data.push({ id: catalogModel, object: "model" });
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(list));
+        });
       },
     );
     upstream.on("error", (error) => {
@@ -304,6 +329,11 @@ const addProjectDialog = page.getByRole("dialog", {
 });
 const composer = page.locator('[data-chat-composer-form="true"] [contenteditable="true"]').first();
 const pickerRows = page.locator("[data-model-picker-row]");
+/** Model names in the open picker. A row reads "<model name>" then its shortcut hint. */
+const visibleRows = async () =>
+  (await pickerRows.allInnerTexts()).map((text) => text.trim().split("\n")[0]!);
+/** The toggle the picker shows when it has folded models away as legacy. */
+const moreModels = page.locator("[data-model-picker-content]").getByText("More models");
 const requests = () =>
   NodeFS.existsSync(requestLog) ? NodeFS.readFileSync(requestLog, "utf8") : "";
 
@@ -324,21 +354,19 @@ const pickerModelsOn = (page: Page, tab: "Claude" | "Codex") =>
       if (!(await tabButton.isVisible())) return undefined;
       await tabButton.click();
       await pickerRows.first().waitFor({ timeout: 5_000 });
-      // A row reads "<model name>" then its shortcut hint, one per line.
-      const rows = (await pickerRows.allInnerTexts()).map((text) => text.trim().split("\n")[0]!);
+      const rows = await visibleRows();
       // The first snapshot is the built-in list; wait for the probe that asks the gateway.
-      // A "More models" toggle means models were folded away as legacy, which the checks report.
-      const folded = await page
-        .locator("[data-model-picker-content]")
-        .getByText(/^More models/)
-        .count();
-      return folded > 0 || rows.some((row) => gatewayModels.includes(row)) ? rows : undefined;
+      // Folded models count as listed too: the checks report what was folded.
+      return (await moreModels.isVisible()) || rows.some((row) => gatewayModels.includes(row))
+        ? rows
+        : undefined;
     },
     180_000,
   );
 
 /** Pick `turnModel` in the open picker and send one short message, waiting for the reply. */
 const runTurn = async (page: Page) => {
+  if (await moreModels.isVisible()) await moreModels.click();
   await pickerRows.filter({ hasText: turnModel }).first().click();
   const stop = page.getByRole("button", { name: "Stop generation" });
   // A message can't start a turn while the project's first import runs, so keep sending.
@@ -394,6 +422,25 @@ try {
       pickerModels = await pickerModelsOn(page, tab);
       return { rows: pickerModels };
     });
+    if (tab === "Claude" && catalogModel) {
+      check(
+        "the Claude tab shows the catalog model alone, with the gateway's other models folded",
+        pickerModels.length === 1 && !gatewayModels.includes(pickerModels[0]!),
+        { pickerModels },
+      );
+      let expanded: string[] = [];
+      await run("claude-picker-more-models", async () => {
+        await moreModels.click();
+        expanded = await visibleRows();
+        return { rows: expanded };
+      });
+      check(
+        '"More models" lists every model the gateway lists, after the catalog model',
+        expanded[0] === pickerModels[0] && gatewayModels.every((id) => expanded.includes(id)),
+        { gatewayModels, expanded },
+      );
+      continue;
+    }
     const customModels = tab === "Codex" ? [codexCustomModel] : [];
     check(
       `the ${tab} tab lists every model the gateway lists, none folded away`,
