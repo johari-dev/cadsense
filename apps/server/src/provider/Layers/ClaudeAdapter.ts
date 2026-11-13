@@ -4583,6 +4583,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                         type: "http" as const,
                         url: `${mcpSession.endpoint}/cad`,
                         headers: { Authorization: mcpSession.authorizationHeader },
+                        // Declared in full on every turn instead of deferred behind
+                        // ToolSearch: a model that never searches (local models do
+                        // not) could otherwise see only the CAD tool names.
+                        alwaysLoad: true,
                       },
                     }
                   : {}),

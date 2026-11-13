@@ -8,11 +8,12 @@
  *   NN-*.png              a screenshot after each step
  *   dev.log               dev runner, server, and web output
  *   gateway-models.json   what the gateway's GET /v1/models returned
- *   gateway-requests.log  every request either CLI sent the gateway: method, path, model, status
+ *   gateway-requests.log  every request either CLI sent the gateway: method, path, model, how many
+ *                         tools it declared and how many of those are CAD tools, status
  *   summary.json          each check with pass/fail and the values it compared
  *
  *   node apps/server/scripts/gateway-models-e2e.ts --out .cadsense/gateway-e2e/run \
- *     [--gateway http://127.0.0.1:11434] [--model qwen3:0.6b] [--codex-config builtin|custom]
+ *     [--gateway http://127.0.0.1:11434] [--model qwen3:0.6b] [--codex-config builtin|custom|none]
  *
  * --gateway is an Ollama-compatible endpoint serving both Anthropic's /v1/messages and OpenAI's
  * /v1/responses (default: Ollama on its usual port), and --model the one to run turns with
@@ -23,7 +24,11 @@
  *           ANTHROPIC_AUTH_TOKEN=ollama in the environment.
  *   Codex   model_provider = "ollama" in config.toml (what `codex --oss` uses), with
  *           CODEX_OSS_PORT pointing at the proxy. --codex-config custom instead declares a
- *           [model_providers.local] entry whose base_url is the proxy.
+ *           [model_providers.local] entry whose base_url is the proxy. --codex-config none leaves
+ *           Codex unconfigured and signed out, like a Claude-only setup, and skips its checks.
+ *
+ * Claude's turn must declare the CAD tools in full: Claude Code otherwise defers MCP tools behind
+ * ToolSearch, and a local model that never searches only sees their names.
  *
  * Codex also starts with one custom model saved in settings. A custom model is never marked legacy,
  * so this checks that the gateway's own models are not marked legacy either: the picker would fold
@@ -31,7 +36,9 @@
  *
  * Each chat should also get a generated title. Titles use the "Text generation model" setting,
  * whose default (a Codex model) the gateway does not serve, so this checks that title generation
- * falls back to a model the gateway lists.
+ * falls back to a model the gateway lists. With --codex-config none, titles fall back to Claude,
+ * whose gateway list has no default; they must use the chat's own model, since the first model a
+ * gateway lists may not support the tools the Claude CLI needs.
  *
  * Every CLAUDE_*, ANTHROPIC_*, CODEX_* and OPENAI_* variable is removed from the environment
  * first, so this machine's real accounts and config are never read. The real Claude and Codex
@@ -59,13 +66,14 @@ const { values } = NodeUtil.parseArgs({
 });
 if (!values.out) {
   throw new Error(
-    "Usage: --out <dir> [--gateway <url>] [--model <id>] [--codex-config builtin|custom]",
+    "Usage: --out <dir> [--gateway <url>] [--model <id>] [--codex-config builtin|custom|none]",
   );
 }
 const codexConfigKind = values["codex-config"] ?? "builtin";
-if (codexConfigKind !== "builtin" && codexConfigKind !== "custom") {
-  throw new Error("--codex-config must be builtin or custom");
+if (codexConfigKind !== "builtin" && codexConfigKind !== "custom" && codexConfigKind !== "none") {
+  throw new Error("--codex-config must be builtin, custom or none");
 }
+const tabs = codexConfigKind === "none" ? (["Claude"] as const) : (["Claude", "Codex"] as const);
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
 NodeFS.mkdirSync(out, { recursive: true });
@@ -111,23 +119,36 @@ const turnModel = values.model ?? gatewayModels[0];
 const codexCustomModel = "e2e-custom-model";
 if (!turnModel) throw new Error(`${gateway.href} lists no models. Pull one first.`);
 
-/** Forwards everything to the gateway and logs each request's model and response status. */
+/** Every tool name a request declares, including tools nested in a Codex namespace. */
+const toolNames = (tools: unknown): string[] =>
+  Array.isArray(tools)
+    ? tools.flatMap((tool: { name?: unknown; tools?: unknown }) => [
+        ...(typeof tool.name === "string" ? [tool.name] : []),
+        ...toolNames(tool.tools),
+      ])
+    : [];
+
+/** Forwards everything to the gateway and logs each request's model, tools and response status. */
 const proxy = NodeHttp.createServer((request, response) => {
   const chunks: Buffer[] = [];
   request.on("data", (chunk: Buffer) => chunks.push(chunk));
   request.on("end", () => {
     const body = Buffer.concat(chunks);
     let model = "-";
+    let tools: string[] = [];
     try {
-      model = (JSON.parse(body.toString("utf8")) as { model?: string }).model ?? "-";
+      const parsed = JSON.parse(body.toString("utf8")) as { model?: string; tools?: unknown };
+      model = parsed.model ?? "-";
+      tools = toolNames(parsed.tools);
     } catch {}
+    const cadTools = tools.filter((name) => name.includes("cad_")).length;
     const upstream = NodeHttp.request(
       new URL(request.url ?? "/", gateway),
       { method: request.method, headers: { ...request.headers, host: gateway.host } },
       (upstreamResponse) => {
         NodeFS.appendFileSync(
           requestLog,
-          `${request.method} ${request.url} model=${model} status=${upstreamResponse.statusCode}\n`,
+          `${request.method} ${request.url} model=${model} tools=${tools.length} cad=${cadTools} status=${upstreamResponse.statusCode}\n`,
         );
         response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
         upstreamResponse.pipe(response);
@@ -154,20 +175,21 @@ NodeFS.writeFileSync(
   `${JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyUrl } }, null, 2)}\n`,
 );
 NodeFS.mkdirSync(codexHome, { recursive: true });
-NodeFS.writeFileSync(
-  NodePath.join(codexHome, "config.toml"),
-  codexConfigKind === "builtin"
-    ? `model_provider = "ollama"\nmodel = "${turnModel}"\n`
-    : [
-        `model_provider = "local"`,
-        `model = "${turnModel}"`,
-        ``,
-        `[model_providers.local]`,
-        `name = "Local gateway"`,
-        `base_url = "${proxyUrl}/v1"`,
-        ``,
-      ].join("\n"),
-);
+if (codexConfigKind !== "none")
+  NodeFS.writeFileSync(
+    NodePath.join(codexHome, "config.toml"),
+    codexConfigKind === "builtin"
+      ? `model_provider = "ollama"\nmodel = "${turnModel}"\n`
+      : [
+          `model_provider = "local"`,
+          `model = "${turnModel}"`,
+          ``,
+          `[model_providers.local]`,
+          `name = "Local gateway"`,
+          `base_url = "${proxyUrl}/v1"`,
+          ``,
+        ].join("\n"),
+  );
 // The server's settings file under the dev runner's home, seeded with one Codex custom model.
 NodeFS.mkdirSync(NodePath.join(out, "home", "userdata"), { recursive: true });
 NodeFS.writeFileSync(
@@ -366,7 +388,7 @@ try {
     await addProjectDialog.waitFor({ state: "detached" });
   });
 
-  for (const tab of ["Claude", "Codex"] as const) {
+  for (const tab of tabs) {
     let pickerModels: string[] = [];
     await run(`${tab.toLowerCase()}-picker`, async (page) => {
       pickerModels = await pickerModelsOn(page, tab);
@@ -387,18 +409,20 @@ try {
 
   // The picker only folds legacy rows while the selected model is not one of them, so select the
   // custom model and look again.
-  let codexRowsWithCustomSelected: string[] = [];
-  await run("codex-picker-custom-selected", async (page) => {
-    await pickerModelsOn(page, "Codex");
-    await pickerRows.filter({ hasText: codexCustomModel }).first().click();
-    codexRowsWithCustomSelected = await pickerModelsOn(page, "Codex");
-    return { rows: codexRowsWithCustomSelected };
-  });
-  check(
-    "with the custom model selected, the Codex tab still lists every gateway model",
-    gatewayModels.every((id) => codexRowsWithCustomSelected.includes(id)),
-    { gatewayModels, rows: codexRowsWithCustomSelected },
-  );
+  if (codexConfigKind !== "none") {
+    let codexRowsWithCustomSelected: string[] = [];
+    await run("codex-picker-custom-selected", async (page) => {
+      await pickerModelsOn(page, "Codex");
+      await pickerRows.filter({ hasText: codexCustomModel }).first().click();
+      codexRowsWithCustomSelected = await pickerModelsOn(page, "Codex");
+      return { rows: codexRowsWithCustomSelected };
+    });
+    check(
+      "with the custom model selected, the Codex tab still lists every gateway model",
+      gatewayModels.every((id) => codexRowsWithCustomSelected.includes(id)),
+      { gatewayModels, rows: codexRowsWithCustomSelected },
+    );
+  }
 
   await run("claude-turn", async (page) => {
     await pickerModelsOn(page, "Claude");
@@ -406,24 +430,38 @@ try {
     titles.Claude = await generatedTitle(page);
     return { title: titles.Claude, requests: requestsTo("/v1/messages") };
   });
-  await run("codex-turn", async (page) => {
-    await page
-      .getByRole("button", { name: /^New thread in / })
-      .first()
-      .click({ force: true });
-    await pickerModelsOn(page, "Codex");
-    await runTurn(page);
-    titles.Codex = await generatedTitle(page);
-    return { title: titles.Codex, requests: requestsTo("/v1/responses") };
-  });
-  for (const [cli, path] of [
-    ["Claude", "/v1/messages"],
-    ["Codex", "/v1/responses"],
-  ] as const) {
+  if (codexConfigKind !== "none") {
+    await run("codex-turn", async (page) => {
+      await page
+        .getByRole("button", { name: /^New thread in / })
+        .first()
+        .click({ force: true });
+      await pickerModelsOn(page, "Codex");
+      await runTurn(page);
+      titles.Codex = await generatedTitle(page);
+      return { title: titles.Codex, requests: requestsTo("/v1/responses") };
+    });
+  }
+  const claudeTurnRequests = requestsTo("/v1/messages").filter((line) =>
+    line.includes(`model=${turnModel} `),
+  );
+  check(
+    "the Claude turn declared the CAD tools in full, not deferred behind ToolSearch",
+    claudeTurnRequests.some((line) => !/ cad=0 /.test(line) && / cad=\d+ /.test(line)),
+    { claudeTurnRequests },
+  );
+  for (const [cli, path] of (
+    [
+      ["Claude", "/v1/messages"],
+      ["Codex", "/v1/responses"],
+    ] as const
+  ).filter(([cli]) => (tabs as ReadonlyArray<string>).includes(cli))) {
     const turnRequests = requestsTo(path);
     check(
       `the ${cli} turn reached the gateway asking for ${turnModel}`,
-      turnRequests.some((line) => line.includes(`model=${turnModel} status=200`)),
+      turnRequests.some(
+        (line) => line.includes(`model=${turnModel} `) && line.endsWith(" status=200"),
+      ),
       { turnRequests },
     );
     check(
