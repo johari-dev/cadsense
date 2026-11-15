@@ -117,7 +117,12 @@ function SetupChecklist({
           summary={
             reviewer ? (
               <>
-                <span className="shrink-0">{reviewer.account}</span>
+                {/* The account's name once signed in; the tool's for a reviewer with no account. */}
+                <span className="shrink-0">
+                  {reviewerProvider?.auth.status === "authenticated"
+                    ? reviewer.account
+                    : reviewer.tool}
+                </span>
                 {reviewerProvider?.auth.email ? (
                   <>
                     <span>·</span>
@@ -430,7 +435,9 @@ function ReviewerProgress({
             {signInLabel}
           </StepRow>
         ) : stage.kind === "ready" ? (
-          <StepRow mark="done">Signed in to {reviewer.account}</StepRow>
+          <StepRow mark="done">
+            {stage.signedIn ? `Signed in to ${reviewer.account}` : `${reviewer.tool} is ready`}
+          </StepRow>
         ) : stage.kind === "signingIn" ? (
           <StepRow mark="waiting">
             <p>{signInLabel} in your browser</p>

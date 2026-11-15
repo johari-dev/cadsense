@@ -355,12 +355,12 @@ export const ProviderRegistryLive = Layer.effect(
         },
       );
 
-      // Onboarding's provider step. Only live probes reach it (they come through here); the
-      // status cache read at boot may describe an older sign-in.
+      // Onboarding's provider step, by the rule it uses (`isReviewerReady` in the web app): a
+      // ready provider, signed in or needing no account. Only live probes reach it (they come
+      // through here); the status cache read at boot may describe an older sign-in.
       if (
         providers.some(
-          (provider) =>
-            provider.enabled && provider.installed && provider.auth.status === "authenticated",
+          (provider) => provider.enabled && provider.installed && provider.status === "ready",
         )
       ) {
         yield* analytics.reach("first_provider_ready");
