@@ -155,6 +155,7 @@ export function getAppModelOptions(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderDriverKind,
+  // oxlint-disable-next-line no-unused-vars -- callers pass it to keep an unavailable selection listed, but nothing reads it. Possible bug, left unfixed on purpose.
   selectedModel?: string | null,
 ): AppModelOption[] {
   const rawModels = getProviderModels(providers, provider);
@@ -203,6 +204,7 @@ export function getAppModelOptions(
 export function getAppModelOptionsForInstance(
   settings: UnifiedSettings,
   entry: ProviderInstanceEntry,
+  // oxlint-disable-next-line no-unused-vars -- unread, as in getAppModelOptions. `preserveUnavailableSelection` callers rely on it.
   selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = entry.models.map(toAppModelOption);

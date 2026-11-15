@@ -52,6 +52,7 @@ import {
   type ClaudeAdapterLiveOptions,
 } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+const encodeUnknownJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 class FakeClaudeProcess extends NodeEvents.EventEmitter {
   readonly stdin = new NodeStream.PassThrough();
@@ -1629,9 +1630,7 @@ describe("ClaudeAdapterLive", () => {
       const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
       const completed = runtimeEvents.filter((event) => event.type === "item.completed");
       assert.equal(completed.length, 2);
-      const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        runtimeEvents,
-      );
+      const serialized = yield* encodeUnknownJson(runtimeEvents);
       assert.include(serialized, "cad_comment_locate metadata");
       assert.include(serialized, "cad_comment_inspect metadata");
       assert.notInclude(serialized, "native-render-bytes");

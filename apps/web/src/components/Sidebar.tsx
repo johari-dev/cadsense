@@ -7,7 +7,6 @@ import {
   CaretRightIcon as ChevronRightIcon,
   ChatCircleIcon,
   FolderPlusIcon,
-  GlobeIcon as Globe2Icon,
   SpinnerIcon as LoaderIcon,
   GearSixIcon as SettingsIcon,
   NotePencilIcon as SquarePenIcon,
@@ -137,7 +136,6 @@ import {
   NumberFieldIncrement,
   NumberFieldInput,
 } from "./ui/number-field";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -879,7 +877,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const updateSettings = useUpdateClientSettings();
   const sidebarThreadPreviewCount = useClientSettings<SidebarThreadPreviewCount>(
     (settings) => settings.sidebarThreadPreviewCount,
   );

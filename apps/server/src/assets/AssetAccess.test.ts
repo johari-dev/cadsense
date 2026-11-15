@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { AssetPreviewTypeValidationError, ThreadId } from "@cadsense/contracts";
+import { ThreadId } from "@cadsense/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@cadsense/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";

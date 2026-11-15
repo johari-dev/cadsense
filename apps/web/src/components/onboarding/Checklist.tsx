@@ -93,7 +93,6 @@ export function ChecklistProgress({ done }: { readonly done: ReadonlyArray<boole
     >
       {done.map((stepDone, index) => (
         // Steps never reorder, so the index is their identity.
-        // oxlint-disable-next-line react/no-array-index-key
         <span key={index} className="h-[3px] flex-1 overflow-hidden rounded-full bg-foreground/10">
           <span
             className={cn(

@@ -1,5 +1,4 @@
 // @effect-diagnostics globalConsole:off - spike script prints its measurements.
-/* eslint-disable unicorn/require-post-message-target-origin -- worker_threads ports take transfer lists, not window target origins. */
 // @effect-diagnostics nodeBuiltinImport:off - spike runs directly in Node worker threads.
 // @effect-diagnostics globalTimers:off - the parent times out a worker with a plain timer.
 /**

@@ -21,8 +21,9 @@ export default defineConfig({
     testTimeout: 60_000,
   },
   staged: {
-    // Formatter only for now — no lint or typecheck on commit.
-    "*": "vp fmt --no-error-on-unmatched-pattern",
+    // Format, then lint the formatted files. One list so the two run in that
+    // order. No typecheck on commit.
+    "*": ["vp fmt --no-error-on-unmatched-pattern", "vp lint"],
   },
   fmt: {
     ignorePatterns: [
@@ -62,13 +63,19 @@ export default defineConfig({
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-cadsense/index.ts"],
+    // Every enabled rule is "error" so a finding fails `vp check` in CI. Turn a
+    // rule "off" with a reason instead of downgrading it to "warn".
     categories: {
-      correctness: "warn",
-      suspicious: "warn",
-      perf: "warn",
+      correctness: "error",
+      suspicious: "error",
+      perf: "error",
     },
     rules: {
       "unicorn/no-array-sort": "off",
+      // Flags `[...x]` snapshots taken before a loop mutates x, where dropping the copy is a bug.
+      "unicorn/no-useless-spread": "off",
+      // Every site is a positional list with no stable id (drawing lines, table cells).
+      "react/no-array-index-key": "off",
       "unicorn/consistent-function-scoping": "off",
       "oxc/no-map-spread": "off",
       "react-in-jsx-scope": "off",
@@ -106,7 +113,7 @@ export default defineConfig({
         },
       ],
       "cadsense/no-global-process-runtime": "error",
-      "cadsense/no-inline-schema-compile": "warn",
+      "cadsense/no-inline-schema-compile": "error",
       "cadsense/no-manual-effect-runtime-in-tests": "error",
       "cadsense/no-native-title-tooltip": "error",
       "cadsense/namespace-node-imports": "error",
@@ -115,6 +122,10 @@ export default defineConfig({
       // Revisit once Oxlint's tsgolint path can integrate with @effect/tsgo diagnostics.
       typeAware: false,
       typeCheck: false,
+      // A rule someone adds at "warn" later still fails the run.
+      denyWarnings: true,
+      // A disable comment that no longer suppresses anything is a finding too.
+      reportUnusedDisableDirectives: "error",
     },
   },
 });

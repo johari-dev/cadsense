@@ -6,6 +6,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
+const decodeTurnAdmissionJson = Schema.decodeEffect(Schema.fromJsonString(ThreadTurnAdmission));
+
 it.layer(NodeSqliteClient.layerMemory())("CAD lifecycle migration", (it) => {
   it.effect("backfills only unresolved legacy starts for correlated startup cleanup", () =>
     Effect.gen(function* () {
@@ -23,9 +25,7 @@ it.layer(NodeSqliteClient.layerMemory())("CAD lifecycle migration", (it) => {
       const rows = yield* sql<{
         turn_admission_json: string;
       }>`SELECT turn_admission_json FROM projection_threads`;
-      const state = yield* Schema.decodeEffect(Schema.fromJsonString(ThreadTurnAdmission))(
-        rows[0]?.turn_admission_json ?? "null",
-      );
+      const state = yield* decodeTurnAdmissionJson(rows[0]?.turn_admission_json ?? "null");
       assert.deepStrictEqual(state, {
         pending: [
           {

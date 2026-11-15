@@ -61,7 +61,7 @@ it("opens a published comment at its location in the CAD panel", () => {
   const commentButton = buttons.find((button) => text(button).includes("roller shaft"));
   const badge = elements(commentButton).find((element) => element.type === CommentBadge);
   expect(badge?.props.severity).toBe("blocker");
-  (commentButton?.props.onClick as () => void)();
+  (commentButton!.props.onClick as () => void)();
   expect(useCadCommentReviewStore.getState().pending[scopedThreadKey(threadRef)]).toEqual({
     id: "comment-1",
     target: "all",

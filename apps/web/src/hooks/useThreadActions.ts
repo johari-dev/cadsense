@@ -1,4 +1,4 @@
-import { scopeProjectRef, scopedThreadKey } from "@cadsense/client-runtime/environment";
+import { scopeProjectRef } from "@cadsense/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@cadsense/client-runtime/state/runtime";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@cadsense/contracts";
 import * as Cause from "effect/Cause";

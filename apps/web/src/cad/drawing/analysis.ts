@@ -735,13 +735,15 @@ const classifyShape = (
     }
     const around = (degree: number) =>
       bins[(degree + 359) % 360]! + bins[degree % 360]! + bins[(degree + 1) % 360]!;
-    for (let offset = 0; offset < 60 && side > 0; offset++) {
-      const flats = [0, 1, 2, 3, 4, 5].map((k) => around(offset + 60 * k) / side);
-      if (
-        flats.every((share) => share > 0.04) &&
-        flats.reduce((sum, share) => sum + share, 0) > 0.5
-      )
-        return { kind: "hex", flats: sw, length: su };
+    if (side > 0) {
+      for (let offset = 0; offset < 60; offset++) {
+        const flats = [0, 1, 2, 3, 4, 5].map((k) => around(offset + 60 * k) / side);
+        if (
+          flats.every((share) => share > 0.04) &&
+          flats.reduce((sum, share) => sum + share, 0) > 0.5
+        )
+          return { kind: "hex", flats: sw, length: su };
+      }
     }
   }
   // A disc is turned about w instead; draw it as a plate with a round outline.

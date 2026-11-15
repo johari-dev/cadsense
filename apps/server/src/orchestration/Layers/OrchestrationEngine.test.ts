@@ -4,7 +4,6 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
-  TurnId,
   type OrchestrationEvent,
   ProviderInstanceId,
 } from "@cadsense/contracts";
@@ -41,7 +40,6 @@ import { ServerConfig } from "../../config.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
-const asTurnId = (value: string): TurnId => TurnId.make(value);
 
 async function createOrchestrationSystem() {
   const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {

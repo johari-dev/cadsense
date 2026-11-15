@@ -163,6 +163,9 @@ const decodeImporting = Schema.decodeUnknownEffect(
 const decodeFailure = Schema.decodeUnknownEffect(
   Schema.Struct({ reason: Schema.String, details: Schema.String }),
 );
+const decodeLocalFileStatus = Schema.decodeUnknownEffect(
+  Schema.Struct({ localFileStatus: Schema.String }),
+);
 const decodeToolSchema = Schema.decodeUnknownSync(
   Schema.Struct({ properties: Schema.Record(Schema.String, Schema.Unknown) }),
 );
@@ -463,9 +466,7 @@ it.layer(layer, { timeout: 120_000, excludeTestServices: true })(
         const status = Effect.fn(function* () {
           const result = yield* reviews.call("cad_context", {});
           assert.isFalse(result.isError);
-          return (yield* Schema.decodeUnknownEffect(
-            Schema.Struct({ localFileStatus: Schema.String }),
-          )(result.structuredContent)).localFileStatus;
+          return (yield* decodeLocalFileStatus(result.structuredContent)).localFileStatus;
         });
         assert.strictEqual(yield* status(), "unchanged");
         yield* fs.writeFileString(folder.part, "\n", { flag: "a" });

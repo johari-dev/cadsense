@@ -4,6 +4,11 @@ import * as Schema from "effect/Schema";
 import * as CodexSchema from "./schema.ts";
 
 const isGetAccountResponse = Schema.is(CodexSchema.V2GetAccountResponse);
+const isCollabAgentTool = Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool);
+const isCollabAgentToolCallStatus = Schema.is(
+  CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus,
+);
+const isThreadResumeResponse = Schema.is(CodexSchema.V2ThreadResumeResponse);
 
 it("accepts Codex 0.150 multi-agent values", () => {
   const schemas = [
@@ -18,13 +23,10 @@ it("accepts Codex 0.150 multi-agent values", () => {
   }
 
   for (const tool of ["sendMessage", "followupTask", "interruptAgent", "listAgents"]) {
-    assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool)(tool), true);
+    assert.equal(isCollabAgentTool(tool), true);
   }
 
-  assert.equal(
-    Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus)("interrupted"),
-    true,
-  );
+  assert.equal(isCollabAgentToolCallStatus("interrupted"), true);
 
   const resumeResponse = {
     approvalPolicy: "never",
@@ -65,7 +67,7 @@ it("accepts Codex 0.150 multi-agent values", () => {
     },
   };
 
-  assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse)(resumeResponse), true);
+  assert.equal(isThreadResumeResponse(resumeResponse), true);
 });
 
 it("accepts Codex 0.150 account plan values", () => {
