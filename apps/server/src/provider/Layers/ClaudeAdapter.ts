@@ -93,6 +93,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
+import { claudeUsesGateway } from "../Drivers/ClaudeGateway.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -3914,6 +3915,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
       const modelCatalog = yield* modelCatalogEffect;
+      // Decided for this session's folder: the CLI also reads the project's settings there.
+      const usesGateway = yield* claudeUsesGateway(
+        claudeSettings,
+        claudeEnvironment,
+        input.cwd,
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
       if (input.provider !== undefined && input.provider !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
@@ -4583,10 +4593,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                         type: "http" as const,
                         url: `${mcpSession.endpoint}/cad`,
                         headers: { Authorization: mcpSession.authorizationHeader },
-                        // Declared in full on every turn instead of deferred behind
-                        // ToolSearch: a model that never searches (local models do
-                        // not) could otherwise see only the CAD tool names.
-                        alwaysLoad: true,
+                        // Behind a gateway, declared in full on every turn instead
+                        // of deferred behind ToolSearch: a model that never searches
+                        // (local models do not) would see only the CAD tool names.
+                        // Anthropic's own API keeps the CLI's default.
+                        ...(usesGateway ? { alwaysLoad: true } : {}),
                       },
                     }
                   : {}),

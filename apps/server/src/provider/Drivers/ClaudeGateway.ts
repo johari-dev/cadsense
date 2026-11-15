@@ -105,6 +105,21 @@ function resolveClaudeGateway(environment: NodeJS.ProcessEnv): Gateway | undefin
 }
 
 /**
+ * Whether a session started in `cwd` reaches its models through a gateway
+ * instead of Anthropic's own API. Reads the same settings files the CLI does
+ * for that folder, and makes no request. `environment` must already carry the
+ * instance's `CLAUDE_CONFIG_DIR`.
+ */
+export const claudeUsesGateway = Effect.fn("claudeUsesGateway")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  environment: NodeJS.ProcessEnv,
+  cwd: string | undefined,
+): Effect.fn.Return<boolean, never, FileSystem.FileSystem | Path.Path> {
+  const effectiveEnvironment = yield* resolveClaudeEffectiveEnvironment(config, environment, cwd);
+  return resolveClaudeGateway(effectiveEnvironment) !== undefined;
+});
+
+/**
  * Models from the gateway this Claude instance is configured for, or
  * `undefined` when it uses Anthropic's own API. `environment` must already
  * carry the instance's `CLAUDE_CONFIG_DIR` (see `makeClaudeEnvironment`).

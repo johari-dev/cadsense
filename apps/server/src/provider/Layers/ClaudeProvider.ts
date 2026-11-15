@@ -39,6 +39,7 @@ import {
   type GatewayModels,
 } from "../GatewayModels.ts";
 import {
+  adoptGatewayModelIds,
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
   formatClaudeVersionUpgradeMessage,
@@ -51,13 +52,13 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 });
 
 /**
- * Picker entries for a gateway's models.
+ * Picker entries for a gateway's models. `catalog` already names its models
+ * as the gateway does (see `adoptGatewayModelIds`).
  *
- * An id the catalog knows, by slug or alias (a proxy in front of Anthropic
- * lists dated ids such as `claude-haiku-4-5-20251001`), becomes that catalog
- * entry, so it keeps its name and options and title generation still finds
- * Haiku. Those entries come first, in catalog order and limited to
- * `supportedModels` (the ones this CLI version can run), as without a gateway.
+ * An id the catalog knows becomes that catalog entry, so it keeps its name
+ * and options and title generation still finds Haiku. Those entries come
+ * first, in catalog order and limited to `supportedModels` (the ones this CLI
+ * version can run), as without a gateway.
  *
  * Any other id is passed through as a plain model. When the gateway also
  * serves catalog models, those extra ids are marked legacy, which the picker
@@ -548,10 +549,17 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   // A gateway's own list replaces the Claude catalog: catalog slugs mean
   // nothing to Ollama or LM Studio, and the CLI sends the slug unchanged.
   const gatewayModels = resolveGatewayModels ? yield* resolveGatewayModels() : undefined;
-  const supportedModels = resolveClaudeModelsForVersion(modelCatalog, parsedVersion);
+  const gatewayCatalog =
+    gatewayModels?._tag === "Listed"
+      ? adoptGatewayModelIds(
+          modelCatalog,
+          gatewayModels.models.map((model) => model.id),
+        )
+      : modelCatalog;
+  const supportedModels = resolveClaudeModelsForVersion(gatewayCatalog, parsedVersion);
   const builtInModels =
     gatewayModels?._tag === "Listed"
-      ? claudeGatewayProviderModels(modelCatalog, supportedModels, gatewayModels.models)
+      ? claudeGatewayProviderModels(gatewayCatalog, supportedModels, gatewayModels.models)
       : supportedModels;
   const models = providerModelsFromSettings(
     builtInModels,
@@ -565,9 +573,9 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     gatewayModels?._tag === "Unlisted"
       ? formatUnlistedGatewayMessage(gatewayModels.baseUrl, "Claude")
       : gatewayModels?._tag === "Listed" &&
-          !gatewayModels.models.some((model) => resolveClaudeCatalogModel(modelCatalog, model.id))
+          !gatewayModels.models.some((model) => resolveClaudeCatalogModel(gatewayCatalog, model.id))
         ? undefined
-        : formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
+        : formatClaudeVersionUpgradeMessage(gatewayCatalog, parsedVersion);
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))

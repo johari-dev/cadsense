@@ -14,7 +14,7 @@
  *
  *   node apps/server/scripts/gateway-models-e2e.ts --out .cadsense/gateway-e2e/run \
  *     [--gateway http://127.0.0.1:11434] [--model qwen3:0.6b] [--codex-config builtin|custom|none] \
- *     [--catalog-model claude-opus-5-5]
+ *     [--catalog-model claude-opus-5-5] [--alias-model claude-haiku-4-5-20251001]
  *
  * --gateway is an Ollama-compatible endpoint serving both Anthropic's /v1/messages and OpenAI's
  * /v1/responses (default: Ollama on its usual port), and --model the one to run turns with
@@ -32,6 +32,12 @@
  * model, like a proxy in front of Anthropic that lists the curated models next to dated ids and
  * its own aliases. The Claude tab must then show the catalog model and fold the gateway's other
  * models under "More models", where they can still be picked.
+ *
+ * --alias-model makes the gateway list, and serve, a model under an id the Claude catalog only
+ * knows as an alias, like a proxy that lists the dated `claude-haiku-4-5-20251001` and rejects the
+ * catalog's `claude-haiku-4-5`. The Claude tab must show that model once, under its catalog name,
+ * next to the gateway's own models. A turn on it must ask the gateway for the id the gateway
+ * lists, and nothing (title generation included) may ask for any other Claude model id.
  *
  * Claude's turn must declare the CAD tools in full: Claude Code otherwise defers MCP tools behind
  * ToolSearch, and a local model that never searches only sees their names.
@@ -69,11 +75,12 @@ const { values } = NodeUtil.parseArgs({
     model: { type: "string" },
     "codex-config": { type: "string" },
     "catalog-model": { type: "string" },
+    "alias-model": { type: "string" },
   },
 });
 if (!values.out) {
   throw new Error(
-    "Usage: --out <dir> [--gateway <url>] [--model <id>] [--codex-config builtin|custom|none] [--catalog-model <slug>]",
+    "Usage: --out <dir> [--gateway <url>] [--model <id>] [--codex-config builtin|custom|none] [--catalog-model <slug>] [--alias-model <id>]",
   );
 }
 const codexConfigKind = values["codex-config"] ?? "builtin";
@@ -82,6 +89,10 @@ if (codexConfigKind !== "builtin" && codexConfigKind !== "custom" && codexConfig
 }
 const tabs = codexConfigKind === "none" ? (["Claude"] as const) : (["Claude", "Codex"] as const);
 const catalogModel = values["catalog-model"];
+const aliasModel = values["alias-model"];
+if (catalogModel && aliasModel) throw new Error("Use --catalog-model or --alias-model, not both");
+/** The extra id Claude's listing of the gateway names. */
+const extraListedModel = catalogModel ?? aliasModel;
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
 NodeFS.mkdirSync(out, { recursive: true });
@@ -144,27 +155,39 @@ const proxy = NodeHttp.createServer((request, response) => {
     const body = Buffer.concat(chunks);
     let model = "-";
     let tools: string[] = [];
+    // The gateway serves the alias id as its turn model, the way a proxy serves a dated id.
+    let forwardedBody = body;
     try {
       const parsed = JSON.parse(body.toString("utf8")) as { model?: string; tools?: unknown };
       model = parsed.model ?? "-";
       tools = toolNames(parsed.tools);
+      if (aliasModel !== undefined && model === aliasModel) {
+        forwardedBody = Buffer.from(JSON.stringify({ ...parsed, model: turnModel }));
+      }
     } catch {}
     const cadTools = tools.filter((name) => name.includes("cad_")).length;
     const upstream = NodeHttp.request(
       new URL(request.url ?? "/", gateway),
-      { method: request.method, headers: { ...request.headers, host: gateway.host } },
+      {
+        method: request.method,
+        headers: {
+          ...request.headers,
+          host: gateway.host,
+          ...(forwardedBody === body ? {} : { "content-length": String(forwardedBody.length) }),
+        },
+      },
       (upstreamResponse) => {
         NodeFS.appendFileSync(
           requestLog,
           `${request.method} ${request.url} model=${model} tools=${tools.length} cad=${cadTools} status=${upstreamResponse.statusCode}\n`,
         );
         // Only Claude's listing sends anthropic-version, so Codex still sees the gateway's own list.
-        const addCatalogModel =
-          catalogModel !== undefined &&
+        const addListedModel =
+          extraListedModel !== undefined &&
           request.method === "GET" &&
           request.url?.startsWith("/v1/models") === true &&
           request.headers["anthropic-version"] !== undefined;
-        if (!addCatalogModel) {
+        if (!addListedModel) {
           response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
           upstreamResponse.pipe(response);
           return;
@@ -173,7 +196,7 @@ const proxy = NodeHttp.createServer((request, response) => {
         upstreamResponse.on("data", (chunk: Buffer) => listed.push(chunk));
         upstreamResponse.on("end", () => {
           const list = JSON.parse(Buffer.concat(listed).toString("utf8")) as { data: unknown[] };
-          list.data.push({ id: catalogModel, object: "model" });
+          list.data.push({ id: extraListedModel, object: "model" });
           response.writeHead(200, { "content-type": "application/json" });
           response.end(JSON.stringify(list));
         });
@@ -186,7 +209,7 @@ const proxy = NodeHttp.createServer((request, response) => {
       );
       response.destroy();
     });
-    upstream.end(body);
+    upstream.end(forwardedBody);
   });
 });
 await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
@@ -364,10 +387,10 @@ const pickerModelsOn = (page: Page, tab: "Claude" | "Codex") =>
     180_000,
   );
 
-/** Pick `turnModel` in the open picker and send one short message, waiting for the reply. */
-const runTurn = async (page: Page) => {
+/** Pick `model` in the open picker and send one short message. Returns the turn's stop button. */
+const startTurn = async (page: Page, model: string) => {
   if (await moreModels.isVisible()) await moreModels.click();
-  await pickerRows.filter({ hasText: turnModel }).first().click();
+  await pickerRows.filter({ hasText: model }).first().click();
   const stop = page.getByRole("button", { name: "Stop generation" });
   // A message can't start a turn while the project's first import runs, so keep sending.
   const deadline = Date.now() + 5 * 60_000;
@@ -380,6 +403,11 @@ const runTurn = async (page: Page) => {
     await page.getByRole("button", { name: "Send message" }).click();
     await stop.waitFor({ timeout: 5_000 }).catch(() => {});
   }
+  return stop;
+};
+/** Run one turn on `turnModel` and wait for the reply. */
+const runTurn = async (page: Page) => {
+  const stop = await startTurn(page, turnModel);
   await stop.waitFor({ state: "detached", timeout: 5 * 60_000 });
 };
 const prompt = "Reply with the single word: pong";
@@ -416,6 +444,8 @@ try {
     await addProjectDialog.waitFor({ state: "detached" });
   });
 
+  /** The picker row of the model the gateway lists under an alias, in --alias-model runs. */
+  let aliasRow: string | undefined;
   for (const tab of tabs) {
     let pickerModels: string[] = [];
     await run(`${tab.toLowerCase()}-picker`, async (page) => {
@@ -439,6 +469,28 @@ try {
         expanded[0] === pickerModels[0] && gatewayModels.every((id) => expanded.includes(id)),
         { gatewayModels, expanded },
       );
+      continue;
+    }
+    if (tab === "Claude" && aliasModel) {
+      // The catalog model may or may not fold the gateway's models, so look at every row.
+      let rows: string[] = [];
+      await run("claude-picker-all-models", async () => {
+        if (await moreModels.isVisible()) await moreModels.click();
+        rows = await visibleRows();
+        return { rows };
+      });
+      const catalogRows = rows.filter((row) => !gatewayModels.includes(row));
+      check(
+        "the Claude tab lists every model the gateway lists",
+        gatewayModels.every((id) => rows.includes(id)),
+        { gatewayModels, rows },
+      );
+      check(
+        `the Claude tab lists ${aliasModel} once, under its catalog name`,
+        catalogRows.length === 1 && catalogRows[0] !== aliasModel,
+        { catalogRows },
+      );
+      aliasRow = catalogRows[0];
       continue;
     }
     const customModels = tab === "Codex" ? [codexCustomModel] : [];
@@ -474,7 +526,8 @@ try {
   await run("claude-turn", async (page) => {
     await pickerModelsOn(page, "Claude");
     await runTurn(page);
-    titles.Claude = await generatedTitle(page);
+    // A chat that never gets a title fails its check below, not the whole run.
+    titles.Claude = await generatedTitle(page).catch(() => "");
     return { title: titles.Claude, requests: requestsTo("/v1/messages") };
   });
   if (codexConfigKind !== "none") {
@@ -485,9 +538,47 @@ try {
         .click({ force: true });
       await pickerModelsOn(page, "Codex");
       await runTurn(page);
-      titles.Codex = await generatedTitle(page);
+      titles.Codex = await generatedTitle(page).catch(() => "");
       return { title: titles.Codex, requests: requestsTo("/v1/responses") };
     });
+  }
+  if (aliasModel !== undefined) {
+    const claudeRequests = () =>
+      requestsTo("/v1/messages").filter((line) => line.includes("model=claude-"));
+    const before = claudeRequests().length;
+    await run("claude-alias-turn", async (page) => {
+      await page
+        .getByRole("button", { name: /^New thread in / })
+        .first()
+        .click({ force: true });
+      await pickerModelsOn(page, "Claude");
+      // The check is which id reaches the gateway, so stop once the gateway has seen the turn.
+      // Claude Code treats a Claude model id as a Claude model, and a small local model standing
+      // in for one can take minutes to finish.
+      // A turn that cannot start fails the check below, so the remaining checks still report.
+      // Title generation asks for a Claude model too, so wait for the request that declares the
+      // CAD tools: only the chat turn does.
+      const stop = await startTurn(page, aliasRow ?? aliasModel).catch(() => undefined);
+      await waitFor("the turn to reach the gateway", () =>
+        claudeRequests()
+          .slice(before)
+          .some((line) => !line.includes(" cad=0 "))
+          ? true
+          : undefined,
+      ).catch(() => {});
+      await stop?.click().catch(() => {});
+      await stop?.waitFor({ state: "detached", timeout: 60_000 }).catch(() => {});
+      return { requests: claudeRequests().slice(before) };
+    });
+    const turnRequests = claudeRequests().slice(before);
+    check(
+      `a Claude turn on that model asked the gateway for ${aliasModel}, as the gateway lists it`,
+      turnRequests.some((line) => !line.includes(" cad=0 ")) &&
+        turnRequests.every(
+          (line) => line.includes(`model=${aliasModel} `) && line.endsWith(" status=200"),
+        ),
+      { turnRequests },
+    );
   }
   const claudeTurnRequests = requestsTo("/v1/messages").filter((line) =>
     line.includes(`model=${turnModel} `),
@@ -513,7 +604,9 @@ try {
     );
     check(
       `no ${cli} request asked the gateway for a built-in model`,
-      !turnRequests.some((line) => /model=(claude-|gpt-)/.test(line)),
+      !turnRequests.some(
+        (line) => /model=(claude-|gpt-)/.test(line) && !line.includes(`model=${aliasModel} `),
+      ),
       { turnRequests },
     );
     check(`the ${cli} chat got a generated title`, Boolean(titles[cli]), { title: titles[cli] });

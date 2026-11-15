@@ -21,6 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
@@ -38,7 +39,7 @@ import {
   probeClaudeCapabilities,
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
-import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
+import { adoptGatewayModelIds, resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import {
@@ -47,6 +48,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import type { GatewayModels } from "../GatewayModels.ts";
 import { discoverClaudeGatewayModels } from "./ClaudeGateway.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { installScriptCommand, type ProviderSetupCommands } from "../providerSetup.ts";
@@ -139,17 +141,38 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         continuationGroupKey,
       });
 
+      // Asked on every status check, so a model pulled into Ollama shows up
+      // on the next refresh. The ids it lists are kept for requests, which
+      // must name each model as the gateway does (see `adoptGatewayModelIds`).
+      const gatewayModelIds = yield* Ref.make<ReadonlyArray<string> | undefined>(undefined);
+      const listedIds = (gateway: GatewayModels | undefined) =>
+        gateway?._tag === "Listed" ? gateway.models.map((model) => model.id) : [];
+      const discoverGatewayModels = discoverClaudeGatewayModels(
+        effectiveConfig,
+        claudeEnv,
+        cwd,
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.tap((gateway) => Ref.set(gatewayModelIds, listedIds(gateway))),
+      );
+      const requestModelCatalog = Effect.gen(function* () {
+        // A request sent before the first status check asks the gateway itself.
+        const ids = (yield* Ref.get(gatewayModelIds)) ?? listedIds(yield* discoverGatewayModels);
+        return adoptGatewayModelIds(yield* modelCatalog, ids);
+      });
       const adapterOptions = {
         instanceId,
         environment: processEnv,
-        modelCatalog,
+        modelCatalog: requestModelCatalog,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
       const textGeneration = yield* makeClaudeTextGeneration(
         effectiveConfig,
         processEnv,
-        modelCatalog,
+        requestModelCatalog,
       );
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
@@ -183,14 +206,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                 processEnv,
                 cwd,
                 resolveClaudeModelCatalog(manifest),
-                // Asked on every check, so a model pulled into Ollama shows
-                // up on the next refresh.
-                () =>
-                  discoverClaudeGatewayModels(effectiveConfig, claudeEnv, cwd).pipe(
-                    Effect.provideService(FileSystem.FileSystem, fileSystem),
-                    Effect.provideService(Path.Path, path),
-                    Effect.provideService(HttpClient.HttpClient, httpClient),
-                  ),
+                () => discoverGatewayModels,
               ),
             ),
             Effect.map(stampIdentity),
