@@ -5,7 +5,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { describe, expect } from "vite-plus/test";
 
-import { ProviderInstanceId } from "@cadsense/contracts";
+import { ProviderInstanceId, type ServerProvider } from "@cadsense/contracts";
 import { createModelSelection } from "@cadsense/shared/model";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
@@ -25,7 +25,15 @@ const makeStubInstance = (
     },
     displayName: undefined,
     enabled: true,
-    snapshot: {} as ProviderInstance["snapshot"],
+    // Ready and serving the model the tests select, so routing keeps it.
+    snapshot: {
+      getSnapshot: Effect.succeed({
+        instanceId,
+        enabled: true,
+        status: "ready",
+        models: [{ slug: "test-model", name: "test-model", isCustom: false, capabilities: null }],
+      } as unknown as ServerProvider),
+    } as ProviderInstance["snapshot"],
     adapter: {} as ProviderInstance["adapter"],
     textGeneration: TextGeneration.TextGeneration.of({ generateThreadTitle }),
   }) satisfies ProviderInstance;
