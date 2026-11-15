@@ -32,6 +32,11 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("cad-thumbnail", {
     snapshotId: CadSnapshotId,
   }),
+  /** The new thread backdrop the CAD panel saved for a snapshot. Fails with
+      `AssetCadThumbnailNotFoundError` until one is saved. */
+  Schema.TaggedStruct("cad-backdrop", {
+    snapshotId: CadSnapshotId,
+  }),
 ]);
 export type AssetResource = typeof AssetResource.Type;
 

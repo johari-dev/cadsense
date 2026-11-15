@@ -37,6 +37,8 @@ const webp = (fill: number) =>
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]);
 const thumbnails = (dir: string) =>
   Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "thumbnails")).then((n) => n.sort()));
+const backdrops = (dir: string) =>
+  Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "backdrops")).then((n) => n.sort()));
 const firstId = "00000000-0000-4000-8000-000000000001";
 const secondId = "00000000-0000-4000-8000-000000000002";
 const root = Schema.decodeUnknownSync(CadSnapshotRoot)({
@@ -654,6 +656,80 @@ describe("CadSnapshotStore thumbnails", () => {
           }),
         );
         assert.deepStrictEqual(yield* thumbnails(dir), [`${firstId}.webp`]);
+      }),
+    ),
+  );
+});
+
+// Ways a second image per snapshot can go wrong: it shares the thumbnail's file or cap, takes a
+// format without alpha, gets replaced by a later upload, or outlives its snapshot.
+describe("CadSnapshotStore backdrops", () => {
+  it.effect(
+    "keeps a snapshot's backdrop apart from its thumbnail, and keeps the first of each",
+    () =>
+      harness((store, dir) =>
+        Effect.gen(function* () {
+          yield* store.publish(yield* fixture(store));
+          yield* store.putThumbnail(firstId, jpeg);
+          yield* store.putThumbnail(firstId, webp(1), "backdrop");
+          yield* store.putThumbnail(firstId, webp(2), "backdrop");
+          assert.deepStrictEqual(yield* thumbnails(dir), [`${firstId}.jpg`]);
+          assert.deepStrictEqual(yield* backdrops(dir), [`${firstId}.webp`]);
+          const saved = yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(dir, "backdrops", `${firstId}.webp`)),
+          );
+          assert.deepStrictEqual(Array.from(saved), Array.from(webp(1)));
+        }),
+      ),
+  );
+  it.effect("takes a backdrop larger than a thumbnail, but only WebP and only up to its cap", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        assert.strictEqual(
+          (yield* Effect.flip(store.putThumbnail(firstId, webp(1), "backdrop"))).reason,
+          "unavailable",
+        );
+        yield* store.publish(yield* fixture(store));
+        // JPEG has no alpha, so it would show as an opaque block behind the new thread view.
+        assert.strictEqual(
+          (yield* Effect.flip(store.putThumbnail(firstId, jpeg, "backdrop"))).reason,
+          "corrupt",
+        );
+        const oversized = new Uint8Array(320 * 1024 + 1);
+        oversized.set(webp(1));
+        assert.strictEqual(
+          (yield* Effect.flip(store.putThumbnail(firstId, oversized, "backdrop"))).reason,
+          "corrupt",
+        );
+        assert.deepStrictEqual(yield* backdrops(dir), []);
+        const large = new Uint8Array(64 * 1024 + 1);
+        large.set(webp(1));
+        yield* store.putThumbnail(firstId, large, "backdrop");
+        assert.deepStrictEqual(yield* backdrops(dir), [`${firstId}.webp`]);
+        assert.deepStrictEqual(yield* thumbnails(dir), []);
+      }),
+    ),
+  );
+  it.effect("removes a backdrop with its snapshot, and at startup when the snapshot is gone", () =>
+    harness((store, dir) =>
+      Effect.gen(function* () {
+        yield* store.publish(yield* fixture(store));
+        yield* store.publish(yield* fixture(store, secondId));
+        yield* store.putThumbnail(firstId, webp(1), "backdrop");
+        yield* store.putThumbnail(secondId, webp(2), "backdrop");
+        yield* store.remove([firstId], []);
+        assert.deepStrictEqual(yield* backdrops(dir), [`${secondId}.webp`]);
+        yield* Effect.flip(store.putThumbnail(firstId, webp(1), "backdrop"));
+        // Left by a crash between removing a manifest and its backdrop.
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(dir, "backdrops", `${firstId}.webp`), webp(1)),
+        );
+        yield* make.pipe(
+          Effect.provideService(CadDiskSpace, {
+            availableBytes: () => Effect.succeed(CAD_DISK_RESERVE_BYTES * 2),
+          }),
+        );
+        assert.deepStrictEqual(yield* backdrops(dir), [`${secondId}.webp`]);
       }),
     ),
   );

@@ -26,10 +26,18 @@ import { verifyCadAssets } from "./CadAssetVerification.ts";
 export const CAD_DISK_RESERVE_BYTES = 2 * 1024 ** 3;
 const MAX_MANIFEST_BYTES = 128 * 1024 ** 2;
 const MAX_ASSET_BYTES = 512 * 1024 ** 2;
-/** Thumbnail formats the CAD panel encodes, by stored extension. See `CadThumbnails.ts`. */
-export const CAD_THUMBNAIL_EXTENSIONS = ["webp", "jpg"] as const;
-/** Largest thumbnail kept, in bytes. Uploads are capped at about 60 KB by their data URL length. */
-export const CAD_THUMBNAIL_MAX_BYTES = 64 * 1024;
+/**
+ * The preview images the CAD panel captures for a snapshot, by kind: the directory under
+ * `<stateDir>/cad` that holds each, the formats it takes by stored extension, and the largest
+ * one kept, in bytes. Uploads are capped a little lower by their data URL length. A backdrop is
+ * WebP only because it needs transparency. See `CadThumbnails.ts`.
+ */
+export const CAD_SNAPSHOT_IMAGES = {
+  thumbnail: { directory: "thumbnails", extensions: ["webp", "jpg"], maxBytes: 64 * 1024 },
+  backdrop: { directory: "backdrops", extensions: ["webp"], maxBytes: 320 * 1024 },
+} as const;
+export type CadSnapshotImageKind = keyof typeof CAD_SNAPSHOT_IMAGES;
+const CAD_SNAPSHOT_IMAGE_KINDS: ReadonlyArray<CadSnapshotImageKind> = ["thumbnail", "backdrop"];
 const ascii = (bytes: Uint8Array, start: number, text: string) =>
   [...text].every((character, index) => bytes[start + index] === character.charCodeAt(0));
 /** The extension a thumbnail is stored under, from its signature; null for anything else. */
@@ -90,12 +98,13 @@ export interface CadSnapshotStoreShape {
     protectedIds: readonly string[],
   ) => Effect.Effect<void, CadSnapshotStoreError>;
   /**
-   * Saves a published snapshot's WebP or JPEG thumbnail, once: a snapshot that already has one
-   * keeps it. Removing the snapshot removes its thumbnail.
+   * Saves one of a published snapshot's preview images, once: a snapshot that already has one of
+   * that kind keeps it. `kind` defaults to the thumbnail. Removing the snapshot removes both.
    */
   readonly putThumbnail: (
     snapshotId: string,
     bytes: Uint8Array,
+    kind?: CadSnapshotImageKind,
   ) => Effect.Effect<void, CadSnapshotStoreError>;
   readonly withPinned: <A, E, R>(
     snapshotId: string,
@@ -131,7 +140,9 @@ export const make = Effect.gen(function* () {
   const manifests = NodePath.join(root, "manifests");
   const staging = NodePath.join(root, "staging");
   const retired = NodePath.join(root, "retired");
-  const thumbnails = NodePath.join(root, "thumbnails");
+  const imageDirectory = (kind: CadSnapshotImageKind) =>
+    NodePath.join(root, CAD_SNAPSHOT_IMAGES[kind].directory);
+  const imageDirectories = CAD_SNAPSHOT_IMAGE_KINDS.map(imageDirectory);
   const pins = new Map<string, number>();
   let acquisitions = 0;
   const pendingOrphans = new Set<string>();
@@ -148,13 +159,13 @@ export const make = Effect.gen(function* () {
       manifests,
       staging,
       retired,
-      thumbnails,
+      ...imageDirectories,
     ])
       await assertDirectory(directory);
   };
   yield* io(async () => {
     await assertDirectory(config.stateDir);
-    for (const directory of [root, assets, manifests, staging, retired, thumbnails]) {
+    for (const directory of [root, assets, manifests, staging, retired, ...imageDirectories]) {
       await NodeFSP.mkdir(directory, { recursive: false }).catch((error: unknown) => {
         if (!(Predicate.isObject(error) && "code" in error && error.code === "EEXIST")) throw error;
       });
@@ -197,9 +208,9 @@ export const make = Effect.gen(function* () {
     }
   };
   const manifestPath = (id: string) => NodePath.join(manifests, `${decodeSnapshotId(id)}.json`);
-  const thumbnailPaths = (id: string) =>
-    CAD_THUMBNAIL_EXTENSIONS.map((extension) =>
-      NodePath.join(thumbnails, `${decodeSnapshotId(id)}.${extension}`),
+  const imagePaths = (id: string, kind: CadSnapshotImageKind) =>
+    CAD_SNAPSHOT_IMAGES[kind].extensions.map((extension) =>
+      NodePath.join(imageDirectory(kind), `${decodeSnapshotId(id)}.${extension}`),
     );
   const exists = async (path: string) => {
     try {
@@ -273,15 +284,16 @@ export const make = Effect.gen(function* () {
         }
       }
     });
-    // Thumbnails are written only for a published manifest, under the mutex, and removed with
-    // it. One without its manifest was left by an interrupted removal.
+    // Preview images are written only for a published manifest, under the mutex, and removed
+    // with it. One without its manifest was left by an interrupted removal.
     yield* io(async () => {
       const published = new Set(await NodeFSP.readdir(manifests));
-      for (const name of await NodeFSP.readdir(thumbnails)) {
-        const match = /^([a-f0-9-]{36})\.(webp|jpg)$/.exec(name);
-        if (match && !published.has(`${match[1]}.json`))
-          await unlinkFile(NodePath.join(thumbnails, name));
-      }
+      for (const directory of imageDirectories)
+        for (const name of await NodeFSP.readdir(directory)) {
+          const match = /^([a-f0-9-]{36})\.(webp|jpg)$/.exec(name);
+          if (match && !published.has(`${match[1]}.json`))
+            await unlinkFile(NodePath.join(directory, name));
+        }
     });
     if (pendingOrphans.size > 0)
       yield* Effect.logWarning("CAD asset cleanup pending; local cleanup will retry.");
@@ -503,7 +515,8 @@ export const make = Effect.gen(function* () {
             } catch (error) {
               if (!missing(error)) throw error;
             }
-            for (const thumbnail of thumbnailPaths(id)) await unlinkFile(thumbnail);
+            for (const kind of CAD_SNAPSHOT_IMAGE_KINDS)
+              for (const image of imagePaths(id, kind)) await unlinkFile(image);
           }
           if (!canCollect) throw failure("corrupt");
           if (canCollect)
@@ -528,24 +541,29 @@ export const make = Effect.gen(function* () {
         });
       }),
     );
-  const putThumbnail = (snapshotId: string, input: Uint8Array) =>
+  const putThumbnail: CadSnapshotStoreShape["putThumbnail"] = (
+    snapshotId,
+    input,
+    kind = "thumbnail",
+  ) =>
     lock.withPermits(1)(
       Effect.gen(function* () {
         const bytes = Uint8Array.from(input);
-        const extension = cadThumbnailExtension(bytes);
-        if (!extension || bytes.length > CAD_THUMBNAIL_MAX_BYTES) return yield* failure("corrupt");
+        const { extensions, maxBytes } = CAD_SNAPSHOT_IMAGES[kind];
+        const extension = extensions.find((known) => known === cadThumbnailExtension(bytes));
+        if (!extension || bytes.length > maxBytes) return yield* failure("corrupt");
         const paths = yield* Effect.try({
-          try: () => thumbnailPaths(snapshotId),
+          try: () => imagePaths(snapshotId, kind),
           catch: () => failure("corrupt"),
         });
         yield* io(assertDirectories);
-        // Removal holds this mutex too, so a retired snapshot cannot gain a thumbnail.
+        // Removal holds this mutex too, so a retired snapshot cannot gain a preview image.
         if (!(yield* io(() => exists(manifestPath(snapshotId)))))
           return yield* failure("unavailable");
         for (const path of paths) if (yield* io(() => exists(path))) return;
         yield* checkReserve(bytes.length);
         yield* io(() =>
-          atomicWrite(NodePath.join(thumbnails, `${snapshotId}.${extension}`), bytes),
+          atomicWrite(NodePath.join(imageDirectory(kind), `${snapshotId}.${extension}`), bytes),
         );
       }),
     );

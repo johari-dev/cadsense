@@ -37,7 +37,7 @@ import {
 } from "./CadProjectState";
 import { observeCadAppearance } from "./CadAppearance";
 import { CadCameraToolbar } from "./CadCameraToolbar";
-import { saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
+import { saveModelBackdrop, saveModelThumbnail, useModelThumbnail } from "./modelThumbnails";
 import { cadThumbnailEnvironment } from "../state/cadThumbnails";
 import { createCadViewEdits } from "./CadViewEdits";
 import { useCadDraftViewStore, usableCadDraftView } from "./cadDraftViewStore";
@@ -319,19 +319,30 @@ export function CadScene({
       setError("The CAD viewer is unavailable. Close and reopen the CAD panel to retry locally.");
     }
   }, [captureId, manifest, view]);
-  // The server keeps one thumbnail per snapshot. Capture it only when the server has none.
+  // The server keeps one thumbnail and one new thread backdrop per snapshot. Capture each only
+  // when the server has none.
   const environmentId = threadRef.environmentId;
   const thumbnailMissing = useModelThumbnail(environmentId, view.snapshotId).missing;
+  const backdropMissing = useModelThumbnail(environmentId, view.snapshotId, "backdrop").missing;
   const saveThumbnail = useAtomCommand(cadThumbnailEnvironment.save, { reportFailure: false });
   useLayoutEffect(() => {
     const current = renderer.current;
     const snapshotId = view.snapshotId;
-    if (!thumbnailMissing || !current || manifest?.snapshotId !== snapshotId) return;
-    void saveModelThumbnail(environmentId, snapshotId, current, async (image) => {
-      const result = await saveThumbnail({ environmentId, input: { snapshotId, image } });
-      return result._tag === "Success";
-    });
-  }, [environmentId, manifest, saveThumbnail, thumbnailMissing, view.snapshotId]);
+    if (!current || manifest?.snapshotId !== snapshotId) return;
+    if (thumbnailMissing)
+      void saveModelThumbnail(environmentId, snapshotId, current, async (image) => {
+        const result = await saveThumbnail({ environmentId, input: { snapshotId, image } });
+        return result._tag === "Success";
+      });
+    if (backdropMissing)
+      void saveModelBackdrop(environmentId, snapshotId, current, async (image) => {
+        const result = await saveThumbnail({
+          environmentId,
+          input: { snapshotId, kind: "backdrop", image },
+        });
+        return result._tag === "Success";
+      });
+  }, [backdropMissing, environmentId, manifest, saveThumbnail, thumbnailMissing, view.snapshotId]);
   // OrbitControls disconnects from canvas.getRootNode(); dispose before React detaches that root.
   useLayoutEffect(() => {
     if (!baseUrl || !canvas.current) return;

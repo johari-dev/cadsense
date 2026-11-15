@@ -103,6 +103,17 @@ if (THREE.ShaderChunk.tonemapping_pars_fragment.includes(IDENTITY_TONE_MAPPING))
       return saturate( exposed * ( mapped / luminance ) );
     }`,
   );
+/**
+ * A part of the overview to draw on its own, as shares of the overview's width and height from
+ * its top left corner. It may reach past the overview's edges. Its width and height shares must
+ * be equal, or the picture stretches.
+ */
+export interface CadOverviewRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
 export interface CadSceneRendererOptions {
   readonly cacheScenes?: boolean;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -694,12 +705,19 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     return blob;
   };
   /**
-   * Snapshots every shown part from a fitted isometric camera, for project thumbnails that must
-   * not depend on where the user left the camera. Encoding copies the drawing buffer before this
-   * returns to the event loop, so the live frame is redrawn before the browser can present the
-   * overview.
+   * Snapshots every shown part from a fitted isometric camera, once per clear color, for project
+   * images that must not depend on where the user left the camera. The draws run back to back, so
+   * every snapshot shows the same scene. Encoding copies the drawing buffer before this returns
+   * to the event loop, so the live frame is redrawn before the browser can present an overview.
+   * `longSide` draws the snapshots with the viewport's longer side at least that many pixels: the
+   * drawing buffer grows for these draws only and is back to its size before the live redraw.
+   * `region` fills the snapshots with that part of the overview, which is how a capture zooms in
+   * on the model without a larger buffer.
    */
-  const captureOverview = async (): Promise<Blob> => {
+  const captureOverviewOn = async (
+    clearColors: readonly number[],
+    { longSide = 0, region }: { longSide?: number; region?: CadOverviewRegion } = {},
+  ): Promise<Blob[]> => {
     assertAvailable();
     if (!model || !view) throw new CadRendererError("invalid-view");
     const overview = createCamera(
@@ -709,19 +727,47 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
         width / height,
       ),
     );
-    drawScene(overview);
-    let encoded: Promise<Blob | null>;
+    if (region) overview.setViewOffset(1, 1, region.x, region.y, region.width, region.height);
+    const encoded: Promise<Blob | null>[] = [];
+    const pixelRatio = renderer.getPixelRatio();
+    const enlarged = Math.max(pixelRatio, longSide / Math.max(width, height));
     try {
-      encoded =
-        "convertToBlob" in canvas
-          ? canvas.convertToBlob({ type: "image/png" })
-          : new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (enlarged > pixelRatio) renderer.setPixelRatio(enlarged);
+      for (const clearColor of clearColors) {
+        renderer.setClearColor(clearColor);
+        drawScene(overview);
+        encoded.push(
+          "convertToBlob" in canvas
+            ? canvas.convertToBlob({ type: "image/png" })
+            : new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")),
+        );
+      }
     } finally {
+      if (enlarged > pixelRatio) renderer.setPixelRatio(pixelRatio);
+      renderer.setClearColor(appearance.background);
       render();
     }
-    const blob = await encoded.catch(() => null);
+    const blobs = await Promise.all(encoded.map((blob) => blob.catch(() => null)));
+    if (blobs.some((blob) => !blob)) throw new CadRendererError("capture-failed");
+    return blobs.filter((blob) => blob !== null);
+  };
+  /** The overview on the themed viewport color, for the square project thumbnail. */
+  const captureOverview = async (): Promise<Blob> => {
+    const [blob] = await captureOverviewOn([appearance.background]);
     if (!blob) throw new CadRendererError("capture-failed");
     return blob;
+  };
+  /**
+   * The overview on black and on white. The renderer has no alpha channel, so a transparent
+   * image comes from the difference between the two: see `cutoutFromMattes`. `longSide` and
+   * `region` are as in `captureOverviewOn`.
+   */
+  const captureOverviewMattes = async (
+    options: { longSide?: number; region?: CadOverviewRegion } = {},
+  ): Promise<{ black: Blob; white: Blob }> => {
+    const [black, white] = await captureOverviewOn([0x000000, 0xffffff], options);
+    if (!black || !white) throw new CadRendererError("capture-failed");
+    return { black, white };
   };
   // Camera and framing from before the current comment review began, so leaving the focus
   // can return to them.
@@ -1508,6 +1554,7 @@ export const createCadSceneRenderer = (options: CadSceneRendererOptions) => {
     transition,
     capture,
     captureOverview,
+    captureOverviewMattes,
     setAppearance: (next: CadAppearance) => {
       assertAvailable();
       if (next.background === appearance.background && next.dark === appearance.dark) return;

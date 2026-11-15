@@ -104,6 +104,12 @@ const AssetClaimsSchema = Schema.Union([
     snapshotId: Schema.String,
     expiresAt: Schema.Number,
   }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("cad-backdrop"),
+    snapshotId: Schema.String,
+    expiresAt: Schema.Number,
+  }),
 ]);
 type AssetClaims = typeof AssetClaimsSchema.Type;
 
@@ -146,12 +152,16 @@ const optionOnNotFound = <A, R>(
     }),
   );
 
-/** The saved thumbnail file for a snapshot, if any. */
-const findCadThumbnail = Effect.fn("AssetAccess.findCadThumbnail")(function* (snapshotId: string) {
+/** The saved thumbnail or backdrop file for a snapshot, if any, by its asset tag. */
+const findCadThumbnail = Effect.fn("AssetAccess.findCadThumbnail")(function* (
+  snapshotId: string,
+  tag: "cad-thumbnail" | "cad-backdrop",
+) {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  for (const candidate of cadThumbnailPaths(path, config.stateDir, snapshotId)) {
+  const kind = tag === "cad-backdrop" ? "backdrop" : "thumbnail";
+  for (const candidate of cadThumbnailPaths(path, config.stateDir, snapshotId, kind)) {
     const info = yield* optionOnNotFound(fileSystem.stat(candidate));
     if (Option.isSome(info) && info.value.type === "File") return candidate;
   }
@@ -409,16 +419,18 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       break;
     }
-    case "cad-thumbnail": {
-      const thumbnailPath = yield* findCadThumbnail(input.resource.snapshotId).pipe(
-        Effect.orElseSucceed(() => null),
-      );
+    case "cad-thumbnail":
+    case "cad-backdrop": {
+      const thumbnailPath = yield* findCadThumbnail(
+        input.resource.snapshotId,
+        input.resource._tag,
+      ).pipe(Effect.orElseSucceed(() => null));
       if (!thumbnailPath) {
         return yield* new AssetCadThumbnailNotFoundError({ resource: input.resource });
       }
       claims = {
         version: 1,
-        kind: "cad-thumbnail",
+        kind: input.resource._tag,
         snapshotId: input.resource.snapshotId,
         expiresAt,
       };
@@ -437,8 +449,13 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         }),
     ),
   );
-  // Favicon and thumbnail URLs stay the same within a bucket, so browsers reuse cached images.
-  if (claims.kind === "project-favicon" || claims.kind === "cad-thumbnail") {
+  // Favicon, thumbnail, and backdrop URLs stay the same within a bucket, so browsers reuse
+  // cached images.
+  if (
+    claims.kind === "project-favicon" ||
+    claims.kind === "cad-thumbnail" ||
+    claims.kind === "cad-backdrop"
+  ) {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
       (Math.floor(issuedAt / PROJECT_FAVICON_TOKEN_BUCKET_MS) + 2) *
@@ -501,8 +518,8 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       : null;
   }
 
-  if (claims.kind === "cad-thumbnail") {
-    const thumbnailPath = yield* findCadThumbnail(claims.snapshotId).pipe(
+  if (claims.kind === "cad-thumbnail" || claims.kind === "cad-backdrop") {
+    const thumbnailPath = yield* findCadThumbnail(claims.snapshotId, claims.kind).pipe(
       Effect.orElseSucceed(() => null),
     );
     return thumbnailPath ? ({ kind: "file", path: thumbnailPath } satisfies ResolvedAsset) : null;
