@@ -25,7 +25,7 @@ import { ModelEsque } from "./components/chat/providerIconUtils";
 import { type ProviderInstanceEntry, deriveProviderInstanceEntries } from "./providerInstances";
 import { sortModelsForProviderInstance } from "./modelOrdering";
 
-const MAX_CUSTOM_MODEL_COUNT = 32;
+export const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
 const DEFAULT_TEXT_GENERATION_INSTANCE_ID = ProviderInstanceId.make("codex");
 
@@ -45,7 +45,7 @@ const DEFAULT_TEXT_GENERATION_INSTANCE_ID = ProviderInstanceId.make("codex");
  * per-driver bucket; otherwise one custom model added to `claude_openrouter`
  * can appear on the stock `claudeAgent` instance.
  */
-function readInstanceCustomModels(
+export function readInstanceCustomModels(
   settings: UnifiedSettings,
   instanceId: ProviderInstanceId,
   driverKind: ProviderDriverKind,
