@@ -1,0 +1,6 @@
+# Runs the committer's own commit-msg hook, when they have one. This repo sets
+# core.hooksPath, so git does not reach a user-level hooks folder by itself.
+# Keep the `if`: vite-plus runs this file with `sh -e`, and a bare
+# `[ -x ] && exec` would exit 1 and refuse the commit when there is no hook.
+hook="${XDG_CONFIG_HOME:-$HOME/.config}/git/hooks/commit-msg"
+if [ -x "$hook" ]; then exec "$hook" "$@"; fi

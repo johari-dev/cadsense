@@ -1,0 +1,7 @@
+# Runs the pusher's own pre-push hook, when they have one. This repo sets
+# core.hooksPath, so git does not reach a user-level hooks folder by itself.
+# The hook gets git's arguments and the ref list on stdin unchanged.
+# Keep the `if`: vite-plus runs this file with `sh -e`, and a bare
+# `[ -x ] && exec` would exit 1 and refuse the push when there is no hook.
+hook="${XDG_CONFIG_HOME:-$HOME/.config}/git/hooks/pre-push"
+if [ -x "$hook" ]; then exec "$hook" "$@"; fi
