@@ -93,6 +93,7 @@ export default defineConfig({
       "typescript/require-array-sort-compare": "off",
       "typescript/restrict-template-expressions": "off",
       "typescript/unbound-method": "off",
+      "typescript/no-explicit-any": "error",
       "eslint/no-restricted-imports": [
         "error",
         {

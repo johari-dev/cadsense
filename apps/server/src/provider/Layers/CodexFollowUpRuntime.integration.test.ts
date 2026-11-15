@@ -137,13 +137,30 @@ const writeScript = (script: Record<string, unknown>) =>
     );
   });
 
-const readLines = (suffix: string) =>
+/** What the mock peer appends to each sidecar file, one JSON object per line. */
+interface SidecarLines {
+  /** A request the peer recorded. These tests record `turn/start`. */
+  readonly ".requests": {
+    readonly method: string;
+    readonly params: {
+      readonly input: ReadonlyArray<{ readonly type: string; readonly text: string }>;
+      readonly model?: unknown;
+      readonly collaborationMode?: unknown;
+    };
+  };
+  /** The thread and turn a `turn/interrupt` named. */
+  readonly ".interrupts": { readonly threadId?: string; readonly turnId?: string };
+}
+
+const readLines = <Suffix extends keyof SidecarLines>(
+  suffix: Suffix,
+): ReadonlyArray<SidecarLines[Suffix]> =>
   NodeFS.existsSync(scriptPath + suffix)
     ? NodeFS.readFileSync(scriptPath + suffix, "utf8")
         .trim()
         .split("\n")
         .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line) as Record<string, any>)
+        .map((line) => JSON.parse(line) as SidecarLines[Suffix])
     : [];
 
 const startRuntime = (cad: CadProviderTools, cadFollowUpStartTimeout?: Duration.Input) =>
@@ -450,7 +467,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
         "turn/completed turn-3",
       ]);
       assert.deepEqual(
-        readLines(".requests").map((request) => request.params.input[0].text),
+        readLines(".requests").map((request) => request.params.input[0]?.text),
         ["review my transfer", "also check the intake"],
       );
       assert.include(cad.calls, "end null turn-1 completed");

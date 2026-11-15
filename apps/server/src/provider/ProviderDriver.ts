@@ -166,4 +166,5 @@ export interface ProviderDriver<Config, R = never> {
 // needs the original `Config` type. Using `unknown` instead would force
 // `create` callers into casts since `unknown` is not assignable to a
 // concrete `Config` from inside the driver body.
+// oxlint-disable-next-line typescript/no-explicit-any -- erases the per-driver Config, see above
 export type AnyProviderDriver<R = never> = ProviderDriver<any, R>;
