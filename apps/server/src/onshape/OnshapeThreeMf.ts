@@ -4,6 +4,7 @@ import type { CadSnapshotDraft } from "@cadsense/contracts";
 import { CAD_SCENE_LIMITS } from "@cadsense/shared/cadSceneBudget";
 import { CadGeometryError } from "../cad/CadGeometry.ts";
 import { readOnshapeZip } from "./OnshapeExportBundle.ts";
+import { snapshotPartStudioKey } from "./OnshapeSnapshotManifest.ts";
 
 const CORE = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02";
 const MATERIAL = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02";
@@ -377,6 +378,8 @@ function glb(object: Object3mf, palettes: Map<string, number[][]>) {
 
 /** Extract only uniquely identified source geometry. Bulk callers can fetch unresolved
  * parts separately with allowMissing; strict callers reject them. No UUID or array-order identity inference.
+ * An object identifies a part only when every part of its Part Studio at the same placement has
+ * an object of its own, because Onshape can export several of a studio's bodies as one object.
  */
 export function readOnshapeThreeMf(
   draft: CadSnapshotDraft,
@@ -507,7 +510,10 @@ export function readOnshapeThreeMf(
   );
   if (!rootSeen || !build.length) throw invalid();
   const parts = new Map(draft.parts.map((p) => [p.geometryKey, p]));
+  const studios = new Map(draft.parts.map((p) => [p.geometryKey, snapshotPartStudioKey(p.source)]));
   const candidates = draft.nodes.filter((n) => !n.suppressed && n.sourcePartKey !== null);
+  // Occurrences at each distinct placement of a mesh object, keyed by its matrix.
+  const placements = new Map<string, typeof candidates>();
   const matched = new Map<string, Set<string>>();
   const rejected = new Set<string>();
   let visits = 0;
@@ -516,13 +522,17 @@ export function readOnshapeThreeMf(
     if (!object || ancestors.has(id) || ++visits > 100_000 || ancestors.size > 128) throw invalid();
     if (object.positions.length) {
       if (!object.triangles.size || object.components.length) throw invalid();
-      const atPose = candidates.filter((n) =>
-        matrix.every(
-          (v, i) =>
-            Math.abs(v - n.transform[(i % 4) * 4 + Math.floor(i / 4)]!) <=
-            1e-5 * Math.max(1, Math.abs(v)),
-        ),
-      );
+      const pose = matrix.join(" ");
+      const atPose =
+        placements.get(pose) ??
+        candidates.filter((n) =>
+          matrix.every(
+            (v, i) =>
+              Math.abs(v - n.transform[(i % 4) * 4 + Math.floor(i / 4)]!) <=
+              1e-5 * Math.max(1, Math.abs(v)),
+          ),
+        );
+      placements.set(pose, atPose);
       const named = atPose.filter(
         (n) =>
           parts.get(n.sourcePartKey!)?.metadata?.name === object.name ||
@@ -556,6 +566,16 @@ export function readOnshapeThreeMf(
       visit(component.id, multiply(matrix, component.matrix), new Set([...ancestors, id]));
   };
   for (const item of build) visit(item.id, item.matrix, new Set());
+  // Onshape can export several bodies of one Part Studio as a single object named after one of
+  // them, which leaves the other parts without an object. Such a part's body may be inside any
+  // object of its studio at the same placement, so none of those objects is a single part.
+  for (const atPose of placements.values()) {
+    const merged = new Set(
+      atPose.filter((n) => !matched.has(n.id)).map((n) => studios.get(n.sourcePartKey!)),
+    );
+    for (const n of atPose)
+      if (merged.has(studios.get(n.sourcePartKey!))) rejected.add(n.sourcePartKey!);
+  }
   const keys = new Map<string, string[]>();
   for (const n of candidates) {
     const ids = [...(matched.get(n.id) ?? [])].sort();

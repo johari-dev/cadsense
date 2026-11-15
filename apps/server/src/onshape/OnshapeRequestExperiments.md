@@ -157,6 +157,44 @@ Artifacts: `target-baseline-live/` (11 and 1), `target-v6-live/` (every row abov
 `target-v6-replay/` (the same counts offline), `element-revision-lab/` (the scratch-document
 edits), and `element-mv-research/`. Earlier runs are kept for comparison.
 
+## Merged bodies in archive objects
+
+November 14, 2026. Document `05760c4d8b40fba37db8fa48`, workspace `f31b499c519e8471cced93dc`,
+element `b53dde24ab8b46d679af9944`, microversion `de54642171d191b245abc54f`. 467 required parts,
+1,362 nodes.
+
+Onshape's 3MF export can write several bodies of one Part Studio as a single object named after
+one of them. In this archive the object `Screw, 10-32 X 2.25, 91251A354_91251A354_2` holds three
+screws. The parts `…91251A354` and `…91251A354_1` have the same placement and no object. The
+importer matched the object to `…_2` by name and placement and stored all three screws as that
+part. 12 of 467 assets were wrong this way, in two imported vendor studios. Each merged object
+holds copies of one shape, with per-body triangle counts within 10 of each other. Copies alone do
+not cause it: two brass inserts of equal size and triangle count in the same studio have an
+object each.
+
+`readOnshapeThreeMf` now accepts an object as a part only when every part of the same Part Studio
+at that placement has an object of its own. The other parts of that studio at that placement use
+the pinned Part Studio read. That read already runs for the part without an object, so the rule
+adds a request only when a batch passes 64 parts.
+
+|                                         |    Before |     After |
+| --------------------------------------- | --------: | --------: |
+| Parts taken from the archive            |       278 |       214 |
+| Parts read from Part Studios            |       189 |       253 |
+| Assets holding another part's bodies    |        12 |         0 |
+| Requests, with the connection check     |        28 |        29 |
+| Unique-asset triangles                  | 5,196,940 | 5,419,132 |
+| `cad_checks` mesh-interference findings |       708 |       569 |
+| `cad_checks` gear-mesh findings         |        18 |        22 |
+
+Exactly 12 bounding boxes changed, and each now matches a direct read of its Part Studio. The
+other 52 parts that moved to a studio read kept their bounding boxes within 0.6 mm, and 403
+assets are byte-identical. Profile `onshape-3mf-coarse-meters-z-up-opacity-composite-source-v5`
+keeps the old assets from being reused.
+
+The rule assumes a merged object only holds bodies of one Part Studio. All 12 did. Parts of other
+studios at the same placement stay on the archive.
+
 ## Geometry and appearance
 
 Both versions retain **577 scene nodes, 196 source-part records, and 153 assets**.

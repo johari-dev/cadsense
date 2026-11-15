@@ -29,8 +29,8 @@ const context = {
   root,
   rootId: snapshotRootId(root),
 };
-const draft = () => {
-  const f = bulkFixture(2);
+const draft = (count = 2) => {
+  const f = bulkFixture(count);
   return parseAssemblySnapshotDraft(context, f.definition).pipe(
     Effect.flatMap((d) =>
       enrichSnapshotMetadata(d, [{ source: d.parts[0]!.source, response: f.metadata }]),
@@ -174,6 +174,35 @@ describe("3MF source geometry", () => {
       };
       assert.throws(() => readOnshapeThreeMf(ambiguous, threeMfArchive(threeMfXml())));
     }),
+  );
+  // Onshape can export several bodies of one Part Studio as a single object named after one of
+  // them. Seen on a public robot: the object of screw "…_2" held three screws, and screws "…"
+  // and "…_1" at the same placement had no object. The reader could hand out other parts'
+  // bodies when:
+  //   1. the object is named after the part being read (the reported failure);
+  //   2. the part has an object of its own, which may still hold the body of a sibling without one.
+  // It must keep archive geometry when:
+  //   3. the part without an object is placed elsewhere, where no object can hold its body.
+  it.effect(
+    "leaves parts to the source read where a sibling at their placement has no object",
+    () =>
+      Effect.gen(function* () {
+        const d = yield* draft(3),
+          placed = d.nodes.filter((n) => n.sourcePartKey !== null);
+        // Objects for Part 0 and Part 1 at the first placement, and none for Part 2.
+        const archive = threeMfArchive(threeMfXml(2).replace("0.01 0 0", "0 0 0"));
+        // Which parts the archive supplies when the first `together` parts share that placement.
+        const supplied = (together: number) => {
+          const moved = new Set(placed.slice(0, together).map((n) => n.id));
+          const nodes = d.nodes.map((n) =>
+            moved.has(n.id) ? { ...n, transform: placed[0]!.transform } : n,
+          );
+          const geometry = readOnshapeThreeMf({ ...d, nodes }, archive, undefined, true);
+          return d.parts.map((p) => geometry.has(p.geometryKey));
+        };
+        assert.deepEqual(supplied(3), [false, false, false]);
+        assert.deepEqual(supplied(2), [true, true, false]);
+      }),
   );
   it.effect("selects source-ID references for ambiguous coincident parts", () =>
     Effect.gen(function* () {

@@ -39,7 +39,7 @@ import { acquireSnapshotMetadata, onshapeDefinitionQuery } from "./OnshapeSnapsh
 import { OnshapeSyncState } from "./OnshapeSyncState.ts";
 
 export const ONSHAPE_BULK_TESSELLATION_PROFILE =
-  "onshape-3mf-coarse-meters-z-up-opacity-composite-source-v4";
+  "onshape-3mf-coarse-meters-z-up-opacity-composite-source-v5";
 export const ONSHAPE_TRANSLATION_MAX_POLLS = 24;
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{24}$/));
 const Translation = Schema.Struct({
@@ -595,7 +595,7 @@ export const makeBulkAcquisition = Effect.gen(function* () {
         }
         const bytes = yield* entry.readDownload(checkpoint);
         const geometry = yield* Effect.try({
-          // Keep uniquely identified archive geometry. Only ambiguous, omitted, or
+          // Keep uniquely identified archive geometry. Only ambiguous, omitted, merged, or
           // composite sources need the pinned Part Studio fallback below.
           try: () => readOnshapeThreeMf(checkpoint.draft, bytes, undefined, true),
           catch: geometryFailure,
