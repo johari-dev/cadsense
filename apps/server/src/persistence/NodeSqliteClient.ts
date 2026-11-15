@@ -26,6 +26,9 @@ import * as Statement from "effect/unstable/sql/Statement";
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
 
+/** One result row as `StatementSync.all` returns it. */
+type SqliteRow = Record<string, NodeSqlite.SQLOutputValue>;
+
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
 export type TypeId = "~local/sqlite-node/SqliteClient";
@@ -157,19 +160,25 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
       lookup: prepare,
     });
 
+    // `Connection` hands every driver its params as `ReadonlyArray<unknown>`, while node:sqlite
+    // types bound values as `SQLInputValue`. node:sqlite throws on a value it cannot bind and the
+    // callers below report that throw as a `SqlError`. A guard here would change which error an
+    // unbindable param reports, so the spreads into `all` and `run` stay unchecked.
     const runStatement = (
       statement: NodeSqlite.StatementSync,
       params: ReadonlyArray<unknown>,
       raw: boolean,
     ) =>
-      Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
+      Effect.withFiber<ReadonlyArray<SqliteRow>, SqlError>((fiber) => {
         try {
           statement.setReadBigInts(Boolean(Context.get(fiber.context, Client.SafeIntegers)));
           if (hasRows(statement)) {
+            // oxlint-disable-next-line typescript/no-explicit-any -- unchecked params, see runStatement
             return Effect.succeed(statement.all(...(params as any)));
           }
+          // oxlint-disable-next-line typescript/no-explicit-any -- unchecked params, see runStatement
           const result = statement.run(...(params as any));
-          return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
+          return Effect.succeed(raw ? (result as unknown as ReadonlyArray<SqliteRow>) : []);
         } catch (cause) {
           return Effect.fail(
             new SqlError({
@@ -197,10 +206,12 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
               if (hasRows(statement)) {
                 statement.setReturnArrays(true);
                 // Safe to cast to array after we've setReturnArrays(true)
+                // oxlint-disable-next-line typescript/no-explicit-any -- unchecked params, see runStatement
                 return statement.all(...(params as any)) as unknown as ReadonlyArray<
                   ReadonlyArray<unknown>
                 >;
               }
+              // oxlint-disable-next-line typescript/no-explicit-any -- unchecked params, see runStatement
               statement.run(...(params as any));
               return [];
             },

@@ -104,10 +104,15 @@ if (values.home) {
   NodeFS.mkdirSync(home);
   NodeFS.cpSync(NodePath.resolve(values.folder!), folder!, { recursive: true });
 }
+/** settings.json as this script edits it: the Codex provider entry. Every other key is kept as is. */
+interface SettingsFile {
+  providers?: { codex?: Record<string, unknown>; [kind: string]: unknown };
+  [key: string]: unknown;
+}
 if (values["codex-home"]) {
   const settingsPath = NodePath.join(home, "userdata", "settings.json");
-  const settings = NodeFS.existsSync(settingsPath)
-    ? (JSON.parse(NodeFS.readFileSync(settingsPath, "utf8")) as Record<string, any>)
+  const settings: SettingsFile = NodeFS.existsSync(settingsPath)
+    ? (JSON.parse(NodeFS.readFileSync(settingsPath, "utf8")) as SettingsFile)
     : {};
   settings.providers = {
     ...settings.providers,
