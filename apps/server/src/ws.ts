@@ -17,7 +17,6 @@ import {
   ClientSurface,
   CommandId,
   type DiscoveredLocalServerList,
-  EventId,
   type FileManagerRevealKind,
   type OrchestrationClientOrigin,
   type MessageRating,
@@ -483,7 +482,6 @@ const makeWsRpcLayer = (
           toDispatchCommandError(cause, "Failed to generate orchestration command identifier."),
         ),
       );
-      const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
 

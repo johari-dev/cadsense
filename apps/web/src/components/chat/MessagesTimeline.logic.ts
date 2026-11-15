@@ -16,7 +16,6 @@ import {
   type CadCommentsPublishedCard,
   type CadPartDrawingCard,
   type CadFeatureScriptPreviewCard,
-  type MessageId,
   type OrchestrationLatestTurn,
   type TurnId,
 } from "@cadsense/contracts";

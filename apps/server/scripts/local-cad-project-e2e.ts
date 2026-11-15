@@ -445,7 +445,7 @@ try {
     return { url: threadUrl, saved };
   });
   // Like the Onshape link, the heading opens the CAD file it names, here with its default app.
-  await run("open-file", async (page) => {
+  await run("open-file", async () => {
     await sceneTitle.click();
     const request = await waitFor("the request to open the file", () => openRequests[0]);
     const { payload } = JSON.parse(request) as { payload: { cwd: string; reveal?: boolean } };

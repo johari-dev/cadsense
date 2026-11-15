@@ -1,12 +1,7 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  ServerConfig,
-  ServerProvider,
-  ServerProviders,
-  ServerUpsertKeybindingResult,
-} from "./server.ts";
+import { ServerProvider, ServerProviders, ServerUpsertKeybindingResult } from "./server.ts";
 
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
 const decodeServerProviders = Schema.decodeUnknownSync(ServerProviders);

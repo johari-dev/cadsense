@@ -39,6 +39,9 @@ const StoredServerConfigJson = Schema.fromJsonString(
     config: ServerConfig,
   }),
 );
+const encodeStoredShellSnapshot = Schema.encodeEffect(StoredShellSnapshotJson);
+const encodeStoredThreadSnapshot = Schema.encodeEffect(StoredThreadSnapshotJson);
+const encodeStoredServerConfig = Schema.encodeEffect(StoredServerConfigJson);
 
 function persistenceError(
   operation: ConnectionPersistenceError["operation"],
@@ -163,7 +166,7 @@ export const connectionStorageLayer = Layer.effect(
           Effect.map(Option.map((stored) => stored.snapshot)),
         ),
       saveShell: (environmentId, snapshot) =>
-        Schema.encodeEffect(StoredShellSnapshotJson)({ environmentId, snapshot }).pipe(
+        encodeStoredShellSnapshot({ environmentId, snapshot }).pipe(
           Effect.mapError((cause) => persistenceError("save-shell", cause)),
           Effect.flatMap((encoded) =>
             writeValue(database, SHELL_STORE_NAME, environmentId, encoded, "save-shell"),
@@ -180,7 +183,7 @@ export const connectionStorageLayer = Layer.effect(
           Effect.map(Option.map((stored) => stored.snapshot)),
         ),
       saveThread: (environmentId, snapshot) =>
-        Schema.encodeEffect(StoredThreadSnapshotJson)({
+        encodeStoredThreadSnapshot({
           environmentId,
           threadId: snapshot.thread.id,
           snapshot,
@@ -212,7 +215,7 @@ export const connectionStorageLayer = Layer.effect(
           Effect.map(Option.map((stored) => stored.config)),
         ),
       saveServerConfig: (environmentId, config) =>
-        Schema.encodeEffect(StoredServerConfigJson)({ environmentId, config }).pipe(
+        encodeStoredServerConfig({ environmentId, config }).pipe(
           Effect.mapError((cause) => persistenceError("save-server-config", cause)),
           Effect.flatMap((encoded) =>
             writeValue(

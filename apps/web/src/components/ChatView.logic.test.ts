@@ -15,7 +15,6 @@ import {
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
-  deriveComposerSendState,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getStartedThreadModelChangeBlockReason,
   loadVideoPreviewUrl,

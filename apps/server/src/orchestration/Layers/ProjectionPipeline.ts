@@ -26,19 +26,13 @@ import { ProjectionProjectRepository } from "../../persistence/Services/Projecti
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { type ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
-import {
-  type ProjectionThreadMessage,
-  ProjectionThreadMessageRepository,
-} from "../../persistence/Services/ProjectionThreadMessages.ts";
+import { ProjectionThreadMessageRepository } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import {
   type ProjectionThreadProposedPlan,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
-import {
-  type ProjectionTurn,
-  ProjectionTurnRepository,
-} from "../../persistence/Services/ProjectionTurns.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
@@ -55,7 +49,6 @@ import {
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
 import {
-  attachmentRelativePath,
   parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
@@ -230,30 +223,6 @@ function deriveHasActionableProposedPlan(input: {
 
   const latestPlan = sorted.at(-1) ?? null;
   return latestPlan !== null && latestPlan.implementedAt === null;
-}
-
-function collectThreadAttachmentRelativePaths(
-  threadId: string,
-  messages: ReadonlyArray<ProjectionThreadMessage>,
-): Set<string> {
-  const threadSegment = toSafeThreadAttachmentSegment(threadId);
-  if (!threadSegment) {
-    return new Set();
-  }
-  const relativePaths = new Set<string>();
-  for (const message of messages) {
-    for (const attachment of message.attachments ?? []) {
-      const attachmentThreadSegment = parseThreadSegmentFromAttachmentId(attachment.id);
-      if (!attachmentThreadSegment || attachmentThreadSegment !== threadSegment) {
-        continue;
-      }
-      const relativePath = attachmentRelativePath(attachment);
-      if (relativePath) {
-        relativePaths.add(relativePath);
-      }
-    }
-  }
-  return relativePaths;
 }
 
 const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function* (
@@ -799,7 +768,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     const applyThreadMessagesProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadMessagesProjection",
-    )(function* (event, attachmentSideEffects) {
+    )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         // A draft retry re-creates a soft-deleted thread id. Every projector
         // drops its own rows for the old incarnation here so replay from any

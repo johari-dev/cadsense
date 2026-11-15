@@ -28,7 +28,6 @@ import {
 } from "@cadsense/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
-import * as Effect from "effect/Effect";
 import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@cadsense/shared/model";
 import { useMemo } from "react";

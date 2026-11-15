@@ -10,7 +10,6 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
-  normalizeModelSlug,
 } from "@cadsense/shared/model";
 import type { ReactNode } from "react";
 

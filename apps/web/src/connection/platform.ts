@@ -24,7 +24,6 @@ import {
   type DesktopEnvironmentBootstrap,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@cadsense/contracts";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,7 +41,6 @@ import {
   readPrimaryEnvironmentTarget,
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
-import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
   desktopLocalConnectionId,

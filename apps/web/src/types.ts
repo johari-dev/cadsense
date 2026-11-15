@@ -7,7 +7,6 @@ import type {
   OrchestrationProposedPlan,
   OrchestrationSession,
   ProviderInteractionMode,
-  RuntimeMode,
 } from "@cadsense/contracts";
 import type {
   EnvironmentProject,

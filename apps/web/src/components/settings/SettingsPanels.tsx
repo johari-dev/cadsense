@@ -2,7 +2,6 @@ import { settingsLocation } from "./settingsLocation";
 import {
   ArchiveIcon,
   ArchiveIcon as ArchiveX,
-  CaretRightIcon as ChevronRightIcon,
   ArrowUUpLeftIcon as Undo2Icon,
   SpinnerIcon as LoaderIcon,
 } from "~/lib/icons";
@@ -59,7 +58,6 @@ import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import {
   DEFAULT_CODE_FONT_STACK,

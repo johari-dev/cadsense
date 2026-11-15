@@ -16,7 +16,7 @@ import { hasCadSource, type ModelSelection, type ProviderDriverKind } from "@cad
 import { createModelSelection } from "@cadsense/shared/model";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 import { FolderOpenIcon, GearSixIcon as SettingsIcon, TrashIcon as Trash2Icon } from "~/lib/icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { isCadProjectRunActive } from "../../cad/CadProjectState";

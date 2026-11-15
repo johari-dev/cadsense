@@ -6,6 +6,19 @@ import { batchOnshapeGeometry } from "./OnshapeGeometryBatching.ts";
 import { bulkFixture, encodeFixture } from "./testFixtures/bulkExport.ts";
 import { measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 
+const decodeGltfJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      meshes: Schema.Array(
+        Schema.Struct({
+          primitives: Schema.Array(Schema.Struct({ material: Schema.Number })),
+        }),
+      ),
+      materials: Schema.Array(Schema.Unknown),
+    }),
+  ),
+);
+
 describe("Onshape face batching", () => {
   it.effect("preserves triangles and material boundaries while reducing face draw calls", () =>
     Effect.gen(function* () {
@@ -31,18 +44,9 @@ describe("Onshape face batching", () => {
       assert.equal(measureCadGeometry(input).drawCalls, 40);
       assert.equal(measureCadGeometry(output).drawCalls, 2);
       const header = new DataView(output.buffer);
-      const document = yield* Schema.decodeUnknownEffect(
-        Schema.fromJsonString(
-          Schema.Struct({
-            meshes: Schema.Array(
-              Schema.Struct({
-                primitives: Schema.Array(Schema.Struct({ material: Schema.Number })),
-              }),
-            ),
-            materials: Schema.Array(Schema.Unknown),
-          }),
-        ),
-      )(new TextDecoder().decode(output.subarray(20, 20 + header.getUint32(12, true))));
+      const document = yield* decodeGltfJson(
+        new TextDecoder().decode(output.subarray(20, 20 + header.getUint32(12, true))),
+      );
       assert.deepEqual(
         document.meshes[0]!.primitives.map((p) => p.material),
         [0, 1],
