@@ -1,5 +1,6 @@
 import { type CSSProperties, memo } from "react";
 import { type ProviderDriverKind } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import { cn } from "~/lib/utils";
@@ -7,7 +8,7 @@ import { cn } from "~/lib/utils";
 export function providerInstanceInitials(label: string): string {
   const words = label.replace(/[_-]+/g, " ").split(/\s+/u).filter(Boolean);
   if (words.length === 0) return "";
-  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
+  if (words.length === 1) return clip(words[0]!, 2).toUpperCase();
   return words
     .slice(0, 2)
     .map((word) => word[0]?.toUpperCase() ?? "")

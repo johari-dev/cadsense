@@ -1,5 +1,6 @@
 // The part drawing sheet: a formal drawing with third-angle views, a tolerance block, a title
 // block, and a hole table.
+import { clip } from "@cadsense/shared/String";
 import type { DrawingView, HoleGroup, PartAnalysis, Vec2 } from "./analysis";
 import { isAlong, isShaft, projectPoint } from "./analysis";
 import {
@@ -519,7 +520,7 @@ export const FormalSheet = ({ data }: { data: SheetData }) => {
 const isLong = (view: DrawingView) => (view.max[0] - view.min[0]) / (view.max[1] - view.min[1]) > 4;
 
 const truncate = (text: string, max: number) =>
-  text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  text.length > max ? `${clip(text, max - 1)}…` : text;
 
 const ThirdAngleSymbol = ({ x, y }: { x: number; y: number }) => (
   <g stroke={INK} strokeWidth={0.008} fill="none">

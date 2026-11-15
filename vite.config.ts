@@ -111,6 +111,7 @@ export default defineConfig({
       "cadsense/no-manual-effect-runtime-in-tests": "error",
       "cadsense/no-native-title-tooltip": "error",
       "cadsense/namespace-node-imports": "error",
+      "cadsense/no-slice-truncation": "error",
     },
     options: {
       // Revisit once Oxlint's tsgolint path can integrate with @effect/tsgo diagnostics.

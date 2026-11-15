@@ -31,6 +31,7 @@ import type {
 } from "@cadsense/contracts";
 import { HostProcessPlatform } from "@cadsense/shared/hostProcess";
 import { normalizePreviewUrl } from "@cadsense/shared/preview";
+import { clip } from "@cadsense/shared/String";
 import { BrowserWindow, type Session, clipboard, nativeImage, shell, webContents } from "electron";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -3260,6 +3261,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const browserDiagnostics = diagnostics.get(wc.id);
       return {
         ...page,
+        // The page cut this with `slice`, which can leave half an emoji at the end.
+        visibleText: clip(page.visibleText, MAX_VISIBLE_TEXT_LENGTH),
         accessibilityTree: accessibility,
         consoleEntries: [...(browserDiagnostics?.consoleEntries ?? [])],
         networkEntries: [...(browserDiagnostics?.networkEntries ?? [])],

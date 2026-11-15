@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 
 import { normalizePreviewUrl } from "@cadsense/shared/preview";
+import { clip } from "@cadsense/shared/String";
 import { readPreparedConnection } from "~/state/session";
 
 import { isLocalLoopbackHost, normalizeHostname } from "./browser/browserTargetResolver";
@@ -120,7 +121,7 @@ export function migratePersistedBrowserHistoryState(persistedState: unknown): {
             url: normalizedUrl,
             lastVisitedAt,
             ...(typeof title === "string" && title.length > 0
-              ? { title: title.slice(0, BROWSER_HISTORY_MAX_TITLE_LENGTH) }
+              ? { title: clip(title, BROWSER_HISTORY_MAX_TITLE_LENGTH) }
               : {}),
           },
         ];
@@ -211,7 +212,7 @@ export const useBrowserHistoryStore = create<BrowserHistoryStoreState>()(
         const normalized = normalizeHistoryUrl(url);
         const state = get();
         const entries = state.byProjectKey[projectKey];
-        const trimmed = title.trim().slice(0, BROWSER_HISTORY_MAX_TITLE_LENGTH);
+        const trimmed = clip(title.trim(), BROWSER_HISTORY_MAX_TITLE_LENGTH);
         if (!normalized || !entries || trimmed.length === 0) return;
         const key = titleLookupKey(normalized, environmentHostname);
         const index = entries.findIndex(

@@ -1,9 +1,9 @@
 import type { CadCheckDraft, CadChecksResult } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { CAD_DRAFT_DECLINE_RULE } from "../cad/CadChecks.ts";
-import { clip } from "../cad/CadDrivetrain.ts";
 import type { CadAgentTools } from "../cad/CadViewing.ts";
 import { type CadPlacementCache, makeCadPlacementCache } from "./CadCheckPlacement.ts";
 

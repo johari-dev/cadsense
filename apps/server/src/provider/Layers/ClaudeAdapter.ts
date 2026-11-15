@@ -68,6 +68,7 @@ import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
   formatClaudeResumeCompactionQuestion,
 } from "@cadsense/shared/claudeCompaction";
+import { clip } from "@cadsense/shared/String";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -1237,7 +1238,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   const commandValue = input.command ?? input.cmd;
   const command = typeof commandValue === "string" ? commandValue : undefined;
   if (command && command.trim().length > 0) {
-    return `${toolName}: ${command.trim().slice(0, 400)}`;
+    return `${toolName}: ${clip(command.trim(), 400)}`;
   }
 
   // For agent/subagent tools, prefer the human-readable description or prompt
@@ -1248,7 +1249,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     const description =
       typeof input.description === "string" ? input.description.trim() : undefined;
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : undefined;
-    const label = description || (prompt ? prompt.slice(0, 200) : undefined);
+    const label = description || (prompt ? clip(prompt, 200) : undefined);
     if (label) {
       return label;
     }
@@ -1258,7 +1259,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   if (serialized.length <= 400) {
     return `${toolName}: ${serialized}`;
   }
-  return `${toolName}: ${serialized.slice(0, 397)}...`;
+  return `${toolName}: ${clip(serialized, 397)}...`;
 }
 
 /**
@@ -1732,7 +1733,7 @@ function previewUnknownSdkContent(message: unknown): string | undefined {
     return undefined;
   }
   const joined = parts.join(" · ");
-  return joined.length > 280 ? `${joined.slice(0, 279)}…` : joined;
+  return joined.length > 280 ? `${clip(joined, 279)}…` : joined;
 }
 
 function describeUnknownSdkMessage(kind: string, message: unknown): string {

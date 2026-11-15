@@ -7,6 +7,7 @@ import * as Tracer from "effect/Tracer";
 import { OtlpResource, OtlpTracer } from "effect/unstable/observability";
 
 import { RotatingFileSink } from "./logging.ts";
+import { clip } from "./String.ts";
 
 const FLUSH_BUFFER_THRESHOLD = 256;
 const textEncoder = new TextEncoder();
@@ -260,7 +261,7 @@ function truncateNestedValue(value: unknown): unknown {
   if (typeof value === "string") {
     return value.length <= TRACE_ATTRIBUTE_MAX_LENGTH
       ? value
-      : `${value.slice(0, TRACE_ATTRIBUTE_MAX_LENGTH)}${TRACE_ATTRIBUTE_TRUNCATION_SUFFIX}`;
+      : `${clip(value, TRACE_ATTRIBUTE_MAX_LENGTH)}${TRACE_ATTRIBUTE_TRUNCATION_SUFFIX}`;
   }
   if (Array.isArray(value)) {
     const truncated = value.map(truncateNestedValue);
@@ -292,7 +293,7 @@ export function truncateTraceAttributes(attributes: TraceAttributes): TraceAttri
       if (value.length <= TRACE_ATTRIBUTE_TRUNCATED_LENGTH) continue;
       truncated ??= { ...attributes };
       truncated[key] =
-        `${value.slice(0, TRACE_ATTRIBUTE_TRUNCATED_LENGTH)}${TRACE_ATTRIBUTE_TRUNCATION_SUFFIX}`;
+        `${clip(value, TRACE_ATTRIBUTE_TRUNCATED_LENGTH)}${TRACE_ATTRIBUTE_TRUNCATION_SUFFIX}`;
       continue;
     }
     const next = truncateNestedValue(value);

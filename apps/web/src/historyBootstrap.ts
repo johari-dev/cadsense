@@ -1,3 +1,4 @@
+import { clip } from "@cadsense/shared/String";
 import type { ChatMessage } from "./types";
 
 export interface BootstrapInputResult {
@@ -63,7 +64,7 @@ export function buildBootstrapInput(
   maxChars: number,
 ): BootstrapInputResult {
   const budget = Number.isFinite(maxChars) ? Math.max(1, Math.floor(maxChars)) : 1;
-  const promptOnly = latestPrompt.length <= budget ? latestPrompt : latestPrompt.slice(0, budget);
+  const promptOnly = latestPrompt.length <= budget ? latestPrompt : clip(latestPrompt, budget);
 
   if (previousMessages.length === 0) {
     return {

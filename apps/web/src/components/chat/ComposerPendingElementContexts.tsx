@@ -1,3 +1,4 @@
+import { clip } from "@cadsense/shared/String";
 import { CursorClickIcon as MousePointerClick, XIcon as X } from "~/lib/icons";
 
 import {
@@ -34,7 +35,7 @@ function buildTooltipContent(context: ElementContextDraft): string {
   if (context.selector) lines.push(context.selector);
   if (context.htmlPreview.trim().length > 0) {
     lines.push("");
-    lines.push(context.htmlPreview.trim().slice(0, 600));
+    lines.push(clip(context.htmlPreview.trim(), 600));
   }
   return lines.join("\n");
 }

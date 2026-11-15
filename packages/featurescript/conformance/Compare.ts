@@ -371,6 +371,7 @@ export interface ReportEntry {
 /** A value for a Markdown table cell: its JSON, cut at 300 characters. */
 const cell = (value: Plain | string): string => {
   const json = typeof value === "string" ? value : JSON.stringify(value);
+  // oxlint-disable-next-line cadsense/no-slice-truncation -- conformance report tooling, and this package does not depend on @cadsense/shared.
   return (json.length > 300 ? `${json.slice(0, 300)}...` : json)
     .replaceAll("|", "\\|")
     .replaceAll("\n", " ");
