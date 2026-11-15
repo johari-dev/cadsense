@@ -4,6 +4,7 @@ import type {
   OrchestrationThreadDetailSnapshot,
 } from "@cadsense/contracts";
 import { toolCallFactsForActivity } from "@cadsense/shared/toolCallFacts";
+import { clip } from "@cadsense/shared/String";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -155,7 +156,7 @@ function summarizeToolTextOutput(value: string): string | null {
 
   const firstLine = lines.find((line) => line !== "```");
   if (firstLine) {
-    return firstLine.length <= 84 ? firstLine : `${firstLine.slice(0, 83).trimEnd()}…`;
+    return firstLine.length <= 84 ? firstLine : `${clip(firstLine, 83).trimEnd()}…`;
   }
   if (lines.length > 1) {
     return `${lines.length.toLocaleString()} lines`;

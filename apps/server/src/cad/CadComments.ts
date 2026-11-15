@@ -37,6 +37,7 @@ import {
   CAD_CAPTURE_SIZE,
 } from "@cadsense/contracts";
 import { canonicalCadJson, cadCommentModelDescriptor } from "@cadsense/shared/cadCommentIdentity";
+import { clip } from "@cadsense/shared/String";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -129,7 +130,7 @@ const decode = <S extends Schema.Top>(schema: S, input: unknown) =>
       (cause) =>
         new CadCommentError({
           reason: "invalid-input",
-          details: [cause.message.slice(0, 6000), inputGuidance(schema)].filter(Boolean).join("\n"),
+          details: [clip(cause.message, 6000), inputGuidance(schema)].filter(Boolean).join("\n"),
         }),
     ),
   );
@@ -831,7 +832,7 @@ export const make = Effect.gen(function* () {
         seen.add(key);
         const title =
           typeof raw === "object" && raw !== null && "title" in raw ? raw.title : undefined;
-        if (typeof title === "string" && title.trim()) titles.set(key, title.trim().slice(0, 160));
+        if (typeof title === "string" && title.trim()) titles.set(key, clip(title.trim(), 160));
       }
       for (const raw of request.items) {
         yield* Effect.gen(function* () {

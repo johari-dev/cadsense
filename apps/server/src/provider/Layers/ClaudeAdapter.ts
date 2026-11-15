@@ -68,6 +68,7 @@ import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
   formatClaudeResumeCompactionQuestion,
 } from "@cadsense/shared/claudeCompaction";
+import { clip } from "@cadsense/shared/String";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -93,6 +94,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
+import { claudeUsesGateway } from "../Drivers/ClaudeGateway.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -1236,7 +1238,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   const commandValue = input.command ?? input.cmd;
   const command = typeof commandValue === "string" ? commandValue : undefined;
   if (command && command.trim().length > 0) {
-    return `${toolName}: ${command.trim().slice(0, 400)}`;
+    return `${toolName}: ${clip(command.trim(), 400)}`;
   }
 
   // For agent/subagent tools, prefer the human-readable description or prompt
@@ -1247,7 +1249,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     const description =
       typeof input.description === "string" ? input.description.trim() : undefined;
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : undefined;
-    const label = description || (prompt ? prompt.slice(0, 200) : undefined);
+    const label = description || (prompt ? clip(prompt, 200) : undefined);
     if (label) {
       return label;
     }
@@ -1257,7 +1259,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   if (serialized.length <= 400) {
     return `${toolName}: ${serialized}`;
   }
-  return `${toolName}: ${serialized.slice(0, 397)}...`;
+  return `${toolName}: ${clip(serialized, 397)}...`;
 }
 
 /**
@@ -1731,7 +1733,7 @@ function previewUnknownSdkContent(message: unknown): string | undefined {
     return undefined;
   }
   const joined = parts.join(" · ");
-  return joined.length > 280 ? `${joined.slice(0, 279)}…` : joined;
+  return joined.length > 280 ? `${clip(joined, 279)}…` : joined;
 }
 
 function describeUnknownSdkMessage(kind: string, message: unknown): string {
@@ -3914,6 +3916,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
       const modelCatalog = yield* modelCatalogEffect;
+      // Decided for this session's folder: the CLI also reads the project's settings there.
+      const usesGateway = yield* claudeUsesGateway(
+        claudeSettings,
+        claudeEnvironment,
+        input.cwd,
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
       if (input.provider !== undefined && input.provider !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
@@ -4583,6 +4594,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                         type: "http" as const,
                         url: `${mcpSession.endpoint}/cad`,
                         headers: { Authorization: mcpSession.authorizationHeader },
+                        // Behind a gateway, declared in full on every turn instead
+                        // of deferred behind ToolSearch: a model that never searches
+                        // (local models do not) would see only the CAD tool names.
+                        // Anthropic's own API keeps the CLI's default.
+                        ...(usesGateway ? { alwaysLoad: true } : {}),
                       },
                     }
                   : {}),

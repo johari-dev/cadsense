@@ -7,6 +7,7 @@ import {
   type CadSnapshotManifest,
   type CadViewState,
 } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { presentCadBounds, worldCadBounds, type CadCheckGeometry } from "./CadChecks.ts";
@@ -117,7 +118,7 @@ export const findCadParts = Effect.fn("findCadParts")(function* (
     let textTruncated = false;
     const text = (value: string) => {
       if (value.length > 256) textTruncated = true;
-      return value.slice(0, 256);
+      return clip(value, 256);
     };
     const assemblyPath: { occurrenceId: string; name: string }[] = [];
     let parentId = node.parentId,

@@ -28,14 +28,19 @@ export class ElectronPowerMonitor extends Context.Service<
   }
 >()("@cadsense/desktop/electron/ElectronPowerMonitor") {}
 
+// Electron types `powerMonitor.on` once per event name, so it rejects a union of names. These
+// events all take a `() => void` listener, so they register through the `EventEmitter` that
+// `Electron.PowerMonitor` extends.
 const onSimpleEvent: ElectronPowerMonitor["Service"]["onSimpleEvent"] = (eventName, listener) =>
   Effect.acquireRelease(
     Effect.sync(() => {
-      Electron.powerMonitor.on(eventName as any, listener as any);
+      const powerMonitor: NodeJS.EventEmitter = Electron.powerMonitor;
+      powerMonitor.on(eventName, listener);
     }),
     () =>
       Effect.sync(() => {
-        Electron.powerMonitor.removeListener(eventName as any, listener as any);
+        const powerMonitor: NodeJS.EventEmitter = Electron.powerMonitor;
+        powerMonitor.removeListener(eventName, listener);
       }),
   ).pipe(Effect.asVoid);
 

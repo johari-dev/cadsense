@@ -581,10 +581,7 @@ describe("OrchestrationEngine", () => {
   });
 
   it("keeps processing queued commands after a storage failure", async () => {
-    type StoredEvent =
-      ReturnType<OrchestrationEventStoreShape["append"]> extends Effect.Effect<infer A, any, any>
-        ? A
-        : never;
+    type StoredEvent = Effect.Success<ReturnType<OrchestrationEventStoreShape["append"]>>;
     const events: StoredEvent[] = [];
     let nextSequence = 1;
     let shouldFailFirstAppend = true;
@@ -820,10 +817,7 @@ describe("OrchestrationEngine", () => {
   });
 
   it("reconciles command state when append persists but projection fails", async () => {
-    type StoredEvent =
-      ReturnType<OrchestrationEventStoreShape["append"]> extends Effect.Effect<infer A, any, any>
-        ? A
-        : never;
+    type StoredEvent = Effect.Success<ReturnType<OrchestrationEventStoreShape["append"]>>;
     const events: StoredEvent[] = [];
     let nextSequence = 1;
 

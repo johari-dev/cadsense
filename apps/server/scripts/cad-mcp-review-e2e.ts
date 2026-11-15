@@ -196,6 +196,42 @@ const pendingDrafts = () => {
   const block = log.slice(at, log.indexOf("}", at) + 1);
   return [...block.matchAll(/'([^']+)'/g)].map((match) => match[1]!);
 };
+// The fields this script reads from one line of the agent's JSON event stream. Claude Code puts
+// tool calls in `message.content` blocks, Codex puts them in `item`. Both streams carry more block
+// and item kinds than the ones named here, and the script skips those.
+interface TextPart {
+  readonly type: string;
+  readonly text?: string;
+}
+type ClaudeBlock =
+  | { readonly type: "tool_use"; readonly id: string; readonly name: string }
+  | {
+      readonly type: "tool_result";
+      readonly tool_use_id: string;
+      readonly content?: string | TextPart[];
+      readonly is_error?: boolean;
+    }
+  | { readonly type: "text" | "thinking" };
+type CodexItem =
+  | {
+      readonly type: "mcp_tool_call";
+      readonly tool: string;
+      readonly status?: string;
+      readonly error?: { readonly message?: string } | null;
+      readonly result?: { readonly content?: TextPart[]; readonly isError?: boolean } | null;
+    }
+  | { readonly type: "agent_message" | "reasoning" | "command_execution" };
+interface TranscriptEvent {
+  readonly type?: string;
+  readonly subtype?: string;
+  readonly model?: string;
+  readonly result?: string;
+  readonly session_id?: string;
+  readonly thread_id?: string;
+  readonly message?: { readonly content?: ClaudeBlock[] };
+  readonly item?: CodexItem;
+}
+
 const pendingBefore = pendingDrafts();
 let followUp:
   | { readonly sent: boolean; readonly pendingBefore: number; readonly pendingAfter: number }
@@ -204,7 +240,7 @@ if (values["follow-up"]) {
   const firstLines = NodeFS.readFileSync(transcriptFile, "utf8").split("\n");
   const sessionId = firstLines
     .filter((line) => line.startsWith("{"))
-    .map((line) => JSON.parse(line) as Record<string, any>)
+    .map((line) => JSON.parse(line) as TranscriptEvent)
     .map((event) => (agent === "claude" ? event.session_id : event.thread_id))
     .find((value) => typeof value === "string");
   if (pendingBefore.length > 0 && sessionId) {
@@ -259,7 +295,7 @@ interface ToolCall {
 const events = NodeFS.readFileSync(NodePath.join(out, "transcript.jsonl"), "utf8")
   .split("\n")
   .filter((line) => line.startsWith("{"))
-  .map((line) => JSON.parse(line) as Record<string, any>);
+  .map((line) => JSON.parse(line) as TranscriptEvent);
 const calls: ToolCall[] = [];
 let model: string | undefined;
 let finalMessage: string | undefined;
@@ -277,8 +313,8 @@ if (agent === "claude") {
       if (block.type === "tool_result") {
         const text = Array.isArray(block.content)
           ? block.content
-              .filter((part: any) => part.type === "text")
-              .map((part: any) => part.text)
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
               .join(" ")
           : String(block.content ?? "");
         const isError = block.is_error === true;
@@ -299,8 +335,8 @@ if (agent === "claude") {
     const item = event.item;
     if (event.type !== "item.completed" || item?.type !== "mcp_tool_call") continue;
     const text = (item.result?.content ?? [])
-      .filter((part: any) => part.type === "text")
-      .map((part: any) => part.text)
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
       .join(" ");
     const isError = item.status === "failed" || item.error != null || item.result?.isError === true;
     calls.push({

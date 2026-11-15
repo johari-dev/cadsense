@@ -29,6 +29,7 @@ import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@cadsense/shared/DrainableWorker";
+import { clip } from "@cadsense/shared/String";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -195,7 +196,7 @@ function findProposedPlanById(
 }
 
 function truncateDetail(value: string, limit = 180): string {
-  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+  return value.length > limit ? `${clip(value, limit - 3)}...` : value;
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {

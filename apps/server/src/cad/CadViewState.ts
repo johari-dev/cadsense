@@ -9,6 +9,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { indexCadSnapshot, revealCadOccurrences } from "@cadsense/shared/cadScene";
+import { clip } from "@cadsense/shared/String";
 import { localCadElementId } from "../localCad/LocalCadFiles.ts";
 export { indexCadSnapshot } from "@cadsense/shared/cadScene";
 
@@ -53,7 +54,7 @@ export const decodeCadToolInput = <S extends Schema.Top>(schema: S, input: unkno
   Schema.decodeUnknownEffect(schema)(input, { errors: "all" }).pipe(
     Effect.mapError(
       (cause) =>
-        new CadViewError({ reason: "invalid-operation", details: cause.message.slice(0, 4000) }),
+        new CadViewError({ reason: "invalid-operation", details: clip(cause.message, 4000) }),
     ),
   );
 

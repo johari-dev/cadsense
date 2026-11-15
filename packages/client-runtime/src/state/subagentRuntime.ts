@@ -18,6 +18,7 @@
  * metadata).
  */
 import type { OrchestrationThreadActivity } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 export type RuntimeSubagentStatus =
   | "pending"
@@ -121,7 +122,7 @@ export function isBackgroundTaskActivity(payload: Record<string, unknown>): bool
 }
 
 function bounded(value: string): string {
-  return value.length <= SUMMARY_CHAR_LIMIT ? value : `${value.slice(0, SUMMARY_CHAR_LIMIT - 1)}…`;
+  return value.length <= SUMMARY_CHAR_LIMIT ? value : `${clip(value, SUMMARY_CHAR_LIMIT - 1)}…`;
 }
 
 /** Appends to the ring buffer, deduping consecutive identical summaries. */

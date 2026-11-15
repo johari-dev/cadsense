@@ -176,7 +176,8 @@ describe("applyShellStreamEvent", () => {
   });
 
   it("returns original snapshot for unrecognized event kinds", () => {
-    const unknownEvent = { kind: "unknown-future-event", sequence: 99 } as any;
+    const unknownEvent = { kind: "unknown-future-event", sequence: 99 };
+    // @ts-expect-error a kind this build does not know, as a newer server could send.
     const next = applyShellStreamEvent(baseSnapshot, unknownEvent);
     expect(next).toBe(baseSnapshot);
   });

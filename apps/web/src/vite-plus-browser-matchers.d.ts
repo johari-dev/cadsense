@@ -1,4 +1,4 @@
-import type { ExpectPollOptions } from "vite-plus/test";
+import type { Assertion, ExpectPollOptions } from "vite-plus/test";
 import type { Locator } from "vite-plus/test/browser";
 
 declare module "vite-plus/test" {
@@ -6,6 +6,6 @@ declare module "vite-plus/test" {
     element: (
       element: HTMLElement | SVGElement | null | Locator,
       options?: ExpectPollOptions,
-    ) => any;
+    ) => Assertion<HTMLElement | SVGElement | null>["resolves"];
   }
 }

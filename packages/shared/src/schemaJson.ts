@@ -8,6 +8,8 @@ import * as SchemaGetter from "effect/SchemaGetter";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
+import { clip } from "./String.ts";
+
 const MAX_SCHEMA_DIAGNOSTIC_ISSUES = 8;
 const MAX_SCHEMA_DIAGNOSTIC_PATH_SEGMENTS = 16;
 const MAX_SCHEMA_DIAGNOSTIC_PATH_SEGMENT_LENGTH = 64;
@@ -22,7 +24,7 @@ interface SchemaDiagnosticIssue {
 // process and UI boundaries, so retain only issue kinds and bounded paths.
 
 function truncateDiagnostic(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
+  return value.length <= maxLength ? value : `${clip(value, maxLength - 3)}...`;
 }
 
 function formatDiagnosticPathSegment(key: PropertyKey): string {

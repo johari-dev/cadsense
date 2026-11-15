@@ -37,6 +37,7 @@ export type Infer<S> = S extends Schema<infer T> ? T : never;
 const shown = (value: unknown) => {
   const json = JSON.stringify(value);
   if (json === undefined) return String(value);
+  // oxlint-disable-next-line cadsense/no-slice-truncation -- conformance report tooling, and this package does not depend on @cadsense/shared.
   return json.length > 120 ? `${json.slice(0, 120)}...` : json;
 };
 const fail = (path: string, expected: string, value: unknown): never => {

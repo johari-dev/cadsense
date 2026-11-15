@@ -1,4 +1,5 @@
 import type { DesktopUpdateReleaseNote } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 interface ElectronReleaseNoteInfo {
   readonly version: string;
@@ -68,7 +69,7 @@ function stripMarkup(input: string): string {
 
 function truncateReleaseNoteItem(item: string): string {
   if (item.length <= MAX_RELEASE_NOTE_ITEM_LENGTH) return item;
-  return `${item.slice(0, MAX_RELEASE_NOTE_ITEM_LENGTH - 3).trimEnd()}...`;
+  return `${clip(item, MAX_RELEASE_NOTE_ITEM_LENGTH - 3).trimEnd()}...`;
 }
 
 function isIgnoredReleaseNoteLine(line: string): boolean {

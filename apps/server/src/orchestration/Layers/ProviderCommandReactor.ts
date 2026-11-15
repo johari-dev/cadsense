@@ -26,6 +26,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@cadsense/shared/DrainableWorker";
+import { clip } from "@cadsense/shared/String";
 
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
@@ -119,8 +120,8 @@ function limitFirstUserSection(section: string): string {
   if (section.length <= MAX_FIRST_USER_TITLE_CONTEXT_CHARS) {
     return section;
   }
-  return `${section.slice(
-    0,
+  return `${clip(
+    section,
     MAX_FIRST_USER_TITLE_CONTEXT_CHARS - FIRST_USER_CONTEXT_TRUNCATION_MARKER.length,
   )}${FIRST_USER_CONTEXT_TRUNCATION_MARKER}`;
 }
@@ -147,7 +148,7 @@ function collectRecentThreadTitleContext(
     const available = maxChars - context.length - separator.length;
     if (section.length > available) {
       if (available > 0) {
-        context = `${section.slice(-available)}${separator}${context}`;
+        context = `${clip(section, available, "end")}${separator}${context}`;
         retainedAttachments.unshift(...(message.attachments ?? []));
       }
       truncated = true;
@@ -773,6 +774,7 @@ const make = Effect.gen(function* () {
       readonly messageText: string;
       readonly attachments?: ReadonlyArray<ChatAttachment>;
       readonly titleSeed?: string;
+      readonly chatModelSelection?: ModelSelection;
     }) {
       const attachments = input.attachments ?? [];
       yield* Effect.gen(function* () {
@@ -785,6 +787,7 @@ const make = Effect.gen(function* () {
             message: input.messageText,
             ...(attachments.length > 0 ? { attachments } : {}),
             modelSelection,
+            chatModelSelection: input.chatModelSelection,
           })
           .pipe(
             Effect.retry({
@@ -850,6 +853,7 @@ const make = Effect.gen(function* () {
       previousTitle,
       ...(attachments.length > 0 ? { attachments } : {}),
       modelSelection,
+      chatModelSelection: thread.modelSelection,
     });
     if (generated.title === DEFAULT_THREAD_TITLE || generated.title === previousTitle) {
       return { _tag: "Completed", title: undefined } as const;
@@ -1036,6 +1040,7 @@ const make = Effect.gen(function* () {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,
+          chatModelSelection: event.payload.modelSelection ?? thread.modelSelection,
           ...generationInput,
         }).pipe(Effect.forkScoped);
       }

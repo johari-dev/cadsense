@@ -80,25 +80,23 @@ export const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
 
 export type EnvironmentRpcInput<TTag extends EnvironmentRpcTag> = Parameters<RpcMethod<TTag>>[0];
 
+/**
+ * Matches every RPC method that returns `Result`. Parameters are contravariant, so `never` accepts
+ * any input and options type. Effect and Stream are covariant, so `unknown` accepts any channel.
+ */
+type RpcSignature<Result> = (input: never, options?: never) => Result;
+
 export type EnvironmentRpcSuccess<TTag extends EnvironmentUnaryRpcTag> =
-  RpcMethod<TTag> extends (input: any, options?: any) => Effect.Effect<infer A, any, any>
-    ? A
-    : never;
+  RpcMethod<TTag> extends RpcSignature<Effect.Effect<infer A, unknown, unknown>> ? A : never;
 
 export type EnvironmentRpcFailure<TTag extends EnvironmentUnaryRpcTag> =
-  RpcMethod<TTag> extends (input: any, options?: any) => Effect.Effect<any, infer E, any>
-    ? E
-    : never;
+  RpcMethod<TTag> extends RpcSignature<Effect.Effect<unknown, infer E, unknown>> ? E : never;
 
 export type EnvironmentRpcStreamValue<TTag extends EnvironmentStreamRpcTag> =
-  RpcMethod<TTag> extends (input: any, options?: any) => Stream.Stream<infer A, any, any>
-    ? A
-    : never;
+  RpcMethod<TTag> extends RpcSignature<Stream.Stream<infer A, unknown, unknown>> ? A : never;
 
 export type EnvironmentRpcStreamFailure<TTag extends EnvironmentStreamRpcTag> =
-  RpcMethod<TTag> extends (input: any, options?: any) => Stream.Stream<any, infer E, any>
-    ? E
-    : never;
+  RpcMethod<TTag> extends RpcSignature<Stream.Stream<unknown, infer E, unknown>> ? E : never;
 
 const currentSession = Effect.fn("EnvironmentRpc.currentSession")(function* () {
   const supervisor = yield* EnvironmentSupervisor;

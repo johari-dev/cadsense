@@ -19,6 +19,8 @@ import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 import * as NodeUtil from "node:util";
 
+import type { CadMcpToolResult } from "../src/cadMcp/CadMcpStdio.ts";
+
 const { values } = NodeUtil.parseArgs({
   options: {
     run: { type: "string" },
@@ -92,14 +94,18 @@ const server = NodeChildProcess.spawn(
   },
 );
 server.stderr.pipe(NodeFS.createWriteStream(NodePath.join(out, "mcp-stderr.log")));
-const replies = new Map<number, (message: any) => void>();
+/** A JSON-RPC reply from `cadsense mcp`. This script reads only `tools/call` results. */
+interface McpReply {
+  readonly result?: CadMcpToolResult;
+}
+const replies = new Map<number, (message: McpReply) => void>();
 NodeReadline.createInterface({ input: server.stdout }).on("line", (line) => {
   const message = JSON.parse(line);
   if (typeof message.id === "number") replies.get(message.id)?.(message);
 });
 let nextId = 1;
 const request = (method: string, params: unknown) =>
-  new Promise<any>((resolve) => {
+  new Promise<McpReply>((resolve) => {
     const id = nextId++;
     replies.set(id, resolve);
     server.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
@@ -173,7 +179,7 @@ for (const [index, call] of recorded.entries()) {
       if (typeof was === "string" && typeof is === "string") mapped.set(was, is);
     }
   if (call.tool === "cad_comment_locate" || call.tool === "cad_comment_inspect") {
-    const image = (response.result?.content ?? []).find((part: any) => part.type === "image");
+    const image = (response.result?.content ?? []).find((part) => part.type === "image");
     const file = `${String(index).padStart(3, "0")}-${call.tool}.png`;
     if (image) NodeFS.writeFileSync(NodePath.join(out, file), Buffer.from(image.data, "base64"));
     report.push({

@@ -78,17 +78,21 @@ export class ElectronApp extends Context.Service<
   }
 >()("@cadsense/desktop/electron/ElectronApp") {}
 
+// Electron types `app.on` once per event name, so it rejects a plain `string`. The service takes
+// any event name, so listeners register through the `EventEmitter` that `Electron.App` extends.
 const addScopedAppListener = <Args extends ReadonlyArray<unknown>>(
   eventName: string,
   listener: (...args: Args) => void,
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.sync(() => {
-      Electron.app.on(eventName as any, listener as any);
+      const app: NodeJS.EventEmitter = Electron.app;
+      app.on(eventName, listener);
     }),
     () =>
       Effect.sync(() => {
-        Electron.app.removeListener(eventName as any, listener as any);
+        const app: NodeJS.EventEmitter = Electron.app;
+        app.removeListener(eventName, listener);
       }),
   ).pipe(Effect.asVoid);
 

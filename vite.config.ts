@@ -100,6 +100,7 @@ export default defineConfig({
       "typescript/require-array-sort-compare": "off",
       "typescript/restrict-template-expressions": "off",
       "typescript/unbound-method": "off",
+      "typescript/no-explicit-any": "error",
       "eslint/no-restricted-imports": [
         "error",
         {
@@ -117,6 +118,7 @@ export default defineConfig({
       "cadsense/no-manual-effect-runtime-in-tests": "error",
       "cadsense/no-native-title-tooltip": "error",
       "cadsense/namespace-node-imports": "error",
+      "cadsense/no-slice-truncation": "error",
     },
     options: {
       // Revisit once Oxlint's tsgolint path can integrate with @effect/tsgo diagnostics.

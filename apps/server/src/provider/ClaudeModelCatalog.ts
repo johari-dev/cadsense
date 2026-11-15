@@ -99,6 +99,40 @@ export function scopeClaudeModelCatalog(
   };
 }
 
+/**
+ * The catalog as a gateway names its models. A catalog model the gateway
+ * lists only under one of its aliases takes that id as its slug: a proxy in
+ * front of Anthropic lists `claude-haiku-4-5-20251001` and may reject
+ * `claude-haiku-4-5`. The picker then lists the id the gateway serves, with
+ * the model's name and options, and requests send that id. The catalog's own
+ * slug joins the aliases, so settings and threads that name it still resolve.
+ */
+export function adoptGatewayModelIds(
+  catalog: ClaudeModelCatalog,
+  gatewayModelIds: ReadonlyArray<string>,
+): ClaudeModelCatalog {
+  if (gatewayModelIds.length === 0) return catalog;
+  const listed = new Set(gatewayModelIds);
+  return {
+    models: catalog.models.map((entry) => {
+      const { slug, aliases = [] } = entry.model;
+      if (listed.has(slug)) return entry;
+      const gatewayId = gatewayModelIds.find((id) =>
+        aliases.some((alias) => alias.toLowerCase() === id.toLowerCase()),
+      );
+      if (gatewayId === undefined) return entry;
+      return {
+        ...entry,
+        model: {
+          ...entry.model,
+          slug: gatewayId,
+          aliases: [slug, ...aliases],
+        },
+      };
+    }),
+  };
+}
+
 export function resolveClaudeCatalogModel(
   catalog: ClaudeModelCatalog,
   slugOrAlias: string | null | undefined,
