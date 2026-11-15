@@ -18,6 +18,7 @@ import type {
   ServerProcessResourceHistorySummary,
   ServerProcessSignal,
 } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
@@ -71,6 +72,7 @@ function formatRelativeNoWrap(value: DateTime.Utc | null): string {
 
 function shortenTraceId(traceId: string): string {
   if (traceId.length <= 32) return traceId;
+  // oxlint-disable-next-line cadsense/no-slice-truncation -- a trace id is hex, so it has no surrogate pairs.
   return `${traceId.slice(0, 18)}...${traceId.slice(-10)}`;
 }
 
@@ -533,7 +535,7 @@ function formatCpuTime(seconds: number): string {
 
 function formatShortProcessName(command: string): string {
   const name = formatProcessName(command);
-  return name.length > 42 ? `${name.slice(0, 39)}...` : name;
+  return name.length > 42 ? `${clip(name, 39)}...` : name;
 }
 
 function ResourceHistoryProcessNameCell({

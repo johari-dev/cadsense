@@ -131,6 +131,10 @@ rl.on("line", (line) => {
         `${JSON.stringify({ method, params: message.params })}\n`,
       );
     }
+    // The line as the runtime wrote it, for tests of the encoding. `.requests` is re-encoded here.
+    if (script.recordTurnWire) {
+      NodeFS.appendFileSync(`${process.env.CADSENSE_CODEX_COLLAB_SCRIPT}.wire`, `${line}\n`);
+    }
     // Per-turn options are indexed by turn/start order and fall back to the script-wide ones.
     const index = turnStartCount;
     turnStartCount += 1;

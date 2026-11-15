@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { clip } from "@cadsense/shared/String";
 
 import { ThreadTitleGenerationError } from "./TextGeneration.ts";
 
@@ -16,7 +17,7 @@ export function toJsonSchemaObject(schema: Schema.Top): unknown {
 /** Truncate a text section to `maxChars`, appending a `[truncated]` marker when needed. */
 export function limitSection(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
-  const truncated = value.slice(0, maxChars);
+  const truncated = clip(value, maxChars);
   return `${truncated}\n\n[truncated]`;
 }
 
@@ -38,7 +39,7 @@ export function sanitizeThreadTitle(raw: string): string {
     return normalized;
   }
 
-  return `${normalized.slice(0, 47).trimEnd()}...`;
+  return `${clip(normalized, 47).trimEnd()}...`;
 }
 
 /** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */

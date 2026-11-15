@@ -1,4 +1,5 @@
 import type { CadCheckFinding } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 import type { CadTriangleMesh, PartOccurrence } from "./CadChecks.ts";
 
 /**
@@ -311,14 +312,6 @@ export interface CadDrivetrainFinding {
 
 const MOTOR_PRODUCT = /\b(neo|vortex|falcon|kraken|cim|minion|775|bag|redline)\b/i;
 const CONTROLLER_PRODUCT = /spark\s*(flex|max)|talon|victor/i;
-/**
- * At most `max` UTF-16 units of `text`, never half of an emoji, and well formed: a lone surrogate
- * would make the follow-up's turn/start JSON unparsable for Codex.
- */
-export const clip = (text: string, max: number) => {
-  const cut = text.slice(0, max);
-  return (/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut).toWellFormed();
-};
 /** A name without its instance tag, underscores, or invisible characters, trimmed. */
 const visible = (name: string) =>
   name

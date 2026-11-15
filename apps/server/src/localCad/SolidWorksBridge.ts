@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { HostProcessEnvironment, HostProcessPlatform } from "@cadsense/shared/hostProcess";
+import { clip } from "@cadsense/shared/String";
 import { LocalCadImportError } from "./LocalCadTessellation.ts";
 
 /** One component in the tree SolidWorks reports, or the part itself when a part was opened. */
@@ -574,7 +575,7 @@ const unavailable = () => new LocalCadImportError({ reason: "solidworks-unavaila
 const failed = (detail: string) =>
   new LocalCadImportError({
     reason: "solidworks-failed",
-    detail: detail.replace(/\s+/g, " ").trim().slice(0, 200),
+    detail: clip(detail.replace(/\s+/g, " ").trim(), 200),
   });
 
 export interface SolidWorksOptions {
@@ -685,7 +686,7 @@ export const make = (options: SolidWorksOptions = {}) =>
         );
         let stderr = "";
         child.stderr.on("data", (chunk: Buffer) => {
-          stderr = (stderr + chunk.toString()).slice(-4000);
+          stderr = clip(stderr + chunk.toString(), 4000, "end");
         });
         child.stdout.resume();
         const exited = new Promise<Effect.Effect<void, LocalCadImportError>>((settle) => {

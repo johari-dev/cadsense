@@ -1,5 +1,6 @@
 import { type ThreadId } from "@cadsense/contracts";
 import type { PickedElementPayload, PickedElementStackFrame } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 const ELEMENT_CONTEXT_HTML_PREVIEW_LIMIT = 4000;
 const ELEMENT_CONTEXT_STYLES_LIMIT = 4000;
@@ -54,7 +55,7 @@ export interface ExtractedElementContexts {
 
 function truncateString(value: string, limit: number): string {
   if (value.length <= limit) return value;
-  return `${value.slice(0, Math.max(0, limit - 1))}…`;
+  return `${clip(value, limit - 1)}…`;
 }
 
 function normalizeText(value: string): string {
@@ -106,7 +107,7 @@ export function elementContextDedupKey(context: ElementContextSelection): string
 
 function shortenTagLabel(tagName: string): string {
   if (tagName.length <= ELEMENT_CONTEXT_LABEL_TAG_MAX) return tagName;
-  return `${tagName.slice(0, ELEMENT_CONTEXT_LABEL_TAG_MAX - 1)}…`;
+  return `${clip(tagName, ELEMENT_CONTEXT_LABEL_TAG_MAX - 1)}…`;
 }
 
 /**

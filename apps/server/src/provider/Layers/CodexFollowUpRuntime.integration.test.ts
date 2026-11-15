@@ -5,11 +5,18 @@
  */
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { type ProviderEvent, ThreadId, TurnId } from "@cadsense/contracts";
+import {
+  type CadCheckFinding,
+  CadSnapshotId,
+  type ProviderEvent,
+  ThreadId,
+  TurnId,
+} from "@cadsense/contracts";
 import * as Deferred from "effect/Deferred";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -18,6 +25,8 @@ import * as Stream from "effect/Stream";
 import { assert, describe } from "vite-plus/test";
 
 import wireFixture from "../testFixtures/codexMultiAgentWire.json" with { type: "json" };
+import { draftCadComments } from "../../cad/CadChecks.ts";
+import { followUpMessage } from "../CadCheckBackstop.ts";
 import type { CadProviderTools } from "../CadProviderTools.ts";
 import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
 
@@ -26,14 +35,18 @@ const CHILD = wireFixture.childThreadIds[0]!;
 const MESSAGE = "Your review is not finished.";
 const scriptPath = NodePath.join(import.meta.dirname, "../testFixtures/.follow-up-script.json");
 const peerPath = NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.sh");
+/** Where the emoji case leaves the follow-up's turn/start line, as sent, for a person to read. */
+const wireArtifactPath = NodePath.join(NodeOS.tmpdir(), "cadsense-follow-up-turn-start.json");
 
 /**
  * CAD tools that offer one follow-up for `turn-1` and record what the runtime asks of them. With
  * `hold`, deciding the follow-up signals `asked` and waits for `release`, like a slow ledger read.
+ * `message` replaces the follow-up's text.
  */
 const fakeCad = (
   options: {
     readonly followUp?: boolean;
+    readonly message?: string;
     readonly hold?: {
       readonly asked: Deferred.Deferred<void>;
       readonly release: Deferred.Deferred<void>;
@@ -57,7 +70,7 @@ const fakeCad = (
         }
         if (options.followUp === false || offered || turnId !== "turn-1") return null;
         offered = true;
-        return MESSAGE;
+        return options.message ?? MESSAGE;
       }),
     end: (childKey, turnId, outcome) =>
       Effect.sync(() => {
@@ -113,7 +126,7 @@ const writeScript = (script: Record<string, unknown>) =>
   Effect.gen(function* () {
     // @effect-diagnostics-next-line preferSchemaOverJson:off
     NodeFS.writeFileSync(scriptPath, JSON.stringify({ rootThreadId: ROOT, ...script }), "utf8");
-    const sidecars = [".requests", ".interrupts", ".responses"].map(
+    const sidecars = [".requests", ".interrupts", ".responses", ".wire"].map(
       (suffix) => scriptPath + suffix,
     );
     for (const file of sidecars) NodeFS.rmSync(file, { force: true });
@@ -223,6 +236,74 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       assert.equal(second?.model, first?.model);
       assert.deepEqual(second?.collaborationMode, first?.collaborationMode);
       assert.equal((yield* runtime.getSession).activeTurnId, undefined);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // The lone surrogate failure, end to end: a part name padded so an emoji sits on a draft title's
+  // cut, through the real drafts, the real follow-up text and the real runtime, to the line Codex
+  // reads.
+  it.live("sends a follow-up Codex can parse when an emoji sits on a draft title's cut", () =>
+    Effect.gen(function* () {
+      const part = (n: number, name: string) => ({ occurrenceId: `${n}`.repeat(64), name });
+      const bracket = part(4, "Left Bumper Mount Bracket \u{1F534} Red Alliance <1>");
+      // Three rollers into one bracket make a collision title longer than its 160 unit limit.
+      const draftsFor = (pad: number) =>
+        draftCadComments(
+          [
+            part(1, `Top Intake Roller ${"y".repeat(pad)} <1>`),
+            part(2, "Middle Intake Roller Compliant Wheels <1>"),
+            part(3, "Bottom Intake Roller Compliant Wheels <1>"),
+          ].map(
+            (roller): CadCheckFinding => ({
+              check: "drivetrain",
+              kind: "collision",
+              problem: true,
+              summary: "s",
+              occurrences: [roller, bracket],
+            }),
+          ),
+          CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+        );
+      // Pad the first name until the emoji's first half is the title's 160th unit.
+      const probe = draftsFor(1)[0]!.title.indexOf("\u{1F534}");
+      assert.isAtLeast(probe, 0);
+      const drafts = draftsFor(1 + 159 - probe);
+      const title = drafts[0]!.title;
+      // `slice(0, 160)` would end on half of the emoji. The cut lands one unit earlier.
+      assert.equal(title, title.toWellFormed());
+      assert.equal(title.length, 159);
+      assert.isTrue(title.endsWith("Left Bumper Mount Bracket "), title);
+      const message = followUpMessage(drafts);
+      assert.include(message, `- ${title} (cad_checks draft `);
+
+      yield* writeScript({
+        recordTurnWire: true,
+        turnIds: ["turn-1", "turn-2"],
+        notifications: [],
+        turnNotifications: [
+          [agentMessage("turn-1", "Review done.")],
+          [agentMessage("turn-2", "Pinned the rest.")],
+        ],
+      });
+      const cad = fakeCad({ message });
+      const runtime = yield* startRuntime(cad.tools);
+      const collected = yield* untilCompleted(runtime.events, "turn-1");
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review my transfer" });
+      yield* Fiber.join(collected);
+
+      // The second turn/start is the follow-up, read as the runtime wrote it.
+      const followUp = NodeFS.readFileSync(`${scriptPath}.wire`, "utf8").trim().split("\n")[1];
+      assert.isDefined(followUp);
+      NodeFS.writeFileSync(wireArtifactPath, `${followUp}\n`, "utf8");
+      // JSON.stringify writes half a pair as an escape like \ud83d, which serde_json rejects with
+      // "unexpected end of hex escape". A whole pair is written as itself.
+      assert.notMatch(followUp!, /\\ud[89a-f][0-9a-f]{2}/i);
+      const sent: unknown = readLines(".wire")[1]?.params.input[0].text;
+      assert.equal(sent, message);
+      assert.isTrue(typeof sent === "string" && sent.isWellFormed());
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

@@ -26,6 +26,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@cadsense/shared/DrainableWorker";
+import { clip } from "@cadsense/shared/String";
 
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
@@ -119,8 +120,8 @@ function limitFirstUserSection(section: string): string {
   if (section.length <= MAX_FIRST_USER_TITLE_CONTEXT_CHARS) {
     return section;
   }
-  return `${section.slice(
-    0,
+  return `${clip(
+    section,
     MAX_FIRST_USER_TITLE_CONTEXT_CHARS - FIRST_USER_CONTEXT_TRUNCATION_MARKER.length,
   )}${FIRST_USER_CONTEXT_TRUNCATION_MARKER}`;
 }
@@ -147,7 +148,7 @@ function collectRecentThreadTitleContext(
     const available = maxChars - context.length - separator.length;
     if (section.length > available) {
       if (available > 0) {
-        context = `${section.slice(-available)}${separator}${context}`;
+        context = `${clip(section, available, "end")}${separator}${context}`;
         retainedAttachments.unshift(...(message.attachments ?? []));
       }
       truncated = true;

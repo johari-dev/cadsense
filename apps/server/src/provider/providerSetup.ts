@@ -22,6 +22,7 @@ import {
   type ServerProviderUpdatedPayload,
 } from "@cadsense/contracts";
 import { CommandResolutionCache, resolveSpawnCommand } from "@cadsense/shared/shell";
+import { clip } from "@cadsense/shared/String";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -142,7 +143,7 @@ function outputTail(output: string): string {
   const trimmed = output.trim();
   return trimmed.length <= FAILURE_OUTPUT_MAX_CHARS
     ? trimmed
-    : `…${trimmed.slice(-FAILURE_OUTPUT_MAX_CHARS)}`;
+    : `…${clip(trimmed, FAILURE_OUTPUT_MAX_CHARS, "end")}`;
 }
 
 export const make = Effect.fn("ProviderSetupRunner.make")(function* () {

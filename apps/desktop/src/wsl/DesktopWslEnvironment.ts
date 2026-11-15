@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { satisfiesSemverRange } from "@cadsense/shared/semver";
+import { clip } from "@cadsense/shared/String";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { parseWslDistroList, type WslDistro } from "./wslPathParsing.ts";
@@ -927,7 +928,7 @@ const ensureNodePtyImpl = (
       } as const;
     }
     if (build.exitCode === 0) return { ok: true, nodePath, resolvedPath } as const;
-    const trimmedTail = `${build.stdout}${build.stderr}`.trim().slice(-500);
+    const trimmedTail = clip(`${build.stdout}${build.stderr}`.trim(), 500, "end");
     return {
       ok: false,
       reason: `node-pty Linux build failed (exit ${build.exitCode}): ${trimmedTail || "no stderr captured"}`,
@@ -967,7 +968,7 @@ const prepareWslRuntimeImpl = Effect.fn("desktop.wsl.prepareRuntimeImpl")(functi
     } as const;
   }
   if (install.exitCode !== 0) {
-    const trimmedTail = `${install.stdout}${install.stderr}`.trim().slice(-500);
+    const trimmedTail = clip(`${install.stdout}${install.stderr}`.trim(), 500, "end");
     return {
       ok: false,
       reason: `WSL runtime installation failed (exit ${install.exitCode}): ${trimmedTail || "no stderr captured"}`,
@@ -995,7 +996,7 @@ const pruneWslRuntimesImpl = Effect.fn("desktop.wsl.pruneRuntimesImpl")(function
   );
   if (result.transportFailure === null && result.exitCode === 0) return;
 
-  const detail = `${result.stdout}${result.stderr}`.trim().slice(-500);
+  const detail = clip(`${result.stdout}${result.stderr}`.trim(), 500, "end");
   yield* Effect.logWarning("Could not prune old WSL runtime caches.", {
     distro,
     runtimeId,
@@ -1015,7 +1016,7 @@ const invalidateWslRuntimeImpl = Effect.fn("desktop.wsl.invalidateRuntimeImpl")(
   );
   if (result.transportFailure === null && result.exitCode === 0) return;
 
-  const detail = `${result.stdout}${result.stderr}`.trim().slice(-500);
+  const detail = clip(`${result.stdout}${result.stderr}`.trim(), 500, "end");
   // Best effort: the caller has already fallen back to the mounted tree, so a
   // failure here only costs the reinstall that would have repaired the cache.
   yield* Effect.logWarning("Could not invalidate the staged WSL runtime cache.", {

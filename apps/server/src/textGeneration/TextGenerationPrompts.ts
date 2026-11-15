@@ -8,6 +8,7 @@
  */
 import * as Schema from "effect/Schema";
 import type { ChatAttachment } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 
@@ -93,7 +94,7 @@ function preserveMessageEnd(message: string): string {
   if (!alreadyTruncated && contents.length <= 8_000) {
     return contents;
   }
-  return `${EARLIER_CONTENT_TRUNCATION_MARKER}${contents.slice(-8_000)}`;
+  return `${EARLIER_CONTENT_TRUNCATION_MARKER}${clip(contents, 8_000, "end")}`;
 }
 
 function threadTitlePromptSuffix(input: ThreadTitlePromptInput): string {

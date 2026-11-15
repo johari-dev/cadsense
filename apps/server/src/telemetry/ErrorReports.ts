@@ -19,6 +19,7 @@
  */
 import * as Cause from "effect/Cause";
 import * as Logger from "effect/Logger";
+import { clip } from "@cadsense/shared/String";
 
 import type { ErrorReport } from "./AnalyticsEvents.ts";
 
@@ -42,9 +43,7 @@ export const takeReports = (): ReadonlyArray<HeldReport> => held.splice(0, held.
 const PATH = /[A-Za-z]:\\[^\s"'<>]*|~[\\/][^\s"'<>]*|(?:\/[^\s/"'<>]+){2,}\/?/g;
 const scrub = (text: string) => {
   const scrubbed = text.replace(PATH, "<path>").trim();
-  return scrubbed.length > MAX_VALUE_LENGTH
-    ? `${scrubbed.slice(0, MAX_VALUE_LENGTH - 1)}…`
-    : scrubbed;
+  return scrubbed.length > MAX_VALUE_LENGTH ? `${clip(scrubbed, MAX_VALUE_LENGTH - 1)}…` : scrubbed;
 };
 
 const STACK_LINE = /^\s*at (?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/;

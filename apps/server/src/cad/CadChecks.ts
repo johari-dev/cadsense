@@ -12,6 +12,7 @@ import {
   type CadSnapshotManifest,
   type CadViewState,
 } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import Module from "manifold-3d";
@@ -21,7 +22,6 @@ import {
   type CadDrivetrainComment,
   type CadDrivetrainPart,
   type CadOverlap,
-  clip,
   countedList,
   distinctLabels,
   distinctPhrases,

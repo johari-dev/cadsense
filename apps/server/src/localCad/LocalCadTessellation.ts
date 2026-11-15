@@ -1,5 +1,6 @@
 import * as NodeModule from "node:module";
 import * as NodeWorkerThreads from "node:worker_threads";
+import { clip } from "@cadsense/shared/String";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -194,7 +195,7 @@ export const tessellateLocalCad = (bytes: Uint8Array, format: LocalCadFormat) =>
     };
     const unreadable = (detail: string) =>
       settle(
-        Effect.logWarning("Local CAD tessellation failed", { detail: detail.slice(0, 2000) }).pipe(
+        Effect.logWarning("Local CAD tessellation failed", { detail: clip(detail, 2000) }).pipe(
           Effect.andThen(Effect.fail(new LocalCadImportError({ reason: "unreadable" }))),
         ),
       );

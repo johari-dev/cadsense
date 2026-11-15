@@ -1,5 +1,7 @@
 import type { ToolCallFacts, ToolCallInputFacts } from "@cadsense/contracts";
 
+import { clip } from "./String.ts";
+
 /**
  * Reads what chat shows about a tool call from a `tool.*` activity's full payload. Claude
  * reports `data.toolName` / `data.input` / `data.result`; Codex reports `data.item` with `tool`,
@@ -200,9 +202,7 @@ function toolErrorText(output: string): string | null {
 function line(value: unknown): string | null {
   const first = asString(value)?.split("\n")[0]?.trim();
   if (!first) return null;
-  return first.length > LINE_MAX_LENGTH
-    ? `${first.slice(0, LINE_MAX_LENGTH - 1).trimEnd()}…`
-    : first;
+  return first.length > LINE_MAX_LENGTH ? `${clip(first, LINE_MAX_LENGTH - 1).trimEnd()}…` : first;
 }
 
 function humanize(value: string): string {

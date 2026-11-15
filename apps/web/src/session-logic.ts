@@ -24,6 +24,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 import type { ChatMessage, ProposedPlan, SessionPhase, Thread, ThreadSession } from "./types";
 
@@ -1548,7 +1549,7 @@ function truncateInlinePreview(value: string, maxLength = 84): string {
   if (value.length <= maxLength) {
     return value;
   }
-  return `${value.slice(0, maxLength - 1).trimEnd()}…`;
+  return `${clip(value, maxLength - 1).trimEnd()}…`;
 }
 
 function normalizePreviewForComparison(value: string | null | undefined): string | null {

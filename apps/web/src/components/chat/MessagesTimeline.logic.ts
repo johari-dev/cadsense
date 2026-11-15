@@ -20,6 +20,7 @@ import {
   type OrchestrationLatestTurn,
   type TurnId,
 } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
@@ -1249,7 +1250,7 @@ export function collapsedUserMessagePreview(text: string): string {
       continue;
     }
     if (budget >= COLLAPSED_USER_MESSAGE_MIN_CUT_CHARS) {
-      const cut = line.slice(0, budget);
+      const cut = clip(line, budget);
       const space = cut.lastIndexOf(" ");
       // Trailing punctuation before the ellipsis reads as a typo (",…"), so it goes too.
       kept.push(`${(space > budget / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:]+$/, "")}…`);

@@ -9,6 +9,7 @@ import {
   type CadUserStartInput,
   type ProjectId,
 } from "@cadsense/contracts";
+import { clip } from "@cadsense/shared/String";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -193,7 +194,7 @@ const failureReason = (error: unknown, source: "onshape" | "local"): string => {
   const suffix = ` Existing ${source === "local" ? "imported" : "downloaded"} CAD is unchanged.`;
   // The outcome schema caps reasons, and a reason that does not fit cannot be recorded at all.
   const room = MAX_OUTCOME_REASON_LENGTH - suffix.length;
-  return `${detail.length > room ? `${detail.slice(0, room - 1).trimEnd()}…` : detail}${suffix}`;
+  return `${detail.length > room ? `${clip(detail, room - 1).trimEnd()}…` : detail}${suffix}`;
 };
 
 const ONSHAPE_FAILURE_COUNTER = {
