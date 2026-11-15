@@ -38,3 +38,6 @@ native/**/target/
 node_modules/
 *.log
 .env*
+
+# Written by the mac build (and by hand for Icon Composer previews); the source is logo-1024.png.
+assets/cadsense/Cadsense.icon/Assets/logo.png

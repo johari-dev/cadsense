@@ -4,18 +4,22 @@
 const CADSENSE_LOGO = {
   png1024: "assets/cadsense/logo-1024.png",
   png180: "assets/cadsense/logo-180.png",
+  // macOS 26 Icon Composer bundle. The build adds png1024 to it as Assets/logo.png.
+  iconComposer: "assets/cadsense/Cadsense.icon",
   faviconIco: "assets/cadsense/favicon.ico",
   windowsIco: "assets/cadsense/windows.ico",
 } as const;
 
 export const BRAND_ASSET_PATHS = {
   productionMacIconPng: CADSENSE_LOGO.png1024,
+  productionMacIconComposer: CADSENSE_LOGO.iconComposer,
   productionLinuxIconPng: CADSENSE_LOGO.png1024,
   productionWindowsIconIco: CADSENSE_LOGO.windowsIco,
   productionWebFaviconIco: CADSENSE_LOGO.faviconIco,
   productionRendererAppIconPng: CADSENSE_LOGO.png180,
 
   nightlyMacIconPng: CADSENSE_LOGO.png1024,
+  nightlyMacIconComposer: CADSENSE_LOGO.iconComposer,
   nightlyLinuxIconPng: CADSENSE_LOGO.png1024,
   nightlyWindowsIconIco: CADSENSE_LOGO.windowsIco,
   nightlyWebFaviconIco: CADSENSE_LOGO.faviconIco,
