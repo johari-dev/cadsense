@@ -773,6 +773,7 @@ const make = Effect.gen(function* () {
       readonly messageText: string;
       readonly attachments?: ReadonlyArray<ChatAttachment>;
       readonly titleSeed?: string;
+      readonly chatModelSelection?: ModelSelection;
     }) {
       const attachments = input.attachments ?? [];
       yield* Effect.gen(function* () {
@@ -785,6 +786,7 @@ const make = Effect.gen(function* () {
             message: input.messageText,
             ...(attachments.length > 0 ? { attachments } : {}),
             modelSelection,
+            chatModelSelection: input.chatModelSelection,
           })
           .pipe(
             Effect.retry({
@@ -850,6 +852,7 @@ const make = Effect.gen(function* () {
       previousTitle,
       ...(attachments.length > 0 ? { attachments } : {}),
       modelSelection,
+      chatModelSelection: thread.modelSelection,
     });
     if (generated.title === DEFAULT_THREAD_TITLE || generated.title === previousTitle) {
       return { _tag: "Completed", title: undefined } as const;
@@ -1036,6 +1039,7 @@ const make = Effect.gen(function* () {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,
+          chatModelSelection: event.payload.modelSelection ?? thread.modelSelection,
           ...generationInput,
         }).pipe(Effect.forkScoped);
       }
