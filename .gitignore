@@ -15,7 +15,6 @@ release/
 release-mock/
 .cadsense
 .t3/
-/README.md
 /CONTRIBUTING.md
 /AGENTS.md
 /CLAUDE.md
