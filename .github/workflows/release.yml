@@ -423,6 +423,11 @@ jobs:
             "release/*.blockmap" \
             "release/*.yml"; do
             for file in $pattern; do
+              # electron-builder's dump of its resolved config. Neither the
+              # updater nor the site reads it, so keep it off the release.
+              if [[ "$(basename "$file")" == builder-debug.yml ]]; then
+                continue
+              fi
               cp "$file" release-publish/
             done
           done
@@ -478,10 +483,6 @@ jobs:
       #     shopt -s nullglob
       #     found_windows_manifest=false
       #     for x64_manifest in release-assets/*-win-x64.yml; do
-      #       if [[ "$(basename "$x64_manifest")" == builder-debug-* ]]; then
-      #         continue
-      #       fi
-
       #       arm64_manifest="${x64_manifest/-x64.yml/-arm64.yml}"
       #       output_manifest="${x64_manifest/-win-x64.yml/.yml}"
       #       if [[ ! -f "$arm64_manifest" ]]; then
