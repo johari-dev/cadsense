@@ -150,6 +150,8 @@ interface SidecarLines {
   };
   /** The thread and turn a `turn/interrupt` named. */
   readonly ".interrupts": { readonly threadId?: string; readonly turnId?: string };
+  /** A request as it crossed the wire, before the peer re-encoded it (`recordTurnWire`). */
+  readonly ".wire": SidecarLines[".requests"];
 }
 
 const readLines = <Suffix extends keyof SidecarLines>(
@@ -318,7 +320,7 @@ describe("CodexSessionRuntime CAD follow-up", () => {
       // JSON.stringify writes half a pair as an escape like \ud83d, which serde_json rejects with
       // "unexpected end of hex escape". A whole pair is written as itself.
       assert.notMatch(followUp!, /\\ud[89a-f][0-9a-f]{2}/i);
-      const sent: unknown = readLines(".wire")[1]?.params.input[0].text;
+      const sent: unknown = readLines(".wire")[1]?.params.input[0]?.text;
       assert.equal(sent, message);
       assert.isTrue(typeof sent === "string" && sent.isWellFormed());
 
