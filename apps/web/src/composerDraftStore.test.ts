@@ -2239,3 +2239,366 @@ describe("createDebouncedStorage", () => {
     expect(base.setItem).toHaveBeenCalledWith("key", "v2");
   });
 });
+
+describe("composerDraftStore persisted restore", () => {
+  const NOW = "2026-11-21T12:00:00.000Z";
+  const IMAGE_DATA_URL = "data:image/png;base64,iVBORw==";
+  const projectId = ProjectId.make("project-restore");
+  const logicalProjectKey = `${TEST_ENVIRONMENT_ID}:/tmp/project-restore`;
+  const legacyLogicalProjectKey = `${TEST_ENVIRONMENT_ID}:project-legacy`;
+  const newLogicalProjectKey = `${TEST_ENVIRONMENT_ID}:project-new`;
+  const draftId = DraftId.make("draft-restore-v3");
+  const draftThreadId = ThreadId.make("thread-restore-v3");
+  const serverThreadKey = scopedThreadKey(
+    scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-restore-server")),
+  );
+  const scopedSessionKey = scopedThreadKey(
+    scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-restore-scoped")),
+  );
+  const legacyThreadKey = "thread-restore-legacy";
+  const pickedAt = "2026-11-20T00:00:00.000Z";
+  const pageUrl = "http://localhost:5173/";
+
+  // One payload with every entry kind the loader handles: current v3 entries,
+  // a legacy v2 entry keyed by a raw thread id, and malformed entries.
+  const storedState = {
+    draftsByThreadKey: {
+      [draftId]: {
+        prompt: "restore me",
+        attachments: [
+          {
+            id: "img-ok",
+            name: "a.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+            dataUrl: IMAGE_DATA_URL,
+            extra: "dropped",
+          },
+          { id: "", name: "b.png", mimeType: "image/png", sizeBytes: 4, dataUrl: IMAGE_DATA_URL },
+          {
+            id: "img-bad-size",
+            name: "c.png",
+            mimeType: "image/png",
+            sizeBytes: "4",
+            dataUrl: IMAGE_DATA_URL,
+          },
+          { id: "img-no-data", name: "d.png", mimeType: "image/png", sizeBytes: 4, dataUrl: "" },
+          "not-an-attachment",
+        ],
+        files: [
+          { id: "file-marker", name: "notes.txt", mimeType: "text/plain", sizeBytes: 12 },
+          {
+            id: "file-uploaded",
+            name: "report.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 9,
+            attachmentId: "attachment-1",
+            environmentId: TEST_ENVIRONMENT_ID,
+          },
+          { id: "file-bad", name: "x.txt", mimeType: "text/plain" },
+        ],
+        elementContexts: [
+          {
+            id: "ctx-full",
+            threadId: draftThreadId,
+            pickedAt,
+            pageUrl,
+            pageTitle: "Home",
+            tagName: "button",
+            selector: "#go",
+            htmlPreview: "<button>",
+            componentName: "GoButton",
+            source: { functionName: "Go", fileName: "go.tsx", lineNumber: 4, columnNumber: 2 },
+            styles: "color: red",
+          },
+          {
+            id: "ctx-min",
+            threadId: " thread-padded ",
+            pickedAt,
+            pageUrl,
+            tagName: "div",
+            pageTitle: 7,
+            source: [],
+          },
+          {
+            id: "ctx-src",
+            threadId: draftThreadId,
+            pickedAt,
+            pageUrl,
+            tagName: "span",
+            source: { functionName: "fn", fileName: 3, lineNumber: "1", columnNumber: 9 },
+          },
+          { id: "ctx-bad", threadId: draftThreadId, pickedAt, pageUrl, tagName: "" },
+        ],
+        runtimeMode: "full-access",
+        interactionMode: "bogus",
+        modelSelectionByProvider: { [CODEX_INSTANCE]: modelSelection(CODEX_DRIVER, "gpt-5.4") },
+        activeProvider: CODEX_INSTANCE,
+        modelSelectionExplicit: true,
+      },
+      [serverThreadKey]: { prompt: "", attachments: "nope", runtimeMode: "approval-required" },
+      [legacyThreadKey]: {
+        prompt: "legacy prompt",
+        attachments: [],
+        modelSelection: { provider: "codex", model: "gpt-5.4" },
+        modelOptions: { codex: { reasoningEffort: "high" } },
+      },
+      "thread-restore-scoped": { prompt: "scoped prompt", attachments: [] },
+      "malformed-string": "oops",
+      "malformed-null": null,
+      "malformed-array": [],
+      "malformed-empty": { prompt: 42, attachments: [] },
+      "": { prompt: "empty key", attachments: [] },
+    },
+    draftThreadsByThreadKey: {
+      [draftId]: {
+        threadId: draftThreadId,
+        environmentId: TEST_ENVIRONMENT_ID,
+        projectId,
+        logicalProjectKey,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        promotedTo: null,
+      },
+      [scopedSessionKey]: {
+        threadId: "ignored-thread",
+        environmentId: OTHER_TEST_ENVIRONMENT_ID,
+        projectId,
+        createdAt: "",
+        runtimeMode: "nope",
+        interactionMode: "plan",
+        promotedTo: {
+          environmentId: TEST_ENVIRONMENT_ID,
+          threadId: "thread-server-promoted",
+          extra: true,
+        },
+      },
+      [legacyThreadKey]: {
+        projectId,
+        runtimeMode: "approval-required",
+        promotedTo: { environmentId: "", threadId: "thread-x" },
+      },
+      "thread-no-project": { threadId: "thread-no-project", environmentId: TEST_ENVIRONMENT_ID },
+      "thread-empty-project": { environmentId: TEST_ENVIRONMENT_ID, projectId: "" },
+      "thread-no-env": { projectId },
+      "thread-string": "oops",
+    },
+    logicalProjectDraftThreadKeyByLogicalProjectKey: {
+      [logicalProjectKey]: draftId,
+      [legacyLogicalProjectKey]: legacyThreadKey,
+      [newLogicalProjectKey]: "thread-restore-new",
+      "bad-mapping": 42,
+    },
+    stickyModelSelectionByProvider: {
+      [CLAUDE_AGENT_INSTANCE]: modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6"),
+    },
+    stickyActiveProvider: CLAUDE_AGENT_INSTANCE,
+  };
+
+  const emptyDraft = {
+    prompt: "",
+    images: [],
+    files: [],
+    nonPersistedImageIds: [],
+    persistedAttachments: [],
+    elementContexts: [],
+    previewAnnotations: [],
+    modelSelectionByProvider: {},
+    activeProvider: null,
+    runtimeMode: null,
+    interactionMode: null,
+  };
+
+  beforeEach(async () => {
+    resetComposerDraftStore();
+    await useComposerDraftStore.persist.clearStorage();
+  });
+
+  afterEach(async () => {
+    await useComposerDraftStore.persist.clearStorage();
+    vi.useRealTimers();
+  });
+
+  // Guards restore behavior: v8 runs migrate then merge, v9 runs merge alone.
+  it.each([8, 9])("restores exactly the valid entries from v%s storage", async (version) => {
+    vi.useFakeTimers();
+    const storage = useComposerDraftStore.persist.getOptions().storage;
+    expect(storage).toBeDefined();
+    storage?.setItem(COMPOSER_DRAFT_STORAGE_KEY, { version, state: storedState } as never);
+    await vi.advanceTimersByTimeAsync(300);
+    // Entries without a valid createdAt restore with the current time.
+    vi.setSystemTime(new Date(NOW));
+
+    await useComposerDraftStore.persist.rehydrate();
+
+    const state = useComposerDraftStore.getState();
+    const drafts = Object.fromEntries(
+      Object.entries(state.draftsByThreadKey).map(([key, draft]) => [
+        key,
+        {
+          ...draft,
+          images: draft.images.map(({ file, ...image }) => ({
+            ...image,
+            fileType: file.type,
+            fileSize: file.size,
+          })),
+        },
+      ]),
+    );
+    expect(drafts).toEqual({
+      [draftId]: {
+        ...emptyDraft,
+        prompt: "restore me",
+        images: [
+          {
+            type: "image",
+            id: "img-ok",
+            name: "a.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+            previewUrl: IMAGE_DATA_URL,
+            fileType: "image/png",
+            fileSize: 4,
+          },
+        ],
+        persistedAttachments: [
+          {
+            id: "img-ok",
+            name: "a.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+            dataUrl: IMAGE_DATA_URL,
+          },
+        ],
+        files: [
+          {
+            type: "file",
+            id: "file-marker",
+            name: "notes.txt",
+            mimeType: "text/plain",
+            sizeBytes: 12,
+            file: null,
+          },
+          {
+            type: "file",
+            id: "file-uploaded",
+            name: "report.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 9,
+            file: null,
+            uploadedAttachmentId: "attachment-1",
+            uploadEnvironmentId: TEST_ENVIRONMENT_ID,
+          },
+        ],
+        elementContexts: [
+          {
+            id: "ctx-full",
+            threadId: draftThreadId,
+            pickedAt,
+            pageUrl,
+            pageTitle: "Home",
+            tagName: "button",
+            selector: "#go",
+            htmlPreview: "<button>",
+            componentName: "GoButton",
+            source: { functionName: "Go", fileName: "go.tsx", lineNumber: 4, columnNumber: 2 },
+            styles: "color: red",
+          },
+          {
+            id: "ctx-min",
+            threadId: " thread-padded ",
+            pickedAt,
+            pageUrl,
+            pageTitle: null,
+            tagName: "div",
+            selector: null,
+            htmlPreview: "",
+            componentName: null,
+            source: { functionName: null, fileName: null, lineNumber: null, columnNumber: null },
+            styles: "",
+          },
+          {
+            id: "ctx-src",
+            threadId: draftThreadId,
+            pickedAt,
+            pageUrl,
+            pageTitle: null,
+            tagName: "span",
+            selector: null,
+            htmlPreview: "",
+            componentName: null,
+            source: { functionName: "fn", fileName: null, lineNumber: null, columnNumber: 9 },
+            styles: "",
+          },
+        ],
+        modelSelectionByProvider: { [CODEX_INSTANCE]: modelSelection(CODEX_DRIVER, "gpt-5.4") },
+        activeProvider: CODEX_INSTANCE,
+        modelSelectionExplicit: true,
+        runtimeMode: "full-access",
+      },
+      [serverThreadKey]: { ...emptyDraft, runtimeMode: "approval-required" },
+      [legacyThreadKey]: {
+        ...emptyDraft,
+        prompt: "legacy prompt",
+        modelSelectionByProvider: {
+          [CODEX_INSTANCE]: modelSelection(CODEX_DRIVER, "gpt-5.4", { reasoningEffort: "high" }),
+        },
+        activeProvider: CODEX_INSTANCE,
+      },
+      [scopedSessionKey]: { ...emptyDraft, prompt: "scoped prompt" },
+    });
+
+    expect(state.draftThreadsByThreadKey).toEqual({
+      [draftId]: {
+        threadId: draftThreadId,
+        environmentId: TEST_ENVIRONMENT_ID,
+        projectId,
+        logicalProjectKey,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        promotedTo: null,
+      },
+      [scopedSessionKey]: {
+        threadId: "thread-restore-scoped",
+        environmentId: TEST_ENVIRONMENT_ID,
+        projectId,
+        logicalProjectKey: `${TEST_ENVIRONMENT_ID}:${projectId}`,
+        createdAt: NOW,
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: "plan",
+        promotedTo: { environmentId: TEST_ENVIRONMENT_ID, threadId: "thread-server-promoted" },
+      },
+      [legacyThreadKey]: {
+        threadId: legacyThreadKey,
+        environmentId: TEST_ENVIRONMENT_ID,
+        projectId: "project-legacy",
+        logicalProjectKey: legacyLogicalProjectKey,
+        createdAt: NOW,
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        promotedTo: null,
+      },
+      "thread-restore-new": {
+        threadId: "thread-restore-new",
+        environmentId: TEST_ENVIRONMENT_ID,
+        projectId: "project-new",
+        logicalProjectKey: newLogicalProjectKey,
+        createdAt: NOW,
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: "default",
+        promotedTo: null,
+      },
+    });
+    expect(state.logicalProjectDraftThreadKeyByLogicalProjectKey).toEqual({
+      [logicalProjectKey]: draftId,
+      [legacyLogicalProjectKey]: legacyThreadKey,
+      [newLogicalProjectKey]: "thread-restore-new",
+    });
+    expect(state.stickyModelSelectionByProvider).toEqual({
+      [CLAUDE_AGENT_INSTANCE]: modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6"),
+    });
+    expect(state.stickyActiveProvider).toBe(CLAUDE_AGENT_INSTANCE);
+  });
+});

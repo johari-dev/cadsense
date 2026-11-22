@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   EnvironmentId,
+  ForwardCompatibleArray,
   ModelSelection,
   ProjectId,
   ProviderInstanceId,
@@ -26,6 +27,8 @@ import {
   scopedThreadKey,
   scopeThreadRef,
 } from "@cadsense/client-runtime/environment";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import { DeepMutable } from "effect/Types";
@@ -119,7 +122,6 @@ export const PersistedComposerDraftFileAttachment = Schema.Struct({
   environmentId: Schema.optionalKey(EnvironmentId),
 });
 export type PersistedComposerDraftFileAttachment = typeof PersistedComposerDraftFileAttachment.Type;
-const isPersistedComposerDraftFileAttachment = Schema.is(PersistedComposerDraftFileAttachment);
 
 const PersistedElementContextStackFrame = Schema.Struct({
   functionName: Schema.NullOr(Schema.String),
@@ -185,45 +187,6 @@ type LegacyCodexFields = {
   codexFastMode?: unknown;
   serviceTier?: unknown;
 };
-
-type LegacyThreadModelFields = {
-  provider?: unknown;
-  model?: unknown;
-  modelOptions?: unknown;
-};
-
-type LegacyV2ThreadDraftFields = {
-  modelSelection?: ModelSelection | null;
-  modelOptions?: unknown;
-};
-
-type LegacyPersistedComposerThreadDraftState = PersistedComposerThreadDraftState &
-  LegacyCodexFields &
-  LegacyThreadModelFields &
-  LegacyV2ThreadDraftFields;
-
-type LegacyStickyModelFields = {
-  stickyProvider?: unknown;
-  stickyModel?: unknown;
-  stickyModelOptions?: unknown;
-};
-
-type LegacyV2StoreFields = {
-  stickyModelSelection?: ModelSelection | null;
-  stickyModelOptions?: unknown;
-  projectDraftThreadIdByProjectId?: Record<string, string> | null;
-  draftsByThreadId?: Record<string, PersistedComposerThreadDraftState> | null;
-  draftThreadsByThreadId?: Record<string, PersistedDraftThreadState> | null;
-  projectDraftThreadIdByProjectKey?: Record<string, string> | null;
-  draftsByThreadKey?: Record<string, PersistedComposerThreadDraftState> | null;
-  draftThreadsByThreadKey?: Record<string, PersistedDraftThreadState> | null;
-  projectDraftThreadKeyByProjectKey?: Record<string, string> | null;
-  logicalProjectDraftThreadKeyByLogicalProjectKey?: Record<string, string> | null;
-};
-
-type LegacyPersistedComposerDraftStoreState = PersistedComposerDraftStoreState &
-  LegacyStickyModelFields &
-  LegacyV2StoreFields;
 
 const PersistedDraftThreadState = Schema.Struct({
   threadId: ThreadId,
@@ -599,7 +562,7 @@ function compactModelSelectionByProvider(
   return Object.fromEntries(entries) as DeepMutable<Record<ProviderInstanceId, ModelSelection>>;
 }
 
-const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftStoreState>({
+const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<RestoredComposerDraftStoreState>({
   draftsByThreadKey: {},
   draftThreadsByThreadKey: {},
   logicalProjectDraftThreadKeyByLogicalProjectKey: {},
@@ -1086,91 +1049,164 @@ function revokeDraftThreadPreviewUrls(draft: ComposerThreadDraftState | undefine
   }
 }
 
-function normalizePersistedAttachment(value: unknown): PersistedComposerImageAttachment | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const candidate = value as Record<string, unknown>;
-  const id = candidate.id;
-  const name = candidate.name;
-  const mimeType = candidate.mimeType;
-  const sizeBytes = candidate.sizeBytes;
-  const dataUrl = candidate.dataUrl;
-  if (
-    typeof id !== "string" ||
-    typeof name !== "string" ||
-    typeof mimeType !== "string" ||
-    typeof sizeBytes !== "number" ||
-    !Number.isFinite(sizeBytes) ||
-    typeof dataUrl !== "string" ||
-    id.length === 0 ||
-    dataUrl.length === 0
-  ) {
-    return null;
-  }
-  return {
-    id,
-    name,
-    mimeType,
-    sizeBytes,
-    dataUrl,
-  };
+// ── Restore decoding ───────────────────────────────────────────────────
+//
+// Restore decodes each persisted entry on its own and drops the ones that
+// fail, so one bad entry never costs the user the rest of their drafts.
+// Fields with a default restore leniently: a missing or undecodable value
+// becomes an absent key, and the normalizers below fill in the default.
+
+/** Struct field that decodes to an absent key instead of failing the entry. */
+const lenientKey = <S extends Schema.Top>(schema: S) =>
+  Schema.optionalKey(schema).pipe(Schema.catchDecoding(() => Effect.succeedNone));
+
+/** Struct field kept as stored, for legacy values a migration reads itself. */
+const UnknownKey = Schema.optionalKey(Schema.Unknown);
+
+// Ids restore verbatim. `toType` keeps each brand's non-empty check but skips
+// the trim its decoder applies, so restore accepts exactly what it always did.
+const PersistedThreadId = Schema.toType(ThreadId);
+const PersistedProjectId = Schema.toType(ProjectId);
+const PersistedEnvironmentId = Schema.toType(EnvironmentId);
+
+// An image restores only with an id, bytes and a finite size.
+const RestorableImageAttachment = Schema.Struct({
+  ...PersistedComposerImageAttachment.fields,
+  id: Schema.NonEmptyString,
+  sizeBytes: Schema.Finite,
+  dataUrl: Schema.NonEmptyString,
+});
+
+const RestorableStackFrame = Schema.Struct({
+  functionName: lenientKey(Schema.String),
+  fileName: lenientKey(Schema.String),
+  lineNumber: lenientKey(Schema.Finite),
+  columnNumber: lenientKey(Schema.Finite),
+});
+const decodeRestorableStackFrame = Schema.decodeUnknownOption(RestorableStackFrame);
+
+const RestorableElementContext = Schema.Struct({
+  id: Schema.NonEmptyString,
+  threadId: PersistedThreadId,
+  pickedAt: Schema.NonEmptyString,
+  pageUrl: Schema.NonEmptyString,
+  pageTitle: lenientKey(Schema.String),
+  tagName: Schema.NonEmptyString,
+  selector: lenientKey(Schema.String),
+  htmlPreview: lenientKey(Schema.String),
+  componentName: lenientKey(Schema.String),
+  source: UnknownKey,
+  styles: lenientKey(Schema.String),
+});
+type RestorableElementContext = typeof RestorableElementContext.Type;
+
+/** Every field any storage version wrote on a composer draft. */
+const RestorableComposerThreadDraft = Schema.Struct({
+  prompt: lenientKey(Schema.String),
+  attachments: lenientKey(ForwardCompatibleArray(RestorableImageAttachment)),
+  files: lenientKey(ForwardCompatibleArray(Schema.toType(PersistedComposerDraftFileAttachment))),
+  elementContexts: lenientKey(ForwardCompatibleArray(RestorableElementContext)),
+  runtimeMode: lenientKey(RuntimeMode),
+  interactionMode: lenientKey(ProviderInteractionMode),
+  modelSelectionByProvider: UnknownKey,
+  activeProvider: UnknownKey,
+  modelSelectionExplicit: UnknownKey,
+  // Legacy v2 and earlier model fields, read by the model-selection migration.
+  modelSelection: UnknownKey,
+  modelOptions: UnknownKey,
+  provider: UnknownKey,
+  model: UnknownKey,
+  effort: UnknownKey,
+  codexFastMode: UnknownKey,
+  serviceTier: UnknownKey,
+});
+const decodeRestorableComposerThreadDraft = Schema.decodeUnknownOption(
+  RestorableComposerThreadDraft,
+);
+
+/** `PersistedDraftThreadState`, with every field that has a default made lenient. */
+const RestorableDraftThread = Schema.Struct({
+  threadId: lenientKey(PersistedThreadId),
+  environmentId: lenientKey(PersistedEnvironmentId),
+  projectId: PersistedProjectId,
+  logicalProjectKey: lenientKey(Schema.NonEmptyString),
+  createdAt: lenientKey(Schema.NonEmptyString),
+  runtimeMode: lenientKey(RuntimeMode),
+  interactionMode: lenientKey(ProviderInteractionMode),
+  promotedTo: lenientKey(
+    Schema.Struct({ environmentId: PersistedEnvironmentId, threadId: PersistedThreadId }),
+  ),
+});
+const decodeRestorableDraftThread = Schema.decodeUnknownOption(RestorableDraftThread);
+
+/**
+ * Every top-level key any storage version wrote. Values stay unknown here;
+ * each normalizer decodes its own entries, and current keys win over the
+ * legacy v2 keys they replaced.
+ */
+const PersistedComposerDraftStoreKeys = Schema.Struct({
+  draftsByThreadKey: UnknownKey,
+  draftsByThreadId: UnknownKey,
+  draftThreadsByThreadKey: UnknownKey,
+  draftThreadsByThreadId: UnknownKey,
+  logicalProjectDraftThreadKeyByLogicalProjectKey: UnknownKey,
+  projectDraftThreadKeyByProjectKey: UnknownKey,
+  projectDraftThreadIdByProjectKey: UnknownKey,
+  projectDraftThreadIdByProjectId: UnknownKey,
+  stickyModelSelectionByProvider: UnknownKey,
+  stickyActiveProvider: UnknownKey,
+  stickyModelSelection: UnknownKey,
+  stickyModelOptions: UnknownKey,
+  stickyProvider: UnknownKey,
+  stickyModel: UnknownKey,
+});
+const decodePersistedComposerDraftStoreKeys = Schema.decodeUnknownOption(
+  PersistedComposerDraftStoreKeys,
+);
+
+/** Restore output: the persisted shape, with draft sessions already in runtime form. */
+type RestoredComposerDraftStoreState = Omit<
+  PersistedComposerDraftStoreState,
+  "draftThreadsByThreadKey"
+> & {
+  readonly draftThreadsByThreadKey: Readonly<Record<string, DraftThreadState>>;
+};
+
+/** Entries of a persisted map. Any object counts, as it always has. */
+function persistedEntries(value: unknown): Array<[string, unknown]> {
+  return value !== null && typeof value === "object" ? Object.entries(value) : [];
 }
 
-function normalizePersistedElementContextDraft(
-  value: unknown,
-): PersistedElementContextDraft | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  const id = candidate.id;
-  const threadId = candidate.threadId;
-  const pickedAt = candidate.pickedAt;
-  const pageUrl = candidate.pageUrl;
-  const tagName = candidate.tagName;
-  if (
-    typeof id !== "string" ||
-    id.length === 0 ||
-    typeof threadId !== "string" ||
-    threadId.length === 0 ||
-    typeof pickedAt !== "string" ||
-    pickedAt.length === 0 ||
-    typeof pageUrl !== "string" ||
-    pageUrl.length === 0 ||
-    typeof tagName !== "string" ||
-    tagName.length === 0
-  ) {
+function restoreStackFrame(value: unknown): PersistedElementContextDraft["source"] {
+  if (value === null || typeof value !== "object") {
     return null;
   }
-  const sourceCandidate = candidate.source;
-  let source: PersistedElementContextDraft["source"] = null;
-  if (sourceCandidate && typeof sourceCandidate === "object") {
-    const sourceRecord = sourceCandidate as Record<string, unknown>;
-    source = {
-      functionName:
-        typeof sourceRecord.functionName === "string" ? sourceRecord.functionName : null,
-      fileName: typeof sourceRecord.fileName === "string" ? sourceRecord.fileName : null,
-      lineNumber:
-        typeof sourceRecord.lineNumber === "number" && Number.isFinite(sourceRecord.lineNumber)
-          ? sourceRecord.lineNumber
-          : null,
-      columnNumber:
-        typeof sourceRecord.columnNumber === "number" && Number.isFinite(sourceRecord.columnNumber)
-          ? sourceRecord.columnNumber
-          : null,
-    };
-  }
+  // Any object restores as a frame. Spreading turns an array into a plain
+  // object, so it restores with every field null instead of being dropped.
+  return Option.match(decodeRestorableStackFrame({ ...value }), {
+    onNone: () => null,
+    onSome: (frame) => ({
+      functionName: frame.functionName ?? null,
+      fileName: frame.fileName ?? null,
+      lineNumber: frame.lineNumber ?? null,
+      columnNumber: frame.columnNumber ?? null,
+    }),
+  });
+}
+
+function restoreElementContext(context: RestorableElementContext): PersistedElementContextDraft {
   return {
-    id,
-    threadId: threadId as ThreadId,
-    pickedAt,
-    pageUrl,
-    pageTitle: typeof candidate.pageTitle === "string" ? candidate.pageTitle : null,
-    tagName,
-    selector: typeof candidate.selector === "string" ? candidate.selector : null,
-    htmlPreview: typeof candidate.htmlPreview === "string" ? candidate.htmlPreview : "",
-    componentName: typeof candidate.componentName === "string" ? candidate.componentName : null,
-    source,
-    styles: typeof candidate.styles === "string" ? candidate.styles : "",
+    id: context.id,
+    threadId: context.threadId,
+    pickedAt: context.pickedAt,
+    pageUrl: context.pageUrl,
+    pageTitle: context.pageTitle ?? null,
+    tagName: context.tagName,
+    selector: context.selector ?? null,
+    htmlPreview: context.htmlPreview ?? "",
+    componentName: context.componentName ?? null,
+    source: restoreStackFrame(context.source),
+    styles: context.styles ?? "",
   };
 }
 
@@ -1211,7 +1247,7 @@ function normalizeLegacyComposerStorageKey(
     return composerTargetKey(parsedThreadRef);
   }
   if (options?.environmentId) {
-    return composerTargetKey(scopeThreadRef(options.environmentId, threadKeyOrId as ThreadId));
+    return composerTargetKey(scopeThreadRef(options.environmentId, ThreadId.make(threadKeyOrId)));
   }
   return threadKeyOrId;
 }
@@ -1389,165 +1425,111 @@ function normalizePersistedDraftThreads(
   rawDraftThreadsByThreadId: unknown,
   rawProjectDraftThreadIdByProjectKey: unknown,
 ): Pick<
-  PersistedComposerDraftStoreState,
+  RestoredComposerDraftStoreState,
   "draftThreadsByThreadKey" | "logicalProjectDraftThreadKeyByLogicalProjectKey"
 > {
-  const draftThreadsByThreadKey: Record<string, PersistedDraftThreadState> = {};
-  const environmentIdByThreadId = new Map<ThreadId, EnvironmentId>();
-  if (
-    rawProjectDraftThreadIdByProjectKey &&
-    typeof rawProjectDraftThreadIdByProjectKey === "object"
-  ) {
-    for (const [projectKey, threadId] of Object.entries(
-      rawProjectDraftThreadIdByProjectKey as Record<string, unknown>,
-    )) {
-      if (typeof threadId !== "string" || threadId.length === 0) {
-        continue;
-      }
-      const projectRef = parseScopedProjectKey(projectKey);
-      if (!projectRef) {
-        continue;
-      }
-      const parsedThreadRef = parseScopedThreadKey(threadId);
-      if (parsedThreadRef) {
-        environmentIdByThreadId.set(parsedThreadRef.threadId, parsedThreadRef.environmentId);
-        continue;
-      }
-      environmentIdByThreadId.set(threadId as ThreadId, projectRef.environmentId);
+  const draftThreadsByThreadKey: Record<string, DraftThreadState> = {};
+  const projectMappings = persistedEntries(rawProjectDraftThreadIdByProjectKey);
+  // Legacy v2 sessions were keyed by a raw thread id. Their environment comes
+  // from the project mapping that points at them.
+  const environmentIdByThreadId = new Map<string, EnvironmentId>();
+  for (const [projectKey, threadId] of projectMappings) {
+    if (typeof threadId !== "string" || threadId.length === 0) {
+      continue;
     }
+    const projectRef = parseScopedProjectKey(projectKey);
+    if (!projectRef) {
+      continue;
+    }
+    const parsedThreadRef = parseScopedThreadKey(threadId);
+    if (parsedThreadRef) {
+      environmentIdByThreadId.set(parsedThreadRef.threadId, parsedThreadRef.environmentId);
+      continue;
+    }
+    environmentIdByThreadId.set(threadId, projectRef.environmentId);
   }
-  if (rawDraftThreadsByThreadId && typeof rawDraftThreadsByThreadId === "object") {
-    for (const [threadKeyOrId, rawDraftThread] of Object.entries(
-      rawDraftThreadsByThreadId as Record<string, unknown>,
-    )) {
-      if (typeof threadKeyOrId !== "string" || threadKeyOrId.length === 0) {
-        continue;
-      }
-      if (!rawDraftThread || typeof rawDraftThread !== "object") {
-        continue;
-      }
-      const candidateDraftThread = rawDraftThread as Record<string, unknown>;
-      const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
-      const threadKey = normalizeLegacyComposerStorageKey(threadKeyOrId);
-      const threadId =
-        parsedThreadRef?.threadId ??
-        (typeof candidateDraftThread.threadId === "string" &&
-        candidateDraftThread.threadId.length > 0
-          ? (candidateDraftThread.threadId as ThreadId)
-          : (threadKeyOrId as ThreadId));
-      const environmentId =
-        parsedThreadRef?.environmentId ??
-        (typeof candidateDraftThread.environmentId === "string" &&
-        candidateDraftThread.environmentId.length > 0
-          ? (candidateDraftThread.environmentId as EnvironmentId)
-          : environmentIdByThreadId.get(threadKeyOrId as ThreadId));
-      const projectId = candidateDraftThread.projectId;
-      const createdAt = candidateDraftThread.createdAt;
-      const promotedToCandidate = candidateDraftThread.promotedTo;
-      const promotedToRecord =
-        promotedToCandidate && typeof promotedToCandidate === "object"
-          ? (promotedToCandidate as Record<string, unknown>)
-          : null;
-      const promotedTo =
-        promotedToRecord &&
-        typeof promotedToRecord.environmentId === "string" &&
-        promotedToRecord.environmentId.length > 0 &&
-        typeof promotedToRecord.threadId === "string" &&
-        promotedToRecord.threadId.length > 0
-          ? scopeThreadRef(
-              promotedToRecord.environmentId as EnvironmentId,
-              promotedToRecord.threadId as ThreadId,
-            )
-          : null;
-      if (typeof projectId !== "string" || projectId.length === 0 || environmentId === undefined) {
-        continue;
-      }
-      const normalizedEnvironmentId = environmentId as EnvironmentId;
-      draftThreadsByThreadKey[threadKey] = {
-        threadId,
-        environmentId: normalizedEnvironmentId,
-        projectId: projectId as ProjectId,
-        logicalProjectKey:
-          typeof candidateDraftThread.logicalProjectKey === "string" &&
-          candidateDraftThread.logicalProjectKey.length > 0
-            ? candidateDraftThread.logicalProjectKey
-            : parsedThreadRef
-              ? projectDraftKey(scopeProjectRef(normalizedEnvironmentId, projectId as ProjectId))
-              : threadKeyOrId,
-        createdAt:
-          typeof createdAt === "string" && createdAt.length > 0
-            ? createdAt
-            : new Date().toISOString(),
-        runtimeMode: isRuntimeMode(candidateDraftThread.runtimeMode)
-          ? candidateDraftThread.runtimeMode
-          : DEFAULT_RUNTIME_MODE,
-        interactionMode:
-          candidateDraftThread.interactionMode === "plan" ||
-          candidateDraftThread.interactionMode === "default"
-            ? candidateDraftThread.interactionMode
-            : DEFAULT_INTERACTION_MODE,
-        promotedTo,
-      };
+  for (const [threadKeyOrId, rawDraftThread] of persistedEntries(rawDraftThreadsByThreadId)) {
+    if (threadKeyOrId.length === 0) {
+      continue;
     }
+    const decoded = decodeRestorableDraftThread(rawDraftThread);
+    if (Option.isNone(decoded)) {
+      continue;
+    }
+    const draftThread = decoded.value;
+    // A scoped key outranks the ids stored inside the entry.
+    const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
+    const environmentId =
+      parsedThreadRef?.environmentId ??
+      draftThread.environmentId ??
+      environmentIdByThreadId.get(threadKeyOrId);
+    if (environmentId === undefined) {
+      continue;
+    }
+    draftThreadsByThreadKey[normalizeLegacyComposerStorageKey(threadKeyOrId)] = {
+      threadId: parsedThreadRef?.threadId ?? draftThread.threadId ?? ThreadId.make(threadKeyOrId),
+      environmentId,
+      projectId: draftThread.projectId,
+      logicalProjectKey:
+        draftThread.logicalProjectKey ??
+        (parsedThreadRef
+          ? projectDraftKey(scopeProjectRef(environmentId, draftThread.projectId))
+          : threadKeyOrId),
+      createdAt: draftThread.createdAt ?? new Date().toISOString(),
+      runtimeMode: draftThread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+      interactionMode: draftThread.interactionMode ?? DEFAULT_INTERACTION_MODE,
+      promotedTo: draftThread.promotedTo
+        ? scopeThreadRef(draftThread.promotedTo.environmentId, draftThread.promotedTo.threadId)
+        : null,
+    };
   }
 
   const logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string> = {};
-  if (
-    rawProjectDraftThreadIdByProjectKey &&
-    typeof rawProjectDraftThreadIdByProjectKey === "object"
-  ) {
-    for (const [logicalProjectKey, threadKeyOrId] of Object.entries(
-      rawProjectDraftThreadIdByProjectKey as Record<string, unknown>,
-    )) {
-      if (typeof threadKeyOrId !== "string" || threadKeyOrId.length === 0) {
-        continue;
-      }
-      const projectRef = parseScopedProjectKey(logicalProjectKey);
-      const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
-      const threadKey = normalizeLegacyComposerStorageKey(threadKeyOrId);
-      logicalProjectDraftThreadKeyByLogicalProjectKey[logicalProjectKey] = threadKey;
-      const existingDraftThread = draftThreadsByThreadKey[threadKey];
-      if (parsedThreadRef) {
-        environmentIdByThreadId.set(parsedThreadRef.threadId, parsedThreadRef.environmentId);
-      }
-      // Logical project keys may contain a workspace path after the
-      // environment prefix. When the persisted draft already names that
-      // logical key, its concrete project id remains authoritative.
-      if (existingDraftThread?.logicalProjectKey === logicalProjectKey) {
-        continue;
-      }
-      if (!projectRef) {
-        if (existingDraftThread) {
-          draftThreadsByThreadKey[threadKey] = {
-            ...existingDraftThread,
-            logicalProjectKey,
-          };
-        }
-        continue;
-      }
-      if (!existingDraftThread) {
-        draftThreadsByThreadKey[threadKey] = {
-          threadId: parsedThreadRef?.threadId ?? (threadKey as ThreadId),
-          environmentId: projectRef.environmentId,
-          projectId: projectRef.projectId,
-          logicalProjectKey,
-          createdAt: new Date().toISOString(),
-          runtimeMode: DEFAULT_RUNTIME_MODE,
-          interactionMode: DEFAULT_INTERACTION_MODE,
-          promotedTo: null,
-        };
-      } else if (
-        existingDraftThread.projectId !== projectRef.projectId ||
-        existingDraftThread.environmentId !== projectRef.environmentId
-      ) {
+  for (const [logicalProjectKey, threadKeyOrId] of projectMappings) {
+    if (typeof threadKeyOrId !== "string" || threadKeyOrId.length === 0) {
+      continue;
+    }
+    const projectRef = parseScopedProjectKey(logicalProjectKey);
+    const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
+    const threadKey = normalizeLegacyComposerStorageKey(threadKeyOrId);
+    logicalProjectDraftThreadKeyByLogicalProjectKey[logicalProjectKey] = threadKey;
+    const existingDraftThread = draftThreadsByThreadKey[threadKey];
+    // Logical project keys may contain a workspace path after the
+    // environment prefix. When the persisted draft already names that
+    // logical key, its concrete project id remains authoritative.
+    if (existingDraftThread?.logicalProjectKey === logicalProjectKey) {
+      continue;
+    }
+    if (!projectRef) {
+      if (existingDraftThread) {
         draftThreadsByThreadKey[threadKey] = {
           ...existingDraftThread,
-          threadId: existingDraftThread.threadId,
-          environmentId: projectRef.environmentId,
-          projectId: projectRef.projectId,
           logicalProjectKey,
         };
       }
+      continue;
+    }
+    if (!existingDraftThread) {
+      draftThreadsByThreadKey[threadKey] = {
+        threadId: parsedThreadRef?.threadId ?? ThreadId.make(threadKey),
+        environmentId: projectRef.environmentId,
+        projectId: projectRef.projectId,
+        logicalProjectKey,
+        createdAt: new Date().toISOString(),
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        promotedTo: null,
+      };
+    } else if (
+      existingDraftThread.projectId !== projectRef.projectId ||
+      existingDraftThread.environmentId !== projectRef.environmentId
+    ) {
+      draftThreadsByThreadKey[threadKey] = {
+        ...existingDraftThread,
+        environmentId: projectRef.environmentId,
+        projectId: projectRef.projectId,
+        logicalProjectKey,
+      };
     }
   }
 
@@ -1556,93 +1538,54 @@ function normalizePersistedDraftThreads(
 
 function normalizePersistedDraftsByThreadId(
   rawDraftMap: unknown,
-  draftThreadsByThreadKey: PersistedComposerDraftStoreState["draftThreadsByThreadKey"],
+  draftThreadsByThreadKey: RestoredComposerDraftStoreState["draftThreadsByThreadKey"],
 ): PersistedComposerDraftStoreState["draftsByThreadKey"] {
-  if (!rawDraftMap || typeof rawDraftMap !== "object") {
-    return {};
-  }
-
-  const environmentIdByThreadId = new Map<ThreadId, EnvironmentId>();
+  const environmentIdByThreadId = new Map<string, EnvironmentId>();
   for (const [threadKey, draftThread] of Object.entries(draftThreadsByThreadKey)) {
     const parsedThreadRef = composerThreadRefFromKey(threadKey);
     if (!parsedThreadRef) {
       continue;
     }
-    environmentIdByThreadId.set(
-      parsedThreadRef.threadId,
-      draftThread.environmentId as EnvironmentId,
-    );
+    environmentIdByThreadId.set(parsedThreadRef.threadId, draftThread.environmentId);
   }
 
-  const nextDraftsByThreadKey: DeepMutable<PersistedComposerDraftStoreState["draftsByThreadKey"]> =
-    {};
-  for (const [threadKeyOrId, draftValue] of Object.entries(
-    rawDraftMap as Record<string, unknown>,
-  )) {
-    if (typeof threadKeyOrId !== "string" || threadKeyOrId.length === 0) {
+  const nextDraftsByThreadKey: Record<string, PersistedComposerThreadDraftState> = {};
+  for (const [threadKeyOrId, draftValue] of persistedEntries(rawDraftMap)) {
+    if (threadKeyOrId.length === 0) {
       continue;
     }
-    if (!draftValue || typeof draftValue !== "object") {
+    const decoded = decodeRestorableComposerThreadDraft(draftValue);
+    if (Option.isNone(decoded)) {
       continue;
     }
-    const draftCandidate = draftValue as PersistedComposerThreadDraftState;
-    const promptCandidate = typeof draftCandidate.prompt === "string" ? draftCandidate.prompt : "";
-    const attachments = Array.isArray(draftCandidate.attachments)
-      ? draftCandidate.attachments.flatMap((entry) => {
-          const normalized = normalizePersistedAttachment(entry);
-          return normalized ? [normalized] : [];
-        })
-      : [];
-    const files = Array.isArray(draftCandidate.files)
-      ? draftCandidate.files.filter(isPersistedComposerDraftFileAttachment)
-      : [];
-    const elementContexts = Array.isArray(draftCandidate.elementContexts)
-      ? draftCandidate.elementContexts.flatMap((entry) => {
-          const normalized = normalizePersistedElementContextDraft(entry);
-          return normalized ? [normalized] : [];
-        })
-      : [];
-    const runtimeMode = isRuntimeMode(draftCandidate.runtimeMode)
-      ? draftCandidate.runtimeMode
-      : null;
-    const interactionMode =
-      draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
-        ? draftCandidate.interactionMode
-        : null;
-    const prompt = promptCandidate;
-    // If the draft already has the v3 shape, use it directly
-    const legacyDraftCandidate = draftValue as LegacyPersistedComposerThreadDraftState;
+    const draft = decoded.value;
+    const prompt = draft.prompt ?? "";
+    const attachments = draft.attachments ?? [];
+    const files = draft.files ?? [];
+    const elementContexts = (draft.elementContexts ?? []).map(restoreElementContext);
+    const runtimeMode = draft.runtimeMode ?? null;
+    const interactionMode = draft.interactionMode ?? null;
     let modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
     let activeProvider: ProviderInstanceId | null = null;
     let modelSelectionExplicit: true | undefined = undefined;
 
-    if (
-      draftCandidate.modelSelectionByProvider &&
-      typeof draftCandidate.modelSelectionByProvider === "object"
-    ) {
-      // v3 format
-      modelSelectionByProvider = draftCandidate.modelSelectionByProvider as Partial<
+    if (draft.modelSelectionByProvider && typeof draft.modelSelectionByProvider === "object") {
+      // v3 format. The map restores as stored, without per-entry decoding.
+      modelSelectionByProvider = draft.modelSelectionByProvider as Partial<
         Record<ProviderInstanceId, ModelSelection>
       >;
-      activeProvider = normalizeProviderInstanceId(draftCandidate.activeProvider);
-      modelSelectionExplicit = draftCandidate.modelSelectionExplicit === true ? true : undefined;
+      activeProvider = normalizeProviderInstanceId(draft.activeProvider);
+      modelSelectionExplicit = draft.modelSelectionExplicit === true ? true : undefined;
     } else {
       // v2 or legacy format: migrate
       const normalizedModelOptions =
-        normalizeProviderModelOptions(
-          legacyDraftCandidate.modelOptions,
-          undefined,
-          legacyDraftCandidate,
-        ) ?? null;
-      const normalizedModelSelection = normalizeModelSelection(
-        legacyDraftCandidate.modelSelection,
-        {
-          provider: legacyDraftCandidate.provider,
-          model: legacyDraftCandidate.model,
-          modelOptions: normalizedModelOptions ?? (legacyDraftCandidate.modelOptions as unknown),
-          legacyCodex: legacyDraftCandidate,
-        },
-      );
+        normalizeProviderModelOptions(draft.modelOptions, undefined, draft) ?? null;
+      const normalizedModelSelection = normalizeModelSelection(draft.modelSelection, {
+        provider: draft.provider,
+        model: draft.model,
+        modelOptions: normalizedModelOptions ?? draft.modelOptions,
+        legacyCodex: draft,
+      });
       const mergedModelOptions = legacyMergeModelSelectionIntoProviderModelOptions(
         normalizedModelSelection,
         normalizedModelOptions,
@@ -1661,7 +1604,7 @@ function normalizePersistedDraftsByThreadId(
     const hasModelData =
       Object.keys(modelSelectionByProvider).length > 0 || activeProvider !== null;
     if (
-      promptCandidate.length === 0 &&
+      prompt.length === 0 &&
       attachments.length === 0 &&
       files.length === 0 &&
       elementContexts.length === 0 &&
@@ -1678,7 +1621,7 @@ function normalizePersistedDraftsByThreadId(
         : draftThreadsByThreadKey[threadKeyOrId] !== undefined
           ? threadKeyOrId
           : (() => {
-              const environmentId = environmentIdByThreadId.get(threadKeyOrId as ThreadId);
+              const environmentId = environmentIdByThreadId.get(threadKeyOrId);
               return environmentId
                 ? normalizeLegacyComposerStorageKey(threadKeyOrId, { environmentId })
                 : threadKeyOrId;
@@ -1881,11 +1824,12 @@ function partializeComposerDraftStoreState(
 
 function normalizeCurrentPersistedComposerDraftStoreState(
   persistedState: unknown,
-): PersistedComposerDraftStoreState {
-  if (!persistedState || typeof persistedState !== "object") {
+): RestoredComposerDraftStoreState {
+  const decodedPersistedState = decodePersistedComposerDraftStoreKeys(persistedState);
+  if (Option.isNone(decodedPersistedState)) {
     return EMPTY_PERSISTED_DRAFT_STORE_STATE;
   }
-  const normalizedPersistedState = persistedState as LegacyPersistedComposerDraftStoreState;
+  const normalizedPersistedState = decodedPersistedState.value;
   const { draftThreadsByThreadKey, logicalProjectDraftThreadKeyByLogicalProjectKey } =
     normalizePersistedDraftThreads(
       normalizedPersistedState.draftThreadsByThreadKey ??
@@ -1903,6 +1847,7 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     normalizedPersistedState.stickyModelSelectionByProvider &&
     typeof normalizedPersistedState.stickyModelSelectionByProvider === "object"
   ) {
+    // The map restores as stored, without per-entry decoding.
     stickyModelSelectionByProvider =
       normalizedPersistedState.stickyModelSelectionByProvider as Partial<
         Record<ProviderInstanceId, ModelSelection>
@@ -2111,33 +2056,6 @@ function toHydratedThreadDraft(
     ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
-  };
-}
-
-function toHydratedDraftThreadState(
-  persistedDraftThread: PersistedDraftThreadState,
-): DraftThreadState {
-  return {
-    threadId: persistedDraftThread.threadId,
-    environmentId: persistedDraftThread.environmentId as EnvironmentId,
-    projectId: persistedDraftThread.projectId,
-    logicalProjectKey:
-      persistedDraftThread.logicalProjectKey ??
-      projectDraftKey(
-        scopeProjectRef(
-          persistedDraftThread.environmentId as EnvironmentId,
-          persistedDraftThread.projectId,
-        ),
-      ),
-    createdAt: persistedDraftThread.createdAt,
-    runtimeMode: persistedDraftThread.runtimeMode,
-    interactionMode: persistedDraftThread.interactionMode,
-    promotedTo: persistedDraftThread.promotedTo
-      ? scopeThreadRef(
-          persistedDraftThread.promotedTo.environmentId as EnvironmentId,
-          persistedDraftThread.promotedTo.threadId as ThreadId,
-        )
-      : null,
   };
 }
 
@@ -3412,15 +3330,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             toHydratedThreadDraft(draft),
           ]),
         );
-        const draftThreadsByThreadKey = Object.fromEntries(
-          Object.entries(normalizedPersisted.draftThreadsByThreadKey).map(
-            ([threadKey, draftThread]) => [threadKey, toHydratedDraftThreadState(draftThread)],
-          ),
-        ) as Record<string, DraftThreadState>;
         return {
           ...currentState,
           draftsByThreadKey,
-          draftThreadsByThreadKey,
+          draftThreadsByThreadKey: { ...normalizedPersisted.draftThreadsByThreadKey },
           logicalProjectDraftThreadKeyByLogicalProjectKey:
             normalizedPersisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
