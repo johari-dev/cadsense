@@ -6,6 +6,7 @@ import {
   OnshapeConnectionError,
   CommandId,
   isSolidWorksFile,
+  projectSource,
   type CadRootIdentity,
   type CadUserStartInput,
   type ProjectId,
@@ -265,14 +266,15 @@ export const make = Effect.gen(function* () {
     const result = yield* query.getProjectShellById(projectId).pipe(Effect.mapError(failed));
     if (Option.isNone(result)) return yield* new CadUserOperationError({ reason: "not-found" });
     const project = result.value;
-    if (project.onshapeSource)
-      return { project, source: { kind: "onshape" as const, source: project.onshapeSource } };
-    if (project.localCadSource)
-      return {
-        project,
-        source: { kind: "local" as const, filePath: project.localCadSource.filePath },
-      };
-    return yield* new CadUserOperationError({ reason: "not-found" });
+    const source = projectSource(project);
+    switch (source.kind) {
+      case "onshape":
+        return { project, source };
+      case "local-cad":
+        return { project, source: { kind: "local" as const, filePath: source.source.filePath } };
+      case "folder":
+        return yield* new CadUserOperationError({ reason: "not-found" });
+    }
   });
   const start = Effect.fn("CadUserOperations.start")(function* (input: CadUserStartInput) {
     const { project, source } = yield* getProject(input.projectId);

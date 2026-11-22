@@ -293,6 +293,7 @@ export const OrchestrationProject = Schema.Struct({
   // Optional for wire compatibility. Absence means a regular filesystem project.
   onshapeSource: Schema.optionalKey(OnshapeProjectSource),
   // A folder project that reviews a CAD file in its workspace. Never set with onshapeSource.
+  // Read the project kind with `projectSource()`, not by checking these fields.
   localCadSource: Schema.optionalKey(LocalCadProjectSource),
   cad: Schema.optionalKey(CadProjectState),
   createdAt: IsoDateTime,

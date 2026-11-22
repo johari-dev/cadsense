@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@cadsense/contracts";
+import { projectSource, type ContextMenuItem } from "@cadsense/contracts";
 import type { SidebarProjectSortOrder } from "@cadsense/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -281,28 +281,32 @@ const LOCAL_CAD_FORMATS: ReadonlyArray<
  * for the tooltip.
  */
 export function describeProjectSource(project: ProjectSourceInput): ProjectSourceDescription {
-  if (project.localCadSource) {
-    const path = project.localCadSource.filePath.toLowerCase();
-    return (
-      LOCAL_CAD_FORMATS.find(([extension]) => path.endsWith(extension))?.[1] ?? {
-        logo: null,
-        label: "CAD file",
-      }
-    );
+  const source = projectSource(project);
+  switch (source.kind) {
+    case "local-cad": {
+      const path = source.source.filePath.toLowerCase();
+      return (
+        LOCAL_CAD_FORMATS.find(([extension]) => path.endsWith(extension))?.[1] ?? {
+          logo: null,
+          label: "CAD file",
+        }
+      );
+    }
+    case "onshape": {
+      const synced = project.cad?.roots.filter((root) => root.current !== null) ?? [];
+      const only = synced.length === 1 ? synced[0] : undefined;
+      const label = only
+        ? only.kind === "assembly"
+          ? "Assembly"
+          : "Part Studio"
+        : synced.length > 1
+          ? `${synced.length} models`
+          : "Not synced yet";
+      return { logo: "onshape", label };
+    }
+    case "folder":
+      return { logo: null, label: "Local project" };
   }
-  if (project.onshapeSource) {
-    const synced = project.cad?.roots.filter((root) => root.current !== null) ?? [];
-    const only = synced.length === 1 ? synced[0] : undefined;
-    const label = only
-      ? only.kind === "assembly"
-        ? "Assembly"
-        : "Part Studio"
-      : synced.length > 1
-        ? `${synced.length} models`
-        : "Not synced yet";
-    return { logo: "onshape", label };
-  }
-  return { logo: null, label: "Local project" };
 }
 
 const WORD_CHARACTER = /[\p{L}\p{N}]/u;

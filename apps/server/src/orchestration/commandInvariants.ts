@@ -2,12 +2,14 @@ import {
   onshapeProjectSourceIdentity,
   hasCadSource,
   isCadThreadRunActive,
+  projectSource,
   type OnshapeProjectSource,
   type OrchestrationCommand,
   type OrchestrationProject,
   type OrchestrationReadModel,
   type OrchestrationThread,
   type ProjectId,
+  type ProjectSourceFields,
   type ThreadId,
 } from "@cadsense/contracts";
 import { normalizeProjectPathForComparison } from "@cadsense/shared/path";
@@ -134,20 +136,25 @@ export interface ProjectPlace {
  * the folder's case rule: case-insensitive on Windows drive and UNC paths.
  */
 export function findConflictingProject<
-  T extends Pick<OrchestrationProject, "id" | "workspaceRoot" | "deletedAt" | "localCadSource">,
+  T extends Pick<OrchestrationProject, "id" | "workspaceRoot" | "deletedAt"> & ProjectSourceFields,
 >(projects: ReadonlyArray<T>, place: ProjectPlace): T | undefined {
   const folder = normalizeProjectPathForComparison(place.workspaceRoot);
   const file = (filePath: string) =>
     normalizeProjectPathForComparison(`${place.workspaceRoot}/${filePath}`);
-  return projects.find(
-    (project) =>
-      project.deletedAt === null &&
-      project.id !== place.exceptProjectId &&
-      normalizeProjectPathForComparison(project.workspaceRoot) === folder &&
-      (place.filePath === undefined ||
-        project.localCadSource === undefined ||
-        file(project.localCadSource.filePath) === file(place.filePath)),
-  );
+  return projects.find((project) => {
+    if (
+      project.deletedAt !== null ||
+      project.id === place.exceptProjectId ||
+      normalizeProjectPathForComparison(project.workspaceRoot) !== folder
+    )
+      return false;
+    const source = projectSource(project);
+    return (
+      place.filePath === undefined ||
+      source.kind !== "local-cad" ||
+      file(source.source.filePath) === file(place.filePath)
+    );
+  });
 }
 
 export function requireNoConflictingProject(
@@ -163,7 +170,7 @@ export function requireNoConflictingProject(
   return Effect.fail(
     invariantError(
       input.command.type,
-      existingProject.localCadSource && input.filePath !== undefined
+      projectSource(existingProject).kind === "local-cad" && input.filePath !== undefined
         ? `Active project '${existingProject.id}' already reviews '${input.filePath}' in '${input.workspaceRoot}'.`
         : `Active project '${existingProject.id}' already exists for workspace root '${input.workspaceRoot}'.`,
     ),

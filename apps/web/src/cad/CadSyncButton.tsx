@@ -1,6 +1,7 @@
 import {
   CadUserOperationError,
   isSolidWorksFile,
+  projectSource,
   type CadProjectState,
   type CadUserStartInput,
   type LocalCadSourceStatus,
@@ -48,18 +49,25 @@ function cadSyncTarget(project: Project, rootId: string | null): CadSyncRoot | n
   const root = cad?.roots.find((entry) => entry.rootId === rootId);
   if (root)
     return { elementId: root.elementId, kind: root.kind, configuration: root.configuration };
-  const source = cad?.catalog?.sourceElement;
-  if (!source) return null;
-  // The catalog names a local project's file even when its first import failed.
-  if (project.localCadSource)
-    return { elementId: source.elementId, kind: "assembly", configuration: "default" };
-  const entry = cad?.catalog?.roots.find((item) => item.elementId === source.elementId);
-  if (!project.onshapeSource || !entry) return null;
-  return {
-    elementId: entry.elementId,
-    kind: entry.kind,
-    configuration: project.onshapeSource.configuration || "default",
-  };
+  const element = cad?.catalog?.sourceElement;
+  if (!element) return null;
+  const source = projectSource(project);
+  switch (source.kind) {
+    // The catalog names a local project's file even when its first import failed.
+    case "local-cad":
+      return { elementId: element.elementId, kind: "assembly", configuration: "default" };
+    case "onshape": {
+      const entry = cad?.catalog?.roots.find((item) => item.elementId === element.elementId);
+      if (!entry) return null;
+      return {
+        elementId: entry.elementId,
+        kind: entry.kind,
+        configuration: source.source.configuration || "default",
+      };
+    }
+    case "folder":
+      return null;
+  }
 }
 
 /**
@@ -131,7 +139,7 @@ function useLocalSourceStatus(
   const check = useAtomCommand(localCadProjectEnvironment.checkSource, { reportFailure: false });
   const snapshotId =
     project.cad?.roots.find((entry) => entry.rootId === rootId)?.current?.snapshotId ?? null;
-  const local = project.localCadSource !== undefined;
+  const local = projectSource(project).kind === "local-cad";
   const [answer, setAnswer] = useState<{
     snapshotId: string;
     status: LocalCadSourceStatus;
@@ -249,13 +257,14 @@ export function CadSyncButton({
       input: { projectId: project.id, kind: "sync", root },
     });
     if (result._tag !== "Success") return refused(name, result);
-    const toastId = project.onshapeSource
-      ? toastManager.add({
-          type: "loading",
-          title: `Syncing ${name}`,
-          description: "Checking Onshape for changes.",
-        })
-      : null;
+    const toastId =
+      projectSource(project).kind === "onshape"
+        ? toastManager.add({
+            type: "loading",
+            title: `Syncing ${name}`,
+            description: "Checking Onshape for changes.",
+          })
+        : null;
     loadingToast.current = toastId;
     setStarted({
       kind: "sync",
@@ -352,7 +361,8 @@ export function CadSyncButton({
   if (!plan) return null;
   const root = plan.kind === "sync" ? plan.root : null;
   const name = root ? nameOf(root) : "CAD";
-  const solidWorks = project.localCadSource !== undefined && isSolidWorksFile(name);
+  const local = projectSource(project).kind === "local-cad";
+  const solidWorks = local && isSolidWorksFile(name);
   const syncing = cad?.operation?.kind === "sync" || started?.kind === "discover";
   const blocker = cadSyncBlocker(project, threads);
   const changed = !syncing && sourceStatus === "changed";
@@ -388,7 +398,7 @@ export function CadSyncButton({
           >
             <ArrowsClockwiseIcon />
             {syncing
-              ? project.localCadSource
+              ? local
                 ? solidWorks
                   ? "Converting…"
                   : "Importing…"
@@ -404,7 +414,7 @@ export function CadSyncButton({
           {blocker ??
             (changed
               ? `${name} changed on disk since it was imported. Sync to import the new version.`
-              : !project.localCadSource
+              : !local
                 ? `Download ${name} from Onshape${root && currentVersion(root) ? " again" : ""}`
                 : solidWorks
                   ? `Convert ${name} with SolidWorks again after saving it`

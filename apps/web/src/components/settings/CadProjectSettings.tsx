@@ -6,6 +6,7 @@ import {
 import {
   CadUserOperationError,
   isSolidWorksFile,
+  projectSource,
   type CadUserStartInput,
 } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
@@ -99,12 +100,14 @@ export function CadProjectSettings({
   const [configuration, setConfiguration] = useState(
     project.onshapeSource?.configuration || "default",
   );
-  const local = project.localCadSource !== undefined;
-  const copy = !project.localCadSource
-    ? COPY.onshape
-    : isSolidWorksFile(project.localCadSource.filePath)
-      ? SOLIDWORKS_COPY
-      : COPY.local;
+  const source = projectSource(project);
+  const local = source.kind === "local-cad";
+  const copy =
+    source.kind !== "local-cad"
+      ? COPY.onshape
+      : isSolidWorksFile(source.source.filePath)
+        ? SOLIDWORKS_COPY
+        : COPY.local;
   const cad = project.cad;
   const retryAt = cad?.lastOutcome?.retryAt;
   const [clock, setClock] = useState(Date.now);
@@ -162,9 +165,9 @@ export function CadProjectSettings({
       <SettingsRow
         title={copy.sectionRow}
         description={
-          project.localCadSource ? (
+          source.kind === "local-cad" ? (
             <>
-              <span className="break-all font-mono text-xs">{project.localCadSource.filePath}</span>
+              <span className="break-all font-mono text-xs">{source.source.filePath}</span>
               <br />
               {copy.sectionDescription}
             </>

@@ -9,6 +9,7 @@ import {
   OnshapeElementId,
   OnshapeWorkspaceId,
   ProjectId,
+  projectSource,
   ThreadId,
   TurnId,
   ProviderInstanceId,
@@ -16,6 +17,7 @@ import {
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -353,5 +355,26 @@ it.effect("disabled CAD retains snapshots and rejects new remote reservations", 
       enabled: true,
     });
     yield* engine.dispatch(reserve(nextOperationId));
+  }).pipe(Effect.provide(testLayer)),
+);
+
+// `projectSource()` treats a project with both sources as a defect. Linking a file is the only
+// command that adds a source to an existing project, so it must refuse an Onshape project.
+it.effect("rejects linking a local CAD file to an Onshape project", () =>
+  Effect.gen(function* () {
+    const engine = yield* seed;
+    const query = yield* ProjectionSnapshotQuery;
+    const error = yield* Effect.flip(
+      engine.dispatch({
+        type: "project.local-cad.set",
+        commandId: CommandId.make("link-onshape"),
+        projectId,
+        localCadSource: { filePath: "part.step" },
+      }),
+    );
+    assert.strictEqual(error._tag, "OrchestrationCommandInvariantError");
+    const stored = Option.getOrThrow(yield* query.getProjectShellById(projectId));
+    assert.strictEqual(stored.localCadSource, undefined);
+    assert.strictEqual(projectSource(stored).kind, "onshape");
   }).pipe(Effect.provide(testLayer)),
 );

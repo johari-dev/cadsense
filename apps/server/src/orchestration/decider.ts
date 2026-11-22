@@ -1,9 +1,9 @@
 import { decideCadComments } from "./cadComments.ts";
 import {
   EventId,
-  hasCadSource,
   initialCadProjectState,
   isCadThreadRunActive,
+  projectSource,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -124,9 +124,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
       const fail = (detail: string) =>
         new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-      if (!hasCadSource(project)) return yield* fail("This project has no CAD source.");
+      const source = projectSource(project);
+      if (source.kind === "folder") return yield* fail("This project has no CAD source.");
       // Only a server-managed Onshape workspace can be deleted. A local folder is the user's.
-      if (!project.onshapeSource && "deleteWorkspace" in command && command.deleteWorkspace)
+      if (source.kind === "local-cad" && "deleteWorkspace" in command && command.deleteWorkspace)
         return yield* fail("A local CAD project's folder is never deleted.");
       const occurredAt = yield* nowIso;
       let cad = project.cad ?? initialCadProjectState();
@@ -185,14 +186,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             readModel,
             command,
             workspaceRoot: project.workspaceRoot,
-            filePath: project.localCadSource?.filePath,
+            filePath: source.kind === "local-cad" ? source.source.filePath : undefined,
             exceptProjectId: project.id,
           });
-          if (project.onshapeSource)
+          if (source.kind === "onshape")
             yield* requireActiveOnshapeProjectSourceAbsent({
               readModel,
               command,
-              source: project.onshapeSource,
+              source: source.source,
             });
           const { storage: _storage, ...retained } = cad;
           cad = retained;
@@ -457,7 +458,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: command.projectId,
       });
       if (command.workspaceRoot !== undefined) {
-        if (project.onshapeSource !== undefined) {
+        const source = projectSource(project);
+        if (source.kind === "onshape") {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `Project '${command.projectId}' has a server-managed Onshape workspace.`,
@@ -467,7 +469,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           readModel,
           command,
           workspaceRoot: command.workspaceRoot,
-          filePath: project.localCadSource?.filePath,
+          filePath: source.kind === "local-cad" ? source.source.filePath : undefined,
           exceptProjectId: command.projectId,
         });
       }
@@ -551,7 +553,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
-      if (project.onshapeSource !== undefined) {
+      // The one transition that adds a source to an existing project. Refusing Onshape projects
+      // keeps `projectSource()` from ever seeing both fields set.
+      if (projectSource(project).kind === "onshape") {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Project '${command.projectId}' is an Onshape project.`,
@@ -620,7 +624,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "project.delete": {
       const target = yield* requireProject({ readModel, command, projectId: command.projectId });
-      if (target.onshapeSource?.managedWorkspaceReady === true)
+      const source = projectSource(target);
+      if (source.kind === "onshape" && source.source.managedWorkspaceReady === true)
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail:
@@ -628,7 +633,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       // Like a ready Onshape project, a local CAD project leaves only through CAD storage removal,
       // which keeps its threads, asks about its imported CAD, and can be restored.
-      if (target.localCadSource)
+      if (source.kind === "local-cad")
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail:

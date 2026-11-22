@@ -9,8 +9,9 @@ import {
   type LocalCadSourceCheckInput,
   type LocalCadSourceCheckResult,
   type ModelSelection,
-  type OrchestrationProject,
   type ProjectId,
+  projectSource,
+  type ProjectSourceFields,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -103,14 +104,17 @@ export const make = Effect.gen(function* () {
   });
 
   /** The error for a place another project holds: its Onshape folder, its plain folder, or its file. */
-  const conflictError = (project: Pick<OrchestrationProject, "onshapeSource" | "localCadSource">) =>
-    new LocalCadError({
-      reason: project.onshapeSource
-        ? "onshape-project"
-        : project.localCadSource
-          ? "file-in-use"
-          : "folder-in-use",
-    });
+  const conflictError = (project: ProjectSourceFields) => {
+    const source = projectSource(project);
+    switch (source.kind) {
+      case "onshape":
+        return new LocalCadError({ reason: "onshape-project" });
+      case "local-cad":
+        return new LocalCadError({ reason: "file-in-use" });
+      case "folder":
+        return new LocalCadError({ reason: "folder-in-use" });
+    }
+  };
 
   /**
    * The active project that `place` collides with, from the latest model. After a failed dispatch
@@ -147,7 +151,8 @@ export const make = Effect.gen(function* () {
     // A project that already reviews this file is the one to open. Any other conflict is the
     // folder's plain or Onshape project, which keeps the folder to itself.
     const existing = (yield* conflictFor(place)) ?? null;
-    if (existing && !existing.localCadSource) return yield* conflictError(existing);
+    if (existing && projectSource(existing).kind !== "local-cad")
+      return yield* conflictError(existing);
     let projectId = existing?.id ?? input.projectId;
     if (!existing) {
       const created = yield* engine
@@ -169,7 +174,7 @@ export const make = Effect.gen(function* () {
         // Another create for this file or folder won the race.
         const winner = yield* conflictFor(place);
         if (!winner) return yield* failed();
-        if (!winner.localCadSource) return yield* conflictError(winner);
+        if (projectSource(winner).kind !== "local-cad") return yield* conflictError(winner);
         projectId = winner.id;
       }
     }
@@ -182,7 +187,8 @@ export const make = Effect.gen(function* () {
   ) {
     const project = yield* query.getProjectShellById(input.projectId).pipe(Effect.mapError(failed));
     if (Option.isNone(project)) return yield* new LocalCadError({ reason: "project-not-found" });
-    if (project.value.onshapeSource) return yield* new LocalCadError({ reason: "onshape-project" });
+    if (projectSource(project.value).kind === "onshape")
+      return yield* new LocalCadError({ reason: "onshape-project" });
     const { workspaceRoot } = project.value;
     const file = yield* withFiles(resolveLocalCadFile({ workspaceRoot, filePath: input.filePath }));
     const place = { workspaceRoot, filePath: file.relativePath, exceptProjectId: input.projectId };
