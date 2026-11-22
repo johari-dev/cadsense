@@ -1178,47 +1178,6 @@ export const OrchestrationCommand = Schema.Union([
 ]);
 export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 
-export const OrchestrationEventType = Schema.Literals([
-  "thread.cad-comments-committed",
-  "thread.cad-comment-reviewed",
-  "thread.cad-comments-outdated",
-  "project.cad-review-learning-added",
-  "project.cad-review-learning-removed",
-  "thread.cad-capture-recorded",
-  "thread.cad-presentation-settled",
-  "thread.cad-context-ensured",
-  "thread.cad-view-set",
-  "thread.cad-user-view-set",
-  "project.cad-state-set",
-  "project.onshape.storage-set",
-  "thread.turn-start-settled",
-  "thread.turn-lifecycle-settled",
-  "project.created",
-  "project.meta-updated",
-  "project.deleted",
-  "thread.created",
-  "thread.deleted",
-  "thread.archived",
-  "thread.unarchived",
-  "thread.pinned",
-  "thread.unpinned",
-  "thread.pin-reordered",
-  "thread.meta-updated",
-  "thread.runtime-mode-set",
-  "thread.interaction-mode-set",
-  "thread.message-sent",
-  "thread.message-rating-set",
-  "thread.turn-start-requested",
-  "thread.turn-interrupt-requested",
-  "thread.approval-response-requested",
-  "thread.user-input-response-requested",
-  "thread.session-stop-requested",
-  "thread.session-set",
-  "thread.proposed-plan-upserted",
-  "thread.activity-appended",
-]);
-export type OrchestrationEventType = typeof OrchestrationEventType.Type;
-
 export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
@@ -1644,6 +1603,12 @@ export const OrchestrationEvent = Schema.Union([
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
+
+// Derived from the union so a new event variant cannot miss the event store's type column.
+export const OrchestrationEventType = Schema.Literals(
+  OrchestrationEvent.members.map((member) => member.fields.type.literal),
+);
+export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
 export const OrchestrationThreadStreamItem = Schema.Union([
   Schema.Struct({
