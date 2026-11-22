@@ -160,18 +160,13 @@ import {
   beginBackgroundDraftSubmissionByRef,
   clearBackgroundDraftSubmissionByRef,
   composerDraftHasUserContent,
-  type ComposerFileAttachment,
   type ComposerImageAttachment,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThreadByRef,
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
-import {
-  appendElementContextsToPrompt,
-  type ElementContextDraft,
-  formatElementContextLabel,
-} from "../lib/elementContext";
+import { appendElementContextsToPrompt, formatElementContextLabel } from "../lib/elementContext";
 import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
 import { environmentCatalog } from "../connection/catalog";
 import { useEnvironmentQuery } from "../state/query";
@@ -662,9 +657,6 @@ function ChatViewContent(props: ChatViewProps) {
     (store) => store.setLogicalProjectDraftThreadId,
   );
   const promptRef = useRef("");
-  const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
-  const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
-  const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
@@ -2385,22 +2377,23 @@ function ChatViewContent(props: ChatViewProps) {
   // interrupting, and works by session, so no active turn is needed.
   const activeBackgroundLiveness =
     !isWorking && activeThread ? (activeThreadShell?.backgroundLiveness ?? null) : null;
-  const [isStoppingBackgroundWork, setIsStoppingBackgroundWork] = useState(false);
-  useEffect(() => {
-    // "Stopping..." holds until the liveness clears; the interrupt command
-    // returning only means the request was accepted.
-    if (activeBackgroundLiveness === null) {
-      setIsStoppingBackgroundWork(false);
-    }
-  }, [activeBackgroundLiveness]);
-  useEffect(() => {
-    // Per-thread state: switching threads while A's stop is pending must not
-    // disable B's Stop button.
-    setIsStoppingBackgroundWork(false);
-  }, [activeThreadId]);
+  // The thread whose Stop was pressed. "Stopping..." holds until its liveness
+  // clears, because the interrupt command returning only means the request was
+  // accepted. It is per thread: a pending stop on A must not disable B's Stop.
+  const [stoppingThreadKey, setStoppingThreadKey] = useState<string | null>(null);
+  const isStoppingBackgroundWork =
+    stoppingThreadKey !== null &&
+    stoppingThreadKey === activeThreadKey &&
+    activeBackgroundLiveness !== null;
+  // Once "Stopping..." stops showing, it is over: coming back to the thread, or
+  // new background work starting, shows a fresh Stop.
+  if (stoppingThreadKey !== null && !isStoppingBackgroundWork) {
+    setStoppingThreadKey(null);
+  }
   const handleStopBackgroundWork = useCallback(async () => {
-    if (!activeThread) return;
-    setIsStoppingBackgroundWork(true);
+    if (!activeThread || activeThreadKey === null) return;
+    const threadKey = activeThreadKey;
+    setStoppingThreadKey(threadKey);
     const result = await interruptThreadTurn({
       environmentId,
       input: buildThreadTurnInterruptInput(activeThread),
@@ -2409,7 +2402,7 @@ function ChatViewContent(props: ChatViewProps) {
       // Every failure clears the pending state — an interrupted command
       // never reached the server, so liveness would hold "Stopping..."
       // forever. Only real failures toast.
-      setIsStoppingBackgroundWork(false);
+      setStoppingThreadKey((key) => (key === threadKey ? null : key));
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         setThreadError(
@@ -2418,7 +2411,7 @@ function ChatViewContent(props: ChatViewProps) {
         );
       }
     }
-  }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
+  }, [activeThread, activeThreadKey, environmentId, interruptThreadTurn, setThreadError]);
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (activeBackgroundLiveness === null || !activeThread) {
       return null;
@@ -3158,11 +3151,14 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      // Restore the sent draft only if the live composer (which may show
+      // another thread by now) is still empty.
+      const liveComposer = composerRef.current?.getSendContext();
       if (
         promptRef.current.length === 0 &&
-        composerImagesRef.current.length === 0 &&
-        composerFilesRef.current.length === 0 &&
-        composerElementContextsRef.current.length === 0 &&
+        (liveComposer?.images.length ?? 0) === 0 &&
+        (liveComposer?.files.length ?? 0) === 0 &&
+        (liveComposer?.elementContexts.length ?? 0) === 0 &&
         (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.previewAnnotations
           .length ?? 0) === 0
       ) {
@@ -3176,9 +3172,6 @@ function ChatViewContent(props: ChatViewProps) {
         });
         promptRef.current = promptForSend;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
-        composerImagesRef.current = retryComposerImages;
-        composerFilesRef.current = composerFilesSnapshot;
-        composerElementContextsRef.current = composerElementContextsSnapshot;
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         addComposerDraftFiles(composerDraftTarget, composerFilesSnapshot);
@@ -4191,9 +4184,6 @@ function ChatViewContent(props: ChatViewProps) {
                             keybindings={keybindings}
                             projectCwd={activeProject?.workspaceRoot ?? null}
                             promptRef={promptRef}
-                            composerImagesRef={composerImagesRef}
-                            composerFilesRef={composerFilesRef}
-                            composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}

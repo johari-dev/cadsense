@@ -612,9 +612,6 @@ export interface ChatComposerProps {
 
   // Refs the parent needs kept in sync
   promptRef: React.RefObject<string>;
-  composerImagesRef: React.RefObject<ComposerImageAttachment[]>;
-  composerFilesRef: React.RefObject<ComposerFileAttachment[]>;
-  composerElementContextsRef: React.RefObject<ElementContextDraft[]>;
   composerRef: React.RefObject<ChatComposerHandle | null>;
 
   // Callbacks
@@ -699,9 +696,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectCwd,
     promptRef,
     composerRef,
-    composerImagesRef,
-    composerFilesRef,
-    composerElementContextsRef,
     onSend,
     onInterrupt,
     onImplementPlanInNewThread,
@@ -1089,12 +1083,37 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
-  const [composerSubmissionError, setComposerSubmissionError] = useState<string | null>(null);
+  // Set when a send is blocked because the prompt is too long. The message then
+  // follows the prompt as the user edits, and clears for good once it fits.
+  const [showPromptLengthError, setShowPromptLengthError] = useState(false);
+  const composerSubmissionError = showPromptLengthError
+    ? getComposerPromptLengthValidationMessage(prompt)
+    : null;
+  if (showPromptLengthError && composerSubmissionError === null) {
+    setShowPromptLengthError(false);
+  }
+  // ChatView's preflight rejection of the composed provider input. It holds
+  // only for the inputs it checked, so a change to any of them clears it.
+  const providerInputs = [
+    prompt,
+    composerElementContexts,
+    composerPreviewAnnotations,
+    selectedModel,
+    selectedPromptEffort,
+    selectedProvider,
+  ] as const;
   const [providerInputSubmissionError, setProviderInputSubmissionError] = useState<string | null>(
     null,
   );
+  const [checkedProviderInputs, setCheckedProviderInputs] = useState(providerInputs);
+  if (providerInputs.some((input, index) => input !== checkedProviderInputs[index])) {
+    setCheckedProviderInputs(providerInputs);
+    setProviderInputSubmissionError(null);
+  }
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
-  const [isTasksDrawerOpen, setIsTasksDrawerOpen] = useState(false);
+  // The thread whose tasks drawer the user opened. The drawer shows only while
+  // that thread is active and its tasks can show; see `isTasksDrawerOpen`.
+  const [tasksDrawerThreadId, setTasksDrawerThreadId] = useState<ThreadId | null>(null);
   const [dismissedTasksTurnId, setDismissedTasksTurnId] = useState<TurnId | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
@@ -1385,7 +1404,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (fileId: string) => {
       // Release by the draft attachment, not the bare queue key: a hydrated
       // file's upload lives server-side under its persisted attachment id.
-      const file = composerFilesRef.current.find((candidate) => candidate.id === fileId);
+      const file = useComposerDraftStore
+        .getState()
+        .getComposerDraft(composerDraftTarget)
+        ?.files.find((candidate) => candidate.id === fileId);
       if (file) {
         releaseDraftAttachment(file);
       } else {
@@ -1393,7 +1415,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       removeComposerDraftFile(composerDraftTarget, fileId);
     },
-    [composerDraftTarget, composerFilesRef, removeComposerDraftFile],
+    [composerDraftTarget, removeComposerDraftFile],
   );
 
   // ------------------------------------------------------------------
@@ -1403,37 +1425,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptRef.current = prompt;
     setComposerCursor((existing) => clampCollapsedComposerCursor(prompt, existing));
   }, [prompt, promptRef]);
-
-  useEffect(() => {
-    if (composerSubmissionError === null) return;
-    const nextError = getComposerPromptLengthValidationMessage(prompt);
-    if (nextError !== composerSubmissionError) {
-      setComposerSubmissionError(nextError);
-    }
-  }, [composerSubmissionError, prompt]);
-
-  useEffect(() => {
-    setProviderInputSubmissionError(null);
-  }, [
-    composerElementContexts,
-    composerPreviewAnnotations,
-    prompt,
-    selectedModel,
-    selectedPromptEffort,
-    selectedProvider,
-  ]);
-
-  useEffect(() => {
-    composerImagesRef.current = composerImages;
-  }, [composerImages, composerImagesRef]);
-
-  useEffect(() => {
-    composerFilesRef.current = composerFiles;
-  }, [composerFiles, composerFilesRef]);
-
-  useEffect(() => {
-    composerElementContextsRef.current = composerElementContexts;
-  }, [composerElementContexts, composerElementContextsRef]);
 
   // ------------------------------------------------------------------
   // Composer menu highlight sync
@@ -1514,7 +1505,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   useEffect(() => {
     setComposerHighlightedItemId(null);
-    setComposerSubmissionError(null);
+    setShowPromptLengthError(false);
     setProviderInputSubmissionError(null);
     setComposerCursor(collapseExpandedComposerCursor(promptRef.current, promptRef.current.length));
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
@@ -1932,7 +1923,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           return !providerInputRejectedRef.current;
         },
       });
-      setComposerSubmissionError(submission.validationMessage);
+      setShowPromptLengthError(submission.validationMessage !== null);
       if (!submission.didDispatch) return;
       if (shouldBlurMobileComposerOnSubmit()) {
         blurMobileComposerAfterSend();
@@ -2065,9 +2056,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return false;
   };
 
-  const toggleTasksDrawer = useCallback(() => {
-    setIsTasksDrawerOpen((open) => !open);
-  }, []);
   const activeTasksTurnId = activeThread?.latestTurn?.turnId ?? null;
   const tasksDismissedForActiveTurn =
     activeTasksTurnId !== null && dismissedTasksTurnId === activeTasksTurnId;
@@ -2075,11 +2063,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const visibleTaskSteps = tasksDismissedForActiveTurn ? null : activeTaskSteps;
   const hasBlockingComposerTopDrawer =
     activePendingApproval !== null || pendingUserInputs.length > 0;
+  const isTasksDrawerOpen =
+    tasksDrawerThreadId !== null &&
+    tasksDrawerThreadId === activeThreadId &&
+    visibleTasksProgress !== null &&
+    visibleTaskSteps !== null &&
+    !hasBlockingComposerTopDrawer;
+  // A closed drawer stays closed: switching away and back, a pending approval
+  // or question resolving, or the next turn's tasks never reopen it.
+  if (tasksDrawerThreadId !== null && !isTasksDrawerOpen) {
+    setTasksDrawerThreadId(null);
+  }
+  const toggleTasksDrawer = useCallback(() => {
+    setTasksDrawerThreadId(isTasksDrawerOpen ? null : activeThreadId);
+  }, [activeThreadId, isTasksDrawerOpen]);
   const dismissTasks = useCallback(() => {
     if (activeTasksTurnId !== null) {
       setDismissedTasksTurnId(activeTasksTurnId);
     }
-    setIsTasksDrawerOpen(false);
+    setTasksDrawerThreadId(null);
   }, [activeTasksTurnId]);
   const showInlineTasksBadge =
     visibleTasksProgress !== null &&
@@ -2107,22 +2109,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     visibleTasksProgress !== null &&
     visibleTaskSteps !== null &&
     visibleTasksProgress.totalSteps > 0;
-  useEffect(() => {
-    if (visibleTasksProgress === null || visibleTaskSteps === null) {
-      setIsTasksDrawerOpen(false);
-    }
-  }, [visibleTaskSteps, visibleTasksProgress]);
-
-  useEffect(() => {
-    if (hasBlockingComposerTopDrawer) {
-      setIsTasksDrawerOpen(false);
-    }
-  }, [hasBlockingComposerTopDrawer]);
-
-  useEffect(() => {
-    setIsTasksDrawerOpen(false);
-  }, [activeThreadId]);
-
   // ------------------------------------------------------------------
   // Callbacks: attachments
   // ------------------------------------------------------------------
@@ -2144,12 +2130,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // accepted files reserve their attachment slots (via the pending counter)
     // before the first await, keeping the total under the limit.
     const pendingCount = pendingImageCompressionsRef.current.get(threadId) ?? 0;
-    let reservedCount =
-      composerImagesRef.current.length + composerFilesRef.current.length + pendingCount;
+    const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+    const draftFiles = draft?.files ?? [];
+    let reservedCount = (draft?.images.length ?? 0) + draftFiles.length + pendingCount;
     // A pick that matches a needs-reattach marker replaces it in the draft, so
     // it must not consume a slot; a draft full of markers would otherwise hit
     // the capacity error before the replacement path could run.
-    const reattachMarkers = composerFilesRef.current.filter(composerFileNeedsReattach);
+    const reattachMarkers = draftFiles.filter(composerFileNeedsReattach);
     const replacedReattachMarkerIds = new Set<string>();
     const acceptedImages: File[] = [];
     const acceptedFiles: ComposerFileAttachment[] = [];
@@ -2455,20 +2442,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             : null,
         );
       },
-      getSendContext: () => ({
-        prompt: promptRef.current,
-        images: composerImagesRef.current,
-        files: composerFilesRef.current,
-        elementContexts: composerElementContextsRef.current,
-        previewAnnotations: composerPreviewAnnotations,
-        selectedPromptEffort,
-        selectedModelOptionsForDispatch,
-        selectedModelSelection,
-        providerAvailable: !noProviderAvailable,
-        selectedProvider,
-        selectedModel,
-        selectedProviderModels,
-      }),
+      getSendContext: () => {
+        // The store, not this render's values: a send can follow an
+        // attachment added since the last render.
+        const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+        return {
+          prompt: promptRef.current,
+          images: draft?.images ?? [],
+          files: draft?.files ?? [],
+          elementContexts: draft?.elementContexts ?? [],
+          previewAnnotations: composerPreviewAnnotations,
+          selectedPromptEffort,
+          selectedModelOptionsForDispatch,
+          selectedModelSelection,
+          providerAvailable: !noProviderAvailable,
+          selectedProvider,
+          selectedModel,
+          selectedProviderModels,
+        };
+      },
       validateProviderInput: (providerInput: string) => {
         const validationMessage = getComposerSubmissionValidationMessage({
           prompt: promptRef.current,
@@ -2485,9 +2477,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerDraftTarget,
       composerCursor,
       promptRef,
-      composerImagesRef,
-      composerFilesRef,
-      composerElementContextsRef,
       composerPreviewAnnotations,
       focusComposer,
       isConnecting,

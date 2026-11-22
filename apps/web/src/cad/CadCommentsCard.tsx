@@ -167,6 +167,12 @@ export function CadCommentsCard({
   const [filter, setFilter] = useState<"open" | "reviewed" | "history">(
     historical ? "history" : "open",
   );
+  // Entering a historical view jumps to the history tab.
+  const [wasHistorical, setWasHistorical] = useState(historical);
+  if (historical !== wasHistorical) {
+    setWasHistorical(historical);
+    if (historical) setFilter("history");
+  }
   // How the selected location was framed (shown as an icon on its chip), and the outcome of
   // the last resolve/dismiss/reopen. Successes clear themselves; failures stay until closed.
   const [focusNotice, setFocusNotice] = useState("");
@@ -280,9 +286,6 @@ export function CadCommentsCard({
   const toggleWidth = openCount
     ? `calc(48px + ${String(openCount).length}ch + ${openCount === 1 ? 4.3 : 4.8}em)`
     : "var(--cad-overlay-control)";
-  useEffect(() => {
-    if (historical) setFilter("history");
-  }, [historical]);
   useEffect(() => {
     // Choosing a finding (from a pin or the chat) shows it even if its severity was filtered.
     const severity = selected?.severity;
