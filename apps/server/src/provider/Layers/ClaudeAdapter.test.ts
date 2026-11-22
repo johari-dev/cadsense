@@ -4451,6 +4451,117 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  // Each cursor field is read on its own: a missing or badly typed field is dropped and the
+  // rest of the cursor still applies. A cursor that is not an object resumes nothing.
+  it.effect("decodes Claude resume cursors field by field", () => {
+    const harness = makeHarness();
+    const sessionUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const cases: ReadonlyArray<{
+      readonly name: string;
+      readonly cursor: unknown;
+      readonly resume: string | undefined;
+      readonly resumeSessionAt: string | undefined;
+      readonly turnCount: number;
+    }> = [
+      {
+        name: "valid",
+        cursor: { resume: sessionUuid, resumeSessionAt: "assistant-7", turnCount: 2 },
+        resume: sessionUuid,
+        resumeSessionAt: "assistant-7",
+        turnCount: 2,
+      },
+      {
+        name: "legacy sessionId",
+        cursor: { sessionId: sessionUuid },
+        resume: sessionUuid,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "missing fields",
+        cursor: {},
+        resume: undefined,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "wrong types fall back field by field",
+        cursor: {
+          threadId: 9,
+          resume: 42,
+          sessionId: sessionUuid,
+          resumeSessionAt: 7,
+          turnCount: "3",
+        },
+        resume: sessionUuid,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "bad values",
+        cursor: { resume: "not-a-uuid", resumeSessionAt: "", turnCount: 1.5 },
+        resume: undefined,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "negative turn count",
+        cursor: { resume: sessionUuid, turnCount: -1 },
+        resume: sessionUuid,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "string cursor",
+        cursor: "cursor",
+        resume: undefined,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "null cursor",
+        cursor: null,
+        resume: undefined,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+      {
+        name: "array cursor",
+        cursor: [sessionUuid],
+        resume: undefined,
+        resumeSessionAt: undefined,
+        turnCount: 0,
+      },
+    ];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      for (const [index, testCase] of cases.entries()) {
+        const session = yield* adapter.startSession({
+          threadId: ThreadId.make(`thread-claude-resume-decode-${index}`),
+          provider: ProviderDriverKind.make("claudeAgent"),
+          resumeCursor: testCase.cursor,
+          runtimeMode: "full-access",
+        });
+        const options = harness.getLastCreateQueryInput()?.options;
+        const cursor = session.resumeCursor as {
+          readonly resumeSessionAt?: string;
+          readonly turnCount?: number;
+        };
+        assert.equal(options?.resume, testCase.resume, testCase.name);
+        assert.equal(
+          options?.sessionId === undefined,
+          testCase.resume !== undefined,
+          testCase.name,
+        );
+        assert.equal(cursor.resumeSessionAt, testCase.resumeSessionAt, testCase.name);
+        assert.equal(cursor.turnCount, testCase.turnCount, testCase.name);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("preserves durable resume ids across Claude resume hooks", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
