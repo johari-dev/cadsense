@@ -62,6 +62,10 @@ export function applyThreadDetailEvent(
     case "project.created":
     case "project.meta-updated":
     case "project.deleted":
+    case "project.cad-state-set":
+    case "project.onshape.storage-set":
+    case "project.cad-review-learning-added":
+    case "project.cad-review-learning-removed":
       return { kind: "unchanged" };
 
     // ── Thread lifecycle ────────────────────────────────────────────
@@ -437,10 +441,34 @@ export function applyThreadDetailEvent(
     case "thread.approval-response-requested":
     case "thread.user-input-response-requested":
       return { kind: "unchanged" };
-  }
 
-  // Forward-compatible: ignore unrecognized event types.
-  return { kind: "unchanged" };
+    // CAD state lives in server read-model tables and reaches clients through
+    // the cad* watch RPCs, not through OrchestrationThread.
+    case "thread.cad-context-ensured":
+    case "thread.cad-view-set":
+    case "thread.cad-user-view-set":
+    case "thread.cad-comments-committed":
+    case "thread.cad-comment-reviewed":
+    case "thread.cad-comments-outdated":
+    case "thread.cad-capture-recorded":
+    case "thread.cad-presentation-settled":
+      return { kind: "unchanged" };
+
+    // The server projects these into `turnAdmission`. Clients read that from
+    // thread shells (CAD panel locks), never from thread detail.
+    case "thread.turn-start-settled":
+    case "thread.turn-lifecycle-settled":
+      return { kind: "unchanged" };
+
+    default: {
+      // A new OrchestrationEvent variant fails typecheck here until it gets a
+      // case above. At runtime this is unreachable: the RPC client decodes
+      // stream items against the closed union, so an unknown event type fails
+      // decoding before it gets here.
+      event satisfies never;
+      return { kind: "unchanged" };
+    }
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
