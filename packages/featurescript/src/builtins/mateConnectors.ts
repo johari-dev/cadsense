@@ -1,6 +1,6 @@
 import type { Entity } from "../geometry/Model.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { subShapes, xyz, type Oc } from "../geometry/occt.ts";
+import { curveKind, subShapes, surfaceKind, xyz, type Oc } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import { FsMap, untag, type FsArray } from "../runtime/Value.ts";
 import { array, map } from "./args.ts";
@@ -68,7 +68,7 @@ function inferred(call: BuiltinCall, oc: Oc, entity: Entity, type: string): Fram
   if (type === "CENTROID") {
     if (entity.type !== "FACE") return failed();
     const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-    if (String(surface.GetType()) !== "GeomAbs_Plane")
+    if (surfaceKind(surface) !== "Plane")
       return call.unsupported(
         "A mate connector at a curved face's centroid is not supported locally yet.",
       );
@@ -84,10 +84,9 @@ function inferred(call: BuiltinCall, oc: Oc, entity: Entity, type: string): Fram
   if (type === "CENTER") {
     if (entity.type === "EDGE") {
       const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape));
-      const kind = String(curve.GetType());
-      if (kind !== "GeomAbs_Circle" && kind !== "GeomAbs_Ellipse") return failed();
-      const position =
-        kind === "GeomAbs_Circle" ? curve.Circle().Position() : curve.Ellipse().Position();
+      const kind = curveKind(curve);
+      if (kind !== "Circle" && kind !== "Ellipse") return failed();
+      const position = kind === "Circle" ? curve.Circle().Position() : curve.Ellipse().Position();
       return {
         origin: xyz(position.Location()),
         x: xyz(position.XDirection()),
@@ -96,7 +95,7 @@ function inferred(call: BuiltinCall, oc: Oc, entity: Entity, type: string): Fram
     }
     if (entity.type === "FACE") {
       const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-      if (String(surface.GetType()) !== "GeomAbs_Sphere") return failed();
+      if (surfaceKind(surface) !== "Sphere") return failed();
       return { origin: xyz(surface.Sphere().Location()), x: WORLD_X, z: WORLD_Z };
     }
     return failed();
@@ -111,7 +110,7 @@ function inferred(call: BuiltinCall, oc: Oc, entity: Entity, type: string): Fram
     if (entity.type !== "FACE") return failed();
     const face = oc.TopoDS.Face(entity.shape);
     const surface = new oc.BRepAdaptor_Surface(face, true);
-    if (String(surface.GetType()) !== "GeomAbs_Cylinder")
+    if (surfaceKind(surface) !== "Cylinder")
       return call.unsupported(
         "Mate connectors on the axis of a revolved face other than a cylinder are not supported locally yet.",
       );
@@ -139,22 +138,22 @@ function axisOf(call: BuiltinCall, oc: Oc, entity: Entity | undefined): Vec3 {
   const failed = () => regenError(call, "MATECONNECTOR_QUERY_AXIS_FAILED");
   if (entity?.type === "EDGE") {
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape));
-    const kind = String(curve.GetType());
-    if (kind === "GeomAbs_Line") {
+    const kind = curveKind(curve);
+    if (kind === "Line") {
       const walk = new EdgeWalk(oc, entity.shape, isReversed(entity.shape));
       return walk.at(walk.parameter(0, false)).direction;
     }
-    if (kind === "GeomAbs_Circle") return xyz(curve.Circle().Axis().Direction());
+    if (kind === "Circle") return xyz(curve.Circle().Axis().Direction());
     return failed();
   }
   if (entity?.type === "FACE") {
     const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-    const kind = String(surface.GetType());
-    if (kind === "GeomAbs_Plane") {
+    const kind = surfaceKind(surface);
+    if (kind === "Plane") {
       const normal = xyz(surface.Plane().Axis().Direction());
       return isReversed(entity.shape) ? scaled(normal, -1) : normal;
     }
-    if (kind === "GeomAbs_Cylinder") return xyz(surface.Cylinder().Axis().Direction());
+    if (kind === "Cylinder") return xyz(surface.Cylinder().Axis().Direction());
     return failed();
   }
   return failed();

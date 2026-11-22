@@ -11,7 +11,15 @@ import {
   type EntityAttribute,
   type History,
 } from "../geometry/Model.ts";
-import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import {
+  ShapeSet,
+  subShapes,
+  surfaceKind,
+  toList,
+  xyz,
+  type Oc,
+  type Shape,
+} from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import { equals, FsMap, untag, type FsValue } from "../runtime/Value.ts";
 import { map } from "./args.ts";
@@ -178,7 +186,7 @@ export const GEOMETRY_BUILTINS = {
     if (entity?.type !== "FACE")
       return call.fail("CANNOT_RESOLVE_PLANE: no planar face or mate connector to evaluate.");
     const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-    if (String(surface.GetType()) !== "GeomAbs_Plane")
+    if (surfaceKind(surface) !== "Plane")
       return call.fail("CANNOT_RESOLVE_PLANE: the face isn't planar.");
     const position = surface.Plane().Position();
     // A reversed face's outward normal is opposite its surface's; keep x, flip the normal.

@@ -12,6 +12,7 @@ import {
   fromList,
   ShapeSet,
   subShapes,
+  surfaceKind,
   toList,
   xyz,
   type Oc,
@@ -151,7 +152,7 @@ function passages(oc: Oc, body: Shape, axis: Axis, radius: number, reach: number
     const leaving: number[] = [];
     for (const face of subShapes(oc, piece, "FACE")) {
       const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-      if (String(surface.GetType()) !== "GeomAbs_Cylinder") continue;
+      if (surfaceKind(surface) !== "Cylinder") continue;
       const wall = surface.Cylinder();
       const [ax, ay] = xyz(wall.Location());
       if (Math.abs(wall.Radius() - radius) > TOLERANCE || Math.hypot(ax, ay) > TOLERANCE) continue;
@@ -466,7 +467,7 @@ function endBoundDistance(call: BuiltinCall, oc: Oc, entity: Entity | undefined,
   if (entity.frame) return crossing(entity.frame.origin, entity.frame.zAxis);
   if (entity.type === "FACE") {
     const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-    if (String(surface.GetType()) !== "GeomAbs_Plane")
+    if (surfaceKind(surface) !== "Plane")
       return call.unsupported("opHole up to a non-planar face is not supported locally yet.");
     const plane = surface.Plane().Position();
     return crossing(xyz(plane.Location()), xyz(plane.Direction()));

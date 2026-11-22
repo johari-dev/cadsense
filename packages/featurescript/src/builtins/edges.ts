@@ -1,6 +1,15 @@
 import type { Entity } from "../geometry/Model.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { subShapes, xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import {
+  curveKind,
+  subShapes,
+  surfaceKind,
+  xyz,
+  type CurveKind,
+  type Oc,
+  type Shape,
+  type SurfaceKind,
+} from "../geometry/occt.ts";
 
 /** Edge and face math shared by the evaluators: parameters along edges, face normals, adjacency. */
 
@@ -382,14 +391,8 @@ export function edgeJoint(
 /** Areas, volumes and their moments are integrated to this relative accuracy where needed. */
 const PROPERTY_ACCURACY = 1e-12;
 /** Surfaces, and boundary curves in their parameter plane, that fixed-order integration gets exact. */
-const FIXED_ORDER_SURFACES = new Set([
-  "GeomAbs_Plane",
-  "GeomAbs_Cylinder",
-  "GeomAbs_Cone",
-  "GeomAbs_Sphere",
-  "GeomAbs_Torus",
-]);
-const FIXED_ORDER_BOUNDARIES = new Set(["GeomAbs_Line", "GeomAbs_Circle", "GeomAbs_Ellipse"]);
+const FIXED_ORDER_SURFACES = new Set<SurfaceKind>(["Plane", "Cylinder", "Cone", "Sphere", "Torus"]);
+const FIXED_ORDER_BOUNDARIES = new Set<CurveKind>(["Line", "Circle", "Ellipse"]);
 
 /**
  * Whether OpenCascade's fixed-order integration is exact (to rounding) on a face: an elementary
@@ -399,12 +402,9 @@ const FIXED_ORDER_BOUNDARIES = new Set(["GeomAbs_Line", "GeomAbs_Circle", "GeomA
  */
 function fixedOrderExact(oc: Oc, shape: Shape): boolean {
   const face = oc.TopoDS.Face(shape);
-  if (!FIXED_ORDER_SURFACES.has(String(new oc.BRepAdaptor_Surface(face, false).GetType())))
-    return false;
+  if (!FIXED_ORDER_SURFACES.has(surfaceKind(new oc.BRepAdaptor_Surface(face, false)))) return false;
   return subShapes(oc, shape, "EDGE").every((edge) =>
-    FIXED_ORDER_BOUNDARIES.has(
-      String(new oc.BRepAdaptor_Curve2d(oc.TopoDS.Edge(edge), face).GetType()),
-    ),
+    FIXED_ORDER_BOUNDARIES.has(curveKind(new oc.BRepAdaptor_Curve2d(oc.TopoDS.Edge(edge), face))),
   );
 }
 
@@ -412,7 +412,7 @@ function fixedOrderExact(oc: Oc, shape: Shape): boolean {
  * Curves whose length and moments fixed-order integration gets to rounding: their speed is
  * constant. An ellipse's isn't (fixed order is 3.9e-4 off on an arc).
  */
-const FIXED_ORDER_CURVES = new Set(["GeomAbs_Line", "GeomAbs_Circle"]);
+const FIXED_ORDER_CURVES = new Set<CurveKind>(["Line", "Circle"]);
 
 /**
  * An edge's length, centroid and moments. Lines and circles take OpenCascade's fixed-order rule
@@ -428,10 +428,7 @@ function edgeProperties(
 ): InstanceType<Oc["GProp_GProps"]> {
   const props = new oc.GProp_GProps();
   const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
-  if (
-    oc.BRep_Tool.Degenerated(oc.TopoDS.Edge(edge)) ||
-    FIXED_ORDER_CURVES.has(String(curve.GetType()))
-  ) {
+  if (oc.BRep_Tool.Degenerated(oc.TopoDS.Edge(edge)) || FIXED_ORDER_CURVES.has(curveKind(curve))) {
     oc.BRepGProp.LinearProperties(edge, props, false, false);
     return props;
   }

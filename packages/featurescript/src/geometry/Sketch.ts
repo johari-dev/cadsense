@@ -247,23 +247,54 @@ export interface SketchRef {
   readonly part: SketchPart | null;
 }
 
+// The std `ConstraintType` members the solver handles, by the value each holds. `skConstraint`
+// stops the run on any other (NONE is a regen error), so a `SketchConstraint` holds one of these.
+/** Constraint types that hold no value. */
+export const GEOMETRIC_CONSTRAINT_TYPES = [
+  "COINCIDENT",
+  "HORIZONTAL",
+  "VERTICAL",
+  "PARALLEL",
+  "PERPENDICULAR",
+  "TANGENT",
+  "EQUAL",
+  "CONCENTRIC",
+  "MIDPOINT",
+  "MIRROR",
+  "FIX",
+  "NORMAL",
+] as const;
+/** Constraint types that hold a length. ANGLE, the one other, holds an angle. */
+export const DIMENSION_TYPES = [
+  "DISTANCE",
+  "LENGTH",
+  "RADIUS",
+  "DIAMETER",
+  "MAJOR_DIAMETER",
+  "MINOR_DIAMETER",
+] as const;
+export type GeometricConstraintType = (typeof GEOMETRIC_CONSTRAINT_TYPES)[number];
+export type DimensionType = (typeof DIMENSION_TYPES)[number];
+export type ConstraintType = GeometricConstraintType | DimensionType | "ANGLE";
+
 /** An `skConstraint`, with its references resolved against the sketch's entities. */
-export interface SketchConstraint {
+export type SketchConstraint = {
   readonly id: string;
-  /** A `ConstraintType` member, e.g. `"COINCIDENT"`. */
-  readonly type: string;
   readonly first: SketchRef | null;
   readonly second: SketchRef | null;
   /** The mirror line of a MIRROR (symmetric) constraint. */
   readonly mirror: SketchRef | null;
-  /** Dimension values: meters and radians. */
-  readonly length: number | null;
-  readonly angle: number | null;
   /** `DimensionDirection` of a DISTANCE. */
   readonly direction: "MINIMUM" | "HORIZONTAL" | "VERTICAL";
   /** `DimensionAlignment`: which way round a directional distance or parallel pair goes. */
   readonly alignment: "UNSPECIFIED" | "ALIGNED" | "ANTI_ALIGNED";
-}
+} & (
+  | { readonly type: GeometricConstraintType }
+  /** Meters, finite. */
+  | { readonly type: DimensionType; readonly length: number }
+  /** Radians, finite. */
+  | { readonly type: "ANGLE"; readonly angle: number }
+);
 
 /** An unsolved sketch: entities in plane coordinates and constraints, added to the context by `skSolve`. */
 export class Sketch {

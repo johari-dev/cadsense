@@ -1,4 +1,4 @@
-import init from "replicad-opencascadejs";
+import init, { type GeomAbs_CurveType, type GeomAbs_SurfaceType } from "replicad-opencascadejs";
 
 /**
  * OpenCascade (WASM) access. Geometry is kept in meters, the unit std passes to builtins, so builtins
@@ -106,6 +106,21 @@ export function seamEdges(oc: Oc, shape: Shape): ShapeSet<true> {
       if (oc.BRep_Tool.IsClosed(oc.TopoDS.Edge(edge), oc.TopoDS.Face(face))) seams.set(edge, true);
   return seams;
 }
+
+type WithoutGeomAbs<T> = T extends `GeomAbs_${infer Kind}` ? Kind : never;
+/** An OpenCascade surface type without its `GeomAbs_` prefix: `"Plane"`, `"BSplineSurface"`... */
+export type SurfaceKind = WithoutGeomAbs<GeomAbs_SurfaceType>;
+/** An OpenCascade curve type without its `GeomAbs_` prefix: `"Line"`, `"BSplineCurve"`... */
+export type CurveKind = WithoutGeomAbs<GeomAbs_CurveType>;
+const PREFIX = "GeomAbs_".length;
+
+// The casts hold because every GetType value is its type's GeomAbs_ name.
+/** What kind of surface a surface adaptor (`BRepAdaptor_Surface`, ...) holds. */
+export const surfaceKind = (surface: { GetType(): GeomAbs_SurfaceType }) =>
+  surface.GetType().slice(PREFIX) as SurfaceKind;
+/** What kind of curve a curve adaptor (`BRepAdaptor_Curve`, `BRepAdaptor_Curve2d`, ...) holds. */
+export const curveKind = (curve: { GetType(): GeomAbs_CurveType }) =>
+  curve.GetType().slice(PREFIX) as CurveKind;
 
 /** Point coordinates as a plain tuple. */
 export const xyz = (

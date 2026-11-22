@@ -8,14 +8,17 @@ import {
 } from "../geometry/Model.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
 import {
+  curveKind,
   seamEdges,
   shapeKind,
   ShapeSet,
   subShapes,
+  surfaceKind,
   toList,
   xyz,
   type Oc,
   type Shape,
+  type SurfaceKind,
 } from "../geometry/occt.ts";
 import { distance } from "../geometry/Query.ts";
 
@@ -33,8 +36,8 @@ export function volumeOf(oc: Oc, shape: Shape): number {
 }
 
 /** A face's surface type without the `GeomAbs_` prefix: `Plane`, `Cylinder`, `BSplineSurface`... */
-export const surfaceType = (oc: Oc, face: Shape): string =>
-  String(new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true).GetType()).replace("GeomAbs_", "");
+export const surfaceType = (oc: Oc, face: Shape) =>
+  surfaceKind(new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true));
 
 /** The face's outward unit normal at (u, v), following its orientation. */
 function normalAtUV(oc: Oc, face: Shape, u: number, v: number): Vec3 {
@@ -141,6 +144,9 @@ function boundary(oc: Oc, body: Shape, faces: readonly Shape[]) {
   );
 }
 
+/** The surfaces a rolling-ball blend leaves. */
+const ROUNDS = new Set<SurfaceKind>(["Cylinder", "Torus", "Sphere"]);
+
 /**
  * Fillet faces next to `faces` in `body`, the ones `includeFillet` deletes along with them: blend
  * surfaces (cylinders, tori, spheres) tangent to a selected face along one edge and to another face
@@ -153,7 +159,7 @@ export function adjacentFillets(oc: Oc, body: Shape, faces: readonly Shape[]): S
   for (const { face, neighbor, edge } of boundary(oc, body, faces))
     if (
       !fillets.has(neighbor) &&
-      ["Cylinder", "Torus", "Sphere"].includes(surfaceType(oc, neighbor)) &&
+      ROUNDS.has(surfaceType(oc, neighbor)) &&
       tangentAlong(oc, face, neighbor, edge) &&
       boundary(oc, body, [neighbor]).some(
         (other) =>
@@ -256,14 +262,14 @@ export function compoundOf(oc: Oc, shapes: readonly Shape[]): Shape {
  */
 function roundness(oc: Oc, face: Shape): { radius: number; outward: 1 | -1 } | null {
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-  const type = String(surface.GetType());
-  if (type !== "GeomAbs_Cylinder" && type !== "GeomAbs_Sphere") return null;
+  const type = surfaceKind(surface);
+  if (type !== "Cylinder" && type !== "Sphere") return null;
   const { UMin, UMax, VMin, VMax } = oc.BRepTools.UVBounds(oc.TopoDS.Face(face));
   const [u, v] = [(UMin + UMax) / 2, (VMin + VMax) / 2];
   const point = xyz(surface.Value(u, v));
   // The axis point (or center) nearest the face point.
   const center: Vec3 = (() => {
-    if (type === "GeomAbs_Sphere") return xyz(surface.Sphere().Location());
+    if (type === "Sphere") return xyz(surface.Sphere().Location());
     const axis = surface.Cylinder().Axis();
     const origin = xyz(axis.Location());
     const d = xyz(axis.Direction());
@@ -341,9 +347,9 @@ export function offsetFace(oc: Oc, face: Shape, distance: number): Shape | null 
   if (offsetCollapses(oc, face, distance)) return null;
   const topoFace = oc.TopoDS.Face(face);
   const surface = new oc.BRepAdaptor_Surface(topoFace, true);
-  const type = String(surface.GetType());
+  const type = surfaceKind(surface);
   const reversed = String(face.Orientation()) === "TopAbs_REVERSED";
-  if (type === "GeomAbs_Plane") {
+  if (type === "Plane") {
     const n = xyz(surface.Plane().Axis().Direction()).map((c) => (reversed ? -c : c) * distance);
     const shift = new oc.gp_Trsf();
     shift.SetTranslation(new oc.gp_Vec(n[0]!, n[1]!, n[2]!));
@@ -354,7 +360,7 @@ export function offsetFace(oc: Oc, face: Shape, distance: number): Shape | null 
     const { UMin, UMax, VMin, VMax } = oc.BRepTools.UVBounds(topoFace);
     const radius = round.radius + round.outward * distance;
     const rebuilt =
-      type === "GeomAbs_Cylinder"
+      type === "Cylinder"
         ? new oc.BRepBuilderAPI_MakeFace(
             new oc.gp_Cylinder(surface.Cylinder().Position(), radius),
             UMin,
@@ -375,8 +381,7 @@ export function offsetFace(oc: Oc, face: Shape, distance: number): Shape | null 
       oc.BRepGProp.SurfaceProperties(shape, props, false, false);
       return props.Mass();
     };
-    const scale =
-      type === "GeomAbs_Cylinder" ? radius / round.radius : (radius / round.radius) ** 2;
+    const scale = type === "Cylinder" ? radius / round.radius : (radius / round.radius) ** 2;
     if (Math.abs(area(rebuilt) - area(face) * scale) <= 1e-9 * area(rebuilt))
       return reversed ? rebuilt.Reversed() : rebuilt;
   }
@@ -817,13 +822,13 @@ export function tidied(
 /** What `sameDomain` compares: a face's surface type, and for a plane its point and outward normal. */
 interface Domain {
   readonly face: Shape;
-  readonly type: string;
+  readonly type: SurfaceKind;
   readonly plane: { readonly origin: Vec3; readonly normal: Vec3 } | null;
 }
 
 function domainOf(oc: Oc, face: Shape): Domain {
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-  const type = String(surface.GetType()).replace("GeomAbs_", "");
+  const type = surfaceKind(surface);
   if (type !== "Plane") return { face, type, plane: null };
   const plane = surface.Plane();
   const sign = String(face.Orientation()) === "TopAbs_REVERSED" ? -1 : 1;
@@ -856,9 +861,9 @@ function sameDomain(oc: Oc, a: Domain, b: Domain): boolean {
 function sameCurve(oc: Oc, a: Shape, b: Shape): boolean {
   const curve = (edge: Shape) => new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
   const [p, q] = [curve(a), curve(b)];
-  const type = String(p.GetType());
-  if (type !== String(q.GetType())) return false;
-  if (type === "GeomAbs_Line") {
+  const type = curveKind(p);
+  if (type !== curveKind(q)) return false;
+  if (type === "Line") {
     // Two lines through one vertex are one line when they run the same way.
     const direction = (line: typeof p) => {
       const d = line.EvalD1(line.FirstParameter()).D1;
@@ -867,7 +872,7 @@ function sameCurve(oc: Oc, a: Shape, b: Shape): boolean {
     };
     return Math.abs(Math.abs(dot(direction(p), direction(q))) - 1) < 1e-9;
   }
-  if (type === "GeomAbs_Circle") {
+  if (type === "Circle") {
     const [c, d] = [p.Circle(), q.Circle()];
     const [m, n] = [xyz(c.Location()), xyz(d.Location())];
     return (
@@ -897,7 +902,7 @@ function seamJoints(oc: Oc, shape: Shape): Shape[] {
     const meeting = atVertex.get(vertex) ?? [];
     if (meeting.length !== 2 || !sameCurve(oc, meeting[0]!, meeting[1]!)) return false;
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(meeting[0]!));
-    if (String(curve.GetType()) !== "GeomAbs_Circle") return false;
+    if (curveKind(curve) !== "Circle") return false;
     const at = oc.BRep_Tool.Parameter(oc.TopoDS.Vertex(vertex), oc.TopoDS.Edge(meeting[0]!));
     const turn = 2 * Math.PI;
     return Math.abs(at - turn * Math.round(at / turn)) < 1e-9;
@@ -1159,8 +1164,8 @@ function seamTargets(
   });
 }
 
-const surfaceCurve = (oc: Oc, edge: Shape): string =>
-  String(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge)).GetType()).replace("GeomAbs_", "");
+const surfaceCurve = (oc: Oc, edge: Shape) =>
+  curveKind(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge)));
 
 /** `solid` with cylinder `face`'s seam moved to run through `through`; see {@link moveSeams}. */
 export function moveSeam(
@@ -1368,7 +1373,7 @@ function wallBetween(
 ): Shape | "NONE" | null {
   const line = (shape: Shape) => {
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(shape));
-    if (String(curve.GetType()) !== "GeomAbs_Line") return null;
+    if (curveKind(curve) !== "Line") return null;
     const d = curve.EvalD1(curve.FirstParameter());
     const length = d.D1.Magnitude() || 1;
     const direction: Vec3 = [d.D1.X() / length, d.D1.Y() / length, d.D1.Z() / length];
@@ -1637,7 +1642,7 @@ function reaches(oc: Oc, faces: readonly Shape[], margin: number): Reach[] {
     oc.BRepBndLib.Add(face, box, false);
     box.Enlarge(margin);
     const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-    if (String(surface.GetType()) !== "GeomAbs_Plane") return { face, box, plane: null };
+    if (surfaceKind(surface) !== "Plane") return { face, box, plane: null };
     // The plane's own axis can point either way (a left-handed frame); the derivatives can't.
     const { UMin, VMin } = oc.BRepTools.UVBounds(oc.TopoDS.Face(face));
     const origin = xyz(surface.Plane().Location());

@@ -1,6 +1,6 @@
 import { addBodies, replaceBodies, type Entity, type History } from "../geometry/Model.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { subShapes, xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import { subShapes, surfaceKind, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, untag, type FsValue } from "../runtime/Value.ts";
@@ -618,7 +618,7 @@ export const CURVE_BUILTINS = {
       let direction: Vec3;
       if (alongNormal) {
         const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(target), true);
-        if (String(surface.GetType()) !== "GeomAbs_Plane")
+        if (surfaceKind(surface) !== "Plane")
           return call.unsupported(
             "opDropCurve normal to a non-planar face is not supported locally yet.",
           );

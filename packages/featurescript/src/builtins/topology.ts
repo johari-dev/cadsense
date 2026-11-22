@@ -1,7 +1,14 @@
 import type { Entity } from "../geometry/Model.ts";
 import { distance } from "../geometry/Query.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { subShapes, xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import {
+  curveKind,
+  subShapes,
+  xyz,
+  type CurveKind,
+  type Oc,
+  type Shape,
+} from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import { versionOrder, type ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, untag, type FsValue } from "../runtime/Value.ts";
@@ -35,10 +42,11 @@ const bodyOf = (model: ModelContext, entity: Entity): Entity =>
  */
 const planarityPoints = (call: BuiltinCall, oc: Oc, edge: Shape): Vec3[] => {
   const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
-  const kind = String(curve.GetType()).replace("GeomAbs_", "");
+  const kind = curveKind(curve);
   const [a, b] = [curve.FirstParameter(), curve.LastParameter()];
   const sampled = Array.from({ length: 17 }, (_, i) => xyz(curve.EvalD0(a + ((b - a) * i) / 16)));
-  if (["Line", "Circle", "Ellipse", "Hyperbola", "Parabola"].includes(kind)) return sampled;
+  const conics: readonly CurveKind[] = ["Line", "Circle", "Ellipse", "Hyperbola", "Parabola"];
+  if (conics.includes(kind)) return sampled;
   if (kind !== "BSplineCurve" && kind !== "BezierCurve")
     return call.unsupported(`evPlanarEdge on ${kind} curves is not supported locally yet.`);
   // The adaptor's spline is already placed where the edge is (its location applied).
@@ -62,11 +70,10 @@ function planeOfEdges(
 ): { origin: Vec3; normal: Vec3; x: Vec3 } | null {
   const points = edges.flatMap((edge) => planarityPoints(call, oc, edge));
   const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edges[0]!));
-  const kind = String(curve.GetType());
+  const kind = curveKind(curve);
   let plane: { origin: Vec3; normal: Vec3; x: Vec3 } | null = null;
-  if (kind === "GeomAbs_Circle" || kind === "GeomAbs_Ellipse") {
-    const position =
-      kind === "GeomAbs_Circle" ? curve.Circle().Position() : curve.Ellipse().Position();
+  if (kind === "Circle" || kind === "Ellipse") {
+    const position = kind === "Circle" ? curve.Circle().Position() : curve.Ellipse().Position();
     plane = {
       origin: xyz(position.Location()),
       normal: xyz(position.Direction()),

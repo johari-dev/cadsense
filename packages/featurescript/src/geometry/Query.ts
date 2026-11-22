@@ -9,7 +9,17 @@ import {
   type EntityType,
   type GeometryState,
 } from "./Model.ts";
-import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "./occt.ts";
+import {
+  curveKind,
+  ShapeSet,
+  subShapes,
+  surfaceKind,
+  toList,
+  xyz,
+  type Oc,
+  type Shape,
+  type SurfaceKind,
+} from "./occt.ts";
 
 /** What `evaluateQuery` needs besides the query: the kernel, the geometry, and how to fail. */
 export interface QueryEnv {
@@ -46,10 +56,8 @@ const continues = (id: string, prefix: string) =>
 /** Face or edge geometry class, as std's `GeometryType` names it. */
 export function geometryType(oc: Oc, entity: Entity): string | null {
   if (entity.type === "FACE") {
-    const kind = String(
-      new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true).GetType(),
-    ).replace("GeomAbs_", "");
-    const map: Record<string, string> = {
+    const kind = surfaceKind(new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true));
+    const map: Partial<Record<SurfaceKind, string>> = {
       Plane: "PLANE",
       Cylinder: "CYLINDER",
       Cone: "CONE",
@@ -61,10 +69,7 @@ export function geometryType(oc: Oc, entity: Entity): string | null {
     return map[kind] ?? "OTHER_SURFACE";
   }
   if (entity.type === "EDGE") {
-    const kind = String(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape)).GetType()).replace(
-      "GeomAbs_",
-      "",
-    );
+    const kind = curveKind(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape)));
     if (kind === "Line") return "LINE";
     if (kind === "Circle") return oc.BRep_Tool.IsClosed(entity.shape) ? "CIRCLE" : "ARC";
     return "OTHER_CURVE";
@@ -496,11 +501,11 @@ export function evaluateQuery(env: QueryEnv, query: FsValue): Entity[] {
         const n = planeNormal(env.oc, entity);
         if (n) return Math.abs(dotOf(n, direction)) <= PARALLEL;
         const surface = new env.oc.BRepAdaptor_Surface(env.oc.TopoDS.Face(entity.shape), true);
-        const kind = String(surface.GetType());
+        const kind = surfaceKind(surface);
         const along =
-          kind === "GeomAbs_Cylinder"
+          kind === "Cylinder"
             ? xyz(surface.Cylinder().Axis().Direction())
-            : kind === "GeomAbs_SurfaceOfExtrusion"
+            : kind === "SurfaceOfExtrusion"
               ? xyz(surface.Direction())
               : null;
         return along !== null && Math.abs(dotOf(along, direction)) >= 1 - PARALLEL;
@@ -1195,7 +1200,7 @@ function edgeReach(
   const [a, b] = [curve.FirstParameter(), curve.LastParameter()];
   const value = (u: number) => along(xyz(curve.EvalD0(u)), d);
   const ends = Math.max(value(a), value(b));
-  const kind = String(curve.GetType()).replace("GeomAbs_", "");
+  const kind = curveKind(curve);
   if (kind === "Line") return ends;
   if (kind === "Circle" || kind === "Ellipse") {
     // p(t) = c + A cos t X + B sin t Y peaks at t = atan2(B Y.d, A X.d), if the arc reaches it.
@@ -1289,7 +1294,7 @@ function profileHull(
   profile: ReturnType<InstanceType<Oc["BRepAdaptor_Surface"]>["BasisCurve"]>,
   stop: (message: string) => never,
 ): (v1: number, v2: number) => readonly (readonly number[])[] | null {
-  const kind = String(profile.GetType()).replace("GeomAbs_", "");
+  const kind = curveKind(profile);
   const at = (v: number) => xyz(profile.EvalD0(v));
   if (kind === "Line") return (v1, v2) => [at(v1), at(v2)];
   if (kind === "BSplineCurve" || kind === "BezierCurve") {
@@ -1340,8 +1345,9 @@ function faceReach(
   tight: boolean,
 ): number {
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-  const kind = String(surface.GetType()).replace("GeomAbs_", "");
-  if (["Plane", "Cylinder", "Cone", "SurfaceOfExtrusion"].includes(kind)) return best;
+  const kind = surfaceKind(surface);
+  const ruled: readonly SurfaceKind[] = ["Plane", "Cylinder", "Cone", "SurfaceOfExtrusion"];
+  if (ruled.includes(kind)) return best;
   const point = (u: number, v: number) => xyz(surface.EvalD0(u, v));
   const region = () => faceRegion(oc, face);
   /**
@@ -1586,7 +1592,7 @@ function sameEdge(oc: Oc, a: Shape, b: Shape, stop: (message: string) => never):
     InstanceType<Oc["BRepAdaptor_Curve"]>,
     InstanceType<Oc["BRepAdaptor_Curve"]>,
   ];
-  const [ka, kb] = [String(ca.GetType()), String(cb.GetType())];
+  const [ka, kb] = [curveKind(ca), curveKind(cb)];
   const at = (curve: typeof ca, t: number) =>
     xyz(
       curve.EvalD0(curve.FirstParameter() + t * (curve.LastParameter() - curve.FirstParameter())),
@@ -1595,8 +1601,8 @@ function sameEdge(oc: Oc, a: Shape, b: Shape, stop: (message: string) => never):
     (near(at(ca, 0), at(cb, 0)) && near(at(ca, 1), at(cb, 1))) ||
     (near(at(ca, 0), at(cb, 1)) && near(at(ca, 1), at(cb, 0)));
   if (ka !== kb) return "unknown";
-  if (ka === "GeomAbs_Line") return sameEnds ? "yes" : "no";
-  if (ka === "GeomAbs_Circle") {
+  if (ka === "Line") return sameEnds ? "yes" : "no";
+  if (ka === "Circle") {
     const [x, y] = [ca.Circle(), cb.Circle()];
     const sameCircle =
       near(xyz(x.Location()), xyz(y.Location())) &&
@@ -1625,8 +1631,8 @@ function sameFace(oc: Oc, a: Shape, b: Shape, stop: (message: string) => never):
     InstanceType<Oc["BRepAdaptor_Surface"]>,
     InstanceType<Oc["BRepAdaptor_Surface"]>,
   ];
-  const kind = String(sa.GetType());
-  if (kind !== String(sb.GetType())) return "unknown";
+  const kind = surfaceKind(sa);
+  if (kind !== surfaceKind(sb)) return "unknown";
   const onLine = (
     p: readonly number[],
     origin: readonly number[],
@@ -1639,20 +1645,20 @@ function sameFace(oc: Oc, a: Shape, b: Shape, stop: (message: string) => never):
   const parallel = (u: readonly number[], v: readonly number[]) =>
     Math.abs(Math.abs(dotOf(u, v)) - 1) <= PARALLEL;
   let sameSurface: boolean;
-  if (kind === "GeomAbs_Plane") {
+  if (kind === "Plane") {
     const [p, q] = [sa.Plane(), sb.Plane()];
     const n = xyz(p.Axis().Direction());
     const offset = [0, 1, 2].map((i) => xyz(q.Location())[i]! - xyz(p.Location())[i]!);
     sameSurface =
       parallel(n, xyz(q.Axis().Direction())) && Math.abs(dotOf(offset, n)) < CONTAINS_TOLERANCE;
-  } else if (kind === "GeomAbs_Cylinder") {
+  } else if (kind === "Cylinder") {
     const [p, q] = [sa.Cylinder(), sb.Cylinder()];
     const d = xyz(p.Axis().Direction());
     sameSurface =
       relativelyEqual(p.Radius(), q.Radius()) &&
       parallel(d, xyz(q.Axis().Direction())) &&
       onLine(xyz(q.Location()), xyz(p.Location()), d);
-  } else if (kind === "GeomAbs_Cone") {
+  } else if (kind === "Cone") {
     const [p, q] = [coneOf(oc, a), coneOf(oc, b)];
     sameSurface =
       near(p.apex, q.apex) && parallel(p.z, q.z) && relativelyEqual(p.halfAngle, q.halfAngle);
@@ -1678,14 +1684,15 @@ function sameFace(oc: Oc, a: Shape, b: Shape, stop: (message: string) => never):
  */
 function covered(oc: Oc, edge: Shape, others: readonly Shape[]): Verdict {
   const curve = (shape: Shape) => new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(shape));
-  const kind = (shape: Shape) => String(curve(shape).GetType());
+  const kind = (shape: Shape) => curveKind(curve(shape));
   const point = (shape: Shape, t: number) => {
     const c = curve(shape);
     return xyz(c.EvalD0(c.FirstParameter() + t * (c.LastParameter() - c.FirstParameter())));
   };
-  const elsewhere: Verdict = others.every((other) =>
-    ["GeomAbs_Line", "GeomAbs_Circle"].includes(kind(other)),
-  )
+  const elsewhere: Verdict = others.every((other) => {
+    const k = kind(other);
+    return k === "Line" || k === "Circle";
+  })
     ? "no"
     : "unknown";
   const coversFrom = (
@@ -1698,7 +1705,7 @@ function covered(oc: Oc, edge: Shape, others: readonly Shape[]): Verdict {
       if (from <= reached + slack) reached = Math.max(reached, to);
     return reached >= target[1] - slack;
   };
-  if (kind(edge) === "GeomAbs_Line") {
+  if (kind(edge) === "Line") {
     const [start, end] = [point(edge, 0), point(edge, 1)];
     const length = Math.hypot(...start.map((c, i) => end[i]! - c));
     const direction = start.map((c, i) => (end[i]! - c) / length);
@@ -1711,8 +1718,7 @@ function covered(oc: Oc, edge: Shape, others: readonly Shape[]): Verdict {
       Math.hypot(...p.map((c, i) => c - start[i]! - along(p) * direction[i]!)) < CONTAINS_TOLERANCE;
     const spans = others
       .filter(
-        (other) =>
-          kind(other) === "GeomAbs_Line" && onLine(point(other, 0)) && onLine(point(other, 1)),
+        (other) => kind(other) === "Line" && onLine(point(other, 0)) && onLine(point(other, 1)),
       )
       .map((other) => {
         const [p, q] = [along(point(other, 0)), along(point(other, 1))];
@@ -1720,7 +1726,7 @@ function covered(oc: Oc, edge: Shape, others: readonly Shape[]): Verdict {
       });
     return coversFrom([0, length], spans, CONTAINS_TOLERANCE) ? "yes" : elsewhere;
   }
-  if (kind(edge) === "GeomAbs_Circle") {
+  if (kind(edge) === "Circle") {
     const circle = curve(edge).Circle();
     const center = xyz(circle.Location());
     const radius = circle.Radius();
@@ -1745,7 +1751,7 @@ function covered(oc: Oc, edge: Shape, others: readonly Shape[]): Verdict {
       return wrap(m - a) <= forward ? [a, a + forward] : [b, b + wrap(a - b)];
     };
     const sameCircle = (other: Shape) => {
-      if (kind(other) !== "GeomAbs_Circle") return false;
+      if (kind(other) !== "Circle") return false;
       const c = curve(other).Circle();
       return (
         near(xyz(c.Location()), center) &&
@@ -1795,7 +1801,7 @@ function inPlane(env: QueryEnv, entity: Entity, plane: { origin: Point; normal: 
   }
   if (entity.type === "EDGE") {
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape));
-    const kind = String(curve.GetType()).replace("GeomAbs_", "");
+    const kind = curveKind(curve);
     if (kind === "Line") return edgePoints(oc, entity.shape, 1).every(onPlane);
     if (kind === "Circle" || kind === "Ellipse") {
       const position = kind === "Circle" ? curve.Circle().Position() : curve.Ellipse().Position();
@@ -1812,12 +1818,13 @@ function inPlane(env: QueryEnv, entity: Entity, plane: { origin: Point; normal: 
     return env.unsupported(`qCoincidesWithPlane on ${kind} edges is not supported locally yet.`);
   }
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-  const kind = String(surface.GetType()).replace("GeomAbs_", "");
+  const kind = surfaceKind(surface);
   if (kind === "Plane") {
     const p = surface.Plane();
     return onPlane(xyz(p.Location())) && parallelToNormal(xyz(p.Axis().Direction()));
   }
-  if (["Cylinder", "Cone", "Sphere", "Torus"].includes(kind)) return false;
+  const curved: readonly SurfaceKind[] = ["Cylinder", "Cone", "Sphere", "Torus"];
+  if (curved.includes(kind)) return false;
   if (!subShapes(oc, entity.shape, "EDGE").every((edge) => edgePoints(oc, edge, 16).every(onPlane)))
     return false;
   return env.unsupported(`qCoincidesWithPlane on ${kind} faces is not supported locally yet.`);
@@ -1832,7 +1839,7 @@ const dotOf = (a: readonly number[], b: readonly number[]) =>
 function planeNormal(oc: Oc, entity: Entity): readonly [number, number, number] | null {
   if (entity.type !== "FACE") return null;
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-  if (String(surface.GetType()) !== "GeomAbs_Plane") return null;
+  if (surfaceKind(surface) !== "Plane") return null;
   const n = xyz(surface.Plane().Axis().Direction());
   return String(entity.shape.Orientation()) === "TopAbs_REVERSED" ? [-n[0], -n[1], -n[2]] : n;
 }
@@ -1850,14 +1857,14 @@ function axisOf(
   if (entity.frame) return { origin: entity.frame.origin, direction: entity.frame.zAxis };
   if (entity.type === "EDGE") {
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape));
-    const kind = String(curve.GetType());
-    if (kind === "GeomAbs_Line") {
+    const kind = curveKind(curve);
+    if (kind === "Line") {
       const at = curve.EvalD1(curve.FirstParameter());
       const d = xyz(at.D1);
       const size = Math.hypot(...d);
       return { origin: xyz(at.Point), direction: d.map((c) => c / size) };
     }
-    if (kind === "GeomAbs_Circle") {
+    if (kind === "Circle") {
       const axis = curve.Circle().Axis();
       return { origin: xyz(axis.Location()), direction: xyz(axis.Direction()) };
     }
@@ -1865,21 +1872,20 @@ function axisOf(
   }
   if (entity.type !== "FACE") return null;
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-  const kind = String(surface.GetType());
-  if (kind === "GeomAbs_Cylinder") {
+  const kind = surfaceKind(surface);
+  if (kind === "Cylinder") {
     const axis = surface.Cylinder().Axis();
     return { origin: xyz(axis.Location()), direction: xyz(axis.Direction()) };
   }
-  if (kind === "GeomAbs_Cone") {
+  if (kind === "Cone") {
     const cone = coneOf(oc, entity.shape);
     return { origin: cone.apex, direction: cone.z };
   }
-  if (kind === "GeomAbs_SurfaceOfRevolution") {
+  if (kind === "SurfaceOfRevolution") {
     const axis = surface.AxeOfRevolution();
     return { origin: xyz(axis.Location()), direction: xyz(axis.Direction()) };
   }
-  if (kind === "GeomAbs_Torus")
-    return env.unsupported("qAxis on a torus is not supported locally yet.");
+  if (kind === "Torus") return env.unsupported("qAxis on a torus is not supported locally yet.");
   return null;
 }
 
@@ -1905,13 +1911,13 @@ export function filletRadius(
     );
   if (creator.builtin !== "opFillet") return null;
   const surface = new env.oc.BRepAdaptor_Surface(env.oc.TopoDS.Face(face.shape), true);
-  const kind = String(surface.GetType());
-  if (kind === "GeomAbs_Cylinder") return surface.Cylinder().Radius();
-  if (kind === "GeomAbs_Sphere") return surface.Sphere().Radius();
+  const kind = surfaceKind(surface);
+  if (kind === "Cylinder") return surface.Cylinder().Radius();
+  if (kind === "Sphere") return surface.Sphere().Radius();
   // A torus's v circle is its tube: |dP/dv| is the tube radius everywhere.
-  if (kind === "GeomAbs_Torus") return Math.hypot(...xyz(surface.EvalD1(0, 0).D1V));
+  if (kind === "Torus") return Math.hypot(...xyz(surface.EvalD1(0, 0).D1V));
   return env.unsupported(
-    `Face ${face.id} was made by a fillet but is now a ${kind.replace("GeomAbs_", "")} surface, so its radius can't be read locally.`,
+    `Face ${face.id} was made by a fillet but is now a ${kind} surface, so its radius can't be read locally.`,
   );
 }
 

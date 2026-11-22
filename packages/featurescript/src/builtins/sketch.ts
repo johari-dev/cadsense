@@ -1,6 +1,8 @@
 import {
   addSketch,
   degenerate,
+  DIMENSION_TYPES,
+  GEOMETRIC_CONSTRAINT_TYPES,
   Sketch,
   withGuess,
   type SketchConstraint,
@@ -220,7 +222,10 @@ const ALIGNMENTS = ["UNSPECIFIED", "ALIGNED", "ANTI_ALIGNED"] as const;
 /** References `skConstraint` resolves; any other `local*` or `external*` field stops the run. */
 const REFERENCE_FIELDS = ["localFirst", "localSecond", "localMirror"] as const;
 
-/** Reads an `skConstraint` definition, resolving its references against the sketch's entities. */
+/**
+ * Reads an `skConstraint` definition, resolving its references against the sketch's entities and
+ * narrowing its type to one the solver handles.
+ */
 function constraintOf(
   call: BuiltinCall,
   sketch: Sketch,
@@ -250,17 +255,33 @@ function constraintOf(
     const known = options.find((option) => option === given);
     return known ?? call.fail(`${field} must be one of ${options.join(", ")}.`);
   };
-  return {
+  const [first, second, mirror] = [ref("localFirst"), ref("localSecond"), ref("localMirror")];
+  // Std leaves a dimension's value undefined when its units are wrong.
+  const [length, angle] = [value("length"), value("angle")];
+  const fields = {
     id,
-    type: String(untag(definition.getField("constraintType"))),
-    first: ref("localFirst"),
-    second: ref("localSecond"),
-    mirror: ref("localMirror"),
-    length: value("length"),
-    angle: value("angle"),
+    first,
+    second,
+    mirror,
     direction: choice("direction", DIRECTIONS),
     alignment: choice("alignment", ALIGNMENTS),
   };
+  const type = String(untag(definition.getField("constraintType")));
+  const geometric = GEOMETRIC_CONSTRAINT_TYPES.find((known) => known === type);
+  if (geometric) return { ...fields, type: geometric };
+  if (type === "ANGLE") {
+    if (angle === null) return regenError(call, "SKETCH_DIMENSION_FAILED");
+    if (!Number.isFinite(angle)) return regenError(call, "SKETCH_DIMENSION_INFINITY");
+    return { ...fields, type, angle };
+  }
+  const dimension = DIMENSION_TYPES.find((known) => known === type);
+  if (dimension) {
+    if (length === null) return regenError(call, "SKETCH_DIMENSION_DIST_ERROR");
+    if (!Number.isFinite(length)) return regenError(call, "SKETCH_DIMENSION_INFINITY");
+    return { ...fields, type: dimension, length };
+  }
+  if (type === "NONE") return regenError(call, "SKETCH_CONSTRAINT_UNKNOWN");
+  return call.unsupported(`Sketch constraint ${type} is not supported locally yet.`);
 }
 
 export const SKETCH_BUILTINS = {

@@ -1,4 +1,11 @@
-import type { SketchConstraint, SketchEntity, SketchPart, SketchRef, Vec2 } from "./Sketch.ts";
+import type {
+  ConstraintType,
+  SketchConstraint,
+  SketchEntity,
+  SketchPart,
+  SketchRef,
+  Vec2,
+} from "./Sketch.ts";
 import { describe, ellipsePoint } from "./Sketch.ts";
 
 /**
@@ -381,15 +388,7 @@ function pair<A extends Geometry["kind"], B extends Geometry["kind"]>(
   return null;
 }
 
-const DIMENSIONS = new Set([
-  "DISTANCE",
-  "LENGTH",
-  "RADIUS",
-  "DIAMETER",
-  "MAJOR_DIAMETER",
-  "MINOR_DIAMETER",
-]);
-const TWO_ENTITY_ERRORS: Readonly<Record<string, string>> = {
+const TWO_ENTITY_ERRORS: Partial<Record<ConstraintType, string>> = {
   COINCIDENT: "SKETCH_CONSTRAINT_COINCIDENT_TWO_ENTITIES",
   CONCENTRIC: "SKETCH_CONSTRAINT_CONCENTRIC_TWO_ENTITIES",
   EQUAL: "SKETCH_CONSTRAINT_EQUAL_TWO_ENTITIES",
@@ -397,28 +396,6 @@ const TWO_ENTITY_ERRORS: Readonly<Record<string, string>> = {
   DISTANCE: "SKETCH_DIMENSION_TWO_ENTITIES",
   ANGLE: "SKETCH_ANGLE_TWO_LINES",
 };
-/** Constraint types the solver handles; anything else in `ConstraintType` stops the run. */
-const SUPPORTED = new Set([
-  "COINCIDENT",
-  "HORIZONTAL",
-  "VERTICAL",
-  "PARALLEL",
-  "PERPENDICULAR",
-  "TANGENT",
-  "EQUAL",
-  "CONCENTRIC",
-  "MIDPOINT",
-  "MIRROR",
-  "FIX",
-  "DISTANCE",
-  "ANGLE",
-  "LENGTH",
-  "RADIUS",
-  "DIAMETER",
-  "MAJOR_DIAMETER",
-  "MINOR_DIAMETER",
-  "NORMAL",
-]);
 
 /** Which sketch points (`"line1.end"`) other constraints hold coincident. */
 type Joined = (p: string, q: string) => boolean;
@@ -434,22 +411,10 @@ function compile(
   joined: Joined = () => false,
 ): Compiled | ConstraintProblem {
   const { type } = constraint;
-  if (type === "NONE") return { error: "SKETCH_CONSTRAINT_UNKNOWN" };
-  if (!SUPPORTED.has(type))
-    return { unsupported: `Sketch constraint ${type} is not supported locally yet.` };
   const error = (name: string) => ({ error: name });
   const a = constraint.first ? layout.resolve(constraint.first) : undefined;
   const b = constraint.second ? layout.resolve(constraint.second) : undefined;
   const only = (...residuals: Residual[]): Compiled => ({ residuals, fixed: [] });
-
-  // Values the dimension needs; std leaves them undefined when their units are wrong.
-  const length = constraint.length;
-  if (DIMENSIONS.has(type) || type === "ANGLE") {
-    const value = type === "ANGLE" ? constraint.angle : length;
-    if (value === null)
-      return error(type === "ANGLE" ? "SKETCH_DIMENSION_FAILED" : "SKETCH_DIMENSION_DIST_ERROR");
-    if (!Number.isFinite(value)) return error("SKETCH_DIMENSION_INFINITY");
-  }
 
   // Bézier curves, conics and fit splines keep their shape; nothing here can move them.
   for (const g of [a, b])
@@ -472,27 +437,30 @@ function compile(
       unsupported: `A ${type} sketch constraint with an alignment is not supported locally yet.`,
     };
 
-  if (type === "FIX") {
+  if (constraint.type === "FIX") {
     if (!a || b) return error("SKETCH_FIX_ONE_ENT");
     return fix(a, x0);
   }
-  if (type === "MAJOR_DIAMETER" || type === "MINOR_DIAMETER") {
+  if (constraint.type === "MAJOR_DIAMETER" || constraint.type === "MINOR_DIAMETER") {
     if (!a || b || a.kind !== "ellipse") return error("SKETCH_ELLIPSE_RADIUS_INPUT_ERROR");
-    const radius = type === "MAJOR_DIAMETER" ? a.major : a.minor;
-    return only(residual([radius], (x) => 2 * x[radius]! - length!));
+    const { length } = constraint;
+    const radius = constraint.type === "MAJOR_DIAMETER" ? a.major : a.minor;
+    return only(residual([radius], (x) => 2 * x[radius]! - length));
   }
-  if (type === "LENGTH") {
+  if (constraint.type === "LENGTH") {
     if (!a || b) return error("SKETCH_LENGTH_DIM_INPUT_ERROR");
     if (a.kind !== "line") return error("SKETCH_LENGTH_DIM_INPUT_ERROR");
-    return only(residual(lineParts(a), (x) => lengthOf(a, x) - length!));
+    const { length } = constraint;
+    return only(residual(lineParts(a), (x) => lengthOf(a, x) - length));
   }
-  if (type === "RADIUS" || type === "DIAMETER") {
+  if (constraint.type === "RADIUS" || constraint.type === "DIAMETER") {
     if (!a || b || a.kind !== "circle") return error("SKETCH_RADIUS_INPUT_ERROR");
-    const scale = type === "DIAMETER" ? 2 : 1;
-    return only(residual([a.radius], (x) => scale * x[a.radius]! - length!));
+    const { length } = constraint;
+    const scale = constraint.type === "DIAMETER" ? 2 : 1;
+    return only(residual([a.radius], (x) => scale * x[a.radius]! - length));
   }
-  if (type === "HORIZONTAL" || type === "VERTICAL") {
-    const axis = type === "HORIZONTAL" ? 1 : 0;
+  if (constraint.type === "HORIZONTAL" || constraint.type === "VERTICAL") {
+    const axis = constraint.type === "HORIZONTAL" ? 1 : 0;
     if (a?.kind === "line" && !b)
       return only(residual(lineParts(a), (x) => a.end.at(x)[axis] - a.start.at(x)[axis]));
     if (a?.kind === "point" && b?.kind === "point")
@@ -518,7 +486,7 @@ function compile(
   if ((a.kind === "ellipse" || b.kind === "ellipse") && type !== "CONCENTRIC")
     return { unsupported: `Sketch constraint ${type} on ellipses is not supported locally yet.` };
 
-  switch (type) {
+  switch (constraint.type) {
     case "COINCIDENT": {
       const points = pair(a, b, "point", "point");
       if (points) {
@@ -582,7 +550,7 @@ function compile(
       const lines = pair(a, b, "line", "line");
       if (!lines) return error("SKETCH_ANGLE_TWO_LINES");
       const [l, m] = lines;
-      const angle = constraint.angle!;
+      const { angle } = constraint;
       return nearest(
         angleBetween(l, m, [angle, -angle, Math.PI - angle, angle - Math.PI], x0),
         ZERO_ANGLE,
@@ -716,8 +684,9 @@ function compile(
     }
     case "DISTANCE":
       return distance(a, b, constraint, x0) ?? error("SKETCH_DIMENSION_INPUT_ERROR");
+    default:
+      throw new Error(`No equations for sketch constraint ${constraint.type satisfies never}.`);
   }
-  return { unsupported: `Sketch constraint ${type} is not supported locally yet.` };
 }
 
 /** An end of `curve` held coincident with an end of `arc`, if any: the point where they meet. */
@@ -949,10 +918,10 @@ function mirrored(a: Geometry, b: Geometry, mirror: LineGeometry): Compiled | nu
 function distance(
   a: Geometry,
   b: Geometry,
-  constraint: SketchConstraint,
+  constraint: Extract<SketchConstraint, { readonly length: number }>,
   x0: Vars,
 ): Compiled | ConstraintProblem | null {
-  const length = constraint.length!;
+  const { length } = constraint;
   const only = (...residuals: Residual[]): Compiled => ({ residuals, fixed: [] });
   if (a.owner === b.owner && (a.part === null || b.part === null)) return null;
   if (a.kind === "point" && b.kind === "point") {
@@ -1144,8 +1113,8 @@ export function solveConstraints(
       x0[index]! >= ZERO_LENGTH ? x[index]! >= ZERO_LENGTH : x[index]! > -ZERO_LENGTH,
     );
   // Perturbations scale with the smallest dimension, or stay just above zeroLength without one.
-  const sizes = constraints.flatMap(({ length }) =>
-    length !== null && length > 0 ? [length] : [],
+  const sizes = constraints.flatMap((constraint) =>
+    "length" in constraint && constraint.length > 0 ? [constraint.length] : [],
   );
   const reach = sizes.length ? Math.min(...sizes) * 1e-3 : ZERO_LENGTH * 100;
 
@@ -1501,6 +1470,9 @@ function pullBack(
   return x;
 }
 
+/** Constraints whose equations don't depend on which way their lines point. */
+const UNDIRECTED = new Set<ConstraintType>(["FIX", "MIDPOINT", "LENGTH", "EQUAL"]);
+
 /**
  * Lines whose direction some constraint uses: horizontal, vertical, parallel, perpendicular,
  * angle, tangent, normal, a mirror line, a coincidence or distance involving the line. Each must
@@ -1513,7 +1485,7 @@ function directedLines(layout: Layout, constraints: readonly SketchConstraint[])
     const uses =
       constraint.type === "MIRROR"
         ? [resolve(constraint.mirror)]
-        : ["FIX", "MIDPOINT", "LENGTH", "EQUAL"].includes(constraint.type)
+        : UNDIRECTED.has(constraint.type)
           ? []
           : [resolve(constraint.first), resolve(constraint.second)];
     for (const g of uses) if (g?.kind === "line") directed.add(g);

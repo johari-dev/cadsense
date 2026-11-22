@@ -1,5 +1,12 @@
 import { addBodies, type Entity } from "../geometry/Model.ts";
-import { ShapeSet, subShapes, type Oc, type Shape } from "../geometry/occt.ts";
+import {
+  curveKind,
+  ShapeSet,
+  subShapes,
+  surfaceKind,
+  type Oc,
+  type Shape,
+} from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, FsTagged, untag, type FsValue } from "../runtime/Value.ts";
@@ -277,10 +284,10 @@ function stdUvSpline(call: BuiltinCall, spline: Spline): FsTagged {
  */
 function faceSpline(call: BuiltinCall, oc: Oc, face: Shape) {
   const adaptor = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), false);
-  const kind = String(adaptor.GetType());
+  const kind = surfaceKind(adaptor);
   // BSpline() hands back the face's own surface: copy it so callers can't change the model.
-  if (kind === "GeomAbs_BSplineSurface") return new oc.Geom_BSplineSurface(adaptor.BSpline());
-  if (kind === "GeomAbs_Plane") {
+  if (kind === "BSplineSurface") return new oc.Geom_BSplineSurface(adaptor.BSpline());
+  if (kind === "Plane") {
     const bounds = oc.BRepTools.UVBounds(oc.TopoDS.Face(face));
     const poles = new oc.NCollection_Array2_gp_Pnt(1, 2, 1, 2);
     [bounds.UMin, bounds.UMax].forEach((u, i) =>
@@ -304,7 +311,7 @@ function faceSpline(call: BuiltinCall, oc: Oc, face: Shape) {
     );
   }
   return call.unsupported(
-    `Reading a ${kind.replace("GeomAbs_", "").toLowerCase()} face as a B-spline surface is not supported locally yet.`,
+    `Reading a ${kind.toLowerCase()} face as a B-spline surface is not supported locally yet.`,
   );
 }
 
@@ -312,9 +319,9 @@ function faceSpline(call: BuiltinCall, oc: Oc, face: Shape) {
 function pcurveSpline(call: BuiltinCall, oc: Oc, edge: Shape, face: Shape): Spline {
   const pcurve = new oc.BRepAdaptor_Curve2d(oc.TopoDS.Edge(edge), oc.TopoDS.Face(face));
   const [first, last] = [pcurve.FirstParameter(), pcurve.LastParameter()];
-  const kind = String(pcurve.GetType());
+  const kind = curveKind(pcurve);
   let curve: InstanceType<Oc["Geom2d_BSplineCurve"]>;
-  if (kind === "GeomAbs_Line") {
+  if (kind === "Line") {
     const [a, b] = [pcurve.Value(first), pcurve.Value(last)];
     const ends = new oc.NCollection_Array1_gp_Pnt2d(1, 2);
     ends.SetValue(1, a);
@@ -323,11 +330,11 @@ function pcurveSpline(call: BuiltinCall, oc: Oc, edge: Shape, face: Shape): Spli
     mults.SetValue(1, 2);
     mults.SetValue(2, 2);
     curve = new oc.Geom2d_BSplineCurve(ends, doubles(oc, [first, last]), mults, 1, false);
-  } else if (kind === "GeomAbs_Circle")
+  } else if (kind === "Circle")
     curve = oc.Geom2dConvert.CurveToBSplineCurve(
       new oc.Geom2d_TrimmedCurve(new oc.Geom2d_Circle(pcurve.Circle()), first, last, true, true),
     );
-  else if (kind === "GeomAbs_BSplineCurve") {
+  else if (kind === "BSplineCurve") {
     // BSpline() hands back the edge's own pcurve: copy it before segmenting or reversing.
     curve = new oc.Geom2d_BSplineCurve(pcurve.BSpline());
     if (
@@ -336,9 +343,7 @@ function pcurveSpline(call: BuiltinCall, oc: Oc, edge: Shape, face: Shape): Spli
     )
       curve.Segment(first, last);
   } else
-    return call.unsupported(
-      `A ${kind.replace("GeomAbs_", "").toLowerCase()} trim curve is not supported locally yet.`,
-    );
+    return call.unsupported(`A ${kind.toLowerCase()} trim curve is not supported locally yet.`);
   if (String(edge.Orientation()) === "TopAbs_REVERSED") curve.Reverse();
   return spline2dOf(curve);
 }

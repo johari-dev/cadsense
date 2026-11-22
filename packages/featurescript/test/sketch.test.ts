@@ -2,7 +2,12 @@
 import * as NodeFS from "node:fs";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { ordered } from "../src/geometry/Model.ts";
-import type { SketchConstraint, SketchEntity, SketchRef } from "../src/geometry/Sketch.ts";
+import type {
+  GeometricConstraintType,
+  SketchConstraint,
+  SketchEntity,
+  SketchRef,
+} from "../src/geometry/Sketch.ts";
 import { solveConstraints } from "../src/geometry/SketchSolver.ts";
 import { FeatureScriptRuntime } from "../src/Runtime.ts";
 import { untag, type FsValue } from "../src/runtime/Value.ts";
@@ -2432,6 +2437,24 @@ describe("sketch entities", () => {
     expect(tangentEllipse.fault).toMatch(/TANGENT.*ellipse/);
   });
 
+  it("stops on constraint types it can't solve, and fails NONE and dimensions without a value", () => {
+    // skConstraint narrows the type and dimension value where FeatureScript hands them over.
+    const constrained = (type: string, fields = '"localFirst" : "l"') =>
+      run(sketch([line("l", [0, 0], [10, 1]), constrain("c", type, fields)]));
+    expect(constrained("OFFSET").fault).toMatch(
+      /Sketch constraint OFFSET is not supported locally/,
+    );
+    expect(constrained("NONE").statusEnum).toBe("SKETCH_CONSTRAINT_UNKNOWN");
+    expect(constrained("LENGTH").statusEnum).toBe("SKETCH_DIMENSION_DIST_ERROR");
+    expect(constrained("LENGTH", '"localFirst" : "l", "length" : 5 * degree').statusEnum).toBe(
+      "SKETCH_DIMENSION_DIST_ERROR",
+    );
+    expect(constrained("LENGTH", '"localFirst" : "l", "length" : inf * meter').statusEnum).toBe(
+      "SKETCH_DIMENSION_INFINITY",
+    );
+    expect(constrained("ANGLE").statusEnum).toBe("SKETCH_DIMENSION_FAILED");
+  });
+
   it("solves ellipse diameters, concentricity and a horizontal major axis", () => {
     // Drawn 10 degrees off, centered at (3, 4), radii 15 and 8: it ends up horizontal, centered on
     // the fixed circle at the origin, 40 by 20.
@@ -2473,16 +2496,18 @@ describe("redundant constraints", () => {
     const [entity, part] = name.split(".");
     return { entity: entity!, part: part === "start" || part === "end" ? part : null };
   };
-  const constraint = (type: string, first: string, second: string | null = null) => ({
+  const constraint = (
+    type: GeometricConstraintType,
+    first: string,
+    second: string | null = null,
+  ): SketchConstraint => ({
     id: `${type}-${first}-${second}`,
     type,
     first: ref(first),
     second: second ? ref(second) : null,
     mirror: null,
-    length: null,
-    angle: null,
-    direction: "MINIMUM" as const,
-    alignment: "UNSPECIFIED" as const,
+    direction: "MINIMUM",
+    alignment: "UNSPECIFIED",
   });
   /** Four lines drawn through `corners` (millimeters), joined corner to corner. */
   const quad = (corners: readonly Corner[]) => ({
@@ -2647,26 +2672,30 @@ describe.skipIf(process.env.CI)("sketch solve cost", () => {
   // machine slows both alike. Each bound is about three times the ratio measured when it was set.
   const constraint = (
     id: string,
-    type: string,
+    type: GeometricConstraintType | "LENGTH" | "DISTANCE" | "ANGLE",
     first: string,
     second: string | null,
-    length: number | null = null,
+    value: number | null = null,
   ): SketchConstraint => {
     const ref = (name: string): SketchRef => {
       const [entity, part] = name.split(".");
       return { entity: entity!, part: part === "start" || part === "end" ? part : null };
     };
-    return {
+    const fields = {
       id,
-      type,
       first: ref(first),
       second: second ? ref(second) : null,
       mirror: null,
-      length,
-      angle: null,
       direction: "MINIMUM",
       alignment: "UNSPECIFIED",
+    } as const;
+    const given = () => {
+      if (value === null) throw new Error(`${type} ${id} needs a value`);
+      return value;
     };
+    if (type === "ANGLE") return { ...fields, type, angle: given() };
+    if (type === "LENGTH" || type === "DISTANCE") return { ...fields, type, length: given() };
+    return { ...fields, type };
   };
   /** A std-style constrained polyline: segments joined end to start, one drawn 1 degree off level. */
   const polyline = (segments: number) => {
@@ -2759,9 +2788,7 @@ describe.skipIf(process.env.CI)("sketch solve cost", () => {
     const constraints = Array.from({ length: n }, (_, i) => [
       constraint(`j${i}`, "COINCIDENT", `s${i}.end`, `s${(i + 1) % n}.start`),
       constraint(`len${i}`, "LENGTH", `s${i}`, null, 0.01),
-      ...(i < n - 1
-        ? [{ ...constraint(`a${i}`, "ANGLE", `s${i}`, `s${i + 1}`), angle: (2 * Math.PI) / n }]
-        : []),
+      ...(i < n - 1 ? [constraint(`a${i}`, "ANGLE", `s${i}`, `s${i + 1}`, (2 * Math.PI) / n)] : []),
     ]).flat();
     const conflicting = [...constraints, constraint("x", "LENGTH", "s0", null, 0.011)];
     expect(solveConstraints(gon(0.01), conflicting)).toBeNull();
