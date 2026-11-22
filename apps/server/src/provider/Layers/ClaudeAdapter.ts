@@ -16,6 +16,7 @@ import {
   type PermissionMode,
   type PermissionResult,
   type PermissionUpdate,
+  type SDKCompactBoundaryMessage,
   type SDKMessage,
   type SDKResultMessage,
   type SettingSource,
@@ -671,23 +672,18 @@ function normalizeClaudeActiveTokenUsage(
   });
 }
 
+// sdk.d.ts types compact_metadata, but the wire may omit it, so it is read as possibly missing.
 function compactBoundaryTokenUsageSnapshot(
-  message: Record<string, unknown>,
+  compactMetadata: SDKCompactBoundaryMessage["compact_metadata"] | undefined,
   contextWindow?: number,
   totalProcessedTokens?: number,
 ): ThreadTokenUsageSnapshot | undefined {
-  const metadata = message.compact_metadata;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return undefined;
-  }
-
-  const compactMetadata = metadata as Record<string, unknown>;
-  const postTokens = finiteNonNegativeInteger(compactMetadata.post_tokens);
+  const postTokens = finiteNonNegativeInteger(compactMetadata?.post_tokens);
   if (postTokens === undefined || postTokens <= 0) {
     return undefined;
   }
 
-  const preTokens = finiteNonNegativeInteger(compactMetadata.pre_tokens);
+  const preTokens = finiteNonNegativeInteger(compactMetadata?.pre_tokens);
   return makeClaudeTokenUsageSnapshot({
     activeTokens: postTokens,
     ...(preTokens !== undefined ? { lastUsedTokens: preTokens } : {}),
@@ -744,41 +740,127 @@ function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId {
   return RuntimeRequestId.make(value);
 }
 
+/**
+ * An optional key that decodes to "absent" when its value has the wrong type, so one bad
+ * field never rejects the struct around it. Use it for SDK and persisted fields the adapter
+ * reads best-effort.
+ */
+const lenientKey = <S extends Schema.Top>(schema: S) =>
+  Schema.optionalKey(schema.pipe(Schema.catchDecoding(() => Effect.succeedNone)));
+
+/**
+ * An array element that decodes to `fallback` when it does not match, so one bad entry never
+ * rejects the array. Pass a fallback that callers skip, such as `{}` for a struct of lenient keys.
+ */
+const lenientEntry = <S extends Schema.Top>(schema: S, fallback: S["Type"]) =>
+  schema.pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(fallback))));
+
+// SDK message fields the adapter reads that sdk.d.ts types as `unknown` or leaves out. Every key
+// is lenient, so a missing or badly typed field reads as absent and the message still flows.
+// Values keep their raw form here; readers trim, floor, and range-check them.
+
+/** One entry of `workflow_progress`: a `workflow_phase` or a `workflow_agent`. */
+const ClaudeWorkflowProgressEntry = Schema.Struct({
+  type: lenientKey(Schema.String),
+  index: lenientKey(Schema.Number),
+  title: lenientKey(Schema.String),
+  state: lenientKey(Schema.String),
+  label: lenientKey(Schema.String),
+  phaseIndex: lenientKey(Schema.Number),
+  phaseTitle: lenientKey(Schema.String),
+  model: lenientKey(Schema.String),
+  attempt: lenientKey(Schema.Number),
+  lastToolName: lenientKey(Schema.String),
+  startedAt: lenientKey(Schema.String),
+  error: lenientKey(Schema.String),
+  tokens: lenientKey(Schema.Number),
+  toolCalls: lenientKey(Schema.Number),
+});
+
+/** A task in a TaskCreate (`task`) or TaskList (`tasks`) tool result. */
+const ClaudeToolResultTask = Schema.Struct({
+  id: lenientKey(Schema.String),
+  subject: lenientKey(Schema.String),
+  status: lenientKey(Schema.String),
+  blockedBy: lenientKey(Schema.Array(Schema.Unknown)),
+});
+
+/** `tool_use_result`: the task tools' results and the Workflow tool's run handles. */
+const ClaudeToolUseResult = Schema.Struct({
+  task: lenientKey(ClaudeToolResultTask),
+  tasks: lenientKey(Schema.Array(lenientEntry(ClaudeToolResultTask, {}))),
+  taskId: lenientKey(Schema.String),
+  runId: lenientKey(Schema.String),
+  scriptPath: lenientKey(Schema.String),
+  transcriptDir: lenientKey(Schema.String),
+  sessionUrl: lenientKey(Schema.String),
+});
+type ClaudeToolUseResult = typeof ClaudeToolUseResult.Type;
+
+const ClaudeSdkMessageExtras = Schema.Struct({
+  // On task_progress messages. Seen on the wire, absent from sdk.d.ts.
+  workflow_progress: lenientKey(Schema.Array(lenientEntry(ClaudeWorkflowProgressEntry, {}))),
+  // On user messages. sdk.d.ts types it as `unknown`.
+  tool_use_result: lenientKey(ClaudeToolUseResult),
+});
+const decodeClaudeSdkMessageExtras = Schema.decodeUnknownOption(ClaudeSdkMessageExtras);
+
+/** Reads the extra fields above off any SDK message. Never fails. */
+function readClaudeSdkMessageExtras(message: SDKMessage): typeof ClaudeSdkMessageExtras.Type {
+  return Option.getOrElse(decodeClaudeSdkMessageExtras(message), () => ({}));
+}
+
+// Content blocks. sdk.d.ts types these, but the adapter reads them off the wire unchecked and
+// skips a malformed block, so it checks only the fields it reads.
+const isClaudeTextBlock = Schema.is(
+  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+);
+const isClaudeToolResultBlock = Schema.is(
+  Schema.Struct({
+    type: Schema.Literal("tool_result"),
+    tool_use_id: Schema.String,
+    content: Schema.optionalKey(Schema.Unknown),
+    is_error: Schema.optionalKey(Schema.Unknown),
+  }),
+);
+
+/** A tool result's content: a string, an array of parts, or a part with `text` or nested `content`. */
+const decodeClaudeNestedText = Schema.decodeUnknownOption(
+  Schema.Struct({ text: lenientKey(Schema.String), content: Schema.optionalKey(Schema.Unknown) }),
+);
+/** ExitPlanMode's tool input. */
+const decodeClaudeExitPlanInput = Schema.decodeUnknownOption(
+  Schema.Struct({ plan: lenientKey(Schema.String) }),
+);
+
+/** The resume cursor this adapter persists. `sessionId` is the legacy name for `resume`. */
+const ClaudeResumeCursor = Schema.Struct({
+  threadId: lenientKey(Schema.String),
+  resume: lenientKey(Schema.String),
+  sessionId: lenientKey(Schema.String),
+  resumeSessionAt: lenientKey(Schema.String),
+  turnCount: lenientKey(Schema.Natural),
+});
+const decodeClaudeResumeCursor = Schema.decodeUnknownOption(ClaudeResumeCursor);
+
 function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
-  if (!resumeCursor || typeof resumeCursor !== "object") {
+  const cursor = Option.getOrUndefined(decodeClaudeResumeCursor(resumeCursor));
+  if (!cursor) {
     return undefined;
   }
-  const cursor = resumeCursor as {
-    threadId?: unknown;
-    resume?: unknown;
-    sessionId?: unknown;
-    resumeSessionAt?: unknown;
-    turnCount?: unknown;
-  };
 
-  const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
   const threadId =
-    threadIdCandidate && !isSyntheticClaudeThreadId(threadIdCandidate)
-      ? ThreadId.make(threadIdCandidate)
+    cursor.threadId && !isSyntheticClaudeThreadId(cursor.threadId)
+      ? ThreadId.make(cursor.threadId)
       : undefined;
-  const resumeCandidate =
-    typeof cursor.resume === "string"
-      ? cursor.resume
-      : typeof cursor.sessionId === "string"
-        ? cursor.sessionId
-        : undefined;
+  const resumeCandidate = cursor.resume ?? cursor.sessionId;
   const resume = resumeCandidate && isUuid(resumeCandidate) ? resumeCandidate : undefined;
-  const resumeSessionAt =
-    typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
-  const turnCountValue = typeof cursor.turnCount === "number" ? cursor.turnCount : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
     ...(resume ? { resume } : {}),
-    ...(resumeSessionAt ? { resumeSessionAt } : {}),
-    ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
-      ? { turnCount: turnCountValue }
-      : {}),
+    ...(cursor.resumeSessionAt ? { resumeSessionAt: cursor.resumeSessionAt } : {}),
+    ...(cursor.turnCount !== undefined ? { turnCount: cursor.turnCount } : {}),
   };
 }
 
@@ -881,29 +963,10 @@ function readStringArray(value: unknown): Array<string> {
     : [];
 }
 
-function readClaudeToolUseResult(message: SDKMessage): Record<string, unknown> | undefined {
-  if (message.type !== "user") {
-    return undefined;
-  }
-  const result = (message as { readonly tool_use_result?: unknown }).tool_use_result;
-  return result !== null && typeof result === "object" && !Array.isArray(result)
-    ? (result as Record<string, unknown>)
-    : undefined;
-}
-
-function readClaudeTaskFromResult(
-  result: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  const task = result?.task;
-  return task !== null && typeof task === "object" && !Array.isArray(task)
-    ? (task as Record<string, unknown>)
-    : undefined;
-}
-
 function applyClaudeTaskToolResult(
   tasks: Map<string, ClaudeTaskState>,
   tool: ToolInFlight,
-  result: Record<string, unknown> | undefined,
+  result: ClaudeToolUseResult | undefined,
 ): boolean {
   if (!isClaudeTaskTool(tool.toolName)) {
     return false;
@@ -912,15 +975,11 @@ function applyClaudeTaskToolResult(
   let changed = false;
   if (tool.toolName === "TaskList") {
     const resultTasks = result?.tasks;
-    if (!Array.isArray(resultTasks)) {
+    if (!resultTasks) {
       return false;
     }
     tasks.clear();
-    for (const entry of resultTasks) {
-      if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-        continue;
-      }
-      const task = entry as Record<string, unknown>;
+    for (const task of resultTasks) {
       const id = readString(task.id);
       const subject = readString(task.subject);
       if (!id || !subject) {
@@ -937,7 +996,7 @@ function applyClaudeTaskToolResult(
   }
 
   if (tool.toolName === "TaskCreate") {
-    const resultTask = readClaudeTaskFromResult(result);
+    const resultTask = result?.task;
     const id = readString(resultTask?.id);
     const subject = readString(resultTask?.subject) ?? readString(tool.input.subject);
     if (!id || !subject) {
@@ -1133,23 +1192,22 @@ interface ClaudeWorkflowProgress {
 }
 
 /**
- * Defensive parse of the SDK's undeclared-but-real workflow_progress array on
- * task_progress messages (wire-confirmed; absent from sdk.d.ts). Unknown
- * shapes are skipped per-entry; phases and agents dedupe by index before
- * caps; a vanished field never throws. If the array disappears upstream the
- * caller keeps the coordinator row and plain task lifecycle.
+ * Builds phases and agents from the SDK's undeclared-but-real workflow_progress
+ * array on task_progress messages (wire-confirmed; absent from sdk.d.ts), as
+ * decoded by `readClaudeSdkMessageExtras`. Entries missing their fields are
+ * skipped; phases and agents dedupe by index before caps. If the array
+ * disappears upstream the caller keeps the coordinator row and plain task
+ * lifecycle.
  */
-function parseWorkflowProgress(value: unknown): ClaudeWorkflowProgress | undefined {
-  if (!Array.isArray(value) || value.length === 0) {
+function parseWorkflowProgress(
+  value: typeof ClaudeSdkMessageExtras.Type.workflow_progress,
+): ClaudeWorkflowProgress | undefined {
+  if (!value || value.length === 0) {
     return undefined;
   }
   const phasesByIndex = new Map<number, string>();
   const agentsByIndex = new Map<number, ClaudeWorkflowAgentEntry>();
-  for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) {
-      continue;
-    }
-    const record = entry as Record<string, unknown>;
+  for (const record of value) {
     const entryType = trimmedString(record.type);
     if (entryType === "workflow_phase") {
       const index = nonNegativeInt(record.index);
@@ -1450,23 +1508,15 @@ function extractAssistantTextBlocks(message: SDKMessage): Array<string> {
     return [];
   }
 
-  const content = (message.message as { content?: unknown } | undefined)?.content;
+  const content = message.message?.content;
   if (!Array.isArray(content)) {
     return [];
   }
 
   const fragments: string[] = [];
   for (const block of content) {
-    if (!block || typeof block !== "object") {
-      continue;
-    }
-    const candidate = block as { type?: unknown; text?: unknown };
-    if (
-      candidate.type === "text" &&
-      typeof candidate.text === "string" &&
-      candidate.text.length > 0
-    ) {
-      fragments.push(candidate.text);
+    if (isClaudeTextBlock(block) && block.text.length > 0) {
+      fragments.push(block.text);
     }
   }
 
@@ -1474,12 +1524,7 @@ function extractAssistantTextBlocks(message: SDKMessage): Array<string> {
 }
 
 function extractContentBlockText(block: unknown): string {
-  if (!block || typeof block !== "object") {
-    return "";
-  }
-
-  const candidate = block as { type?: unknown; text?: unknown };
-  return candidate.type === "text" && typeof candidate.text === "string" ? candidate.text : "";
+  return isClaudeTextBlock(block) ? block.text : "";
 }
 
 function extractTextContent(value: unknown): string {
@@ -1491,33 +1536,17 @@ function extractTextContent(value: unknown): string {
     return value.map((entry) => extractTextContent(entry)).join("");
   }
 
-  if (!value || typeof value !== "object") {
+  const record = Option.getOrUndefined(decodeClaudeNestedText(value));
+  if (!record) {
     return "";
   }
 
-  const record = value as {
-    text?: unknown;
-    content?: unknown;
-  };
-
-  if (typeof record.text === "string") {
-    return record.text;
-  }
-
-  return extractTextContent(record.content);
+  return record.text ?? extractTextContent(record.content);
 }
 
 function extractExitPlanModePlan(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-
-  const record = value as {
-    plan?: unknown;
-  };
-  return typeof record.plan === "string" && record.plan.trim().length > 0
-    ? record.plan.trim()
-    : undefined;
+  const plan = Option.getOrUndefined(decodeClaudeExitPlanInput(value))?.plan;
+  return plan !== undefined && plan.trim().length > 0 ? plan.trim() : undefined;
 }
 
 function exitPlanCaptureKey(input: {
@@ -1555,9 +1584,14 @@ function toolResultStreamKind(itemType: CanonicalItemType): ClaudeToolResultStre
   }
 }
 
+type ClaudeToolResultBlock = Extract<
+  Exclude<SDKUserMessage["message"]["content"], string>[number],
+  { readonly type: "tool_result" }
+>;
+
 function toolResultBlocksFromUserMessage(message: SDKMessage): Array<{
   readonly toolUseId: string;
-  readonly block: Record<string, unknown>;
+  readonly block: ClaudeToolResultBlock;
   readonly text: string;
   readonly isError: boolean;
 }> {
@@ -1565,35 +1599,25 @@ function toolResultBlocksFromUserMessage(message: SDKMessage): Array<{
     return [];
   }
 
-  const content = (message.message as { content?: unknown } | undefined)?.content;
+  const content = message.message?.content;
   if (!Array.isArray(content)) {
     return [];
   }
 
   const blocks: Array<{
     readonly toolUseId: string;
-    readonly block: Record<string, unknown>;
+    readonly block: ClaudeToolResultBlock;
     readonly text: string;
     readonly isError: boolean;
   }> = [];
 
-  for (const entry of content) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-
-    const block = entry as Record<string, unknown>;
-    if (block.type !== "tool_result") {
-      continue;
-    }
-
-    const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
-    if (!toolUseId) {
+  for (const block of content) {
+    if (!isClaudeToolResultBlock(block) || !block.tool_use_id) {
       continue;
     }
 
     blocks.push({
-      toolUseId,
+      toolUseId: block.tool_use_id,
       block,
       text: extractTextContent(block.content),
       isError: block.is_error === true,
@@ -1638,35 +1662,34 @@ function toRequestError(threadId: ThreadId, method: string, cause: unknown): Pro
   });
 }
 
-function sdkMessageType(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as { type?: unknown };
-  return typeof record.type === "string" ? record.type : undefined;
+const SdkTags = Schema.Struct({
+  type: lenientKey(Schema.String),
+  subtype: lenientKey(Schema.String),
+  delta: Schema.optionalKey(Schema.Unknown),
+});
+const decodeSdkTags = Schema.decodeUnknownOption(SdkTags);
+
+/** Reads `type`, `subtype`, and a stream event's `delta` off any SDK value. Never fails. */
+function sdkTags(value: unknown): typeof SdkTags.Type {
+  return Option.getOrElse(decodeSdkTags(value), () => ({}));
 }
 
-function sdkMessageSubtype(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as { subtype?: unknown };
-  return typeof record.subtype === "string" ? record.subtype : undefined;
+function sdkMessageType(value: unknown): string | undefined {
+  return sdkTags(value).type;
 }
 
 function sdkNativeMethod(message: SDKMessage): string {
-  const subtype = sdkMessageSubtype(message);
+  const { subtype } = sdkTags(message);
   if (subtype) {
     return `claude/${message.type}/${subtype}`;
   }
 
   if (message.type === "stream_event") {
-    const streamType = sdkMessageType(message.event);
+    const event = sdkTags(message.event);
+    const streamType = event.type;
     if (streamType) {
       const deltaType =
-        streamType === "content_block_delta"
-          ? sdkMessageType((message.event as { delta?: unknown }).delta)
-          : undefined;
+        streamType === "content_block_delta" ? sdkMessageType(event.delta) : undefined;
       if (deltaType) {
         return `claude/${message.type}/${streamType}/${deltaType}`;
       }
@@ -2818,6 +2841,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       context.turnState.items.push(message.message);
     }
 
+    const toolUseResult = readClaudeSdkMessageExtras(message).tool_use_result;
     for (const toolResult of toolResultBlocksFromUserMessage(message)) {
       const toolEntry = Array.from(context.inFlightTools.entries()).find(
         ([, tool]) => tool.itemId === toolResult.toolUseId,
@@ -2828,7 +2852,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const [index, tool] = toolEntry;
       const itemStatus = toolResult.isError ? "failed" : "completed";
-      const toolUseResult = readClaudeToolUseResult(message);
       const toolData = {
         toolName: tool.toolName,
         input: tool.input,
@@ -3128,15 +3151,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const emitWorkflowMemberProgress = Effect.fn("emitWorkflowMemberProgress")(function* (
     context: ClaudeSessionContext,
     base: Omit<ProviderRuntimeEvent, "type" | "payload">,
-    message: Extract<SDKMessage, { type: "system"; subtype: "task_progress" }>,
+    coordinatorId: string,
+    progress: ClaudeWorkflowProgress,
   ) {
-    const progress = parseWorkflowProgress(
-      (message as unknown as Record<string, unknown>).workflow_progress,
-    );
-    if (!progress) {
-      return;
-    }
-    const coordinatorId = message.task_id;
     for (const entry of progress.agents) {
       const memberTaskId = `${coordinatorId}:wf:${entry.index}`;
       const status = workflowAgentStatus(entry);
@@ -3246,7 +3263,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* emitThreadTokenUsage(
           context,
           compactBoundaryTokenUsageSnapshot(
-            message as unknown as Record<string, unknown>,
+            message.compact_metadata,
             context.lastKnownContextWindow,
             context.lastKnownTotalProcessedTokens,
           ),
@@ -3387,9 +3404,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         // separate phases-only row shared the stable ingestion activity id
         // with this full row, and the thinner upsert overwrote usage and
         // progress text (review finding).
-        const workflowPhases = parseWorkflowProgress(
-          (message as unknown as Record<string, unknown>).workflow_progress,
-        )?.phases;
+        const workflowProgress = parseWorkflowProgress(
+          readClaudeSdkMessageExtras(message).workflow_progress,
+        );
+        const workflowPhases = workflowProgress?.phases;
         yield* offerRuntimeEvent({
           ...base,
           type: "task.progress",
@@ -3405,7 +3423,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(message.subagent_type ? { role: message.subagent_type } : {}),
           },
         });
-        yield* emitWorkflowMemberProgress(context, base, message);
+        if (workflowProgress) {
+          yield* emitWorkflowMemberProgress(context, base, message.task_id, workflowProgress);
+        }
         return;
       }
       case "task_updated": {
