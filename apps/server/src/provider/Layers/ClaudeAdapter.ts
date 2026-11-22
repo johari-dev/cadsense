@@ -782,48 +782,30 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   };
 }
 
+// Claude Code's built-in tools that map to a specific item type, by exact name.
+// Every other built-in (TodoWrite, Read, WebFetch, TaskCreate, ...) is a generic tool call.
+const CLAUDE_TOOL_ITEM_TYPES = new Map<string, CanonicalItemType>([
+  ["Agent", "collab_agent_tool_call"],
+  ["Task", "collab_agent_tool_call"],
+  ["Bash", "command_execution"],
+  ["BashOutput", "command_execution"],
+  ["KillShell", "command_execution"],
+  ["PowerShell", "command_execution"],
+  ["Edit", "file_change"],
+  ["MultiEdit", "file_change"],
+  ["Write", "file_change"],
+  ["NotebookEdit", "file_change"],
+  ["WebSearch", "web_search"],
+  ["ListMcpResourcesTool", "mcp_tool_call"],
+  ["ReadMcpResourceTool", "mcp_tool_call"],
+]);
+
+/** Item type for a Claude tool call. Also picks the approval kind in `classifyRequestType`. */
 function classifyToolItemType(toolName: string): CanonicalItemType {
-  const normalized = toolName.toLowerCase();
-  if (normalized.includes("agent")) {
-    return "collab_agent_tool_call";
-  }
-  if (
-    normalized === "task" ||
-    normalized === "agent" ||
-    normalized.includes("subagent") ||
-    normalized.includes("sub-agent")
-  ) {
-    return "collab_agent_tool_call";
-  }
-  if (
-    normalized.includes("bash") ||
-    normalized.includes("command") ||
-    normalized.includes("shell") ||
-    normalized.includes("terminal")
-  ) {
-    return "command_execution";
-  }
-  if (
-    normalized.includes("edit") ||
-    normalized.includes("write") ||
-    normalized.includes("file") ||
-    normalized.includes("patch") ||
-    normalized.includes("replace") ||
-    normalized.includes("create") ||
-    normalized.includes("delete")
-  ) {
-    return "file_change";
-  }
-  if (normalized.includes("mcp")) {
+  if (toolName.startsWith("mcp__")) {
     return "mcp_tool_call";
   }
-  if (normalized.includes("websearch") || normalized.includes("web search")) {
-    return "web_search";
-  }
-  if (normalized.includes("image")) {
-    return "image_view";
-  }
-  return "dynamic_tool_call";
+  return CLAUDE_TOOL_ITEM_TYPES.get(toolName) ?? "dynamic_tool_call";
 }
 
 function isReadOnlyToolName(toolName: string): boolean {
