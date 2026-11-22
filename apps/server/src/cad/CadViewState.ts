@@ -3,8 +3,10 @@ import {
   CadUpdateViewInput,
   CadViewError,
   CadViewState,
+  projectSource,
   type CadSnapshotManifest,
-  type OrchestrationProjectShell,
+  type ProjectSource,
+  type ProjectSourceFields,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -26,12 +28,10 @@ const invalid = () => new CadViewError({ reason: "invalid-operation" });
 export const defaultCadRoot = <
   R extends { readonly elementId: string; readonly configuration: string },
 >(
-  project: Pick<OrchestrationProjectShell, "onshapeSource" | "localCadSource">,
+  project: ProjectSourceFields,
   roots: readonly R[],
 ): R | undefined => {
-  const linked = project.localCadSource
-    ? { elementId: localCadElementId(project.localCadSource.filePath), configuration: "default" }
-    : project.onshapeSource;
+  const linked = linkedRoot(projectSource(project));
   return (
     roots.find(
       (root) =>
@@ -40,6 +40,20 @@ export const defaultCadRoot = <
         root.configuration === (linked.configuration || "default"),
     ) ?? (roots.length === 1 ? roots[0] : undefined)
   );
+};
+
+/** The element and configuration a project's source names, if it names one. */
+const linkedRoot = (
+  source: ProjectSource,
+): { readonly elementId?: string; readonly configuration: string } | undefined => {
+  switch (source.kind) {
+    case "onshape":
+      return source.source;
+    case "local-cad":
+      return { elementId: localCadElementId(source.source.filePath), configuration: "default" };
+    case "folder":
+      return undefined;
+  }
 };
 
 /**

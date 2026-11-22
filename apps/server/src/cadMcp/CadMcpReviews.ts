@@ -6,6 +6,7 @@ import {
   LocalCadError,
   onshapeProjectSourceIdentity,
   ProjectId,
+  projectSource,
   ThreadId,
   TurnId,
   type OnshapeConnectionError,
@@ -375,7 +376,7 @@ export const makeCadMcpReviews = Effect.fn("makeCadMcpReviews")(function* (optio
       filePath,
     });
     // Reopening a file needs no new import here; importLocalFile checks its revision.
-    if (existing?.localCadSource) return existing.id;
+    if (existing && projectSource(existing).kind === "local-cad") return existing.id;
     const created = yield* localCadProjects.create({
       projectId: ProjectId.make(yield* uuid),
       title,

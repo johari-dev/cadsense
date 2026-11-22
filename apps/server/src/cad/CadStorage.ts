@@ -7,6 +7,7 @@ import {
   type CadStorageInput,
   type CadStorageEntry,
   type ProjectId,
+  projectSource,
   type OrchestrationCommand,
 } from "@cadsense/contracts";
 import * as Context from "effect/Context";
@@ -148,7 +149,7 @@ export const make = Effect.gen(function* () {
           if (project.cad.storage.cleanupPending)
             return yield* new CadUserOperationError({ reason: "busy" });
           // A local CAD project's folder is the user's, so only Onshape has a workspace to recreate.
-          if (project.onshapeSource)
+          if (projectSource(project).kind === "onshape")
             yield* allocator
               .provision({ projectId: project.id, workspaceRoot: project.workspaceRoot })
               .pipe(Effect.mapError(failed));
@@ -183,7 +184,10 @@ export const make = Effect.gen(function* () {
                 projectId: project.id,
                 title: project.title,
                 workspaceRoot: project.workspaceRoot,
-                source: project.onshapeSource ? ("onshape" as const) : ("local" as const),
+                source:
+                  projectSource(project).kind === "onshape"
+                    ? ("onshape" as const)
+                    : ("local" as const),
                 ...storage,
                 byteLength:
                   project.cad?.roots.reduce(

@@ -2,6 +2,7 @@ import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   CadSnapshotManifest,
   isSolidWorksFile,
+  projectSource,
   type CadComment,
   type CadViewState,
   type ProjectId,
@@ -880,10 +881,12 @@ export function CadPanel({
   const roots = project.cad?.roots.filter((root) => root.current) ?? [];
   const shownRootId = view?.rootId ?? data?.unavailableRootId ?? null;
   const shownElementId = project.cad?.roots.find((root) => root.rootId === shownRootId)?.elementId;
+  const source = projectSource(project);
   // A local CAD project's catalog names each root by its file's path in the project folder.
-  const shownFile = project.localCadSource
-    ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
-    : undefined;
+  const shownFile =
+    source.kind === "local-cad"
+      ? project.cad?.catalog?.roots.find((entry) => entry.elementId === shownElementId)?.name
+      : undefined;
   // The empty state tells the user to press the header's Sync button, which can download the
   // linked CAD before the catalog was ever refreshed too. A local project shows its file prompt.
   const syncPrompted =
@@ -891,14 +894,14 @@ export function CadPanel({
     !!data &&
     !data.unavailableRootId &&
     !roots.length &&
-    !project.localCadSource &&
+    source.kind !== "local-cad" &&
     !compact &&
     cadSyncPlan(project, shownRootId) !== null;
   // The header row: the scene picker, with the Sync button for the shown root after it.
   const scenePicker = !compact && (
     <>
       <CadScenePicker
-        documentUrl={project.onshapeSource ? onshapeProjectUrl(project.onshapeSource) : undefined}
+        documentUrl={source.kind === "onshape" ? onshapeProjectUrl(source.source) : undefined}
         openFile={
           shownFile
             ? {
@@ -1011,7 +1014,7 @@ export function CadPanel({
         !AsyncResult.isFailure(state) &&
         cadVisibleViewer.hasResident(threadRef.environmentId) ? (
         <PendingCadScene environmentId={threadRef.environmentId} />
-      ) : data && !data.unavailableRootId && !roots.length && project.localCadSource ? (
+      ) : data && !data.unavailableRootId && !roots.length && source.kind === "local-cad" ? (
         <CadFilePrompt project={project} />
       ) : (
         <div

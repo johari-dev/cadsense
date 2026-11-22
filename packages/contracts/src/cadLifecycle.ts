@@ -141,10 +141,40 @@ export const isCadThreadRunActive = (
   thread.session?.activeTurnId != null ||
   thread.latestTurn?.state === "running" ||
   thread.backgroundLiveness === "working";
+/** The two optional source fields a project carries on the wire and in storage. */
+export type ProjectSourceFields = Pick<
+  OrchestrationProjectShell,
+  "onshapeSource" | "localCadSource"
+>;
+type OnshapeSource = NonNullable<ProjectSourceFields["onshapeSource"]>;
+type LocalCadSource = NonNullable<ProjectSourceFields["localCadSource"]>;
+/**
+ * What a project reviews: an Onshape document, a CAD file in its folder, or only its folder. The
+ * source types follow the input, so a narrowed project type stays narrowed.
+ */
+export type ProjectSource<O = OnshapeSource, L = LocalCadSource> =
+  | { readonly kind: "onshape"; readonly source: O }
+  | { readonly kind: "local-cad"; readonly source: L }
+  | { readonly kind: "folder" };
+/**
+ * The project's kind. Branch on this instead of on the two fields.
+ *
+ * The decider never writes both fields: only `project.onshape.create` sets `onshapeSource`, and
+ * `project.local-cad.set` rejects Onshape projects. Stored data with both is a defect, and the
+ * Onshape source wins here because it marks a server-managed workspace, which nothing can undo.
+ */
+export const projectSource = <O = OnshapeSource, L = LocalCadSource>(project: {
+  readonly onshapeSource?: O | undefined;
+  readonly localCadSource?: L | undefined;
+}): ProjectSource<O, L> =>
+  project.onshapeSource !== undefined
+    ? { kind: "onshape", source: project.onshapeSource }
+    : project.localCadSource !== undefined
+      ? { kind: "local-cad", source: project.localCadSource }
+      : { kind: "folder" };
 /** True when a project has a CAD source to sync and review, from Onshape or a local file. */
-export const hasCadSource = (
-  project: Pick<OrchestrationProjectShell, "onshapeSource" | "localCadSource">,
-): boolean => project.onshapeSource !== undefined || project.localCadSource !== undefined;
+export const hasCadSource = (project: ProjectSourceFields): boolean =>
+  projectSource(project).kind !== "folder";
 export const initialCadProjectState = (): CadProjectState => ({
   enabled: true,
   catalog: null,

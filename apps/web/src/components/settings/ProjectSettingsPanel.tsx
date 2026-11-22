@@ -12,7 +12,13 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@cadsense/client-runtime/state/runtime";
-import { hasCadSource, type ModelSelection, type ProviderDriverKind } from "@cadsense/contracts";
+import {
+  hasCadSource,
+  projectSource,
+  type ModelSelection,
+  type ProjectSource,
+  type ProviderDriverKind,
+} from "@cadsense/contracts";
 import { createModelSelection } from "@cadsense/shared/model";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 import { FolderOpenIcon, GearSixIcon as SettingsIcon, TrashIcon as Trash2Icon } from "~/lib/icons";
@@ -59,6 +65,15 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+
+/** What removing each kind of project deletes and keeps. */
+const REMOVE_DESCRIPTIONS: Record<ProjectSource["kind"], string> = {
+  onshape:
+    "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files.",
+  "local-cad":
+    "Preserves threads and captures. Choose whether to delete imported CAD. Files in the folder are not touched.",
+  folder: "Deletes this project's threads without touching its files.",
+};
 
 function projectKey(project: Project): string {
   return scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
@@ -135,6 +150,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
   const threads = useThreadShells();
   const cadRunActive = isCadProjectRunActive(project, threads);
   const cadBusy = hasCadSource(project) && (cadRunActive || !!project.cad?.operation);
+  const source = projectSource(project);
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const openInFileManager = useAtomCommand(shellEnvironment.openInFileManager, {
@@ -287,7 +303,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
                 />
               }
             />
-            {!project.onshapeSource && (
+            {source.kind !== "onshape" && (
               <SettingsRow
                 title="Folder"
                 description={project.workspaceRoot}
@@ -301,12 +317,8 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
             )}
           </SettingsSection>
 
-          {project.onshapeSource && (
-            <OnshapeProjectSettings
-              project={project}
-              source={project.onshapeSource}
-              busy={cadBusy}
-            />
+          {source.kind === "onshape" && (
+            <OnshapeProjectSettings project={project} source={source.source} busy={cadBusy} />
           )}
           {hasCadSource(project) && (
             <>
@@ -371,13 +383,7 @@ export function ProjectSettingsPanel({ project }: { project: Project }) {
           <SettingsSection title="Danger zone">
             <SettingsRow
               title="Remove project"
-              description={
-                project.onshapeSource
-                  ? "Preserves threads and captures. Choose whether to delete downloaded CAD or workspace files."
-                  : project.localCadSource
-                    ? "Preserves threads and captures. Choose whether to delete imported CAD. Files in the folder are not touched."
-                    : "Deletes this project's threads without touching its files."
-              }
+              description={REMOVE_DESCRIPTIONS[source.kind]}
               control={
                 <Button
                   variant="destructive-outline"
