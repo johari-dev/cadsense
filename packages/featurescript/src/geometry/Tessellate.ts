@@ -1,5 +1,5 @@
 import { ordered, topology, type Entity, type GeometryState } from "./Model.ts";
-import { subShapes, type Oc, type Shape } from "./occt.ts";
+import { curveKind, subShapes, type Oc, type Shape } from "./occt.ts";
 
 /** 0 is the plain material, 1 the highlight (the feature's faces), 2 errors (`setErrorEntities`). */
 export type MeshMaterial = 0 | 1 | 2;
@@ -346,7 +346,7 @@ type Placements = ReturnType<typeof placements>;
 function segments(oc: Oc, edge: Shape): number[] {
   const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
   const [first, last] = [curve.FirstParameter(), curve.LastParameter()];
-  const count = String(curve.GetType()) === "GeomAbs_Line" ? 1 : 64;
+  const count = curveKind(curve) === "Line" ? 1 : 64;
   const points = Array.from({ length: count + 1 }, (_, i) => {
     const point = curve.EvalD0(first + ((last - first) * i) / count);
     const xyz = [point.X(), point.Y(), point.Z()];

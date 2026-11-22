@@ -1,5 +1,5 @@
 import { addBodies } from "../geometry/Model.ts";
-import type { Oc, Shape } from "../geometry/occt.ts";
+import { curveKind, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import { FsTagged, untag, type FsValue } from "../runtime/Value.ts";
 import { array, map, number } from "./args.ts";
@@ -361,7 +361,7 @@ export function edgeSpline(oc: Oc, edge: Shape): InstanceType<Oc["Geom_BSplineCu
   const adaptor = new oc.BRepAdaptor_Curve(topoEdge);
   const [first, last] = [adaptor.FirstParameter(), adaptor.LastParameter()];
   let curve: InstanceType<Oc["Geom_BSplineCurve"]>;
-  if (String(adaptor.GetType()) === "GeomAbs_BSplineCurve") {
+  if (curveKind(adaptor) === "BSplineCurve") {
     // BSpline() hands back the edge's own curve: copy it before segmenting or reversing.
     const own = adaptor.BSpline();
     curve = new oc.Geom_BSplineCurve(own);

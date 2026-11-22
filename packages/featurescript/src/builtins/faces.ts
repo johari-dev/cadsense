@@ -13,9 +13,11 @@ import {
 } from "../geometry/Model.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
 import {
+  curveKind,
   fromList,
   ShapeSet,
   subShapes,
+  surfaceKind,
   toList,
   xyz,
   type Oc,
@@ -122,7 +124,7 @@ function rejectReFillet(
 /** A planar face's plane: origin, unit normal and x direction. */
 function planeOfFace(oc: Oc, face: Shape): { origin: Vec3; normal: Vec3; x: Vec3 } | null {
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-  if (String(surface.GetType()) !== "GeomAbs_Plane") return null;
+  if (surfaceKind(surface) !== "Plane") return null;
   const plane = surface.Plane();
   return {
     origin: xyz(plane.Location()),
@@ -1255,7 +1257,7 @@ function projectEdge(
 }
 
 const surfaceKindOfEdge = (oc: Oc, edge: Shape) =>
-  String(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge)).GetType()).replace("GeomAbs_", "");
+  curveKind(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge)));
 
 /**
  * `edges` plus the edges of their bodies that continue them smoothly (tangent at a shared vertex),

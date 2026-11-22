@@ -1,5 +1,5 @@
 import type { Vec3 } from "../geometry/Sketch.ts";
-import type { Oc, Shape } from "../geometry/occt.ts";
+import { curveKind, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall } from "../runtime/Interpreter.ts";
 import { edgeSpline, splineOf } from "./bspline.ts";
 import { normalized } from "./geometryArgs.ts";
@@ -954,12 +954,12 @@ export function stallsOf(oc: Oc, edges: readonly Shape[]): Stall[] {
   return edges.flatMap((edge): Stall[] => {
     const kind = (() => {
       const adaptor = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
-      const found = String(adaptor.GetType());
+      const found = curveKind(adaptor);
       adaptor.delete();
       return found;
     })();
     // Lines, circles and the like run at a steady speed.
-    if (kind !== "GeomAbs_BSplineCurve" && kind !== "GeomAbs_BezierCurve") return [];
+    if (kind !== "BSplineCurve" && kind !== "BezierCurve") return [];
     const curve = edgeSpline(oc, edge);
     try {
       const spline = bsplineOf(curve);

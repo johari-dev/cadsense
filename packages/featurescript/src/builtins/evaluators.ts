@@ -4,7 +4,7 @@ import { faceSurfaceDefinition } from "./surfaces.ts";
 import type { Entity, EntityType } from "../geometry/Model.ts";
 import { faceRegion, filletRadius, onFace, reach } from "../geometry/Query.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { subShapes, xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import { curveKind, subShapes, surfaceKind, xyz, type Oc, type Shape } from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, FsTagged, untag, type FsArray, type FsValue } from "../runtime/Value.ts";
@@ -103,20 +103,20 @@ function axisOf(call: BuiltinCall, oc: Oc, entity: Entity): { origin: Vec3; dire
   if (entity.frame) return { origin: [...entity.frame.origin], direction: [...entity.frame.zAxis] };
   if (entity.type === "EDGE") {
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(entity.shape));
-    const kind = String(curve.GetType());
-    if (kind === "GeomAbs_Line") {
+    const kind = curveKind(curve);
+    if (kind === "Line") {
       const { point, direction } = edgeTangent(oc, entity.shape, 0);
       return { origin: point, direction };
     }
-    if (kind === "GeomAbs_Circle") {
+    if (kind === "Circle") {
       const axis = curve.Circle().Axis();
       return { origin: xyz(axis.Location()), direction: xyz(axis.Direction()) };
     }
   }
   if (entity.type === "FACE") {
     const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(entity.shape), true);
-    const kind = String(surface.GetType());
-    if (kind === "GeomAbs_Cylinder") {
+    const kind = surfaceKind(surface);
+    if (kind === "Cylinder") {
       const axis = surface.Cylinder().Axis();
       return { origin: xyz(axis.Location()), direction: xyz(axis.Direction()) };
     }
@@ -258,15 +258,15 @@ function extendSide(
       const original = item.shape;
       if (item.kind === "EDGE") {
         const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(original));
-        const kind = String(curve.GetType());
+        const kind = curveKind(curve);
         const [first, last] = [curve.FirstParameter(), curve.LastParameter()];
-        if (kind === "GeomAbs_Circle")
+        if (kind === "Circle")
           return {
             ...item,
             shape: new oc.BRepBuilderAPI_MakeEdge(curve.Circle()).Edge(),
             extends: original,
           };
-        if (kind === "GeomAbs_Line") {
+        if (kind === "Line") {
           const origin = xyz(curve.Value(first));
           const direction = unit(xyz(curve.EvalD1(first).D1));
           return {
@@ -280,12 +280,12 @@ function extendSide(
         }
         return {
           ...item,
-          unextended: `evDistance extends only line and circle edges locally, not ${kind.replace("GeomAbs_", "")} edges.`,
+          unextended: `evDistance extends only line and circle edges locally, not ${kind} edges.`,
         };
       }
       const face = oc.TopoDS.Face(original);
       const surface = new oc.BRepAdaptor_Surface(face, false);
-      const kind = String(surface.GetType());
+      const kind = surfaceKind(surface);
       const geometry = oc.BRep_Tool.Surface(face);
       const piece = (u: [number, number], v: [number, number]) =>
         new oc.BRepBuilderAPI_MakeFace(geometry, u[0], u[1], v[0], v[1], 1e-7).Face();
@@ -302,10 +302,10 @@ function extendSide(
           extends: original,
         };
       };
-      if (kind === "GeomAbs_Sphere")
+      if (kind === "Sphere")
         return { ...item, shape: piece(turn, [-Math.PI / 2, Math.PI / 2]), extends: original };
-      if (kind === "GeomAbs_Torus") return { ...item, shape: piece(turn, turn), extends: original };
-      if (kind === "GeomAbs_Plane") {
+      if (kind === "Torus") return { ...item, shape: piece(turn, turn), extends: original };
+      if (kind === "Plane") {
         const position = surface.Plane().Position();
         const [origin, normal, x, y] = [
           position.Location(),
@@ -322,7 +322,7 @@ function extendSide(
           { type: "plane", origin, normal, x },
         );
       }
-      if (kind === "GeomAbs_Cylinder") {
+      if (kind === "Cylinder") {
         const position = surface.Cylinder().Position();
         const [origin, z] = [position.Location(), position.Direction()].map(xyz) as unknown as [
           Vec3,
@@ -335,7 +335,7 @@ function extendSide(
           ),
         );
       }
-      if (kind === "GeomAbs_Cone") {
+      if (kind === "Cone") {
         // v runs along a side line from the circle at v = 0, so a foot is no farther from that
         // circle's point than the point it's the foot of. Parasolid's cone, and so Onshape's, is
         // only the half on the face's side of the apex, so v stops there.
@@ -362,7 +362,7 @@ function extendSide(
       }
       return {
         ...item,
-        unextended: `evDistance extends only plane, cylinder, cone, sphere and torus faces locally, not ${kind.replace("GeomAbs_", "")} faces.`,
+        unextended: `evDistance extends only plane, cylinder, cone, sphere and torus faces locally, not ${kind} faces.`,
       };
     });
 }
@@ -559,7 +559,7 @@ function extendedParameter(
   if (kind === "EDGE") {
     const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(shape));
     const [first, last] = [curve.FirstParameter(), curve.LastParameter()];
-    if (String(curve.GetType()) === "GeomAbs_Circle") {
+    if (curveKind(curve) === "Circle") {
       // The turn from the edge's start to the point, walking the edge's way: along the curve,
       // or back along it on a reversed edge.
       const position = curve.Circle().Position();
@@ -706,10 +706,7 @@ export const EVALUATOR_BUILTINS = {
   evLine: ([ctx, args], call) => {
     const input = open(call, ctx, args);
     const edge = first(call, input, "edge", "EDGE");
-    if (
-      String(new input.oc.BRepAdaptor_Curve(input.oc.TopoDS.Edge(edge.shape)).GetType()) !==
-      "GeomAbs_Line"
-    )
+    if (curveKind(new input.oc.BRepAdaptor_Curve(input.oc.TopoDS.Edge(edge.shape))) !== "Line")
       return call.fail("CANNOT_RESOLVE_LINE: the edge isn't straight.");
     const { origin, direction } = axisOf(call, input.oc, edge);
     return stdLine(call, origin, direction);
@@ -931,7 +928,7 @@ export const EVALUATOR_BUILTINS = {
     const input = open(call, ctx, args);
     const face = first(call, input, "face", "FACE");
     const surface = new input.oc.BRepAdaptor_Surface(input.oc.TopoDS.Face(face.shape), true);
-    const kind = String(surface.GetType());
+    const kind = surfaceKind(surface);
     const frame = (position: InstanceType<Oc["gp_Ax3"]>) =>
       stdCoordSystem(
         call,
@@ -939,7 +936,7 @@ export const EVALUATOR_BUILTINS = {
         xyz(position.XDirection()),
         xyz(position.Direction()),
       );
-    if (kind === "GeomAbs_Plane") {
+    if (kind === "Plane") {
       const position = surface.Plane().Position();
       const normal = xyz(position.Direction());
       return stdPlane(
@@ -949,28 +946,28 @@ export const EVALUATOR_BUILTINS = {
         xyz(position.XDirection()),
       );
     }
-    if (kind === "GeomAbs_Cylinder") {
+    if (kind === "Cylinder") {
       const cylinder = surface.Cylinder();
       return stdTagged(call, "surfaceGeometry.fs", "Cylinder", [
         ["coordSystem", frame(cylinder.Position())],
         ["radius", length(call, cylinder.Radius())],
       ]);
     }
-    if (kind === "GeomAbs_Sphere") {
+    if (kind === "Sphere") {
       const sphere = surface.Sphere();
       return stdTagged(call, "surfaceGeometry.fs", "Sphere", [
         ["coordSystem", frame(sphere.Position())],
         ["radius", length(call, sphere.Radius())],
       ]);
     }
-    if (kind === "GeomAbs_Cone") {
+    if (kind === "Cone") {
       const cone = coneOf(input.oc, face.shape);
       return stdTagged(call, "surfaceGeometry.fs", "Cone", [
         ["coordSystem", stdCoordSystem(call, cone.apex, cone.x, cone.z)],
         ["halfAngle", quantity(call, cone.halfAngle, "ANGLE_UNITS")],
       ]);
     }
-    if (kind === "GeomAbs_BSplineSurface") {
+    if (kind === "BSplineSurface") {
       // Planes flip with their face; whether Onshape flips a B-spline for a reversed face isn't
       // documented, so only faces running with their surface are read.
       if (reversed(face.shape))
@@ -980,19 +977,19 @@ export const EVALUATOR_BUILTINS = {
       return faceSurfaceDefinition(call, input.oc, face.shape);
     }
     return call.unsupported(
-      `evSurfaceDefinition for ${kind.replace("GeomAbs_", "")} surfaces is not supported locally yet.`,
+      `evSurfaceDefinition for ${kind} surfaces is not supported locally yet.`,
     );
   },
   evCurveDefinition: ([ctx, args], call) => {
     const input = open(call, ctx, args);
     const edge = first(call, input, "edge", "EDGE");
     const curve = new input.oc.BRepAdaptor_Curve(input.oc.TopoDS.Edge(edge.shape));
-    const kind = String(curve.GetType());
-    if (kind === "GeomAbs_Line") {
+    const kind = curveKind(curve);
+    if (kind === "Line") {
       const { origin, direction } = axisOf(call, input.oc, edge);
       return stdLine(call, origin, direction);
     }
-    if (kind === "GeomAbs_Circle") {
+    if (kind === "Circle") {
       const circle = curve.Circle();
       const position = circle.Position();
       return stdTagged(call, "curveGeometry.fs", "Circle", [
@@ -1008,10 +1005,8 @@ export const EVALUATOR_BUILTINS = {
         ["radius", length(call, circle.Radius())],
       ]);
     }
-    if (kind === "GeomAbs_BSplineCurve" || kind === "GeomAbs_BezierCurve")
+    if (kind === "BSplineCurve" || kind === "BezierCurve")
       return edgeCurveDefinition(call, input.oc, edge.shape);
-    return call.unsupported(
-      `evCurveDefinition for ${kind.replace("GeomAbs_", "")} curves is not supported locally yet.`,
-    );
+    return call.unsupported(`evCurveDefinition for ${kind} curves is not supported locally yet.`);
   },
 } satisfies Partial<Record<StdBuiltinName, BuiltinImpl>>;

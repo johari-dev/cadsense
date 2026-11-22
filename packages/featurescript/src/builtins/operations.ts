@@ -13,7 +13,17 @@ import {
 } from "../geometry/Model.ts";
 import { distance } from "../geometry/Query.ts";
 import type { Vec3 } from "../geometry/Sketch.ts";
-import { ShapeSet, subShapes, toList, xyz, type Oc, type Shape } from "../geometry/occt.ts";
+import {
+  curveKind,
+  ShapeSet,
+  subShapes,
+  surfaceKind,
+  toList,
+  xyz,
+  type CurveKind,
+  type Oc,
+  type Shape,
+} from "../geometry/occt.ts";
 import type { BuiltinCall, BuiltinImpl } from "../runtime/Interpreter.ts";
 import type { ModelContext } from "../runtime/ModelContext.ts";
 import { FsMap, untag, type FsValue } from "../runtime/Value.ts";
@@ -315,7 +325,7 @@ function facesOf(model: ModelContext, entities: readonly Entity[]): Entity[] {
 /** A planar face's outward normal (following the face's orientation), or null if it isn't planar. */
 function planarNormal(oc: Oc, face: Shape): Vec3 | null {
   const surface = new oc.BRepAdaptor_Surface(oc.TopoDS.Face(face), true);
-  if (String(surface.GetType()) !== "GeomAbs_Plane") return null;
+  if (surfaceKind(surface) !== "Plane") return null;
   const normal = xyz(surface.Plane().Axis().Direction());
   return String(face.Orientation()) === "TopAbs_REVERSED"
     ? [-normal[0], -normal[1], -normal[2]]
@@ -401,8 +411,7 @@ function pipeShell(
  * until no span turns more. Adding knots leaves the curve unchanged.
  */
 function sweepablePathEdge(oc: Oc, edge: Shape): Shape {
-  if (String(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge)).GetType()) !== "GeomAbs_BSplineCurve")
-    return edge;
+  if (curveKind(new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge))) !== "BSplineCurve") return edge;
   const curve = edgeSpline(oc, edge);
   return addSweepKnots(oc, curve) ? new oc.BRepBuilderAPI_MakeEdge(curve).Edge() : edge;
 }
@@ -1008,8 +1017,8 @@ function profilePoints(oc: Oc, profile: Shape): Vec3[][] {
  */
 function linesAndArcs(oc: Oc, spine: Shape, pathEdges: readonly Shape[]): boolean {
   const curves = pathEdges.map((edge) => new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge)));
-  const analytic = (kind: string) => kind === "GeomAbs_Line" || kind === "GeomAbs_Circle";
-  if (!curves.every((curve) => analytic(String(curve.GetType())))) return false;
+  const analytic = (kind: CurveKind) => kind === "Line" || kind === "Circle";
+  if (!curves.every((curve) => analytic(curveKind(curve)))) return false;
   const along = new oc.BRepAdaptor_CompCurve(oc.TopoDS.Wire(spine), false);
   const [start, end] = [
     xyz(along.Value(along.FirstParameter())),
