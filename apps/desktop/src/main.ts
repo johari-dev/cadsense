@@ -41,7 +41,6 @@ import * as DesktopClientSettings from "./settings/DesktopClientSettings.ts";
 import * as DesktopAppSettings from "./settings/DesktopAppSettings.ts";
 import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
-import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as BrowserSession from "./preview/BrowserSession.ts";
@@ -84,7 +83,6 @@ const electronLayer = Layer.mergeAll(
 );
 
 const desktopFoundationLayer = Layer.mergeAll(
-  DesktopState.layer,
   DesktopShutdown.layer,
   DesktopAppSettings.layer,
   DesktopClientSettings.layer,

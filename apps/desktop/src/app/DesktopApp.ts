@@ -1,7 +1,6 @@
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as NetService from "@cadsense/shared/Net";
@@ -23,7 +22,6 @@ import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
-import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
 
@@ -105,13 +103,9 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
 ): Effect.fn.Return<
   void,
   never,
-  | DesktopShutdown.DesktopShutdown
-  | DesktopState.DesktopState
-  | ElectronApp.ElectronApp
-  | ElectronDialog.ElectronDialog
+  DesktopShutdown.DesktopShutdown | ElectronApp.ElectronApp | ElectronDialog.ElectronDialog
 > {
   const shutdown = yield* DesktopShutdown.DesktopShutdown;
-  const state = yield* DesktopState.DesktopState;
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
   const message = error instanceof Error ? error.message : String(error);
@@ -122,8 +116,7 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
     message,
     ...(detail.length > 0 ? { detail } : {}),
   });
-  const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
-  if (!wasQuitting) {
+  if (yield* shutdown.beginQuit) {
     yield* electronDialog.showErrorBox(
       "Cadsense failed to start",
       `Stage: ${stage}\n${message}${detail}`,
@@ -140,7 +133,7 @@ const bootstrap = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
   const primaryBackend = yield* pool.primary;
-  const state = yield* DesktopState.DesktopState;
+  const shutdown = yield* DesktopShutdown.DesktopShutdown;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
@@ -182,7 +175,7 @@ const bootstrap = Effect.gen(function* () {
   yield* installDesktopIpcHandlers();
   yield* logBootstrapInfo("bootstrap ipc handlers registered");
 
-  if (!(yield* Ref.get(state.quitting))) {
+  if ((yield* shutdown.phase) === "running") {
     // In wsl-only mode the renderer is served by the WSL backend, which can be
     // slow to cold-boot — show a "Connecting to WSL" splash immediately so the
     // app feels responsive instead of presenting no window until WSL is ready.

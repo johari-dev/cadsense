@@ -1,7 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
@@ -12,7 +11,6 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 export class DesktopLifecycleRelaunchError extends Schema.TaggedErrorClass<DesktopLifecycleRelaunchError>()(
@@ -30,7 +28,6 @@ export class DesktopLifecycleRelaunchError extends Schema.TaggedErrorClass<Deskt
 export type DesktopLifecycleRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
   | DesktopShutdown.DesktopShutdown
-  | DesktopState.DesktopState
   | DesktopWindow.DesktopWindow
   | ElectronApp.ElectronApp;
 
@@ -39,7 +36,7 @@ type DesktopLifecycleRegistrationServices =
   | ElectronWindow.ElectronWindow;
 
 /**
- * @effect-expect-leaking DesktopEnvironment | DesktopShutdown | DesktopState | DesktopWindow | ElectronApp | ElectronWindow
+ * @effect-expect-leaking DesktopEnvironment | DesktopShutdown | DesktopWindow | ElectronApp | ElectronWindow
  */
 export class DesktopLifecycle extends Context.Service<
   DesktopLifecycle,
@@ -103,8 +100,8 @@ function handleBeforeQuit(
   if (allowQuit()) {
     void runEffect(
       Effect.gen(function* () {
-        const state = yield* DesktopState.DesktopState;
-        yield* Ref.set(state.quitting, true);
+        const shutdown = yield* DesktopShutdown.DesktopShutdown;
+        yield* shutdown.beginQuit;
         yield* logLifecycleInfo("before-quit received");
       }).pipe(Effect.withSpan("desktop.lifecycle.beforeQuit")),
     );
@@ -114,9 +111,9 @@ function handleBeforeQuit(
   event.preventDefault();
   void runEffect(
     Effect.gen(function* () {
-      const state = yield* DesktopState.DesktopState;
+      const shutdown = yield* DesktopShutdown.DesktopShutdown;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
-      yield* Ref.set(state.quitting, true);
+      yield* shutdown.beginQuit;
       yield* logLifecycleInfo("before-quit received");
       yield* requestDesktopShutdownAndWait(
         electronWindow.destroyAll.pipe(
@@ -147,9 +144,8 @@ function quitFromSignal(
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ signal });
       const electronApp = yield* ElectronApp.ElectronApp;
-      const state = yield* DesktopState.DesktopState;
-      const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
-      if (wasQuitting) return;
+      const shutdown = yield* DesktopShutdown.DesktopShutdown;
+      if (!(yield* shutdown.beginQuit)) return;
       yield* logLifecycleInfo("process signal received", { signal });
       yield* requestDesktopShutdownAndWait();
       yield* electronApp.quit;
@@ -161,11 +157,11 @@ export const make = DesktopLifecycle.of({
   relaunch: Effect.fn("desktop.lifecycle.relaunch")(function* (reason) {
     const electronApp = yield* ElectronApp.ElectronApp;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const state = yield* DesktopState.DesktopState;
+    const shutdown = yield* DesktopShutdown.DesktopShutdown;
     yield* logLifecycleInfo("desktop relaunch requested", { reason });
     yield* Effect.gen(function* () {
       yield* Effect.yieldNow;
-      yield* Ref.set(state.quitting, true);
+      yield* shutdown.beginQuit;
       yield* requestDesktopShutdownAndWait();
       if (environment.isDevelopment) {
         yield* electronApp.exit(75);
@@ -217,8 +213,8 @@ export const make = DesktopLifecycle.of({
     yield* electronApp.on("activate", () => {
       void runEffect(
         Effect.gen(function* () {
-          const state = yield* DesktopState.DesktopState;
-          if (yield* Ref.get(state.quitting)) return;
+          const shutdown = yield* DesktopShutdown.DesktopShutdown;
+          if ((yield* shutdown.phase) !== "running") return;
           yield* desktopWindow.activate;
         }).pipe(Effect.withSpan("desktop.lifecycle.activate")),
       );
@@ -227,8 +223,8 @@ export const make = DesktopLifecycle.of({
       void runEffect(
         Effect.gen(function* () {
           const app = yield* ElectronApp.ElectronApp;
-          const state = yield* DesktopState.DesktopState;
-          if (environment.platform !== "darwin" && !(yield* Ref.get(state.quitting))) {
+          const shutdown = yield* DesktopShutdown.DesktopShutdown;
+          if (environment.platform !== "darwin" && (yield* shutdown.phase) === "running") {
             yield* app.quit;
           }
         }).pipe(Effect.withSpan("desktop.lifecycle.windowAllClosed")),
