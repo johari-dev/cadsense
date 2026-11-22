@@ -1,4 +1,4 @@
-import { EnvironmentId, OrchestrationProjectShell } from "@cadsense/contracts";
+import { CadOperationId, EnvironmentId, OrchestrationProjectShell } from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isValidElement, type ReactNode } from "react";
@@ -145,7 +145,7 @@ describe("manual CAD project controls", () => {
         cad: {
           ...project.cad!,
           lastOutcome: {
-            operationId: "00000000-0000-4000-8000-000000000001",
+            operationId: CadOperationId.make("00000000-0000-4000-8000-000000000001"),
             kind: "discover",
             status: "failed",
             completedAt: "2026-09-05T00:00:00Z",

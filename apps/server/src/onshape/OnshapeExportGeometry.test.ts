@@ -1,4 +1,4 @@
-import { CadSnapshotRoot } from "@cadsense/contracts";
+import { CadSnapshotId, CadSnapshotRoot } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -28,7 +28,7 @@ const root = Schema.decodeUnknownSync(CadSnapshotRoot)({
   tessellationProfile: "test",
 });
 const context = {
-  snapshotId: "00000000-0000-4000-8000-000000000001",
+  snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
   projectId: bulkInput.projectId,
   createdAt: "2026-09-07T00:00:00Z",
   root,

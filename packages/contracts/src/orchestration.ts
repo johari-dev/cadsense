@@ -60,6 +60,7 @@ import {
   CadOperationResult,
 } from "./cadLifecycle.ts";
 import { CadViewState } from "./cadView.ts";
+import { LooseCadCaptureId } from "./cad.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -343,7 +344,9 @@ export const OrchestrationMessage = Schema.Struct({
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 
-export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
+export const OrchestrationProposedPlanId = TrimmedNonEmptyString.pipe(
+  Schema.brand("OrchestrationProposedPlanId"),
+);
 export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
 
 export const OrchestrationProposedPlan = Schema.Struct({
@@ -1464,7 +1467,7 @@ export const OrchestrationEvent = Schema.Union([
   Schema.Struct({
     ...EventBaseFields,
     type: Schema.Literal("thread.cad-presentation-settled"),
-    payload: Schema.Struct({ threadId: ThreadId, captureId: Schema.String }),
+    payload: Schema.Struct({ threadId: ThreadId, captureId: LooseCadCaptureId }),
   }),
   Schema.Struct({
     ...EventBaseFields,

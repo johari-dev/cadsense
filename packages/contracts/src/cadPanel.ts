@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import { ProjectId, ThreadId, TurnId } from "./baseSchemas.ts";
-import { CadHash, CadSnapshotId } from "./cad.ts";
+import { CadCaptureId, CadHash, CadSnapshotId, CadUuid } from "./cad.ts";
 import { CadViewState } from "./cadView.ts";
 
 /**
@@ -18,7 +18,7 @@ export const CadPanelState = Schema.Struct({
   agentActivityTurnId: Schema.NullOr(TurnId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   userRevision: Schema.NullOr(Schema.Int),
   view: Schema.NullOr(CadViewState),
-  captureId: Schema.NullOr(CadSnapshotId),
+  captureId: Schema.NullOr(CadCaptureId),
   unavailableRootId: Schema.optional(CadHash),
 });
 export type CadPanelState = typeof CadPanelState.Type;
@@ -32,5 +32,5 @@ export const CadPanelSceneInput = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   snapshotId: CadSnapshotId,
 });
-export const CadPanelSceneTicket = Schema.Struct({ sceneId: CadSnapshotId, token: CadSnapshotId });
+export const CadPanelSceneTicket = Schema.Struct({ sceneId: CadUuid, token: CadUuid });
 export type CadPanelSceneTicket = typeof CadPanelSceneTicket.Type;

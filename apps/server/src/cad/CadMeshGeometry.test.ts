@@ -1,7 +1,7 @@
 import { describe, expect } from "vite-plus/test";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { CadSnapshotRoot } from "@cadsense/contracts";
+import { CadSnapshotId, CadSnapshotRoot } from "@cadsense/contracts";
 import { normalizeCadGeometry } from "./CadGeometry.ts";
 import { normalizeOnshapeExport } from "../onshape/OnshapeExportBundle.ts";
 import { readOnshapeExportGeometry } from "../onshape/OnshapeExportGeometry.ts";
@@ -218,7 +218,7 @@ it.effect("reads split Onshape export meshes with retained PTC metadata", () =>
     const fixture = bulkFixture(2);
     const draft = yield* parseAssemblySnapshotDraft(
       {
-        snapshotId: "00000000-0000-4000-8000-000000000001",
+        snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
         projectId: bulkInput.projectId,
         createdAt: "2026-09-07T00:00:00Z",
         root: bulkRoot,

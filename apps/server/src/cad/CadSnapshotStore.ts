@@ -442,7 +442,8 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* io(assertDirectories);
         const targets = yield* Effect.try({
-          try: () => new Set(snapshotIds.map((id) => decodeSnapshotId(id))),
+          // Validated ids, matched below against untyped SQL rows and manifest file names.
+          try: () => new Set<string>(snapshotIds.map((id) => decodeSnapshotId(id))),
           catch: () => failure("corrupt"),
         });
         if (Option.isSome(database)) {

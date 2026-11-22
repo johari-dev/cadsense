@@ -1,6 +1,7 @@
 import {
+  CadCaptureId,
   CadHash,
-  CadSnapshotId,
+  CadOperationId,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -67,7 +68,7 @@ it("leaves this chat's panel unlocked while another chat runs or presents", () =
         {
           threadId: other,
           turnId: TurnId.make("turn-9"),
-          captureId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+          captureId: CadCaptureId.make("00000000-0000-4000-8000-000000000001"),
           rootId: CadHash.make("1".repeat(64)),
         },
       ],
@@ -149,7 +150,7 @@ it("does not credit the previous turn's CAD use while a new run is starting", ()
 });
 
 it("explains the agent's captured view while its presentation is pending", () => {
-  const captureId = CadSnapshotId.make("00000000-0000-4000-8000-000000000001");
+  const captureId = CadCaptureId.make("00000000-0000-4000-8000-000000000001");
   const pending = {
     ...project,
     cad: {
@@ -240,7 +241,7 @@ it("counts a chat whose capture presentation is still pending, even when it is n
         {
           threadId: ThreadId.make(threadId),
           turnId: TurnId.make("turn-9"),
-          captureId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+          captureId: CadCaptureId.make("00000000-0000-4000-8000-000000000001"),
           rootId: CadHash.make("1".repeat(64)),
         },
       ],
@@ -265,7 +266,7 @@ it("blocks a sync while CAD is off or another CAD operation runs", () => {
         cad: {
           ...project.cad,
           operation: {
-            operationId: CadSnapshotId.make("00000000-0000-4000-8000-000000000003"),
+            operationId: CadOperationId.make("00000000-0000-4000-8000-000000000003"),
             kind: "discover",
             root: null,
             startedAt: now,

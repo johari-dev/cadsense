@@ -1,4 +1,6 @@
 import {
+  CadOperationId,
+  CadSnapshotId,
   initialCadProjectState,
   OnshapeElementId,
   OnshapeWorkspaceId,
@@ -15,7 +17,13 @@ const unused = () => Effect.die("Unexpected test operation");
 const projectId = ProjectId.make("retained-project");
 const otherId = ProjectId.make("other-project");
 const now = "2026-09-05T00:00:00Z";
-const metadata = (snapshotId: string) => ({
+const snapshot = {
+  current: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
+  rollback: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
+  obsolete: CadSnapshotId.make("00000000-0000-4000-8000-000000000003"),
+  other: CadSnapshotId.make("00000000-0000-4000-8000-000000000004"),
+};
+const metadata = (snapshotId: CadSnapshotId) => ({
   snapshotId,
   microversionId: OnshapeWorkspaceId.make("a".repeat(24)),
   createdAt: now,
@@ -43,8 +51,8 @@ const model: OrchestrationReadModel = {
             elementId: OnshapeElementId.make("a".repeat(24)),
             configuration: "default",
             kind: "assembly",
-            current: metadata("current"),
-            rollback: metadata("rollback"),
+            current: metadata(snapshot.current),
+            rollback: metadata(snapshot.rollback),
             lastOutcome: null,
           },
         ],
@@ -66,7 +74,12 @@ const run = (input: { operating?: boolean; pinned?: boolean; targetOnly?: boolea
                 ...project,
                 cad: {
                   ...project.cad!,
-                  operation: { operationId: "active", kind: "sync", root: null, startedAt: now },
+                  operation: {
+                    operationId: CadOperationId.make("00000000-0000-4000-8000-000000000005"),
+                    kind: "sync",
+                    root: null,
+                    startedAt: now,
+                  },
                 },
               })),
             }
@@ -99,9 +112,9 @@ const run = (input: { operating?: boolean; pinned?: boolean; targetOnly?: boolea
     withAcquisition: (effect) => effect,
     list: () =>
       Effect.succeed(
-        ["current", "rollback", "obsolete", "other"].map((snapshotId) => ({
+        Object.values(snapshot).map((snapshotId) => ({
           snapshotId,
-          projectId: snapshotId === "other" ? otherId : projectId,
+          projectId: snapshotId === snapshot.other ? otherId : projectId,
           rootId: "root",
           createdAt: now,
           byteLength: 1,
@@ -128,15 +141,15 @@ it.effect("retains current and rollback even for removed projects whose data was
   Effect.gen(function* () {
     const h = run({ targetOnly: true });
     yield* h.effect;
-    assert.deepEqual(h.removed, ["obsolete"]);
-    assert.deepEqual(h.protectedIds, ["current", "rollback"]);
+    assert.deepEqual(h.removed, [snapshot.obsolete]);
+    assert.deepEqual(h.protectedIds, [snapshot.current, snapshot.rollback]);
   }),
 );
 it.effect("does not collect a project's publication while its operation is still reserved", () =>
   Effect.gen(function* () {
     const h = run({ operating: true });
     yield* h.effect;
-    assert.deepEqual(h.removed, ["other"]);
+    assert.deepEqual(h.removed, [snapshot.other]);
   }),
 );
 it.effect("defers collection when a snapshot remains actively pinned", () =>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MessageId, TurnId } from "@cadsense/contracts";
+import { CadCaptureId, CadSnapshotId, MessageId, TurnId } from "@cadsense/contracts";
 import type { TimelineEntry } from "../../session-logic";
 import {
   collapsedUserMessagePreview,
@@ -113,8 +113,8 @@ describe("captured images in turn folds", () => {
         tone: "info",
         label: "CAD view captured",
         cadCapture: {
-          captureId: `00000000-0000-4000-8000-00000000000${index}`,
-          snapshotId: "00000000-0000-4000-8000-000000000002",
+          captureId: CadCaptureId.make(`00000000-0000-4000-8000-00000000000${index}`),
+          snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
           revision: 1,
         },
       },
@@ -249,8 +249,8 @@ describe("CAD review rows", () => {
         tone: "info",
         label: "CAD view captured",
         cadCapture: {
-          captureId: `00000000-0000-4000-8000-0000000000${id.slice(-2)}`,
-          snapshotId: "00000000-0000-4000-8000-000000000002",
+          captureId: CadCaptureId.make(`00000000-0000-4000-8000-0000000000${id.slice(-2)}`),
+          snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
           revision: 1,
         },
       },

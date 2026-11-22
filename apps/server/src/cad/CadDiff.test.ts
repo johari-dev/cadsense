@@ -1,4 +1,5 @@
 import {
+  CadSnapshotId,
   CadSnapshotManifest,
   OnshapeWorkspaceId,
   ThreadId,
@@ -394,14 +395,14 @@ describe("chooseCadDiffBase", () => {
     retainedBy: ("current" | "rollback" | "comments")[],
     commentNumbers: number[] = [],
   ) => ({
-    snapshotId,
+    snapshotId: CadSnapshotId.make(snapshotId),
     createdAt,
     microversionId: OnshapeWorkspaceId.make("a".repeat(24)),
     retainedBy,
     commentNumbers,
   });
   const target = {
-    snapshotId: targetId,
+    snapshotId: CadSnapshotId.make(targetId),
     createdAt: "2026-09-03T00:00:00Z",
     microversionId: OnshapeWorkspaceId.make("b".repeat(24)),
   };
@@ -436,7 +437,7 @@ describe("chooseCadDiffBase", () => {
 
 describe("retainedCadCandidates", () => {
   const metadata = (snapshotId: string, createdAt: string) => ({
-    snapshotId,
+    snapshotId: CadSnapshotId.make(snapshotId),
     createdAt,
     microversionId: OnshapeWorkspaceId.make("a".repeat(24)),
     manifestBytes: 1,
@@ -446,7 +447,7 @@ describe("retainedCadCandidates", () => {
     id: `comment-${number}`,
     threadId: ThreadId.make("thread"),
     rootId,
-    snapshotId,
+    snapshotId: CadSnapshotId.make(snapshotId),
     modelKey: hash("5"),
     modelDescriptor: "descriptor",
     title: "Finding",

@@ -1,5 +1,5 @@
 import { useModelThumbnail } from "../cad/modelThumbnails";
-import type { EnvironmentId, OnshapeProjectSource } from "@cadsense/contracts";
+import type { CadSnapshotId, EnvironmentId, OnshapeProjectSource } from "@cadsense/contracts";
 import {
   getProjectFaviconCacheKey,
   isProjectFaviconFallbackUrl,
@@ -18,7 +18,7 @@ type ProjectFaviconProps = {
   className?: string | undefined;
   fallbackIcon?: ComponentType<{ className?: string }>;
   onshapeSource?: OnshapeProjectSource | undefined;
-  cadSnapshotId?: string | undefined;
+  cadSnapshotId?: CadSnapshotId | undefined;
 };
 
 export function ProjectFavicon(input: ProjectFaviconProps) {

@@ -1,5 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CadOperationId,
+  CadSnapshotId,
   CommandId,
   MessageId,
   OnshapeConnectionId,
@@ -48,8 +50,8 @@ const now = "2026-09-05T00:00:00.000Z";
 const projectId = ProjectId.make("cad-project");
 const threadId = ThreadId.make("cad-thread");
 const messageId = MessageId.make("cad-message");
-const operationId = "00000000-0000-4000-8000-000000000001";
-const nextOperationId = "00000000-0000-4000-8000-000000000002";
+const operationId = CadOperationId.make("00000000-0000-4000-8000-000000000001");
+const nextOperationId = CadOperationId.make("00000000-0000-4000-8000-000000000002");
 const root = {
   rootId: "a".repeat(64),
   elementId: OnshapeElementId.make("a".repeat(24)),
@@ -196,7 +198,7 @@ it.effect("keeps current and rollback on failure and rejects stale completion", 
     const query = yield* ProjectionSnapshotQuery;
     yield* engine.dispatch(reserve());
     const snapshot = {
-      snapshotId: operationId,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
       microversionId: OnshapeWorkspaceId.make("c".repeat(24)),
       createdAt: now,
       manifestBytes: 100,

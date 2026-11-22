@@ -1,6 +1,8 @@
 import {
+  CadOperationId,
   CadUserOperationError,
   CommandId,
+  type CadSnapshotId,
   hasCadSource,
   type CadStorageInput,
   type CadStorageEntry,
@@ -76,7 +78,9 @@ export const make = Effect.gen(function* () {
           .filter((snapshot) => snapshot.projectId === projectId)
           .map((snapshot) => snapshot.snapshotId),
         ...(project.cad?.roots.flatMap((root) =>
-          [root.current?.snapshotId, root.rollback?.snapshotId].filter((id): id is string => !!id),
+          [root.current?.snapshotId, root.rollback?.snapshotId].filter(
+            (id): id is CadSnapshotId => !!id,
+          ),
         ) ?? []),
       ]);
       const protectedIds = model.projects
@@ -85,7 +89,7 @@ export const make = Effect.gen(function* () {
           (item) =>
             item.cad?.roots.flatMap((root) =>
               [root.current?.snapshotId, root.rollback?.snapshotId].filter(
-                (id): id is string => !!id,
+                (id): id is CadSnapshotId => !!id,
               ),
             ) ?? [],
         );
@@ -101,7 +105,10 @@ export const make = Effect.gen(function* () {
     function* (input: CadStorageInput) {
       const project = yield* projectFor(input.projectId);
       if (input.kind === "remove") {
-        const operationId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(failed));
+        const operationId = yield* crypto.randomUUIDv4.pipe(
+          Effect.map(CadOperationId.make),
+          Effect.mapError(failed),
+        );
         yield* dispatch({
           type: "project.cad.operation.reserve",
           projectId: project.id,

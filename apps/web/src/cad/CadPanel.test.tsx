@@ -2,6 +2,7 @@ import {
   EnvironmentId,
   ProjectId,
   ThreadId,
+  CadSnapshotId,
   CadSnapshotManifest,
   type CadViewState,
   type CadComment,
@@ -118,6 +119,7 @@ afterEach(() => {
   useCadCommentReviewStore.setState({ pending: {}, sessions: {}, sessionOrder: [] });
 });
 
+const CURRENT_SNAPSHOT_ID = CadSnapshotId.make("00000000-0000-4000-8000-0000000000c1");
 const manifest = Schema.decodeUnknownSync(CadSnapshotManifest)({
   schemaVersion: 1,
   snapshotId: "00000000-0000-4000-8000-000000000001",
@@ -369,7 +371,7 @@ it("keeps a cold scene load alive across panel detach and rejoins it with the la
 
 function reviewHarness() {
   const current: CadViewState = {
-    snapshotId: "current",
+    snapshotId: CURRENT_SNAPSHOT_ID,
     rootId: "root",
     revision: 1,
     camera: { kind: "preset", preset: "front", fit: [] },
@@ -454,14 +456,14 @@ it("isolates review sessions by environment and thread when navigating away and 
   render().commentsCard.choose(comment, 0);
   expect(render().view.snapshotId).toBe("historical");
   props.threadRef = { ...props.threadRef, threadId: ThreadId.make("other-thread") };
-  expect(render().view.snapshotId).toBe("current");
+  expect(render().view.snapshotId).toBe(CURRENT_SNAPSHOT_ID);
   expect(render().commentsCard.open).toBe(false);
   props.threadRef = {
     ...props.threadRef,
     threadId: ThreadId.make("thread"),
     environmentId: EnvironmentId.make("other-environment"),
   };
-  expect(render().view.snapshotId).toBe("current");
+  expect(render().view.snapshotId).toBe(CURRENT_SNAPSHOT_ID);
   props.threadRef = { ...props.threadRef, environmentId: EnvironmentId.make("test") };
   expect(render().view.snapshotId).toBe("historical");
 });

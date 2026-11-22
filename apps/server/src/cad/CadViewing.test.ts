@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CadAgentContextId,
   CadCommentError,
+  CadOperationId,
   CadDiffResult,
   CadSnapshotManifest,
   CadFindPartsEntry,
@@ -597,7 +599,8 @@ const harness = Effect.fn(function* (
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       createdAt: now,
     });
-  const snapshots = new Map([[snapshot.snapshotId, snapshot]]);
+  // Keyed by plain string: the store interface takes untyped ids.
+  const snapshots = new Map<string, CadSnapshotManifest>([[snapshot.snapshotId, snapshot]]);
   for (let index = 0; index < (multiple ? 2 : 1); index++) {
     const manifest =
       index === 0
@@ -609,7 +612,7 @@ const harness = Effect.fn(function* (
             root: { ...snapshot.root, elementId: "d".repeat(24) },
           });
     snapshots.set(manifest.snapshotId, manifest);
-    const operationId = `00000000-0000-4000-8000-00000000000${index + 4}`;
+    const operationId = CadOperationId.make(`00000000-0000-4000-8000-00000000000${index + 4}`);
     yield* dispatch({
       type: "project.cad.operation.reserve",
       projectId,
@@ -714,7 +717,7 @@ const harness = Effect.fn(function* (
               yield* dispatch({
                 type: "thread.cad.view.set",
                 threadId,
-                contextId: input.sessionId,
+                contextId: CadAgentContextId.make(input.sessionId),
                 expectedRevision: input.state.revision,
                 view: { ...input.state, revision: input.state.revision + 1 },
               }).pipe(Effect.orDie);
@@ -1204,7 +1207,7 @@ it.effect(
         ],
       });
       h.snapshots.set(revised.snapshotId, revised);
-      const operationId = "00000000-0000-4000-8000-000000000008";
+      const operationId = CadOperationId.make("00000000-0000-4000-8000-000000000008");
       yield* h.dispatch({
         type: "project.cad.operation.reserve",
         projectId,
@@ -1739,7 +1742,7 @@ it.effect(
         .dispatch({
           type: "project.cad.operation.reserve",
           projectId,
-          operationId: "00000000-0000-4000-8000-000000000009",
+          operationId: CadOperationId.make("00000000-0000-4000-8000-000000000009"),
           kind: "discover",
           root: null,
         })

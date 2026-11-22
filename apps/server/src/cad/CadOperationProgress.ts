@@ -1,4 +1,5 @@
 import type {
+  CadOperationId,
   CadOperationProgress as CadOperationProgressEntry,
   CadSyncStep,
   ProjectId,
@@ -42,7 +43,7 @@ export class CadOperationProgress extends Context.Service<
   CadOperationProgress,
   {
     readonly begin: (
-      operationId: string,
+      operationId: CadOperationId,
       projectId: ProjectId,
     ) => Effect.Effect<CadProgressTracking>;
     readonly watch: Stream.Stream<ReadonlyArray<CadOperationProgressEntry>>;
@@ -54,7 +55,7 @@ export const make = Effect.gen(function* () {
     new Map(),
   );
   const begin = Effect.fn("CadOperationProgress.begin")(function* (
-    operationId: string,
+    operationId: CadOperationId,
     projectId: ProjectId,
   ) {
     let apiCalls = 0;

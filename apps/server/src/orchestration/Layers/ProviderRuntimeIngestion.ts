@@ -5,7 +5,6 @@ import {
   MessageId,
   type OrchestrationEvent,
   type OrchestrationMessage,
-  type OrchestrationProposedPlanId,
   classifyTaskAgentKind,
   EventId,
   isToolLifecycleItemType,
@@ -13,6 +12,7 @@ import {
   type ThreadTokenUsageSnapshot,
   TurnId,
   type OrchestrationProposedPlan,
+  OrchestrationProposedPlanId,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
@@ -180,7 +180,7 @@ function findProposedPlanById(
   proposedPlans: ReadonlyArray<
     Pick<OrchestrationProposedPlan, "id" | "createdAt" | "implementedAt" | "implementationThreadId">
   >,
-  planId: string,
+  planId: OrchestrationProposedPlanId,
 ):
   | Pick<OrchestrationProposedPlan, "id" | "createdAt" | "implementedAt" | "implementationThreadId">
   | undefined {
@@ -209,19 +209,22 @@ function hasRenderableAssistantText(text: string | undefined): boolean {
   return (text?.trim().length ?? 0) > 0;
 }
 
-function proposedPlanIdForTurn(threadId: ThreadId, turnId: TurnId): string {
-  return `plan:${threadId}:turn:${turnId}`;
+function proposedPlanIdForTurn(threadId: ThreadId, turnId: TurnId): OrchestrationProposedPlanId {
+  return OrchestrationProposedPlanId.make(`plan:${threadId}:turn:${turnId}`);
 }
 
-function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId): string {
+function proposedPlanIdFromEvent(
+  event: ProviderRuntimeEvent,
+  threadId: ThreadId,
+): OrchestrationProposedPlanId {
   const turnId = toTurnId(event.turnId);
   if (turnId) {
     return proposedPlanIdForTurn(threadId, turnId);
   }
   if (event.itemId) {
-    return `plan:${threadId}:item:${event.itemId}`;
+    return OrchestrationProposedPlanId.make(`plan:${threadId}:item:${event.itemId}`);
   }
-  return `plan:${threadId}:event:${event.eventId}`;
+  return OrchestrationProposedPlanId.make(`plan:${threadId}:event:${event.eventId}`);
 }
 
 function assistantSegmentBaseKeyFromEvent(event: ProviderRuntimeEvent): string {
@@ -1339,12 +1342,12 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
     threadProposedPlans: ReadonlyArray<{
-      id: string;
+      id: OrchestrationProposedPlanId;
       createdAt: string;
       implementedAt: string | null;
       implementationThreadId: ThreadId | null;
     }>;
-    planId: string;
+    planId: OrchestrationProposedPlanId;
     turnId?: TurnId;
     planMarkdown: string | undefined;
     createdAt: string;
@@ -1378,12 +1381,12 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
     threadProposedPlans: ReadonlyArray<{
-      id: string;
+      id: OrchestrationProposedPlanId;
       createdAt: string;
       implementedAt: string | null;
       implementationThreadId: ThreadId | null;
     }>;
-    planId: string;
+    planId: OrchestrationProposedPlanId;
     turnId?: TurnId;
     fallbackMarkdown?: string;
     updatedAt: string;

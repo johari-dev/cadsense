@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ThreadId } from "@cadsense/contracts";
+import { CadSnapshotId, ThreadId } from "@cadsense/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@cadsense/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -377,7 +377,7 @@ describe("AssetAccess", () => {
       const config = yield* ServerConfig.ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const snapshotId = "00000000-0000-4000-8000-000000000001";
+      const snapshotId = CadSnapshotId.make("00000000-0000-4000-8000-000000000001");
       const resource = { _tag: "cad-thumbnail", snapshotId } as const;
 
       const missing = yield* issueAssetUrl({ resource }).pipe(Effect.flip);

@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { CadMeasureInput } from "./cadMeasure.ts";
 import { CadDriveOptionsInput } from "./cadDriveOptions.ts";
-import { CadHash, CadSnapshotId, CadSnapshotNode } from "./cad.ts";
+import { CadHash, CadSnapshotId, CadSnapshotNode, LooseCadCaptureId } from "./cad.ts";
 import { CadCameraPose, CadUpdateViewInput, CadViewState } from "./cadView.ts";
 import { IsoDateTime } from "./baseSchemas.ts";
 import { OnshapeWorkspaceId } from "./onshape.ts";
@@ -217,7 +217,7 @@ export const CadCaptureInput = Schema.Struct({
   expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export const CadCaptureResult = Schema.Struct({
-  captureId: Schema.String,
+  captureId: LooseCadCaptureId,
   rootId: CadHash,
   snapshotId: CadSnapshotId,
   revision: Schema.Int,

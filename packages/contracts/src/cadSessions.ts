@@ -1,9 +1,10 @@
 import * as Schema from "effect/Schema";
 import { CommandId, ThreadId } from "./baseSchemas.ts";
-import { CadSnapshotId } from "./cad.ts";
+import { CadUuid } from "./cad.ts";
 import { CadViewState } from "./cadView.ts";
 
-export const CadAgentContextId = CadSnapshotId;
+export const CadAgentContextId = CadUuid.pipe(Schema.brand("CadAgentContextId"));
+export type CadAgentContextId = typeof CadAgentContextId.Type;
 export const CadContextKey = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256));
 const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /** Compact, server-private command index. Full semantic state stays in its SQL projection. */

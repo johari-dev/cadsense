@@ -1,5 +1,7 @@
 import {
   CAD_CAPTURE_SIZE,
+  CadCaptureId,
+  type CadAgentContextId,
   type CadRenderError,
   CadViewError,
   CommandId,
@@ -22,12 +24,16 @@ export interface CadCaptureDelivery {
   readonly result: typeof CadCaptureToolResult.Type;
   readonly png: Uint8Array;
 }
+/** A render for one agent CAD context: the broker's `sessionId` is that context's id. */
+export type CadCaptureRequest = CadRenderRequest & {
+  readonly sessionId: CadAgentContextId;
+  readonly threadId: ThreadId;
+  readonly turnId: TurnId;
+};
 export class CadCaptureArtifacts extends Context.Service<
   CadCaptureArtifacts,
   {
-    readonly capture: (
-      input: CadRenderRequest & { readonly threadId: ThreadId; readonly turnId: TurnId },
-    ) => Effect.Effect<CadCaptureDelivery, CadViewError>;
+    readonly capture: (input: CadCaptureRequest) => Effect.Effect<CadCaptureDelivery, CadViewError>;
   }
 >()("@cadsense/server/cad/CadCaptureArtifacts") {}
 const unavailable = () => new CadViewError({ reason: "capability-unavailable" });
@@ -47,9 +53,7 @@ export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
-  const capture = Effect.fn("CadCaptureArtifacts.capture")(function* (
-    input: CadRenderRequest & { readonly threadId: ThreadId; readonly turnId: TurnId },
-  ) {
+  const capture = Effect.fn("CadCaptureArtifacts.capture")(function* (input: CadCaptureRequest) {
     // Distinct render reasons, with recovery steps in the response itself because resumed
     // providers can keep older tool descriptions.
     const rendered = yield* broker.capture(input).pipe(
@@ -61,7 +65,10 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    const captureId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable));
+    const captureId = yield* crypto.randomUUIDv4.pipe(
+      Effect.map(CadCaptureId.make),
+      Effect.mapError(unavailable),
+    );
     const artifactPath = path.join(config.attachmentsDir, `cad-${captureId}.png`);
     const createdAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
     const result = {

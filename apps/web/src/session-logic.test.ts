@@ -5,6 +5,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationThreadActivity,
+  OrchestrationProposedPlanId,
 } from "@cadsense/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -727,7 +728,7 @@ describe("findLatestProposedPlan", () => {
       findLatestProposedPlan(
         [
           {
-            id: "plan:thread-1:turn:turn-1",
+            id: OrchestrationProposedPlanId.make("plan:thread-1:turn:turn-1"),
             turnId: TurnId.make("turn-1"),
             planMarkdown: "# Older",
             implementedAt: null,
@@ -736,7 +737,7 @@ describe("findLatestProposedPlan", () => {
             updatedAt: "2026-02-23T00:00:01.000Z",
           },
           {
-            id: "plan:thread-1:turn:turn-1",
+            id: OrchestrationProposedPlanId.make("plan:thread-1:turn:turn-1"),
             turnId: TurnId.make("turn-1"),
             planMarkdown: "# Latest",
             implementedAt: null,
@@ -745,7 +746,7 @@ describe("findLatestProposedPlan", () => {
             updatedAt: "2026-02-23T00:00:02.000Z",
           },
           {
-            id: "plan:thread-1:turn:turn-2",
+            id: OrchestrationProposedPlanId.make("plan:thread-1:turn:turn-2"),
             turnId: TurnId.make("turn-2"),
             planMarkdown: "# Different turn",
             implementedAt: null,
@@ -771,7 +772,7 @@ describe("findLatestProposedPlan", () => {
     const latestPlan = findLatestProposedPlan(
       [
         {
-          id: "plan:thread-1:turn:turn-1",
+          id: OrchestrationProposedPlanId.make("plan:thread-1:turn:turn-1"),
           turnId: TurnId.make("turn-1"),
           planMarkdown: "# First",
           implementedAt: null,
@@ -780,7 +781,7 @@ describe("findLatestProposedPlan", () => {
           updatedAt: "2026-02-23T00:00:01.000Z",
         },
         {
-          id: "plan:thread-1:turn:turn-2",
+          id: OrchestrationProposedPlanId.make("plan:thread-1:turn:turn-2"),
           turnId: TurnId.make("turn-2"),
           planMarkdown: "# Latest",
           implementedAt: null,
@@ -800,7 +801,7 @@ describe("hasActionableProposedPlan", () => {
   it("returns true for an unimplemented proposed plan", () => {
     expect(
       hasActionableProposedPlan({
-        id: "plan-1",
+        id: OrchestrationProposedPlanId.make("plan-1"),
         turnId: TurnId.make("turn-1"),
         planMarkdown: "# Plan",
         implementedAt: null,
@@ -814,7 +815,7 @@ describe("hasActionableProposedPlan", () => {
   it("returns false for a proposed plan already implemented elsewhere", () => {
     expect(
       hasActionableProposedPlan({
-        id: "plan-1",
+        id: OrchestrationProposedPlanId.make("plan-1"),
         turnId: TurnId.make("turn-1"),
         planMarkdown: "# Plan",
         implementedAt: "2026-02-23T00:00:02.000Z",
@@ -1867,7 +1868,7 @@ describe("deriveTimelineEntries", () => {
       ],
       [
         {
-          id: "plan:thread-1:turn:turn-1",
+          id: OrchestrationProposedPlanId.make("plan:thread-1:turn:turn-1"),
           turnId: TurnId.make("turn-1"),
           planMarkdown: "# Ship it",
           implementedAt: null,
