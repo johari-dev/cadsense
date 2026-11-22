@@ -1,4 +1,9 @@
-import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
+import {
+  CadCameraPose,
+  CadSnapshotId,
+  CadSnapshotManifest,
+  type CadViewState,
+} from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createCadSceneRenderer } from "./CadSceneRenderer";
@@ -462,7 +467,10 @@ describe("CAD renderer lifecycle without WebGL", () => {
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
     const read = vi.fn(async () => geometry());
-    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    const second = {
+      ...manifest,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
+    };
     try {
       expect(renderer.displayedManifest()).toBeNull();
       expect(await renderer.load(manifest, read)).toBe(false);
@@ -493,7 +501,10 @@ describe("CAD renderer lifecycle without WebGL", () => {
     });
     const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, cacheScenes: true });
     const read = vi.fn(async () => geometry());
-    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    const second = {
+      ...manifest,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
+    };
     try {
       await renderer.load(manifest, read);
       renderer.apply(state);
@@ -526,8 +537,14 @@ describe("CAD renderer lifecycle without WebGL", () => {
     });
     const h = canvasHarness();
     const renderer = createCadSceneRenderer({ canvas: h.canvas, cacheScenes: true });
-    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
-    const third = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000003" };
+    const second = {
+      ...manifest,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
+    };
+    const third = {
+      ...manifest,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000003"),
+    };
     try {
       await renderer.load(manifest, async () => geometry());
       await renderer.load(second, async () => geometry());
@@ -550,7 +567,10 @@ describe("CAD renderer lifecycle without WebGL", () => {
     try {
       for (const suffix of [1, 2, 3, 4]) {
         await renderer.load(
-          { ...manifest, snapshotId: `00000000-0000-4000-8000-00000000000${suffix}` },
+          {
+            ...manifest,
+            snapshotId: CadSnapshotId.make(`00000000-0000-4000-8000-00000000000${suffix}`),
+          },
           async () => geometry(),
         );
       }
@@ -575,7 +595,10 @@ describe("CAD renderer lifecycle without WebGL", () => {
   });
   it("cannot activate a cancelled background load after another snapshot is displayed", async () => {
     const renderer = createCadSceneRenderer({ canvas: canvasHarness().canvas, cacheScenes: true });
-    const second = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    const second = {
+      ...manifest,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
+    };
     let finish!: (value: ArrayBuffer) => void;
     const old = renderer.load(
       manifest,
@@ -821,7 +844,10 @@ describe("CAD renderer lifecycle without WebGL", () => {
     await renderer.load(manifest, async () => geometry());
     expect(calls.render.mock.calls.length).toBe(before);
     renderer.apply(state);
-    const failed = { ...manifest, snapshotId: "00000000-0000-4000-8000-000000000002" };
+    const failed = {
+      ...manifest,
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
+    };
     await expect(
       renderer.load(failed, async () => {
         throw new Error("unavailable");

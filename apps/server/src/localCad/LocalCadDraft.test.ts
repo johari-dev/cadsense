@@ -4,7 +4,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CadSnapshotDraft, ProjectId, type CadSnapshotManifest } from "@cadsense/contracts";
+import {
+  CadSnapshotDraft,
+  CadSnapshotId,
+  ProjectId,
+  type CadSnapshotManifest,
+} from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -59,7 +64,7 @@ const siblingPaths = (names: readonly string[]) => {
       root,
       rootId: snapshotRootId(root),
       projectId: ProjectId.make("local-cad-draft"),
-      snapshotId: "snapshot",
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000003"),
       createdAt: "2026-10-15T00:00:00.000Z",
     },
     model,
@@ -111,7 +116,7 @@ const swContext = () => {
     root,
     rootId: snapshotRootId(root),
     projectId: ProjectId.make("local-cad-draft"),
-    snapshotId: "00000000-0000-4000-8000-000000000002",
+    snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
     createdAt: "2026-10-22T00:00:00.000Z",
   };
 };
@@ -231,7 +236,7 @@ describe("SolidWorks import profile", () => {
           projectId,
           root,
           rootId: snapshotRootId(root),
-          snapshotId: "00000000-0000-4000-8000-000000000001",
+          snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
           createdAt: "2026-10-21T00:00:00.000Z",
         };
         const key = "1".repeat(64);

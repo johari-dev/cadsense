@@ -12,6 +12,7 @@ import {
   CadViewState,
   CadUpdateViewInput,
   CadCaptureInput,
+  CadAgentContextId,
   CadDiffInput,
   CadRenderError,
   CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
@@ -123,10 +124,10 @@ export interface CadViewingShape {
   readonly resolveContext: (
     threadId: ThreadId,
     childKey?: string,
-  ) => Effect.Effect<string, CadViewError>;
+  ) => Effect.Effect<CadAgentContextId, CadViewError>;
   /** Enclose the trusted native run/child lifetime, not individual tool calls. No CAD is loaded until a tool runs. */
   readonly withActivation: <A, E, R>(
-    contextId: string,
+    contextId: CadAgentContextId,
     use: (tools: CadAgentTools) => Effect.Effect<A, E, R>,
     turnId?: TurnId,
   ) => Effect.Effect<A, E | CadViewError, R>;
@@ -195,7 +196,10 @@ export const make = Effect.gen(function* () {
     yield* projectFor(threadId);
     const existing = yield* db(findCadSession(threadId, childKey ?? null));
     if (existing) return existing.contextId;
-    const contextId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable));
+    const contextId = yield* crypto.randomUUIDv4.pipe(
+      Effect.map(CadAgentContextId.make),
+      Effect.mapError(unavailable),
+    );
     yield* dispatch({
       type: "thread.cad.context.ensure",
       commandId: yield* commandId,

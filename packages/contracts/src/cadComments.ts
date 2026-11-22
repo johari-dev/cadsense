@@ -240,7 +240,7 @@ export const CadCommentPick = Schema.Struct({
   y: Schema.Number.check(Schema.isFinite()),
 });
 export const CadCommentLocateInput = Schema.Struct({
-  captureId: Id,
+  captureId: Id.pipe(Schema.brand("CadCaptureId")),
   picks: Schema.Array(CadCommentPick).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
 });
 export const CadCommentInspectInput = Schema.Struct({

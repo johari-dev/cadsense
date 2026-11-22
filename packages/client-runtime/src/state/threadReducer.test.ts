@@ -9,6 +9,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  OrchestrationProposedPlanId,
 } from "@cadsense/contracts";
 import type { OrchestrationThread } from "@cadsense/contracts";
 
@@ -522,7 +523,7 @@ describe("applyThreadDetailEvent", () => {
         payload: {
           threadId: ThreadId.make("thread-1"),
           proposedPlan: {
-            id: "plan-1",
+            id: OrchestrationProposedPlanId.make("plan-1"),
             turnId: TurnId.make("turn-1"),
             planMarkdown: "## Plan\n- Do stuff",
             implementedAt: null,

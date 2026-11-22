@@ -13,6 +13,7 @@ import type {
   OrchestrationProjectShell,
   ProjectId,
 } from "@cadsense/contracts";
+import { CadSnapshotId } from "@cadsense/contracts";
 import {
   CadSceneBudgetError,
   createCadSceneBudget,
@@ -581,6 +582,7 @@ export const make = Effect.gen(function* () {
       rootId: snapshotRootId(root),
       projectId: input.projectId,
       snapshotId: yield* crypto.randomUUIDv4.pipe(
+        Effect.map(CadSnapshotId.make),
         Effect.mapError(() => new LocalCadImportError({ reason: "unreadable" })),
       ),
       createdAt: DateTime.formatIso(yield* DateTime.now),

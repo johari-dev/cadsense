@@ -1,4 +1,4 @@
-import type { ProjectId } from "@cadsense/contracts";
+import type { CadSnapshotId, ProjectId } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
@@ -19,7 +19,7 @@ export const pruneCadSnapshots = Effect.fn("pruneCadSnapshots")(function* (proje
       (project) =>
         project.cad?.roots.flatMap((root) =>
           [root.current?.snapshotId, root.rollback?.snapshotId].filter(
-            (id): id is string => id !== undefined,
+            (id): id is CadSnapshotId => id !== undefined,
           ),
         ) ?? [],
     );

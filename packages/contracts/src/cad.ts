@@ -9,9 +9,23 @@ import {
 } from "./onshape.ts";
 
 export const CadHash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
-export const CadSnapshotId = Schema.String.check(
+/**
+ * Lowercase UUIDv4, the wire format of every server-minted CAD id. Id fields brand it (below)
+ * so the compiler keeps snapshot, capture, operation, and context ids apart.
+ */
+export const CadUuid = Schema.String.check(
   Schema.isPattern(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/),
 );
+export const CadSnapshotId = CadUuid.pipe(Schema.brand("CadSnapshotId"));
+export type CadSnapshotId = typeof CadSnapshotId.Type;
+/** One rendered viewer capture. `CadCaptureArtifacts` mints it and names the PNG `cad-<id>.png`. */
+export const CadCaptureId = CadUuid.pipe(Schema.brand("CadCaptureId"));
+export type CadCaptureId = typeof CadCaptureId.Type;
+/**
+ * The same brand without the UUID check, for capture fields that have always decoded any string.
+ * Persisted events and rows must keep decoding, so do not tighten these fields.
+ */
+export const LooseCadCaptureId = Schema.String.pipe(Schema.brand("CadCaptureId"));
 export const CadRootKind = Schema.Literals(["assembly", "part-studio"]);
 const Text = Schema.String.check(Schema.isMaxLength(4096));
 export const CadTransform = Schema.Array(Schema.Number.check(Schema.isFinite())).check(

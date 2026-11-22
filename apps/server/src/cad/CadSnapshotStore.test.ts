@@ -2,7 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { NodeServices } from "@effect/platform-node";
-import { CadSnapshotRoot, ProjectId } from "@cadsense/contracts";
+import { CadSnapshotId, CadSnapshotRoot, ProjectId } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -37,7 +37,7 @@ const webp = (fill: number) =>
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]);
 const thumbnails = (dir: string) =>
   Effect.promise(() => NodeFSP.readdir(NodePath.join(dir, "thumbnails")).then((n) => n.sort()));
-const firstId = "00000000-0000-4000-8000-000000000001";
+const firstId = CadSnapshotId.make("00000000-0000-4000-8000-000000000001");
 const secondId = "00000000-0000-4000-8000-000000000002";
 const root = Schema.decodeUnknownSync(CadSnapshotRoot)({
   host: "https://cad.onshape.com",

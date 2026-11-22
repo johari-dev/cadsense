@@ -1,4 +1,4 @@
-import type { CadViewState } from "@cadsense/contracts";
+import { CadSnapshotId, type CadViewState } from "@cadsense/contracts";
 import { isValidElement, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 import { reactHookHarness as hooks } from "../test/reactHookHarness";
@@ -41,7 +41,7 @@ function findControl(node: ReactNode, label: string): Control | undefined {
 it("resyncs an open section editor after incoming sections and reset without losing drafts on camera changes", () => {
   let view: CadViewState = {
     rootId: "root",
-    snapshotId: "snapshot",
+    snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
     revision: 0,
     camera: { kind: "preset", preset: "isometric", fit: [] },
     visibility: {},

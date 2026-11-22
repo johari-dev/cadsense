@@ -6,8 +6,12 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
+  CadAgentContextId,
+  CadCaptureId,
   CadCommentsListResult,
   CadCommentsPublishedCard,
+  CadOperationId,
+  CadSnapshotId,
   CadSnapshotManifest,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -206,7 +210,7 @@ const harness = Effect.fn(function* ({
             root: { ...snapshot.root, elementId: "d".repeat(24) },
           });
     snapshots.set(manifest.snapshotId, manifest);
-    const operationId = `00000000-0000-4000-8000-00000000000${index + 4}`;
+    const operationId = CadOperationId.make(`00000000-0000-4000-8000-00000000000${index + 4}`);
     yield* dispatch({
       type: "project.cad.operation.reserve",
       projectId,
@@ -509,7 +513,7 @@ it.effect(
       yield* engine.dispatch({
         type: "thread.cad.context.ensure",
         threadId,
-        contextId: "00000000-0000-4000-8000-000000000099",
+        contextId: CadAgentContextId.make("00000000-0000-4000-8000-000000000099"),
         childKey: null,
         commandId: CommandId.make("unrelated-command"),
       });
@@ -673,8 +677,8 @@ it.effect(
       const h = yield* harness({
         beforeInspect: Deferred.succeed(rendering, undefined).pipe(Effect.andThen(Effect.never)),
       });
-      const contextId = "00000000-0000-4000-8000-000000000011";
-      const captureId = "00000000-0000-4000-8000-000000000012";
+      const contextId = CadAgentContextId.make("00000000-0000-4000-8000-000000000011");
+      const captureId = CadCaptureId.make("00000000-0000-4000-8000-000000000012");
       const turnId = TurnId.make("deleted-inspection");
       yield* h.dispatch({ type: "thread.cad.context.ensure", threadId, contextId, childKey: null });
       yield* h.dispatch({
@@ -777,7 +781,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const h = yield* harness(),
-        contextId = "00000000-0000-4000-8000-000000000011",
+        contextId = CadAgentContextId.make("00000000-0000-4000-8000-000000000011"),
         turnId = TurnId.make("point-turn");
       const { snapshot } = h;
       const finding = makeFinding(snapshot);
@@ -801,7 +805,7 @@ it.effect(
         contextId,
         turnId,
         capture: {
-          captureId: "00000000-0000-4000-8000-000000000012",
+          captureId: CadCaptureId.make("00000000-0000-4000-8000-000000000012"),
           rootId: snapshot.rootId,
           snapshotId: snapshot.snapshotId,
           revision: 0,
@@ -864,13 +868,13 @@ it.effect(
           yield* h.dispatch({
             type: "thread.cad.presentation.settle",
             threadId,
-            captureId: "00000000-0000-4000-8000-000000000012",
+            captureId: CadCaptureId.make("00000000-0000-4000-8000-000000000012"),
             expectedUserRevision: null,
             view: null,
           });
           // Advance the actual project twice: the inspected snapshot is no longer current or rollback.
           for (const n of [7, 8]) {
-            const operationId = `00000000-0000-4000-8000-00000000000${n}`;
+            const operationId = CadOperationId.make(`00000000-0000-4000-8000-00000000000${n}`);
             yield* h.dispatch({
               type: "project.cad.operation.reserve",
               projectId,
@@ -890,7 +894,7 @@ it.effect(
               result: {
                 kind: "sync",
                 snapshot: {
-                  snapshotId: operationId,
+                  snapshotId: CadSnapshotId.make(operationId),
                   microversionId: source.workspaceId,
                   createdAt: now,
                   manifestBytes: 1,
@@ -1023,7 +1027,7 @@ const makeCurrent = Effect.fn(function* (
   yield* h.dispatch({
     type: "project.cad.operation.reserve",
     projectId,
-    operationId: manifest.snapshotId,
+    operationId: CadOperationId.make(manifest.snapshotId),
     kind: "sync",
     root: {
       rootId: manifest.rootId,
@@ -1035,7 +1039,7 @@ const makeCurrent = Effect.fn(function* (
   yield* h.dispatch({
     type: "project.cad.operation.complete",
     projectId,
-    operationId: manifest.snapshotId,
+    operationId: CadOperationId.make(manifest.snapshotId),
     result: {
       kind: "sync",
       snapshot: {

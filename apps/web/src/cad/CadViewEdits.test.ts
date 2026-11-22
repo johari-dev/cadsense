@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { CadViewState } from "@cadsense/contracts";
+import { CadSnapshotId, type CadViewState } from "@cadsense/contracts";
 import { createCadViewEdits } from "./CadViewEdits";
 
 const view: CadViewState = {
   rootId: "a".repeat(64),
-  snapshotId: "00000000-0000-4000-8000-000000000001",
+  snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
   revision: 0,
   camera: { kind: "preset", preset: "front", fit: [] },
   visibility: {},

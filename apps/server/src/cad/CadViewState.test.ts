@@ -1,4 +1,4 @@
-import { CadSnapshotManifest, CadViewState, ProjectId } from "@cadsense/contracts";
+import { CadSnapshotId, CadSnapshotManifest, CadViewState, ProjectId } from "@cadsense/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -7,7 +7,7 @@ import { readCadHierarchy } from "./CadHierarchy.ts";
 
 const id = (value: number) => value.toString(16).padStart(64, "0");
 const rootId = id(20);
-const snapshotId = "00000000-0000-4000-8000-000000000001";
+const snapshotId = CadSnapshotId.make("00000000-0000-4000-8000-000000000001");
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const snapshot = Schema.decodeUnknownSync(CadSnapshotManifest)({
   schemaVersion: 1,
@@ -299,7 +299,7 @@ describe("private CAD semantic state", () => {
       const second = {
         ...snapshot,
         rootId: id(21),
-        snapshotId: "00000000-0000-4000-8000-000000000002",
+        snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
       };
       const state = yield* updateCadView(
         { ...initialCadView(snapshot), explosion: 1, visibility: { [id(2)]: false } },
@@ -316,7 +316,7 @@ describe("private CAD semantic state", () => {
   it("drops incompatible references and refits when an idle view adopts new geometry", () => {
     const next = {
       ...snapshot,
-      snapshotId: "00000000-0000-4000-8000-000000000002",
+      snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000002"),
       nodes: snapshot.nodes.filter((node) => node.id !== id(3)),
     };
     const state = rebaseCadView(

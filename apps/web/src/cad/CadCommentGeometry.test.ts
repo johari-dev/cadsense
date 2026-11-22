@@ -1,4 +1,9 @@
-import { CadCameraPose, CadSnapshotManifest, type CadViewState } from "@cadsense/contracts";
+import {
+  CadCameraPose,
+  CadSnapshotId,
+  CadSnapshotManifest,
+  type CadViewState,
+} from "@cadsense/contracts";
 import * as Schema from "effect/Schema";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -259,7 +264,7 @@ describe("CAD comment anchors", () => {
     expect(
       cadCommentModelDescriptor({
         ...manifest,
-        snapshotId: "another-import",
+        snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-0000000000a1"),
         createdAt: "2026-09-06T00:00:00Z",
         nodes: manifest.nodes.toReversed(),
       }),

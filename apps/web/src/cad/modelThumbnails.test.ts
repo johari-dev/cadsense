@@ -1,11 +1,11 @@
-import { AssetCadThumbnailNotFoundError } from "@cadsense/contracts";
+import { AssetCadThumbnailNotFoundError, CadSnapshotId } from "@cadsense/contracts";
 import { EnvironmentRpcUnavailableError } from "@cadsense/client-runtime/rpc";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 import { isModelThumbnailMissing } from "./modelThumbnails";
 
-const snapshotId = "00000000-0000-4000-8000-000000000001";
+const snapshotId = CadSnapshotId.make("00000000-0000-4000-8000-000000000001");
 
 describe("isModelThumbnailMissing", () => {
   it("is true only when the server says the snapshot has no thumbnail", () => {

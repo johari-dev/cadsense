@@ -1,4 +1,5 @@
 import {
+  CadSnapshotId,
   OnshapeWorkspaceId,
   type CadGeometryAsset,
   type CadPartStudioSource,
@@ -183,6 +184,7 @@ export const make = Effect.gen(function* () {
       rootId: snapshotRootId(root),
       projectId: input.projectId,
       snapshotId: yield* crypto.randomUUIDv4.pipe(
+        Effect.map(CadSnapshotId.make),
         Effect.mapError(
           () => new OnshapeSnapshotAcquisitionError({ reason: "identity-unavailable" }),
         ),

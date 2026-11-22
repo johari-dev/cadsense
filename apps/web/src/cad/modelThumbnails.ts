@@ -3,6 +3,7 @@ import { resolveAssetUrl } from "@cadsense/client-runtime/state/assets";
 import {
   CAD_THUMBNAIL_MAX_DATA_URL_LENGTH,
   type AssetCreateUrlResult,
+  type CadSnapshotId,
   type EnvironmentId,
 } from "@cadsense/contracts";
 import * as Cause from "effect/Cause";
@@ -44,7 +45,10 @@ const NO_THUMBNAIL = Atom.make(AsyncResult.initial<AssetCreateUrlResult, unknown
  * The server-saved thumbnail of a CAD snapshot: its URL once one exists, and whether the server
  * reported none, so the CAD panel knows to capture it.
  */
-export function useModelThumbnail(environmentId: EnvironmentId, snapshotId: string | undefined) {
+export function useModelThumbnail(
+  environmentId: EnvironmentId,
+  snapshotId: CadSnapshotId | undefined,
+) {
   const connection = usePreparedConnection(environmentId);
   const query: Atom.Atom<AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>> = snapshotId
     ? cadThumbnailUrl(environmentId, snapshotId)

@@ -1,4 +1,5 @@
 import {
+  CadOperationId,
   CadSnapshotManifest,
   CadUserOperationError,
   LocalCadError,
@@ -51,10 +52,10 @@ export class CadUserOperations extends Context.Service<
   {
     readonly start: (
       input: CadUserStartInput,
-    ) => Effect.Effect<{ operationId: string }, CadUserOperationError>;
+    ) => Effect.Effect<{ operationId: CadOperationId }, CadUserOperationError>;
     readonly cancel: (
       projectId: ProjectId,
-      operationId: string,
+      operationId: CadOperationId,
     ) => Effect.Effect<void, CadUserOperationError>;
     readonly setEnabled: (
       projectId: ProjectId,
@@ -327,7 +328,10 @@ export const make = Effect.gen(function* () {
         };
       }
     }
-    const operationId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(failed));
+    const operationId = yield* crypto.randomUUIDv4.pipe(
+      Effect.map(CadOperationId.make),
+      Effect.mapError(failed),
+    );
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
         yield* engine
@@ -512,7 +516,7 @@ export const make = Effect.gen(function* () {
   });
   const cancel = Effect.fn("CadUserOperations.cancel")(function* (
     projectId: ProjectId,
-    operationId: string,
+    operationId: CadOperationId,
   ) {
     const job = jobs.get(operationId);
     if (!job || job.projectId !== projectId)

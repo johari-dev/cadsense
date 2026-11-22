@@ -8,10 +8,11 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import type { OrchestrationProjectShell, OrchestrationThread } from "./orchestration.ts";
-import { CadHash, CadRootKind, CadSnapshotId } from "./cad.ts";
+import { CadCaptureId, CadHash, CadRootKind, CadSnapshotId, CadUuid } from "./cad.ts";
 import { OnshapeApiUsage, OnshapeElementId, OnshapeWorkspaceId } from "./onshape.ts";
 
-export const CadOperationId = CadSnapshotId;
+export const CadOperationId = CadUuid.pipe(Schema.brand("CadOperationId"));
+export type CadOperationId = typeof CadOperationId.Type;
 export const CadOperationKind = Schema.Literals(["discover", "sync", "cleanup"]);
 export const CadRootIdentity = Schema.Struct({
   rootId: CadHash,
@@ -117,7 +118,7 @@ export const CadProjectState = Schema.Struct({
       Schema.Struct({
         threadId: ThreadId,
         turnId: TurnId,
-        captureId: CadSnapshotId,
+        captureId: CadCaptureId,
         rootId: CadHash,
       }),
     ).check(Schema.isMaxLength(10_000)),

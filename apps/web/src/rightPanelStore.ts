@@ -1,5 +1,5 @@
 import { scopedThreadKey } from "@cadsense/client-runtime/environment";
-import type { ScopedThreadRef } from "@cadsense/contracts";
+import type { CadSnapshotId, ScopedThreadRef } from "@cadsense/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -24,7 +24,7 @@ export interface RightPanelFile {
 
 /** The parts a part drawing shows, from one CAD snapshot. */
 export interface RightPanelDrawing {
-  snapshotId: string;
+  snapshotId: CadSnapshotId;
   /** Part occurrences, or one assembly occurrence for a packet of its parts. */
   occurrenceIds: string[];
   title: string;

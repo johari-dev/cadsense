@@ -1,4 +1,4 @@
-import { CadSnapshotRoot, ProjectId } from "@cadsense/contracts";
+import { CadSnapshotId, CadSnapshotRoot, ProjectId } from "@cadsense/contracts";
 import { createCadSceneBudget, measureCadGeometry } from "@cadsense/shared/cadSceneBudget";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -25,7 +25,7 @@ const root = Schema.decodeUnknownSync(CadSnapshotRoot)({
   tessellationProfile: "offline-topology-only",
 });
 const context = {
-  snapshotId: "00000000-0000-4000-8000-000000000001",
+  snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
   projectId: ProjectId.make("offline-acceptance"),
   createdAt: "2026-09-06T00:00:00Z",
   root,

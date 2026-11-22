@@ -1,4 +1,5 @@
 import {
+  CadSnapshotId,
   CadSnapshotRoot,
   CadSnapshotManifest,
   ProjectId,
@@ -38,7 +39,7 @@ const root = Schema.decodeUnknownSync(CadSnapshotRoot)({
   tessellationProfile: "test-medium-v1",
 });
 const context = {
-  snapshotId: "00000000-0000-4000-8000-000000000001",
+  snapshotId: CadSnapshotId.make("00000000-0000-4000-8000-000000000001"),
   projectId: ProjectId.make("project"),
   createdAt: "2026-09-05T00:00:00Z",
   root,

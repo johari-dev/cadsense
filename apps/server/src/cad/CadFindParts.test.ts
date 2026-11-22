@@ -1,6 +1,7 @@
 import {
   CadFindPartsInput,
   CadFindPartsResult,
+  CadSnapshotId,
   CadSnapshotManifest,
   ProjectId,
 } from "@cadsense/contracts";
@@ -289,7 +290,7 @@ describe("cad_find_parts", () => {
           }).pipe(Effect.flip)).reason,
           "invalid-operation",
         );
-        const nextId = "00000000-0000-4000-8000-000000000002";
+        const nextId = CadSnapshotId.make("00000000-0000-4000-8000-000000000002");
         assert.equal(
           (yield* findCadParts(
             { ...snapshot, snapshotId: nextId },
