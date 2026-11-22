@@ -156,6 +156,57 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # The apps/server/scripts/*-e2e.ts scripts that need no account, key, or local model server.
+  # The others need a signed-in provider, Onshape, Ollama, or SolidWorks, so they stay manual.
+  # Each script keeps its evidence (summary.json, logs, screenshots) under --out, uploaded below.
+  # The Codex and Claude CLIs are installed but never signed in: onboarding checks what a
+  # signed-out CLI reports.
+  server_e2e:
+    name: Server E2E
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Install Chromium
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
+      - name: Install Codex and Claude CLIs
+        run: npm install --global @openai/codex@0.171.0 @anthropic-ai/claude-code@2.1.325
+
+      - name: Analytics
+        run: node apps/server/scripts/analytics-e2e.ts --out "$RUNNER_TEMP/server-e2e/analytics"
+
+      - name: Settings overlay
+        if: ${{ !cancelled() }}
+        run: node apps/server/scripts/settings-overlay-e2e.ts --out "$RUNNER_TEMP/server-e2e/settings-overlay"
+
+      - name: Onboarding with a local reviewer
+        if: ${{ !cancelled() }}
+        run: node apps/server/scripts/onboarding-local-reviewer-e2e.ts --out "$RUNNER_TEMP/server-e2e/onboarding-local-reviewer"
+
+      - name: Upload evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-e2e-evidence
+          path: ${{ runner.temp }}/server-e2e
+          if-no-files-found: error
+          retention-days: 14
+
   # Split out of Check and Test: both paid ~7-9s to install a Rust toolchain
   # for checks that take under 3s, on the critical path of every PR.
   rust:
