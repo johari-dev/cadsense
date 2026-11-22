@@ -102,8 +102,6 @@ const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 // Incremental output should repaint at display cadence, not persist one database event per token.
 const STREAMING_ASSISTANT_FRAME_WINDOW = Duration.millis(16);
-const STRICT_PROVIDER_LIFECYCLE_GUARD =
-  process.env.CADSENSE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 type TurnStartRequestedDomainEvent = Extract<
   OrchestrationEvent,
@@ -353,12 +351,6 @@ export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
 ): ReadonlyArray<OrchestrationThreadActivity> {
-  const maybeSequence = (() => {
-    const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
-    return eventWithSequence.sessionSequence !== undefined
-      ? { sequence: eventWithSequence.sessionSequence }
-      : {};
-  })();
   switch (event.type) {
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
@@ -394,7 +386,6 @@ export function runtimeEventToActivities(
             ...(event.payload.options ? { options: event.payload.options } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -418,7 +409,6 @@ export function runtimeEventToActivities(
             ...(event.payload.decision ? { decision: event.payload.decision } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -435,7 +425,6 @@ export function runtimeEventToActivities(
             message: truncateDetail(event.payload.message),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -455,7 +444,6 @@ export function runtimeEventToActivities(
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -475,7 +463,6 @@ export function runtimeEventToActivities(
             ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -495,7 +482,6 @@ export function runtimeEventToActivities(
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -513,7 +499,6 @@ export function runtimeEventToActivities(
             questions: event.payload.questions,
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -531,7 +516,6 @@ export function runtimeEventToActivities(
             answers: event.payload.answers,
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -558,7 +542,6 @@ export function runtimeEventToActivities(
             ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -614,7 +597,6 @@ export function runtimeEventToActivities(
                   ...identityLinkage,
                 },
                 turnId: toTurnId(event.turnId) ?? null,
-                ...maybeSequence,
               },
             ]
           : []),
@@ -634,7 +616,6 @@ export function runtimeEventToActivities(
                   typedUsage: event.payload.typedUsage,
                 },
                 turnId: toTurnId(event.turnId) ?? null,
-                ...maybeSequence,
               },
             ]
           : []),
@@ -666,7 +647,6 @@ export function runtimeEventToActivities(
             ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -700,7 +680,6 @@ export function runtimeEventToActivities(
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -734,7 +713,6 @@ export function runtimeEventToActivities(
             ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -756,7 +734,6 @@ export function runtimeEventToActivities(
             ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -776,7 +753,6 @@ export function runtimeEventToActivities(
           summary: "Context window updated",
           payload,
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -811,7 +787,6 @@ export function runtimeEventToActivities(
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         }),
       ];
     }
@@ -839,7 +814,6 @@ export function runtimeEventToActivities(
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -867,7 +841,6 @@ export function runtimeEventToActivities(
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
         },
       ];
     }
@@ -1616,9 +1589,6 @@ const make = Effect.gen(function* () {
           : false;
 
       const shouldApplyThreadLifecycle = (() => {
-        if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
-          return true;
-        }
         switch (event.type) {
           case "session.exited":
             return true;
@@ -1981,9 +1951,8 @@ const make = Effect.gen(function* () {
       if (event.type === "runtime.error") {
         const runtimeErrorMessage = event.payload.message;
 
-        const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
-          ? true
-          : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
+        const shouldApplyRuntimeError =
+          activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
 
         if (shouldApplyRuntimeError) {
           yield* orchestrationEngine.dispatch({
