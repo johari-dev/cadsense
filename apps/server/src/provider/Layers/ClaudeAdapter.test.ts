@@ -4363,6 +4363,59 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("asks for file-change approval only for tools that edit files", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool;
+      assert.equal(typeof canUseTool, "function");
+      if (!canUseTool) {
+        return;
+      }
+
+      const cases = [
+        ["TodoWrite", "dynamic_tool_call"],
+        ["TaskCreate", "dynamic_tool_call"],
+        ["mcp__linear__create_issue", "dynamic_tool_call"],
+        ["Write", "file_change_approval"],
+        ["Bash", "command_execution_approval"],
+      ] as const;
+
+      for (const [toolName, expectedRequestType] of cases) {
+        const permissionPromise = canUseTool(
+          toolName,
+          {},
+          { signal: new AbortController().signal, toolUseID: `tool-${toolName}` },
+        );
+        const requested = yield* Stream.runHead(adapter.streamEvents);
+        if (requested._tag !== "Some" || requested.value.type !== "request.opened") {
+          assert.fail(`expected request.opened for ${toolName}`);
+        }
+        assert.equal(requested.value.payload.requestType, expectedRequestType, toolName);
+
+        yield* adapter.respondToRequest(
+          session.threadId,
+          ApprovalRequestId.make(String(requested.value.requestId)),
+          "accept",
+        );
+        yield* Stream.runHead(adapter.streamEvents);
+        yield* Effect.promise(() => permissionPromise);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("passes Claude resume ids without pinning stale assistant state", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
