@@ -22,7 +22,7 @@ import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
-import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopShutdown from "../app/DesktopShutdown.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
@@ -249,7 +249,7 @@ function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean 
 export const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
-  const desktopState = yield* DesktopState.DesktopState;
+  const shutdown = yield* DesktopShutdown.DesktopShutdown;
   const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -355,7 +355,7 @@ export const make = Effect.gen(function* () {
     actionReservation: "acquire" | "held" = "acquire",
   ) {
     yield* Effect.annotateCurrentSpan({ reason });
-    if (yield* Ref.get(desktopState.quitting)) return false;
+    if ((yield* shutdown.phase) !== "running") return false;
     if (!(yield* Ref.get(updaterConfiguredRef))) return false;
 
     const state = yield* Ref.get(updateStateRef);
@@ -457,8 +457,9 @@ export const make = Effect.gen(function* () {
     );
   }).pipe(Effect.withSpan("desktop.updates.downloadAvailableUpdate"));
 
+  // A failed or interrupted install hands the app back to normal operation.
   const resetInstallAction = Effect.all(
-    [finishUpdateAction("install"), Ref.set(desktopState.quitting, false)],
+    [finishUpdateAction("install"), shutdown.cancelUpdateInstall],
     { discard: true },
   );
 
@@ -469,11 +470,7 @@ export const make = Effect.gen(function* () {
       (state.status === "downloaded" ||
         (state.status === "error" &&
           (state.errorContext === null || state.errorContext === "install")));
-    if (
-      (yield* Ref.get(desktopState.quitting)) ||
-      !(yield* Ref.get(updaterConfiguredRef)) ||
-      !hasInstallableDownload
-    ) {
+    if (!(yield* Ref.get(updaterConfiguredRef)) || !hasInstallableDownload) {
       return { accepted: false, completed: false };
     }
 
@@ -481,7 +478,11 @@ export const make = Effect.gen(function* () {
       return { accepted: false, completed: false };
     }
 
-    yield* Ref.set(desktopState.quitting, true);
+    // Refuses when a quit has already begun.
+    if (!(yield* shutdown.beginUpdateInstall)) {
+      yield* finishUpdateAction("install");
+      return { accepted: false, completed: false };
+    }
 
     return yield* Effect.gen(function* () {
       // Stop every backend in the pool, not just the primary. With
@@ -634,8 +635,7 @@ export const make = Effect.gen(function* () {
       cause,
     });
     if (Option.isSome(activeAction) && activeAction.value === "install") {
-      yield* finishUpdateAction("install");
-      yield* Ref.set(desktopState.quitting, false);
+      yield* resetInstallAction;
       yield* updateState((current) =>
         reduceDesktopUpdateStateOnInstallFailure(current, error.message),
       );
@@ -852,13 +852,6 @@ export const make = Effect.gen(function* () {
       };
     }).pipe(Effect.withSpan("desktop.updates.download")),
     install: Effect.gen(function* () {
-      if (yield* Ref.get(desktopState.quitting)) {
-        return {
-          accepted: false,
-          completed: false,
-          state: yield* Ref.get(updateStateRef),
-        };
-      }
       const result = yield* installDownloadedUpdate;
       return {
         accepted: result.accepted,

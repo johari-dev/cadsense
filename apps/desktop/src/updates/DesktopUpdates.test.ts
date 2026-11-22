@@ -10,16 +10,15 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as References from "effect/References";
-import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopShutdown from "../app/DesktopShutdown.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
-import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
 interface UpdatesHarnessOptions {
@@ -192,7 +191,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     Layer.provideMerge(updaterLayer),
     Layer.provideMerge(windowLayer),
     Layer.provideMerge(backendLayer),
-    Layer.provideMerge(DesktopState.layer),
+    Layer.provideMerge(DesktopShutdown.layer),
     Layer.provideMerge(settingsLayer),
     Layer.provideMerge(
       DesktopConfig.layerTest({
@@ -694,14 +693,14 @@ describe("DesktopUpdates", () => {
     }),
   );
 
-  it.effect("clears quitting state after an unexpected install setup failure", () => {
+  it.effect("returns to running after an unexpected install setup failure", () => {
     const harness = makeHarness({
       stopBackend: Effect.die(new Error("backend stop failed")),
     });
 
     return Effect.scoped(
       Effect.gen(function* () {
-        const desktopState = yield* DesktopState.DesktopState;
+        const shutdown = yield* DesktopShutdown.DesktopShutdown;
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
         harness.emit("update-downloaded", { version: "1.2.4" });
@@ -710,7 +709,7 @@ describe("DesktopUpdates", () => {
         const result = yield* updates.install;
         assert.isTrue(result.accepted);
         assert.isFalse(result.completed);
-        assert.isFalse(yield* Ref.get(desktopState.quitting));
+        assert.equal(yield* shutdown.phase, "running");
 
         const failedState = yield* updates.getState;
         assert.equal(failedState.status, "downloaded");
@@ -719,6 +718,94 @@ describe("DesktopUpdates", () => {
 
         const changedState = yield* updates.setChannel("nightly");
         assert.equal(changedState.channel, "nightly");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("returns to running when the updater reports an error during install", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const shutdown = yield* DesktopShutdown.DesktopShutdown;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const result = yield* updates.install;
+        assert.isTrue(result.accepted);
+        assert.equal(yield* shutdown.phase, "installingUpdate");
+
+        harness.emit("error", new Error("quitAndInstall failed"));
+        yield* flushCallbacks;
+
+        assert.equal(yield* shutdown.phase, "running");
+        const failedState = yield* updates.getState;
+        assert.equal(failedState.errorContext, "install");
+        const retry = yield* updates.install;
+        assert.isTrue(retry.accepted);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("leaves a running install in charge when a quit arrives, then recovers", () =>
+    Effect.gen(function* () {
+      const installStarted = yield* Deferred.make<void>();
+      const failInstall = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        stopBackend: Deferred.succeed(installStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(failInstall)),
+          Effect.andThen(Effect.die(new Error("backend stop failed"))),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const shutdown = yield* DesktopShutdown.DesktopShutdown;
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const installFiber = yield* updates.install.pipe(Effect.forkScoped);
+          yield* Deferred.await(installStarted);
+
+          // A signal or fatal startup error during an install sees the app as
+          // already exiting and backs off.
+          assert.isFalse(yield* shutdown.beginQuit);
+          assert.equal(yield* shutdown.phase, "installingUpdate");
+
+          yield* Deferred.succeed(failInstall, undefined);
+          const result = yield* Fiber.join(installFiber);
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+          assert.equal(yield* shutdown.phase, "running");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
+  it.effect("refuses installs and checks once a quit has begun", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const shutdown = yield* DesktopShutdown.DesktopShutdown;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        assert.isTrue(yield* shutdown.beginQuit);
+
+        const result = yield* updates.install;
+        assert.isFalse(result.accepted);
+        assert.equal(result.state.status, "downloaded");
+        const checkResult = yield* updates.check("manual");
+        assert.isFalse(checkResult.checked);
+        assert.equal(harness.checkCount(), 0);
+        assert.equal(yield* shutdown.phase, "quitting");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

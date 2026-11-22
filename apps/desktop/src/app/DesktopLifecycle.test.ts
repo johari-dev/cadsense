@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
 
@@ -11,7 +10,6 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
-import * as DesktopState from "./DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 function makeElectronAppLayer(
@@ -103,7 +101,6 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(makeDesktopWindowLayer()),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
-        Layer.provideMerge(DesktopState.layer),
       );
 
       return Effect.scoped(
@@ -126,8 +123,8 @@ describe("DesktopLifecycle", () => {
             "cancelling this event prevents the updater from completing its relaunch",
           );
 
-          const state = yield* DesktopState.DesktopState;
-          assert.isTrue(yield* Ref.get(state.quitting));
+          const shutdown = yield* DesktopShutdown.DesktopShutdown;
+          assert.equal(yield* shutdown.phase, "quitting");
         }),
       ).pipe(Effect.provide(layer));
     });
@@ -151,15 +148,22 @@ describe("DesktopLifecycle", () => {
         events.push("flush");
       });
 
-      const desktopShutdownLayer = Layer.succeed(DesktopShutdown.DesktopShutdown, {
-        request: Effect.sync(() => {
-          events.push("request");
-        }).pipe(Effect.andThen(Deferred.succeed(shutdownRequested, undefined)), Effect.asVoid),
-        awaitRequest: Deferred.await(shutdownRequested),
-        markComplete: Deferred.succeed(allowShutdown, undefined).pipe(Effect.asVoid),
-        awaitComplete: Deferred.await(allowShutdown),
-        isComplete: Deferred.isDone(allowShutdown),
-      });
+      const desktopShutdownLayer = Layer.succeed(
+        DesktopShutdown.DesktopShutdown,
+        DesktopShutdown.DesktopShutdown.of({
+          request: Effect.sync(() => {
+            events.push("request");
+          }).pipe(Effect.andThen(Deferred.succeed(shutdownRequested, undefined)), Effect.asVoid),
+          awaitRequest: Deferred.await(shutdownRequested),
+          markComplete: Deferred.succeed(allowShutdown, undefined).pipe(Effect.asVoid),
+          awaitComplete: Deferred.await(allowShutdown),
+          isComplete: Deferred.isDone(allowShutdown),
+          phase: Effect.succeed("running"),
+          beginQuit: Effect.succeed(true),
+          beginUpdateInstall: Effect.succeed(true),
+          cancelUpdateInstall: Effect.void,
+        }),
+      );
 
       const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
         platform: "darwin",
@@ -172,7 +176,6 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(makeDesktopWindowLayer({ flushMainWindowBounds })),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(desktopShutdownLayer),
-        Layer.provideMerge(DesktopState.layer),
       );
 
       yield* Effect.scoped(
@@ -212,15 +215,14 @@ describe("DesktopLifecycle", () => {
         Layer.provideMerge(makeDesktopWindowLayer({ activate })),
         Layer.provideMerge(environmentLayer),
         Layer.provideMerge(DesktopShutdown.layer),
-        Layer.provideMerge(DesktopState.layer),
       );
 
       yield* Effect.scoped(
         Effect.gen(function* () {
           const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
-          const state = yield* DesktopState.DesktopState;
+          const shutdown = yield* DesktopShutdown.DesktopShutdown;
           yield* lifecycle.register;
-          yield* Ref.set(state.quitting, true);
+          assert.isTrue(yield* shutdown.beginQuit);
 
           appListeners.get("activate")?.();
 
