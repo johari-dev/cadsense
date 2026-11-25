@@ -41,6 +41,7 @@ import { LocalCadImport } from "../localCad/LocalCadImport.ts";
 import { CadComments } from "./CadComments.ts";
 import { CadAgentChecksResult, makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import { BACKSTOP_NOTE } from "../provider/CadCheckBackstop.ts";
+import { CAD_REVIEW_LEARNINGS_HEADING } from "../provider/CadReviewInstructions.ts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import type { Options as ClaudeOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -68,6 +69,7 @@ import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocato
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import { make as makeRenderBroker } from "./CadRenderBroker.ts";
 import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 import {
@@ -438,6 +440,136 @@ it.effect("reads the project design brief for Claude instructions and cad_contex
       return yield* Effect.die("Claude session started without a preset system prompt");
     assert.include(systemPrompt.append, "Project design brief (DESIGN.md)");
     assert.include(systemPrompt.append, brief);
+    yield* adapter.stopSession(threadId);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(
+        dependencies,
+        ServerSettingsService.layerTest(),
+        ClaudeCadCapabilities.layer.pipe(Layer.provide(NodeServices.layer)),
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+  ),
+);
+// A running Claude chat must see DESIGN.md edits. Ways it can fail: the edit never reaches the
+// model (system prompt only), it repeats on every turn, a steer into a running turn carries it
+// (and loses it for the next turn), or it displaces the user's text.
+it.live("prepends design brief edits to the next new Claude turn, once", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-fresh-" });
+    const writeBrief = (text: string) => fs.writeFileString(`${workspaceRoot}/DESIGN.md`, text);
+    yield* writeBrief("Brief A: the shooter hood is fixed.");
+    const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("cad-test"),
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          providerSessionId: "claude-fresh-session",
+          endpoint: "http://localhost/mcp",
+          authorizationHeader: "Bearer test-only",
+        }),
+      ),
+      () => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+    );
+    const prompts: Array<ReadonlyArray<{ readonly type: string; readonly text?: string }>> = [];
+    const pending: Array<SDKMessage> = [];
+    let stopped = false;
+    let wake = () => {};
+    const adapter = yield* makeClaudeAdapter(claudeSettings, {
+      modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+      createQuery: ({ prompt }) => {
+        void (async () => {
+          for await (const message of prompt) {
+            const content = message.message.content;
+            prompts.push(typeof content === "string" ? [{ type: "text", text: content }] : content);
+          }
+        })();
+        return {
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          setMaxThinkingTokens: async () => {},
+          close: () => {
+            stopped = true;
+            wake();
+          },
+          [Symbol.asyncIterator]: () => ({
+            next: async (): Promise<IteratorResult<SDKMessage>> => {
+              for (;;) {
+                const value = pending.shift();
+                if (value) return { done: false, value };
+                if (stopped) return { done: true, value: undefined };
+                await new Promise<void>((resolve) => (wake = resolve));
+              }
+            },
+          }),
+        };
+      },
+    }).pipe(Effect.provideService(CadViewing, h.service));
+    // The adapter consumes prompts and results on its own fibers; wait up to 2 s for each step.
+    const until = (condition: Effect.Effect<boolean>) =>
+      condition.pipe(
+        Effect.flatMap((met) => (met ? Effect.void : Effect.fail("not yet" as const))),
+        Effect.retry({ schedule: Schedule.spaced("5 millis"), times: 400 }),
+        Effect.orDie,
+      );
+    const send = (input: string) =>
+      adapter
+        .sendTurn({ threadId, input, interactionMode: "default" })
+        .pipe(
+          Effect.tap(() =>
+            until(Effect.sync(() => prompts.some((items) => items.at(-1)?.text === input))),
+          ),
+        );
+    const texts = (input: string) =>
+      prompts.find((items) => items.at(-1)?.text === input)!.map((item) => item.text ?? "");
+    // Ends the running turn the way the CLI does, then waits for the adapter to close it.
+    const completeTurn = Effect.gen(function* () {
+      pending.push({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        num_turns: 1,
+        session_id: "sdk-fresh",
+        uuid: `result-${prompts.length}`,
+      } as unknown as SDKMessage);
+      wake();
+      yield* until(
+        Effect.map(adapter.listSessions(), ([session]) => session?.activeTurnId === undefined),
+      );
+    });
+
+    yield* adapter.startSession({ threadId, runtimeMode: "full-access", cwd: workspaceRoot });
+    yield* send("turn 1");
+    assert.deepEqual(texts("turn 1"), ["turn 1"]);
+    yield* completeTurn;
+
+    yield* writeBrief("Brief B: the 84T belt is a stand-in.");
+    const second = yield* send("turn 2");
+    const withB = texts("turn 2");
+    assert.strictEqual(withB.length, 2);
+    assert.include(withB[0], "CAD guidance changed");
+    assert.include(withB[0], "Brief B: the 84T belt is a stand-in.");
+    assert.notInclude(withB[0], CAD_REVIEW_LEARNINGS_HEADING);
+
+    // Turn 2 is still running, so this send is a steer into it and carries nothing.
+    yield* writeBrief("Brief C: the intake is not modeled yet.");
+    const steer = yield* send("steer into turn 2");
+    assert.strictEqual(steer.turnId, second.turnId);
+    assert.deepEqual(texts("steer into turn 2"), ["steer into turn 2"]);
+    yield* completeTurn;
+
+    yield* send("turn 3");
+    assert.include(texts("turn 3")[0], "Brief C: the intake is not modeled yet.");
+    assert.strictEqual(texts("turn 3")[1], "turn 3");
+    yield* completeTurn;
+
+    yield* send("turn 4");
+    assert.deepEqual(texts("turn 4"), ["turn 4"]);
     yield* adapter.stopSession(threadId);
   }).pipe(
     Effect.scoped,

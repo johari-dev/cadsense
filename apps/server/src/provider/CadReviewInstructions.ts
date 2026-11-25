@@ -29,29 +29,68 @@ export const CAD_REVIEW_INSTRUCTIONS = [
 export const CAD_REVIEW_LEARNINGS_HEADING =
   "Review learnings from this project's past dismissals (apply them; do not repeat dismissed findings):";
 
-/**
- * Review guidance for one project session or turn: the shared instructions, then the project
- * design brief when the workspace has one, then one line per learning the user left when
- * dismissing earlier findings. Empty sections are omitted, so with neither it is the shared
- * text alone.
- */
-export const cadReviewInstructions = (context: {
+/** The project-specific part of the review guidance: the design brief and review learnings. */
+export interface CadGuidance {
   readonly learnings: ReadonlyArray<{ readonly text: string }>;
   readonly designBrief?: CadDesignBrief | null;
-}): string => {
-  const { learnings, designBrief } = context;
-  return [
+}
+
+const briefSection = (designBrief: CadDesignBrief) =>
+  `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`;
+
+const learningLines = (learnings: CadGuidance["learnings"]) =>
+  learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`);
+
+const learningsSection = (learnings: CadGuidance["learnings"]) =>
+  learnings.length > 0
+    ? [CAD_REVIEW_LEARNINGS_HEADING, ...learningLines(learnings)].join("\n")
+    : null;
+
+/**
+ * Review guidance for one project session: the shared instructions, then the project design brief
+ * when the workspace has one, then one line per learning the user left when dismissing earlier
+ * findings. Empty sections are omitted, so with neither it is the shared text alone.
+ */
+export const cadReviewInstructions = ({ learnings, designBrief }: CadGuidance): string =>
+  [
     CAD_REVIEW_INSTRUCTIONS,
-    designBrief
-      ? `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`
-      : null,
-    learnings.length > 0
-      ? [
-          CAD_REVIEW_LEARNINGS_HEADING,
-          ...learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`),
-        ].join("\n")
-      : null,
+    designBrief ? briefSection(designBrief) : null,
+    learningsSection(learnings),
   ]
     .filter((section) => section !== null)
     .join("\n\n");
+
+/**
+ * The text a running chat needs when its guidance changed since `delivered`: each changed source
+ * in full (the whole brief, the whole current learnings list), or a note that it was removed.
+ * Null when nothing the agent reads changed. Providers prepend it to the next new turn's input,
+ * since the session's instructions are fixed when it starts (CadDesignBriefSpec.md, "Freshness").
+ */
+export const cadGuidanceUpdate = (delivered: CadGuidance, current: CadGuidance): string | null => {
+  const sections: Array<string> = [];
+  const deliveredBrief = delivered.designBrief ?? null;
+  const currentBrief = current.designBrief ?? null;
+  if (
+    deliveredBrief?.path !== currentBrief?.path ||
+    deliveredBrief?.content !== currentBrief?.content
+  ) {
+    sections.push(
+      currentBrief
+        ? briefSection(currentBrief)
+        : "The project no longer has a design brief. Disregard the one given earlier.",
+    );
+  }
+  if (
+    learningLines(delivered.learnings).join("\n") !== learningLines(current.learnings).join("\n")
+  ) {
+    sections.push(
+      learningsSection(current.learnings) ??
+        "The project now has no review learnings. Disregard the ones given earlier.",
+    );
+  }
+  if (sections.length === 0) return null;
+  return [
+    "CAD guidance changed since this chat started. It replaces the matching section of your instructions:",
+    ...sections,
+  ].join("\n\n");
 };

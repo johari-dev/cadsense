@@ -93,39 +93,34 @@ The order is fixed rather than newest-wins, because agents receive learnings wit
 
 ## Freshness
 
-Session start does not change. The full CAD guidance goes into Claude's system prompt and into Codex's thread `developerInstructions`. The session records the guidance revision that its start sent. A Claude session restart and a Codex thread resume each count as a start.
+Session start does not change. The full CAD guidance goes into Claude's system prompt and into Codex's thread `developerInstructions`. The session keeps that guidance (the brief and the learnings) as what it last delivered. A Claude session restart and a Codex thread resume each count as a start.
 
-The guidance revision is a hash of the rendered brief and learnings. The reader returns the brief. Each adapter adds the learnings it already reads through `getCadReviewLearnings` (`../orchestration/Layers/ProjectionSnapshotQuery.ts:2124`).
+On each new turn, the adapter does this under one lock per session, so two quick sends cannot both carry one change or both skip it:
 
-On each new turn, the adapter does this under one lock per session, so two quick sends cannot race:
-
-1. It builds the current guidance revision.
-2. If the revision matches the one the session last delivered, the turn input does not change.
-3. Otherwise it adds an update block. The block holds only what changed. A changed brief is sent whole, and learnings are sent as added and removed lines. The block opens with "This project's CAD guidance changed. Use this instead of the earlier version."
-4. The session records the new revision only after the provider accepts the turn. If the turn fails to start, the next turn sends the block again.
+1. It reads the brief (`readCadDesignBrief`) and the learnings (`getCadReviewLearnings`). A failed learnings read keeps the last learnings, so it never reads as "all learnings removed".
+2. `cadGuidanceUpdate` in `../provider/CadReviewInstructions.ts` compares that with what the session last delivered. If nothing the agent reads changed, the turn input does not change.
+3. Otherwise the turn gets an update block that holds only the changed sources: the whole new brief, or the whole current learnings list, or a note that one was removed. It opens with "CAD guidance changed since this chat started. It replaces the matching section of your instructions."
+4. The session records the new guidance only after the provider accepts the turn (Codex answers `turn/start`, or Claude's prompt queue takes the message). If the turn fails to start, the next turn sends the block again.
 
 Where the block goes:
 
-- It is its own text item, placed before the user's text, and added after skill handling. Claude runs a skill only when `/name` starts the last text block (`ClaudeAdapter.ts:1345`), and Codex finds skills in the user's raw input (`CodexSessionRuntime.ts:2777`). So the block never moves or changes the user's text.
-- A turn with only attachments still gets the block (`../provider/Layers/ProviderService.ts:705`).
-- Only the provider sees the block. The chat transcript keeps the user's own text (`../orchestration/Layers/ProviderCommandReactor.ts:1084`). The settings row and `cad_context` are where a user checks what the agent has.
+- It is its own text item, placed before the user's text. Claude runs a skill only when `/name` starts the last text block (`buildUserMessageEffect`), and Codex finds skills in the user's raw input before the block is added (`buildTurnStartParams`). So the block never moves or changes the user's text.
+- A turn with only attachments still gets the block.
+- Only the provider sees the block. The chat transcript keeps the user's own text. The settings row and `cad_context` are where a user checks what the agent has.
 
 Which turns never get the block:
 
-- **Steers.** A Claude message sent while a turn runs joins that turn (`ClaudeAdapter.ts:4768`). It carries no block, and the new revision waits for the next new turn, so a running turn keeps the guidance it started with. A Codex message sent during a turn is queued as its own turn (`CodexSessionRuntime.ts:2822`) and follows the normal steps.
-- **CAD follow-ups.** The Codex follow-up reuses the parent turn's parameters with new text (`CodexSessionRuntime.ts:1491`). The Claude follow-up runs inside the same turn from a Stop hook (`ClaudeAdapter.ts:4513`). Both keep the parent turn's guidance.
-- **Subagents.** A subagent sees what the main agent passes it, so `CAD_REVIEW_INSTRUCTIONS` tells the main agent to pass along the brief facts each subagent's task needs.
+- **Steers.** A Claude message sent while a turn runs joins that turn. It carries no block, and the change waits for the next new turn, so a running turn keeps the guidance it started with. A Codex message sent during a turn is queued as its own turn and follows the normal steps.
+- **CAD follow-ups.** The Codex follow-up reuses the parent turn's parameters with new input, so it drops the block. The Claude follow-up runs inside the same turn from a Stop hook. Both keep the parent turn's guidance.
+- **Subagents.** A subagent sees what the main agent passes it. Nothing tells the main agent yet to pass along brief facts; that is a prompt change and needs the evaluation first.
 
-Each block stays in the chat history for the rest of the session. The model cannot drop the old version. It can only be told to use the new one. A chat pays for each change once, not once per turn. The end-to-end run measures this cost.
+Each block stays in the chat history for the rest of the session. The model cannot drop the old version. It can only be told to use the new one. A chat pays for each change once, not once per turn.
 
-An edit reaches the next new turn after the editor saves it, which happens 500 ms after the last keystroke (`apps/web/src/components/files/EditableFileSurface.tsx:11`). Sessions do not restart when the brief changes.
+An edit reaches the next new turn after the editor saves it, which happens 500 ms after the last keystroke (`apps/web/src/components/files/EditableFileSurface.tsx`). Sessions do not restart when the brief changes. Codex's per-turn `collaborationMode` no longer carries the brief or learnings, because Codex 0.166 replaces that text.
 
-Code changes:
+Verification: `CadReviewInstructions.test.ts` covers the block (unchanged guidance, an edited brief, new learnings, removals). `Layers/CodexCadTools.test.ts` runs the Codex runtime against the mock app-server and checks the block's position, that it goes once, that a rejected `turn/start` resends it, and that two racing sends carry it once. `CadViewing.test.ts` runs the Claude adapter with a fake query and checks the first turn has no block, an edit reaches the next turn, a steer carries nothing, and the change the steer skipped reaches the turn after it.
 
-- `readCadDesignBrief` in `CadDesignBrief.ts` removes comments and reports whether it cut the text. It stays filesystem-only, so `cad_context` (`CadViewing.ts:332`) keeps the dependencies it has now. Claude (`ClaudeAdapter.ts:4460`) and Codex (`../provider/Layers/CodexAdapter.ts:1725`) call it at session start and on each new turn.
-- One helper, called from both adapters' `sendTurn` (`ClaudeAdapter.ts:4757`, `CodexSessionRuntime.ts:2754`), takes the brief, the learnings, and the last delivered revision, and returns the update block or nothing.
-- Remove the CAD learnings and brief from the per-turn `collaborationMode` in `CodexSessionRuntime.ts:2787-2809`, because Codex drops that text.
-- `cad_context` adds `truncated` to `designBrief` (`packages/contracts/src/cadTools.ts:193`), so a user who asks "did you get my brief?" learns whether it was cut.
+Still open: `cad_context` could report `truncated` on `designBrief`, so a user who asks "did you get my brief?" learns whether it was cut.
 
 ## Creating and editing
 
@@ -188,8 +183,8 @@ Revisit when evaluations show misses:
 
 ## Build order
 
-1. **Make edits reach running chats.** Size M. The update block in both adapters with its lock, the steer and follow-up rules, the subagent sentence, the removed Codex write, and the doc fixes. Do this first. Step 2 makes edits easy, and without this step those edits look broken.
-2. **Put the brief in the app.** Size S. Built as a prototype: the three entry points, the template, comment removal, the `truncated` field, and replacing the six suggested headings in `CadDesignBrief.md` with the template's three questions.
+1. **Make edits reach running chats.** Done: the update block in both adapters with its lock, the steer and follow-up rules, the removed Codex write, and the doc fixes. The subagent sentence waits for the evaluation.
+2. **Put the brief in the app.** Size S. Built: the three entry points, the template, and comment removal. Still open: the `truncated` field.
 3. **Run the decline arm, then settle the rule and the agent offer.** Size S. Instruction text only.
 
 ## Verification
@@ -203,7 +198,7 @@ Write tests for these in `CadDesignBrief.test.ts` and the adapter tests before w
 - A truncation note does not name the file, or `cad_context` reports a cut brief as whole.
 - A turn with unchanged guidance gets the block.
 - A turn after a brief edit or a new learning does not get the block.
-- A block resends an unchanged brief, or resends all learnings for one new learning.
+- A block resends an unchanged brief, or unchanged learnings. A changed learnings list goes whole: learnings are one line each, and a whole list is the plain way to say one was removed.
 - One change sends the block on more than one turn.
 - A turn that fails to start still records the revision, so the update is lost.
 - Two quick sends deliver the block twice, or deliver an older revision after a newer one.

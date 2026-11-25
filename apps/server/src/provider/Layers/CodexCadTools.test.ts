@@ -143,6 +143,118 @@ it.effect.each([
     yield* runtime.close;
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+const decodeTurnStart = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      method: Schema.String,
+      params: Schema.Struct({
+        input: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({ type: Schema.String, text: Schema.optionalKey(Schema.String) }),
+          ),
+        ),
+      }),
+    }),
+  ),
+);
+// A running thread must see DESIGN.md and learning edits. Ways it can fail: the update never
+// reaches the model (instructions only), it repeats on every turn, it replaces or reorders the
+// user's prompt, a turn Codex rejected still counts as delivered, or two racing sends both carry
+// it or both skip it.
+it.effect("sends changed CAD guidance once, as its own item before the next turn's prompt", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-guidance-" });
+    const scriptPath = NodePath.join(cwd, "script.json");
+    const writeBrief = (text: string) => fs.writeFileString(NodePath.join(cwd, "DESIGN.md"), text);
+    yield* writeBrief("Brief A: the shooter hood is fixed.");
+    yield* fs.writeFileString(
+      scriptPath,
+      encodeJson({
+        rootThreadId: wire.rootThreadId,
+        notifications: [],
+        recordStartRequests: true,
+        recordTurnRequests: true,
+        failTurnStartAt: 3,
+      }),
+    );
+    let learnings: ReadonlyArray<{ readonly text: string }> = [];
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const runtime = yield* makeCodexSessionRuntime({
+      threadId: ThreadId.make("cad-guidance"),
+      binaryPath: process.execPath,
+      cwd,
+      runtimeMode: "full-access",
+      designBrief: readCadDesignBrief(cwd).pipe(Effect.provide(NodeServices.layer)),
+      cadReviewLearnings: Effect.sync(() => learnings),
+      cad: {
+        close: Effect.void,
+        invoke: () => Effect.succeed({ result: {} }),
+        followUp: () => Effect.succeed(null),
+        end: () => Effect.void,
+      },
+    }).pipe(
+      Effect.provideService(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          spawner.spawn(
+            ChildProcess.make(
+              process.execPath,
+              [NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.mjs")],
+              {
+                cwd,
+                env: { ...process.env, CADSENSE_CODEX_COLLAB_SCRIPT: scriptPath },
+                forceKillAfter: "1 second",
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    yield* runtime.start();
+    const send = (input: string) => runtime.sendTurn({ input, interactionMode: "default" });
+    const turnInputs = Effect.map(fs.readFileString(`${scriptPath}.requests`), (text) =>
+      text
+        .split("\n")
+        .filter((line) => line.includes('"method":"turn/start"'))
+        .map((line) => (decodeTurnStart(line).params.input ?? []).map((item) => item.text ?? "")),
+    );
+
+    yield* send("turn 0");
+    yield* writeBrief("Brief B: the 84T belt is a stand-in.");
+    learnings = [{ text: "Vent holes are intentional." }];
+    yield* send("turn 1");
+    yield* send("turn 2");
+    yield* writeBrief("Brief C: the intake is not modeled yet.");
+    const failed = yield* Effect.flip(send("turn 3"));
+    assert.isDefined(failed);
+    yield* send("turn 4");
+    yield* writeBrief("Brief D: the climber hooks are off limits.");
+    yield* Effect.all([send("turn 5a"), send("turn 5b")], { concurrency: "unbounded" });
+
+    const inputs = yield* turnInputs;
+    assert.deepEqual(inputs[0], ["turn 0"]);
+    assert.strictEqual(inputs[1]!.length, 2);
+    assert.include(inputs[1]![0], "CAD guidance changed");
+    assert.include(inputs[1]![0], "Brief B: the 84T belt is a stand-in.");
+    assert.include(inputs[1]![0], "- Vent holes are intentional.");
+    assert.strictEqual(inputs[1]![1], "turn 1");
+    assert.deepEqual(inputs[2], ["turn 2"]);
+    // Codex rejected turn 3, so turn 4 carries the same change again, without the unchanged learnings.
+    assert.include(inputs[3]![0], "Brief C");
+    assert.include(inputs[4]![0], "Brief C");
+    assert.notInclude(inputs[4]![0], "Vent holes");
+    assert.strictEqual(inputs[4]![1], "turn 4");
+    const racing = inputs.slice(5);
+    assert.strictEqual(racing.length, 2);
+    assert.strictEqual(racing.filter((items) => items[0]!.includes("Brief D")).length, 1);
+    assert.sameMembers(
+      racing.map((items) => items.at(-1)),
+      ["turn 5a", "turn 5b"],
+    );
+    yield* runtime.close;
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 it.effect(
   "delivers native images from two trusted concurrent Codex children without sharing identities",
   () =>

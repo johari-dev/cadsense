@@ -41,7 +41,7 @@ function capDesignBrief(raw: Uint8Array): string {
  * Read the project's design brief: `designBrief` from cadsense.json, else DESIGN.md at the
  * workspace root. A missing or empty file means no brief. Every other problem (a path outside the
  * workspace, an unreadable file) is logged and also yields null, so a turn never fails because of
- * the brief. Called on each Codex turn, at Claude session start, and by cad_context.
+ * the brief. Called at session start, before each new turn, and by cad_context.
  */
 export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
   workspaceRoot: string,

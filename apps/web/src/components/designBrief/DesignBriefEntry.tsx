@@ -25,11 +25,11 @@ const SETTINGS_DESCRIPTION = {
     "Tell reviews what this mechanism does, what moves, and what is a stand-in. Reviews read it as your intent.",
   template: "Only the template's questions so far. Reviews skip it until you answer one.",
   filled:
-    "Reviews read it as your intent before they look at the model. Edits apply to chats you start after saving.",
+    "Reviews read it as your intent before they look at the model. Open chats get your edits with their next message.",
 } as const;
 
-// Agents read the brief when a chat's session starts (CadDesignBriefSpec.md, "Freshness").
-const NEW_CHATS_NOTE = "Edits apply to new chats, not this one.";
+// A running chat gets brief edits with its next new message (CadDesignBriefSpec.md, "Freshness").
+const NEXT_MESSAGE_NOTE = "Edits reach this chat with your next message.";
 
 /** The project settings row. Opens the brief in a new thread, since settings have no panel. */
 export function DesignBriefSettings({ project }: { readonly project: Project }) {
@@ -116,7 +116,7 @@ export function DesignBriefTitleButton({
         <FileIcon />
         Brief
       </TooltipTrigger>
-      <TooltipPopup>Open the design brief. {NEW_CHATS_NOTE}</TooltipPopup>
+      <TooltipPopup>Open the design brief. {NEXT_MESSAGE_NOTE}</TooltipPopup>
     </Tooltip>
   );
 }

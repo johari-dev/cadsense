@@ -48,6 +48,7 @@ import {
 } from "../CodexDeveloperInstructions.ts";
 import { cadToolDefinitions, type CadProviderTools } from "../CadProviderTools.ts";
 import type { CadDesignBrief } from "../../cad/CadDesignBrief.ts";
+import { cadGuidanceUpdate, type CadGuidance } from "../CadReviewInstructions.ts";
 import { handleCodexCadCall, codexCadFailure } from "./CodexCadTools.ts";
 import { compactCodexCadItem } from "../CadProviderContent.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
@@ -175,9 +176,9 @@ export interface CodexProcessReceipt {
 
 export interface CodexSessionRuntimeOptions {
   readonly cad?: CadProviderTools;
-  /** Read at every turn start so a learning added mid-session reaches the next turn. */
+  /** Read at session start and before each new CAD turn, so a learning added mid-session reaches the next turn. */
   readonly cadReviewLearnings?: Effect.Effect<ReadonlyArray<{ readonly text: string }>>;
-  /** Reads the workspace design brief; run before each CAD turn so edits apply without a restart. */
+  /** Reads the workspace design brief, at session start and before each new CAD turn. */
   readonly designBrief?: Effect.Effect<CadDesignBrief | null>;
   /** How long a CAD follow-up's turn/start may take (30 seconds); tests shorten it. */
   readonly cadFollowUpStartTimeout?: Duration.Input;
@@ -649,8 +650,6 @@ function buildCodexCollaborationMode(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
-  readonly cadReviewLearnings?: ReadonlyArray<{ readonly text: string }>;
-  readonly designBrief?: CadDesignBrief | null;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -667,8 +666,6 @@ function buildCodexCollaborationMode(input: {
         { model, reasoningEffort },
         input.browserToolsAvailable ?? true,
         input.cadToolsAvailable ?? false,
-        input.cadReviewLearnings ?? [],
-        input.designBrief ?? null,
       ),
     },
   };
@@ -690,13 +687,20 @@ export function buildTurnStartParams(input: {
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean;
   readonly cadToolsAvailable?: boolean;
-  readonly cadReviewLearnings?: ReadonlyArray<{ readonly text: string }>;
-  readonly designBrief?: CadDesignBrief | null;
+  /**
+   * Changed CAD guidance (cadGuidanceUpdate), sent as its own text item before the prompt. Codex
+   * fixes thread instructions at start and resume and replaces collaboration-mode instructions, so
+   * turn input is the one place a running thread can read it.
+   */
+  readonly guidanceUpdate?: string;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
 > {
   const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
+  if (input.guidanceUpdate) {
+    turnInput.push({ type: "text", text: input.guidanceUpdate });
+  }
   if (input.prompt) {
     turnInput.push({
       type: "text",
@@ -717,8 +721,6 @@ export function buildTurnStartParams(input: {
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
     cadToolsAvailable: input.cadToolsAvailable ?? false,
-    ...(input.cadReviewLearnings ? { cadReviewLearnings: input.cadReviewLearnings } : {}),
-    designBrief: input.designBrief ?? null,
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -1372,6 +1374,18 @@ export const makeCodexSessionRuntime = (
     // Native dynamic tools survive resume; changing the project toggle cannot add them.
     // Legacy cursors predate this field and retain their existing compatibility behavior.
     let cadToolsEnabled = options.resumeCursor?.cadTools ?? options.cad !== undefined;
+    /** The project's brief and learnings as read now. */
+    const readCadGuidance = Effect.gen(function* () {
+      return {
+        learnings: options.cadReviewLearnings ? yield* options.cadReviewLearnings : [],
+        designBrief: options.designBrief ? yield* options.designBrief : null,
+      } satisfies CadGuidance;
+    });
+    /**
+     * The CAD guidance this thread last received: in its instructions at start or resume, then in
+     * each turn that carried an update. Null for a thread without CAD tools.
+     */
+    const deliveredCadGuidanceRef = yield* Ref.make<CadGuidance | null>(null);
     const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
     // A CAD follow-up continues the app's turn as a second native turn; see "The follow-up" in
     // cad/CadChecks.md. These native turns report as the app turn they continue, even late events.
@@ -2596,12 +2610,7 @@ export const makeCodexSessionRuntime = (
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
-      const cadGuidance = options.cad
-        ? {
-            learnings: options.cadReviewLearnings ? yield* options.cadReviewLearnings : [],
-            designBrief: options.designBrief ? yield* options.designBrief : null,
-          }
-        : null;
+      const cadGuidance = options.cad ? yield* readCadGuidance : null;
       /** Thread instructions for a thread with or without CAD tools. */
       const threadInstructions = (cad: boolean) =>
         buildCodexThreadInstructions(
@@ -2667,6 +2676,7 @@ export const makeCodexSessionRuntime = (
       });
 
       const providerThreadId = opened.thread.id;
+      yield* Ref.set(deliveredCadGuidanceRef, cadToolsEnabled ? cadGuidance : null);
       const session = {
         ...(yield* Ref.get(sessionRef)),
         status: "ready",
@@ -2784,39 +2794,41 @@ export const makeCodexSessionRuntime = (
                   )
                 : { prompt: input.input ?? "", skills: [] };
               const cadToolsAvailable = !!options.cad && cadToolsEnabled;
-              const cadReviewLearnings =
-                cadToolsAvailable && options.cadReviewLearnings
-                  ? yield* options.cadReviewLearnings
-                  : [];
-              const designBrief =
-                cadToolsAvailable && options.designBrief ? yield* options.designBrief : null;
-              const params = yield* buildTurnStartParams({
-                threadId: providerThreadId,
-                runtimeMode: options.runtimeMode,
-                ...(resolvedInput.prompt ? { prompt: resolvedInput.prompt } : {}),
-                ...(resolvedInput.skills.length > 0 ? { skills: resolvedInput.skills } : {}),
-                ...(input.attachments ? { attachments: input.attachments } : {}),
-                ...(normalizedModel ? { model: normalizedModel } : {}),
-                ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
-                ...(input.effort ? { effort: input.effort } : {}),
-                ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-                // Derived from the session's own MCP configuration rather than the
-                // setting, so the prompt describes the tools this turn actually
-                // has even if the setting changed after the session started.
-                browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
-                cadToolsAvailable,
-                cadReviewLearnings,
-                designBrief,
-              });
+              const turnParams = (guidanceUpdate: string | null) =>
+                buildTurnStartParams({
+                  threadId: providerThreadId,
+                  runtimeMode: options.runtimeMode,
+                  ...(resolvedInput.prompt ? { prompt: resolvedInput.prompt } : {}),
+                  ...(resolvedInput.skills.length > 0 ? { skills: resolvedInput.skills } : {}),
+                  ...(input.attachments ? { attachments: input.attachments } : {}),
+                  ...(normalizedModel ? { model: normalizedModel } : {}),
+                  ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+                  ...(input.effort ? { effort: input.effort } : {}),
+                  ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+                  // Derived from the session's own MCP configuration rather than the
+                  // setting, so the prompt describes the tools this turn actually
+                  // has even if the setting changed after the session started.
+                  browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
+                  cadToolsAvailable,
+                  ...(guidanceUpdate ? { guidanceUpdate } : {}),
+                });
+              // Under the lock, so two sends never both carry (or both skip) one change. The
+              // snapshot moves only once Codex accepts the turn, so a failed start resends it.
               const turnId = yield* turnStartLock.withPermits(1)(
-                requestTurnStart(params).pipe(
-                  Effect.tap((turnId) =>
-                    Ref.update(turnRequestsRef, (requests) => ({
-                      ...requests,
-                      latest: { turnId, params },
-                    })),
-                  ),
-                ),
+                Effect.gen(function* () {
+                  const delivered = yield* Ref.get(deliveredCadGuidanceRef);
+                  const guidance = cadToolsAvailable && delivered ? yield* readCadGuidance : null;
+                  const params = yield* turnParams(
+                    delivered && guidance ? cadGuidanceUpdate(delivered, guidance) : null,
+                  );
+                  const turnId = yield* requestTurnStart(params);
+                  yield* Ref.update(turnRequestsRef, (requests) => ({
+                    ...requests,
+                    latest: { turnId, params },
+                  }));
+                  if (guidance) yield* Ref.set(deliveredCadGuidanceRef, guidance);
+                  return turnId;
+                }),
               );
               yield* updateSession(sessionRef, (session) => ({
                 status: "running",

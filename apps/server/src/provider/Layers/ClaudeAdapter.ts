@@ -6,7 +6,11 @@
  *
  * @module ClaudeAdapterLive
  */
-import { cadReviewInstructions } from "../CadReviewInstructions.ts";
+import {
+  cadGuidanceUpdate,
+  cadReviewInstructions,
+  type CadGuidance,
+} from "../CadReviewInstructions.ts";
 import { readCadDesignBrief } from "../../cad/CadDesignBrief.ts";
 import {
   type CanUseTool,
@@ -88,6 +92,7 @@ import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -318,6 +323,12 @@ interface ClaudeSessionContext {
     readonly providerSessionId: string;
     readonly turnIds: Map<string, TurnId>;
     readonly ended: Set<string>;
+    /** Reads the brief and learnings now; a failed learnings read keeps the given ones. */
+    readonly readGuidance: (learnings: CadGuidance["learnings"]) => Effect.Effect<CadGuidance>;
+    /** What Claude last received: the system prompt's guidance, then each update sent since. */
+    deliveredGuidance: CadGuidance;
+    /** Serializes reading, sending, and recording guidance, so one change goes out once. */
+    readonly guidanceLock: Semaphore.Semaphore;
   };
   readonly processExit: ReturnType<typeof makeClaudeProcessExit>;
   quiescing: boolean;
@@ -1396,10 +1407,15 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
     readonly modelCatalog: ClaudeModelCatalog;
     /** Names of the skills Claude Code can run for this session's cwd. */
     readonly skillNames: ReadonlySet<string>;
+    /** Changed CAD guidance (cadGuidanceUpdate), sent as its own block before the prompt. */
+    readonly guidanceUpdate?: string | null;
   },
 ) {
   const text = buildPromptText(input, dependencies.boundInstanceId, dependencies.modelCatalog);
   const sdkContent: Array<Record<string, unknown>> = [];
+  if (dependencies.guidanceUpdate) {
+    sdkContent.push({ type: "text", text: dependencies.guidanceUpdate });
+  }
 
   // Claude Code expands a skill only from the LAST text block, and only when
   // `/name` is its first character. A `$skill` chip anywhere in the prompt is
@@ -4484,26 +4500,34 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : turnIds.get(childKey.slice("claude:".length)) === turnId;
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
-        // The system prompt is fixed for the session, so learnings and design brief edits made
-        // later reach Claude when its next session starts. Codex works the same way: its thread
-        // instructions are also fixed when the thread opens.
-        // A failed learnings read only costs this session its learnings.
-        const learnings = yield* cadQuery.value
-          .getCadReviewLearnings(project.value.id)
-          .pipe(Effect.orElseSucceed(() => []));
-        const designBrief = input.cwd
-          ? yield* readCadDesignBrief(input.cwd).pipe(
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-              Effect.provideService(Path.Path, path),
-            )
-          : null;
+        // The system prompt is fixed for the session. Later learnings and design brief edits
+        // reach Claude through sendTurn, which prepends what changed to the next new turn.
+        const cwd = input.cwd;
+        const projectId = project.value.id;
+        const readGuidance = (learnings: CadGuidance["learnings"]) =>
+          Effect.all({
+            // A failed learnings read keeps the last ones rather than reporting them removed.
+            learnings: cadQuery.value
+              .getCadReviewLearnings(projectId)
+              .pipe(Effect.orElseSucceed(() => learnings)),
+            designBrief: cwd
+              ? readCadDesignBrief(cwd).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                )
+              : Effect.succeed(null),
+          });
+        const deliveredGuidance = yield* readGuidance([]);
         return {
           scope,
           tools,
-          reviewInstructions: cadReviewInstructions({ learnings, designBrief }),
+          reviewInstructions: cadReviewInstructions(deliveredGuidance),
           providerSessionId: mcpSession.providerSessionId,
           turnIds,
           ended: new Set<string>(),
+          readGuidance,
+          deliveredGuidance,
+          guidanceLock: yield* Semaphore.make(1),
         };
       }).pipe(Effect.orElseSucceed(() => undefined));
       // The attachments dir grant lets the agent Read/copy pasted images at
@@ -4904,22 +4928,31 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
     );
-    const message = yield* buildUserMessageEffect(input, {
-      fileSystem,
-      attachmentsDir: serverConfig.attachmentsDir,
-      boundInstanceId,
-      modelCatalog,
-      skillNames: new Set(
-        skills
-          .filter((skill) => skill.enabled && skill.userInvocable !== false)
-          .map((skill) => skill.name),
-      ),
+    // A new turn carries CAD guidance that changed since Claude last received it. A steer joins
+    // a turn already under way, so it waits for the next one. The snapshot moves only once the
+    // message is queued, so a send that fails carries the change again next time.
+    const cad = steeringTurnState === null ? context.cad : undefined;
+    const send = Effect.gen(function* () {
+      const guidance = cad ? yield* cad.readGuidance(cad.deliveredGuidance.learnings) : null;
+      const message = yield* buildUserMessageEffect(input, {
+        fileSystem,
+        attachmentsDir: serverConfig.attachmentsDir,
+        boundInstanceId,
+        modelCatalog,
+        skillNames: new Set(
+          skills
+            .filter((skill) => skill.enabled && skill.userInvocable !== false)
+            .map((skill) => skill.name),
+        ),
+        guidanceUpdate: cad && guidance ? cadGuidanceUpdate(cad.deliveredGuidance, guidance) : null,
+      });
+      yield* Queue.offer(context.promptQueue, {
+        type: "message",
+        message,
+      }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
+      if (cad && guidance) cad.deliveredGuidance = guidance;
     });
-
-    yield* Queue.offer(context.promptQueue, {
-      type: "message",
-      message,
-    }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
+    yield* cad ? cad.guidanceLock.withPermits(1)(send) : send;
 
     return {
       threadId: context.session.threadId,
