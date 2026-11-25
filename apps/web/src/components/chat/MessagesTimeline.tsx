@@ -53,6 +53,7 @@ import {
 import ChatMarkdown from "../ChatMarkdown";
 import { CadFilmstrip, CadPartDrawings, CadPublishedComments } from "../../cad/CadChatRows";
 import { FeatureScriptChatCard } from "../../featurescript/FeatureScriptChatCard";
+import { DesignBriefProposalCard } from "../designBrief/DesignBriefProposalCard";
 import { cadActivityIndicator } from "../../cad/CadActivityIndicator";
 import {
   RobotIcon as BotIcon,
@@ -1041,6 +1042,7 @@ function timelineRowPaddingClass(row: TimelineRow): "pb-1.5" | "pb-2" | "pb-4" {
     row.kind === "cad-filmstrip" ||
     row.kind === "cad-comments" ||
     row.kind === "cad-drawing" ||
+    row.kind === "brief-proposal" ||
     row.kind === "tool-card" ||
     row.kind === "featurescript-preview" ||
     row.kind === "work-toggle" ||
@@ -1076,6 +1078,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "cad-filmstrip" ? <CadFilmstripTimelineRow row={row} /> : null}
       {row.kind === "cad-comments" ? <CadCommentsTimelineRow row={row} /> : null}
       {row.kind === "cad-drawing" ? <CadDrawingTimelineRow row={row} /> : null}
+      {row.kind === "brief-proposal" ? <BriefProposalTimelineRow row={row} /> : null}
       {row.kind === "featurescript-preview" ? <FeatureScriptPreviewTimelineRow row={row} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
@@ -1123,6 +1126,16 @@ function CadCommentsTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "ca
   const { threadRef } = use(TimelineRowCtx);
   if (!threadRef) return null;
   return <CadPublishedComments card={row.card} threadRef={threadRef} />;
+}
+
+function BriefProposalTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "brief-proposal" }>;
+}) {
+  const { threadRef } = use(TimelineRowCtx);
+  if (!threadRef) return null;
+  return <DesignBriefProposalCard card={row.card} outcome={row.outcome} threadRef={threadRef} />;
 }
 
 function CadDrawingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "cad-drawing" }> }) {

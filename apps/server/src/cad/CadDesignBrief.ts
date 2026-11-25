@@ -38,12 +38,11 @@ function capDesignBrief(raw: Uint8Array): string {
 }
 
 /**
- * Read the project's design brief: `designBrief` from cadsense.json, else DESIGN.md at the
- * workspace root. A missing or empty file means no brief. Every other problem (a path outside the
- * workspace, an unreadable file) is logged and also yields null, so a turn never fails because of
- * the brief. Called at session start, before each new turn, and by cad_context.
+ * Where the project's design brief lives: `designBrief` from cadsense.json, else DESIGN.md at the
+ * workspace root. Null, with a warning, when the configured path leaves the workspace. Also used
+ * to save an agent proposal the student approved, so both read and write the same file.
  */
-export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
+export const resolveCadDesignBriefPath = Effect.fn("resolveCadDesignBriefPath")(function* (
   workspaceRoot: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -70,10 +69,24 @@ export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
       ),
       Effect.orElseSucceed(() => null),
     );
+  return resolved && { ...resolved, configured: configuredPath !== undefined };
+});
+
+/**
+ * Read the project's design brief from resolveCadDesignBriefPath. A missing or empty file means no
+ * brief. Every other problem (a path outside the workspace, an unreadable file) is logged and also
+ * yields null, so a turn never fails because of the brief. Called at session start, before each
+ * new turn, and by cad_context.
+ */
+export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
+  workspaceRoot: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const resolved = yield* resolveCadDesignBriefPath(workspaceRoot);
   if (!resolved) return null;
   const raw = yield* fileSystem.readFile(resolved.absolutePath).pipe(
     Effect.tapError((cause) =>
-      cause.reason._tag === "NotFound" && configuredPath === undefined
+      cause.reason._tag === "NotFound" && !resolved.configured
         ? Effect.void
         : Effect.logWarning("Could not read the project design brief.", {
             path: resolved.relativePath,

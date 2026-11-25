@@ -41,3 +41,4 @@ export * from "./cadMeasure.ts";
 export * from "./cadDriveOptions.ts";
 export * from "./cadFindParts.ts";
 export * from "./cadDrawing.ts";
+export * from "./cadBriefProposal.ts";

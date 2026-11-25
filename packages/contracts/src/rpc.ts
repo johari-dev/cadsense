@@ -7,6 +7,7 @@ import {
   CadReviewLearning,
   CadReviewLearningRemoveInput,
 } from "./cadComments.ts";
+import { CadBriefProposalResolveInput, CadBriefProposalResolveResult } from "./cadBriefProposal.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -205,6 +206,7 @@ export const WS_METHODS = {
   cadReviewLearningsWatch: "cad.reviewLearnings.watch",
   cadReviewLearningRemove: "cad.reviewLearning.remove",
   cadPanelSave: "cad.panel.save",
+  cadBriefProposalResolve: "cad.briefProposal.resolve",
   cadPanelScene: "cad.panel.scene",
   cadStorageWatch: "cad.storage.watch",
   cadProgressWatch: "cad.progress.watch",
@@ -587,6 +589,12 @@ export const WsCadPanelSaveRpc = Rpc.make(WS_METHODS.cadPanelSave, {
   success: CadViewState,
   error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
 });
+/** Saves or dismisses an agent's design brief proposal. */
+export const WsCadBriefProposalResolveRpc = Rpc.make(WS_METHODS.cadBriefProposalResolve, {
+  payload: CadBriefProposalResolveInput,
+  success: CadBriefProposalResolveResult,
+  error: Schema.Union([CadViewError, EnvironmentAuthorizationError]),
+});
 /** Runs a `.fs` file locally for the file panel's preview. */
 export const WsFeatureScriptPreviewRpc = Rpc.make(WS_METHODS.featureScriptPreview, {
   payload: FeatureScriptPanelPreviewInput,
@@ -805,6 +813,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCadCommentReviewRpc,
   WsCadReviewLearningsWatchRpc,
   WsCadReviewLearningRemoveRpc,
+  WsCadBriefProposalResolveRpc,
   WsCadStorageWatchRpc,
   WsCadProgressWatchRpc,
   WsCadStorageRunRpc,

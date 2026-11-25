@@ -104,6 +104,11 @@ const descriptions = {
     "Capture exactly expectedRevision as a PNG image and managed artifact. Returns cameraPose with the actual rendered position, target, up, projection, and zoom, including resolved preset/fit views. Reuse this pose in camera-pose to precisely recenter, change angle, or zoom, then capture again to inspect the result. Capturing does not change the view revision. The captured view is eligible for display to the user. render-* errors are rendering failures, not CAD being off: follow their details to recover.",
   cad_part_drawing:
     "Open print-ready shop drawings (one formal drawing per part, with a title block and hole table) for parts the user wants made. Shop drawings are for tubing, shafts (round and hex), and other parts cut from stock. Input: {snapshotId, occurrenceIds:[id], title?}. Pass part occurrence IDs from cad_find_parts or cad_hierarchy, or one assembly occurrence to draw every part under it that needs a drawing. For an assembly, bought parts (fasteners, bearings, motors, vendor parts) are skipped, plates are counted as router (CNC) parts, and printed parts as printer parts; notDrawn reports those counts. Parts named one by one are always drawn. Each sheet carries the part's quantity across the assembly. Use it when the user asks for a part drawing, shop drawing, fab sheet, or print. It changes no view state.",
+  cad_brief_propose: [
+    "Propose a change to the project's design brief; the student sees it as a card under your reply and saves or dismisses it. Call it at most once, at the end of a reply, and only when the user said something lasting about the mechanism in this chat: what it is, what moves, or what is missing or a stand-in, or something that contradicts a line of the brief.",
+    "Input: {add?: [{text, quote}], remove?: [{text, reason}]}, at most 5 lines. text is one plain sentence. quote is the user's own words from one of their messages in this chat, copied exactly; a quote that is not there is refused. Never propose what you only saw in the model. remove.text is a line of the current brief exactly as it reads, and reason says what the user said or what changed.",
+    "Rules about how to review, such as what not to flag, belong in review learnings, not the brief. One proposal is open per chat at a time. Do not describe the card or ask the student about it.",
+  ].join(" "),
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
 
 /** Tools that change no view, comment, or evidence state. MCP clients receive this as readOnlyHint. */
@@ -120,11 +125,12 @@ export const CAD_READ_ONLY_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD
 ]);
 
 /**
- * Tools that open a panel beside the user's chat. `cadsense mcp` reviews run outside the app with
- * no panel to open, so it does not offer them.
+ * Tools that show something in the app beside the user's chat: a panel, or a card the student
+ * acts on. `cadsense mcp` reviews run outside the app, so it does not offer them.
  */
 export const CAD_PANEL_TOOLS: ReadonlySet<string> = new Set<keyof typeof CAD_TOOL_INPUTS>([
   "cad_part_drawing",
+  "cad_brief_propose",
 ]);
 
 export const cadToolDefinitions = Object.entries(CAD_TOOL_INPUTS).map(([name, schema]) => {
@@ -317,6 +323,8 @@ export const invokeCadTool = Effect.fn("invokeCadTool")(function* (
       return { result: yield* tools.partDrawing(input) };
     case "cad_featurescript_preview":
       return yield* tools.featureScriptPreview(input);
+    case "cad_brief_propose":
+      return { result: yield* tools.briefPropose(input) };
     default:
       return yield* new CadViewError({ reason: "capability-unavailable" });
   }

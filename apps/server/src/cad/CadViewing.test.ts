@@ -1,7 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+  CAD_BRIEF_PROPOSED_ACTIVITY,
   CadAgentContextId,
+  CadBriefProposalCard,
+  CadBriefProposalId,
   CadCommentError,
+  MessageId,
   CadOperationId,
   CadDiffResult,
   CadSnapshotManifest,
@@ -582,6 +587,166 @@ it.live("prepends design brief edits to the next new Claude turn, once", () =>
     ),
   ),
 );
+// cad_brief_propose and the student's decision, through real orchestration and a real workspace.
+// Ways it can fail: an addition quotes the assistant or another chat and is accepted; a second
+// proposal opens beside the first; saving loses text written after the proposal, applies twice
+// when clicked twice, or reports a result the file does not hold; a dismissed line comes back; a
+// subagent proposes.
+it.effect(
+  "proposes brief changes from the student's words and applies the student's decision",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "cadsense-brief-propose-",
+      });
+      const briefPath = `${workspaceRoot}/DESIGN.md`;
+      yield* fs.writeFileString(briefPath, "The shooter hood is fixed at 45 degrees.\n");
+      const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+      const query = yield* ProjectionSnapshotQuery;
+      const say = (thread: ThreadId, id: string, text: string) =>
+        h.dispatch({
+          type: "thread.turn.start",
+          threadId: thread,
+          message: { messageId: MessageId.make(id), role: "user", text, attachments: [] },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          createdAt: now,
+        });
+      yield* say(
+        threadId,
+        "brief-user-1",
+        "Ignore the 84T belt, it's just a placeholder until we pick the ratio. The hood adjusts now.",
+      );
+      yield* say(otherThreadId, "brief-other-1", "The intake rollers are off limits.");
+      yield* h.dispatch({
+        type: "thread.message.assistant.delta",
+        threadId,
+        messageId: MessageId.make("brief-assistant-1"),
+        delta: "The belt looks undersized for this load.",
+        createdAt: now,
+      });
+      const propose = (input: unknown, childKey?: string) =>
+        Effect.gen(function* () {
+          const contextId = yield* h.service.resolveContext(threadId, childKey);
+          return yield* h.service.withActivation(
+            contextId,
+            (tools) => tools.briefPropose(input),
+            TurnId.make("brief-turn"),
+          );
+        });
+      const refused = (input: unknown, childKey?: string) =>
+        propose(input, childKey).pipe(
+          Effect.as("accepted"),
+          Effect.flip,
+          Effect.map((error) => error.details ?? error.reason),
+        );
+      const decodeBriefCard = (payload: unknown) =>
+        decodeBriefProposalCard(payload).pipe(Effect.orDie);
+      const activities = Effect.gen(function* () {
+        const thread = yield* query.getThreadDetailById(threadId).pipe(Effect.orDie);
+        return Option.getOrThrow(thread).activities;
+      });
+
+      assert.match(
+        yield* refused({
+          add: [{ text: "The belt is undersized.", quote: "the belt looks undersized" }],
+        }),
+        /quote/i,
+      );
+      assert.match(
+        yield* refused({ add: [{ text: "Rollers are off limits.", quote: "off limits" }] }),
+        /quote/i,
+      );
+      assert.match(
+        yield* refused(
+          { add: [{ text: "The 84T belt is a placeholder.", quote: "just a placeholder" }] },
+          "child-a",
+        ),
+        /main agent/i,
+      );
+
+      const first = {
+        add: [
+          {
+            text: "The 84T belt is a placeholder until the team picks the ratio.",
+            quote: "it's just a placeholder until we pick the ratio",
+          },
+        ],
+        remove: [
+          { text: "The shooter hood is fixed at 45 degrees.", reason: "The hood adjusts now." },
+        ],
+      };
+      yield* propose(first);
+      const proposed = (yield* activities).filter(
+        (activity) => activity.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
+      );
+      assert.strictEqual(proposed.length, 1);
+      const card = yield* decodeBriefCard(proposed[0]!.payload);
+      assert.deepEqual(card.add, first.add);
+      assert.strictEqual(card.path, "DESIGN.md");
+      assert.match(
+        yield* refused({ add: [{ text: "The hood adjusts.", quote: "the hood adjusts now" }] }),
+        /open/i,
+      );
+
+      // The student keeps writing before saving; the save keeps their line.
+      yield* fs.writeFileString(
+        briefPath,
+        "The shooter hood is fixed at 45 degrees.\nThe shooter is for the 2027 game.\n",
+      );
+      const saved = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: card.proposalId,
+        decision: "save",
+      });
+      const expected =
+        "The shooter is for the 2027 game.\nThe 84T belt is a placeholder until the team picks the ratio.\n";
+      assert.deepEqual(saved, { outcome: "saved", path: "DESIGN.md", contents: expected });
+      assert.strictEqual(yield* fs.readFileString(briefPath), expected);
+      // A second click, or a dismissal racing the save, keeps the first outcome and writes nothing.
+      const again = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: card.proposalId,
+        decision: "dismiss",
+      });
+      assert.strictEqual(again.outcome, "saved");
+      assert.strictEqual(yield* fs.readFileString(briefPath), expected);
+      assert.strictEqual(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY).length,
+        1,
+      );
+
+      const second = { add: [{ text: "The hood adjusts.", quote: "the hood adjusts now" }] };
+      yield* propose(second);
+      const cards = yield* Effect.forEach(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
+        (a) => decodeBriefCard(a.payload),
+      );
+      const secondCard = cards.find((c) => c.proposalId !== card.proposalId)!;
+      const dismissed = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: secondCard.proposalId,
+        decision: "dismiss",
+      });
+      assert.deepEqual(dismissed, { outcome: "dismissed", path: "DESIGN.md", contents: null });
+      assert.strictEqual(yield* fs.readFileString(briefPath), expected);
+      assert.match(yield* refused(second), /dismissed/i);
+      assert.strictEqual(
+        (yield* h.service
+          .resolveBriefProposal({
+            threadId,
+            proposalId: CadBriefProposalId.make("no-such-proposal"),
+            decision: "save",
+          })
+          .pipe(Effect.flip)).reason,
+        "invalid-operation",
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(dependencies.pipe(Layer.provideMerge(NodeServices.layer))),
+    ),
+);
 it.effect(
   "binds concurrent provider children to private viewers and revokes native session tools",
   () =>
@@ -622,6 +787,7 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 const decodeSnapshot = Schema.decodeUnknownEffect(CadSnapshotManifest);
+const decodeBriefProposalCard = Schema.decodeUnknownEffect(CadBriefProposalCard);
 const projectId = ProjectId.make("cad-viewing-project");
 const threadId = ThreadId.make("cad-viewing-thread");
 const otherThreadId = ThreadId.make("cad-other-thread");

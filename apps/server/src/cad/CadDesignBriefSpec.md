@@ -132,7 +132,23 @@ Still open: `cad_context` could report `truncated` on `designBrief`, so a user w
 
 The state comes from `designBriefState` in `@cadsense/shared/designBrief`, which uses the same comment stripping as the server reader, so the UI's "filled in" is exactly what reaches agents. The path is `designBrief` from `cadsense.json`, else `DESIGN.md`, as on the server.
 
-**Agent offer.** Add one rule to `CAD_REVIEW_INSTRUCTIONS`. When the project has no brief and the user's message answers one of the template's questions, end the reply with a one-sentence offer to draft a brief. Draft only when asked. The draft is plain sentences that answer the template's questions with only what the user said, and it appears in the chat. The student saves it from the editor. Agents do not write the brief file, because later reviews treat the brief as the user's own words.
+## Agent proposals
+
+Students tell the agent lasting facts in chat ("that belt is just a placeholder", "the hood does not move"), and those facts end with the chat. The evaluation found that a sentence naming a stand-in is the brief content that changes reviews, so the agent offers to save it. The agent proposes and the student decides. Agents never write the brief file themselves, because later reviews treat the brief as the user's own words.
+
+**The rule.** Add one rule to `CAD_REVIEW_INSTRUCTIONS`. When the user states a fact that answers one of the template's questions (what the mechanism is, what moves, what is missing or a stand-in), or says something that contradicts a line in the brief, call `cad_brief_propose` once at the end of the reply. Never propose from the geometry alone, and never during a review's steps. This replaces the earlier plan to offer a drafted brief in chat.
+
+**The tool.** `cad_brief_propose({ add, remove })`:
+
+- `add` is a list of `{ text, quote }`. `text` is the sentence to add, in plain words. `quote` is the user's own words it comes from. The server rejects an addition whose `quote` does not appear in a user message of this chat (after whitespace and case folding), so an agent cannot attribute its own inference to the student.
+- `remove` is a list of `{ text, reason }`. `text` must match a line of the current brief exactly. `reason` says what the user said or what changed in the model.
+- Only the main agent proposes; a subagent's call fails and tells it to report what the user said.
+- At most 5 lines in all. One proposal is open per chat at a time; a second call while one is open fails and tells the agent to wait. A line the student dismissed in this chat fails if proposed again.
+- The tool returns at once ("proposed; the student decides"). The turn does not wait. If the student approves, the brief changes and the next turn carries it through the update block (see "Freshness"). The agent learns nothing on dismissal, which is the point: no arguing.
+
+**Applying it.** Approval runs on the server, not as an editor write. It reads the brief as it is now, appends the added lines below the template comment, deletes the removed lines, and writes. With no brief it creates one from the template first (create-only, as the entry points do). A removed line that the student already deleted counts as done. An open editor on the brief reloads after the write.
+
+**Brief or learning.** The brief holds what the mechanism is, what moves, and what is missing or a stand-in. Review learnings (from dismissals) hold how to review. The tool takes only the first kind. "Do not flag fastener holes" stays a learning.
 
 ## cad_checks
 
@@ -163,7 +179,7 @@ The evaluation (see "Evaluation") points to the first version. With "The 84T bel
 - A brief per assembly inside one project.
 - Restarting sessions when the brief changes.
 - A form or wizard for writing the brief.
-- Agents writing the brief file, with or without a dedicated tool.
+- Agents writing the brief file directly. They propose through `cad_brief_propose` and the student approves.
 - Recording which brief text each review used.
 
 Revisit when evaluations show misses:
@@ -179,13 +195,16 @@ Revisit when evaluations show misses:
 - **Deliver edits only through `cad_context`.** Agents call `cad_context` when a review starts, not on every turn, so a follow-up question would still see the old brief.
 - **Send the full guidance on every turn.** It repeats up to 16 KiB of brief per message when nothing changed.
 - **Send all guidance again on any change.** A new learning would resend an unchanged brief, and every block stays in the chat history.
+- **Agents write the brief, the student reviews later.** Unreviewed agent text becomes "the user's intent" for every later review, including the agent's own guesses.
+- **Proposals from what the agent saw in the model.** A guess approved in one click is still a guess, and later reviews would excuse findings because of it. The quote check limits additions to what the student said.
 - **Let the reader return learnings too.** Learnings come from the orchestration database, and `cad_context` reads files only. Each adapter already has the learnings.
 
 ## Build order
 
 1. **Make edits reach running chats.** Done: the update block in both adapters with its lock, the steer and follow-up rules, the removed Codex write, and the doc fixes. The subagent sentence waits for the evaluation.
 2. **Put the brief in the app.** Size S. Built: the three entry points, the template, and comment removal. Still open: the `truncated` field.
-3. **Run the decline arm, then settle the rule and the agent offer.** Size S. Instruction text only.
+3. **Run the decline arm, then settle the rule.** Size S. Instruction text only.
+4. **Agent proposals.** Built: the tool for both providers, the quote check, server-side apply, card A from the mocks, and the rule. Still open: the proposal arm in Verification, and an "Edit first" button that opens the brief with the changes applied but unsaved.
 
 ## Verification
 
@@ -209,6 +228,21 @@ Write tests for these in `CadDesignBrief.test.ts` and the adapter tests before w
 - After a session restart or Codex thread resume, the next turn sends the block again even though the start already sent that revision.
 - Codex still writes CAD guidance into `collaborationMode`.
 - A path outside the workspace is read. An existing test covers this.
+
+### Ways proposals can fail
+
+Write these as tests before the code:
+
+- An addition whose quote is not in a user message of this chat is accepted.
+- An addition quotes an assistant message, or a message from another chat.
+- A removal names a line the brief does not have, and the server deletes something else.
+- Approving overwrites edits the student made after the proposal, or an open editor saves over the approved write.
+- Approving with no brief replaces a brief created in the meantime.
+- A second proposal opens while one is pending, or a dismissed line comes back in the same chat.
+- An approved change does not reach the next turn.
+- The agent proposes from geometry alone, or proposes a review rule that belongs in learnings. (Evaluation, not unit tests.)
+
+The proposal arm runs scripted chats on the Ultimate Ascent transfer. In some, the student states a stand-in or what moves; in others the student says nothing lasting. Measure how often the agent proposes when it should and when it should not, whether each line keeps the student's meaning, and whether an approved line changes the next review as a hand-written one did.
 
 ### End to end
 

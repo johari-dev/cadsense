@@ -990,6 +990,11 @@ const makeWsRpcLayer = (
             WS_METHODS.cadPanelSave,
             cadViewing.saveUserView(input.threadId, input.expectedRevision, input.view),
           ),
+        [WS_METHODS.cadBriefProposalResolve]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cadBriefProposalResolve,
+            cadViewing.resolveBriefProposal(input),
+          ),
         [WS_METHODS.cadUserCancel]: (input) =>
           observeRpcEffect(
             WS_METHODS.cadUserCancel,

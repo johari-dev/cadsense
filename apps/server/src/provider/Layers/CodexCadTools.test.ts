@@ -384,6 +384,7 @@ it.effect(
           "cad_capture",
           "cad_part_drawing",
           "cad_featurescript_preview",
+          "cad_brief_propose",
         ],
       );
       yield* runtime.close;

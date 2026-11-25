@@ -16,6 +16,12 @@ import {
   CadDiffInput,
   CadRenderError,
   CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+  CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+  CAD_BRIEF_PROPOSED_ACTIVITY,
+  CadBriefProposalId,
+  CadBriefProposeInput,
+  type CadBriefProposalResolveInput,
+  type CadBriefProposalResolveResult,
   CommandId,
   EventId,
   type CadFeatureScriptPreviewCard,
@@ -70,7 +76,8 @@ import {
   shopRoute,
   type ShopRoute,
 } from "@cadsense/shared/cadDrawing";
-import { readCadDesignBrief } from "./CadDesignBrief.ts";
+import { readCadDesignBrief, resolveCadDesignBriefPath } from "./CadDesignBrief.ts";
+import { applyBriefProposal, briefProposalsOf, checkBriefProposal } from "./CadBriefProposal.ts";
 import {
   loadCadBounds,
   loadCadMeshes,
@@ -117,6 +124,8 @@ export interface CadAgentTools {
   readonly featureScriptPreview: (
     input: unknown,
   ) => Effect.Effect<FeatureScriptPreviewDelivery, CadViewError>;
+  /** Posts a design brief proposal card for the student to save or dismiss. */
+  readonly briefPropose: (input: unknown) => Effect.Effect<unknown, CadViewError>;
 }
 export interface CadViewingShape {
   readonly watchActivity: (threadId: ThreadId) => Stream.Stream<CadToolActivityState>;
@@ -137,6 +146,13 @@ export interface CadViewingShape {
     view: unknown,
   ) => Effect.Effect<CadViewState, CadViewError>;
   readonly getUserView: (threadId: ThreadId) => Effect.Effect<CadViewState | null, CadViewError>;
+  /**
+   * Saves or dismisses a brief proposal. The first decision stands: a repeat returns it and writes
+   * nothing, so a double click or a save racing a dismiss changes the brief at most once.
+   */
+  readonly resolveBriefProposal: (
+    input: CadBriefProposalResolveInput,
+  ) => Effect.Effect<CadBriefProposalResolveResult, CadViewError>;
 }
 export class CadViewing extends Context.Service<CadViewing, CadViewingShape>()(
   "@cadsense/server/cad/CadViewing",
@@ -211,6 +227,71 @@ export const make = Effect.gen(function* () {
     if (!session) return yield* unavailable();
     return session.contextId;
   });
+  const invalid = (details: string) => new CadViewError({ reason: "invalid-operation", details });
+  const withBriefFs = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
+    effect.pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+  const threadDetail = Effect.fn("CadViewing.threadDetail")(function* (threadId: ThreadId) {
+    const thread = yield* query.getThreadDetailById(threadId).pipe(Effect.mapError(unavailable));
+    if (Option.isNone(thread)) return yield* unavailable();
+    return thread.value;
+  });
+  /** One proposal or decision at a time, so checks and writes see each other's activities. */
+  const briefLock = yield* Semaphore.make(1);
+  const resolveBriefProposal: CadViewingShape["resolveBriefProposal"] = (input) =>
+    briefLock.withPermits(1)(
+      Effect.gen(function* () {
+        const project = yield* projectFor(input.threadId);
+        const proposals = briefProposalsOf(yield* threadDetail(input.threadId));
+        const card = proposals.cards.get(input.proposalId);
+        if (!card) return yield* invalid("This chat has no such brief proposal.");
+        const prior = proposals.outcomes.get(input.proposalId);
+        if (prior) return { outcome: prior, path: card.path, contents: null };
+        let contents: string | null = null;
+        let briefPath = card.path;
+        if (input.decision === "save") {
+          const target = yield* withBriefFs(resolveCadDesignBriefPath(project.workspaceRoot));
+          if (!target)
+            return yield* invalid("The brief path in cadsense.json leaves the workspace.");
+          briefPath = target.relativePath;
+          const current = yield* fileSystem.readFileString(target.absolutePath).pipe(
+            Effect.map((text): string | null => text),
+            Effect.catchIf(
+              (cause) => cause.reason._tag === "NotFound",
+              () => Effect.succeed(null),
+            ),
+            Effect.mapError(unavailable),
+          );
+          contents = applyBriefProposal(current, card);
+          yield* fileSystem
+            .makeDirectory(path.dirname(target.absolutePath), { recursive: true })
+            .pipe(Effect.andThen(fileSystem.writeFileString(target.absolutePath, contents)))
+            .pipe(Effect.mapError(unavailable));
+        }
+        const outcome = input.decision === "save" ? ("saved" as const) : ("dismissed" as const);
+        const id = yield* commandId;
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        yield* dispatch({
+          type: "thread.activity.append",
+          commandId: id,
+          threadId: input.threadId,
+          activity: {
+            id: EventId.make(`cad-brief-resolved-${id}`),
+            tone: "info",
+            kind: CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+            summary:
+              outcome === "saved" ? "Saved design brief changes" : "Dismissed design brief changes",
+            payload: { proposalId: input.proposalId, outcome },
+            turnId: null,
+            createdAt,
+          },
+          createdAt,
+        });
+        return { outcome, path: briefPath, contents };
+      }),
+    );
   const getUserView = (threadId: ThreadId) =>
     db(readCadUserView(threadId)).pipe(Effect.map((row) => row?.view ?? null));
   const saveUserView = Effect.fn("CadViewing.saveUserView")(function* (
@@ -751,6 +832,63 @@ export const make = Effect.gen(function* () {
             const { card: _card, ...forAgent } = delivery;
             return forAgent;
           });
+        const briefPropose: CadAgentTools["briefPropose"] = (input) =>
+          briefLock.withPermits(1)(
+            Effect.gen(function* () {
+              if (!open) return yield* unavailable();
+              if (session.childKey !== null)
+                return yield* invalid(
+                  "Only the main agent can propose brief changes. Report what the user said instead.",
+                );
+              const proposal = yield* decodeCadToolInput(CadBriefProposeInput, input);
+              const project = yield* projectFor(session.threadId);
+              const thread = yield* threadDetail(session.threadId);
+              const target = yield* withBriefFs(resolveCadDesignBriefPath(project.workspaceRoot));
+              if (!target)
+                return yield* invalid("The brief path in cadsense.json leaves the workspace.");
+              const brief = yield* withBriefFs(readCadDesignBrief(project.workspaceRoot));
+              const proposals = briefProposalsOf(thread);
+              const problem = checkBriefProposal(proposal, {
+                userMessages: thread.messages
+                  .filter((message) => message.role === "user")
+                  .map((message) => message.text),
+                briefLines:
+                  brief?.content
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter((line) => line.length > 0) ?? [],
+                open: proposals.open,
+                dismissed: proposals.dismissed,
+              });
+              if (problem) return yield* invalid(problem);
+              const id = yield* commandId;
+              const createdAt = DateTime.formatIso(yield* DateTime.now);
+              yield* dispatch({
+                type: "thread.activity.append",
+                commandId: id,
+                threadId: session.threadId,
+                activity: {
+                  id: EventId.make(`cad-brief-proposed-${id}`),
+                  tone: "info",
+                  kind: CAD_BRIEF_PROPOSED_ACTIVITY,
+                  summary: "Proposed design brief changes",
+                  payload: {
+                    proposalId: CadBriefProposalId.make(id),
+                    path: target.relativePath,
+                    add: proposal.add ?? [],
+                    remove: proposal.remove ?? [],
+                  },
+                  turnId: turnId ?? null,
+                  createdAt,
+                },
+                createdAt,
+              });
+              return {
+                proposed: true,
+                note: "The student sees the proposal as a card under your reply and decides. Do not describe it or ask about it.",
+              };
+            }),
+          );
         /** Shows the preview as a card in the chat. Display only, so failures never fail the tool. */
         const recordFeatureScriptPreview = (card: CadFeatureScriptPreviewCard) =>
           Effect.gen(function* () {
@@ -817,6 +955,7 @@ export const make = Effect.gen(function* () {
           partDrawing: (input) => activity.track(session.threadId, turnId, partDrawing(input)),
           featureScriptPreview: (input) =>
             activity.track(session.threadId, turnId, featureScriptPreview(input)),
+          briefPropose: (input) => activity.track(session.threadId, turnId, briefPropose(input)),
         });
       }),
     );
@@ -825,6 +964,7 @@ export const make = Effect.gen(function* () {
     withActivation,
     saveUserView,
     getUserView,
+    resolveBriefProposal,
     watchActivity: activity.watch,
   });
 });
