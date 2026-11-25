@@ -277,4 +277,8 @@ November 2-3, 2026, on the Ultimate Ascent transfer, with the prototype reader a
 - **Channel, for Codex.** Sol used the job more often when the sentences came in chat (4 of 4) than in the brief (1.5 of 4 by score). If that holds up, look at how Codex receives the brief in thread developer instructions.
 - **A named stand-in excused only itself.** See "cad_checks".
 
+### Proposals
+
+November 25, 2026, 22 reviews (Opus 5.5 and GPT-6-Sol) through the same harness. Saying nothing lasting led to no proposal in 6 of 6 runs. A stated stand-in led to a faithful one-line proposal quoting the student in 10 of 10, with or without a brief, always after the review's comments were published. A stated change to a fact in the brief ("We switched it to 3 inch rollers") broke the line-level design: the stale sentence shares a line with three true ones, all 3 Opus runs first tried to remove just that sentence and were refused, and 5 of 6 runs then removed the whole first paragraph. Two would have deleted true claims, three restated the paragraph under a quote that does not contain it, and one added the new size beside the old. Next: a sentence-level `replace` (exact text inside a line, with the student's quote), so agents never restate brief text the student did not say.
+
 Untested here: the "what moves" question (this model has no stage-mounted motor), the unrelated-defect and stale-sentence decline cases, and edits mid-chat.

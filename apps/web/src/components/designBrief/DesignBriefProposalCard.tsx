@@ -80,8 +80,8 @@ export function DesignBriefProposalCard({
       >
         <CheckIcon className="size-3.5 shrink-0 text-success" aria-hidden />
         <span className="min-w-0 flex-1">
-          Saved {changes === 1 ? "1 change" : `${changes} changes`} to {card.path}. Reviews use them
-          from your next message.
+          Saved {changes === 1 ? "1 change" : `${changes} changes`} to {card.path}. Reviews use{" "}
+          {changes === 1 ? "it" : "them"} from your next message.
         </span>
         <Button variant="ghost" size="xs" onClick={openBrief}>
           Open
