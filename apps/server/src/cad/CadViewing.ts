@@ -58,7 +58,12 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CadSnapshotStore } from "./CadSnapshotStore.ts";
 import { LocalCadImport } from "../localCad/LocalCadImport.ts";
 import { CadCaptureArtifacts, type CadCaptureDelivery } from "./CadCaptureArtifacts.ts";
-import { findCadSession, readCadSession, readCadUserView } from "./CadSessionPersistence.ts";
+import {
+  findCadSession,
+  readCadBriefActivities,
+  readCadSession,
+  readCadUserView,
+} from "./CadSessionPersistence.ts";
 import {
   cadRevisionConflict,
   decodeCadToolInput,
@@ -244,7 +249,7 @@ export const make = Effect.gen(function* () {
     briefLock.withPermits(1)(
       Effect.gen(function* () {
         const project = yield* projectFor(input.threadId);
-        const proposals = briefProposalsOf(yield* threadDetail(input.threadId));
+        const proposals = briefProposalsOf(yield* db(readCadBriefActivities(input.threadId)));
         const card = proposals.cards.get(input.proposalId);
         if (!card) return yield* invalid("This chat has no such brief proposal.");
         const prior = proposals.outcomes.get(input.proposalId);
@@ -284,7 +289,9 @@ export const make = Effect.gen(function* () {
             summary:
               outcome === "saved" ? "Saved design brief changes" : "Dismissed design brief changes",
             payload: { proposalId: input.proposalId, outcome },
-            turnId: null,
+            // Filed under the proposal's turn, so a client that loads that turn's page gets the
+            // card and its decision together.
+            turnId: proposals.turnIds.get(input.proposalId) ?? null,
             createdAt,
           },
           createdAt,
@@ -847,7 +854,9 @@ export const make = Effect.gen(function* () {
               if (!target)
                 return yield* invalid("The brief path in cadsense.json leaves the workspace.");
               const brief = yield* withBriefFs(readCadDesignBrief(project.workspaceRoot));
-              const proposals = briefProposalsOf(thread);
+              const proposals = briefProposalsOf(
+                yield* db(readCadBriefActivities(session.threadId)),
+              );
               const problem = checkBriefProposal(proposal, {
                 userMessages: thread.messages
                   .filter((message) => message.role === "user")

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
+import { CAD_TOOL_INPUTS } from "@cadsense/contracts";
+import { CAD_PANEL_TOOLS } from "./CadProviderTools.ts";
 import {
+  CAD_BRIEF_PROPOSAL_RULE,
   CAD_REVIEW_INSTRUCTIONS,
   CAD_REVIEW_LEARNINGS_HEADING,
   cadGuidanceUpdate,
@@ -15,11 +18,19 @@ const brief = {
 const runtime = { model: "gpt-5.6-terra", reasoningEffort: "medium" };
 
 describe("cadReviewInstructions", () => {
-  it("is the shared guidance alone without learnings or a design brief", () => {
-    expect(cadReviewInstructions({ learnings: [] })).toBe(CAD_REVIEW_INSTRUCTIONS);
-    expect(cadReviewInstructions({ learnings: [], designBrief: null })).toBe(
-      CAD_REVIEW_INSTRUCTIONS,
-    );
+  const session = `${CAD_REVIEW_INSTRUCTIONS}\n\n${CAD_BRIEF_PROPOSAL_RULE}`;
+  it("is the shared guidance and the app's proposal rule without learnings or a design brief", () => {
+    expect(cadReviewInstructions({ learnings: [] })).toBe(session);
+    expect(cadReviewInstructions({ learnings: [], designBrief: null })).toBe(session);
+  });
+  // `cadsense mcp` sends CAD_REVIEW_INSTRUCTIONS to reviews outside the app and hides the panel
+  // tools from them. The shared text must never tell those agents to call a tool they lack.
+  it("names no tool in the shared guidance that reviews outside the app cannot call", () => {
+    const named = [...new Set(CAD_REVIEW_INSTRUCTIONS.match(/\bcad_[a-z_]+\b/g) ?? [])];
+    expect(named.length).toBeGreaterThan(3);
+    expect(named.filter((tool) => !Object.hasOwn(CAD_TOOL_INPUTS, tool))).toEqual([]);
+    expect(named.filter((tool) => CAD_PANEL_TOOLS.has(tool))).toEqual([]);
+    expect(CAD_BRIEF_PROPOSAL_RULE).toContain("cad_brief_propose");
   });
   it("appends one line per learning in order after the shared guidance", () => {
     const text = cadReviewInstructions({
@@ -28,9 +39,7 @@ describe("cadReviewInstructions", () => {
         { text: "The motor is a placeholder;\n  do not review its mount." },
       ],
     });
-    expect(text.startsWith(`${CAD_REVIEW_INSTRUCTIONS}\n\n${CAD_REVIEW_LEARNINGS_HEADING}\n`)).toBe(
-      true,
-    );
+    expect(text.startsWith(`${session}\n\n${CAD_REVIEW_LEARNINGS_HEADING}\n`)).toBe(true);
     expect(text.split("\n").slice(-2)).toEqual([
       "- Vent holes are intentional.",
       "- The motor is a placeholder; do not review its mount.",

@@ -1,5 +1,7 @@
 import { readCadComments, projectCadCommentEvent } from "./CadCommentPersistence.ts";
 import {
+  CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+  CAD_BRIEF_PROPOSED_ACTIVITY,
   CadSessionIndex,
   CadCaptureRecord,
   CadUserView,
@@ -7,7 +9,7 @@ import {
   CadViewState,
   type OrchestrationEvent,
   type ThreadId,
-  type TurnId,
+  TurnId,
 } from "@cadsense/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -158,6 +160,39 @@ export const findCadSession = Effect.fn("findCadSession")(
   },
   Effect.catchTag("SqlError", (error) =>
     Effect.fail(toPersistenceSqlError("CadSessionPersistence.find")(error)),
+  ),
+);
+
+const decodeBriefActivities = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      kind: Schema.String,
+      turnId: Schema.NullOr(TurnId),
+      payload: Schema.fromJsonString(Schema.Unknown),
+    }),
+  ),
+);
+
+/**
+ * Every design brief proposal and decision in a chat, oldest first. Read from the activity table
+ * because a thread read (getThreadDetailById) returns only its newest 500 activities, and a
+ * proposal must stay decidable, and a dismissal remembered, however long the chat runs.
+ */
+export const readCadBriefActivities = Effect.fn("readCadBriefActivities")(
+  function* (threadId: ThreadId) {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql`
+      SELECT kind, turn_id AS "turnId", payload_json AS "payload"
+      FROM projection_thread_activities
+      WHERE thread_id=${threadId}
+        AND kind IN (${CAD_BRIEF_PROPOSED_ACTIVITY}, ${CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY})
+      ORDER BY sequence ASC, created_at ASC, activity_id ASC`;
+    return yield* decodeBriefActivities(rows).pipe(
+      Effect.mapError(toPersistenceDecodeError("CAD brief activities")),
+    );
+  },
+  Effect.catchTag("SqlError", (error) =>
+    Effect.fail(toPersistenceSqlError("CadSessionPersistence.briefActivities")(error)),
   ),
 );
 

@@ -13,6 +13,7 @@ import {
   CadFindPartsEntry,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   OnshapeProjectSource,
   ProjectId,
   ProviderInstanceId,
@@ -63,7 +64,11 @@ import * as ClaudeCadCapabilities from "../provider/ClaudeCadCapabilities.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { CadRenderBroker, type CadRenderRequest } from "./CadRenderBroker.ts";
 import { CadCaptureArtifacts, make as makeArtifacts } from "./CadCaptureArtifacts.ts";
-import { readLatestCadCapture, readCadUserView } from "./CadSessionPersistence.ts";
+import {
+  readCadBriefActivities,
+  readLatestCadCapture,
+  readCadUserView,
+} from "./CadSessionPersistence.ts";
 import { make as makePresentation } from "./CadPresentation.ts";
 import { make as makePanel } from "./CadPanel.ts";
 import { CadPanel } from "./CadPanel.ts";
@@ -759,6 +764,56 @@ it.effect(
         yield* fs.readFileString(briefPath),
         "The shooter is for the 2027 game. It uses 3 inch rollers and a Vortex.\n",
       );
+      // A thread read returns its newest 500 activities, and one review turn writes about 100.
+      // Ways that can break proposals: a dismissed line comes back, a second proposal opens beside
+      // an undecided one, or saving an older card fails because its proposal is out of the read.
+      const bury = (label: string) =>
+        Effect.forEach(
+          Array.from({ length: 520 }, (_, index) => index),
+          (index) =>
+            h.dispatch({
+              type: "thread.activity.append",
+              threadId,
+              activity: {
+                id: EventId.make(`bury-${label}-${index}`),
+                tone: "info",
+                kind: "tool.completed",
+                summary: "Filler",
+                payload: {},
+                turnId: null,
+                createdAt: now,
+              },
+              createdAt: now,
+            }),
+          { discard: true },
+        );
+      yield* bury("dismissed");
+      assert.match(yield* refused(second), /dismissed/i);
+      yield* propose({
+        add: [{ text: "The belt ratio is undecided.", quote: "until we pick the ratio" }],
+      });
+      // Read from the table: the filler rows are newer than this proposal on the test clock, so
+      // the capped thread read no longer returns it.
+      const buried = (yield* Effect.forEach(
+        (yield* readCadBriefActivities(threadId).pipe(Effect.orDie)).filter(
+          (a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
+        ),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.add[0]?.text === "The belt ratio is undecided.")!;
+      yield* bury("open");
+      assert.match(
+        yield* refused({
+          add: [{ text: "The belt is a placeholder.", quote: "just a placeholder" }],
+        }),
+        /open/i,
+      );
+      const late = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: buried.proposalId,
+        decision: "save",
+      });
+      assert.strictEqual(late.outcome, "saved");
+      assert.include(yield* fs.readFileString(briefPath), "The belt ratio is undecided.");
       assert.strictEqual(
         (yield* h.service
           .resolveBriefProposal({

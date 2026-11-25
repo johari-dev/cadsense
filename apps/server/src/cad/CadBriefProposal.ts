@@ -8,7 +8,7 @@ import {
   type CadBriefProposalId,
   type CadBriefProposalOutcome,
   type CadBriefProposeInput,
-  type OrchestrationThread,
+  type TurnId,
 } from "@cadsense/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -154,14 +154,27 @@ export const applyBriefProposal = (current: string | null, card: CadBriefProposa
 const decodeCard = Schema.decodeUnknownOption(CadBriefProposalCard);
 const decodeResolved = Schema.decodeUnknownOption(CadBriefProposalResolved);
 
-/** The proposals in a chat and the student's decision on each, from its activities. */
-export const briefProposalsOf = (thread: Pick<OrchestrationThread, "activities">) => {
+/**
+ * The proposals in a chat and the student's decision on each, from every proposal activity of the
+ * chat (readCadBriefActivities), oldest first.
+ */
+export const briefProposalsOf = (
+  activities: ReadonlyArray<{
+    readonly kind: string;
+    readonly turnId: TurnId | null;
+    readonly payload: unknown;
+  }>,
+) => {
   const cards = new Map<CadBriefProposalId, CadBriefProposalCard>();
+  const turnIds = new Map<CadBriefProposalId, TurnId | null>();
   const outcomes = new Map<CadBriefProposalId, CadBriefProposalOutcome>();
-  for (const activity of thread.activities) {
+  for (const activity of activities) {
     if (activity.kind === CAD_BRIEF_PROPOSED_ACTIVITY) {
       const card = decodeCard(activity.payload);
-      if (Option.isSome(card)) cards.set(card.value.proposalId, card.value);
+      if (Option.isSome(card)) {
+        cards.set(card.value.proposalId, card.value);
+        turnIds.set(card.value.proposalId, activity.turnId);
+      }
     } else if (activity.kind === CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY) {
       const resolved = decodeResolved(activity.payload);
       // The first decision stands; resolve never records a second one.
@@ -180,6 +193,8 @@ export const briefProposalsOf = (thread: Pick<OrchestrationThread, "activities">
         dismissed.add(foldBriefText(text));
   return {
     cards,
+    /** The turn each proposal was made in, so its decision is filed under the same turn. */
+    turnIds,
     outcomes,
     open: [...cards.keys()].some((id) => !outcomes.has(id)),
     dismissed,

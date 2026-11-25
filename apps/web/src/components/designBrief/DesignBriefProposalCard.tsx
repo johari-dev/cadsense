@@ -8,6 +8,7 @@ import { Fragment, useState } from "react";
 
 import {
   confirmProjectFileQueryData,
+  hasUnsavedProjectFileEdit,
   setProjectFileQueryData,
 } from "~/components/files/projectFilesQueryState";
 import { CheckIcon, FileIcon } from "~/lib/icons";
@@ -18,6 +19,9 @@ import { useProject, useThreadShell } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { Button } from "../ui/button";
+
+/** Longest a save waits for the editor's own autosave of the brief (500 ms debounce) to land. */
+const UNSAVED_EDIT_WAIT_MS = 3000;
 
 /*
  * An agent's proposal to change the design brief, shown under its reply ("Agent proposals" in
@@ -43,6 +47,10 @@ export function DesignBriefProposalCard({
   });
   const [pending, setPending] = useState<"save" | "dismiss" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The server's answer to this card's own click. The activity that records a decision may not be
+  // loaded for an old card, and the first decision stands whatever this click asked for.
+  const [decided, setDecided] = useState<CadBriefProposalOutcome | null>(null);
+  const shown = outcome ?? decided;
   const changes = card.add.length + card.remove.length + card.replace.length;
 
   const decide = async (decision: "save" | "dismiss") => {
@@ -50,6 +58,17 @@ export function DesignBriefProposalCard({
     setPending(decision);
     setError(null);
     try {
+      // An edit still waiting on the editor's autosave would write over the saved proposal.
+      if (decision === "save" && project) {
+        const unsaved = () =>
+          hasUnsavedProjectFileEdit(threadRef.environmentId, project.workspaceRoot, card.path);
+        for (let waited = 0; unsaved() && waited < UNSAVED_EDIT_WAIT_MS; waited += 100)
+          await new Promise((done) => setTimeout(done, 100));
+        if (unsaved()) {
+          setError("Your own brief edits have not saved yet. Try again in a moment.");
+          return;
+        }
+      }
       const result = await resolve({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId, proposalId: card.proposalId, decision },
@@ -58,6 +77,7 @@ export function DesignBriefProposalCard({
         setError(decision === "save" ? "Could not save the brief." : "Could not dismiss this.");
         return;
       }
+      setDecided(result.value.outcome);
       // Same handoff the editor uses after a save, so an open editor shows the saved brief.
       const { contents, path } = result.value;
       if (contents !== null && project) {
@@ -71,8 +91,8 @@ export function DesignBriefProposalCard({
   const openBrief = () =>
     useRightPanelStore.getState().openFile(threadRef, card.path, undefined, { hideExplorer: true });
 
-  if (outcome === "dismissed") return null;
-  if (outcome === "saved")
+  if (shown === "dismissed") return null;
+  if (shown === "saved")
     return (
       <div
         className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-muted-foreground text-xs"
