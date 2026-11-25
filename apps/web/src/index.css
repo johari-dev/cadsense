@@ -57,6 +57,17 @@
   );
 }
 
+/* Beside the folded rail, a titlebar row (workspaceTitlebar.ts) starts as the rail's tint and
+   grain and fades to the page background over 5rem. The rail's titlebar cap (AppSidebarLayout)
+   then has no hard edge under the window controls, even in themes where only the grain sets
+   the sidebar apart. */
+[data-sidebar-state="rail"] .rail-titlebar-fade {
+  background-image:
+    linear-gradient(to right, transparent, var(--background) 5rem), var(--surface-grain),
+    linear-gradient(var(--sidebar), var(--sidebar));
+  background-size: auto, var(--surface-grain-size), auto;
+}
+
 .wco {
   --workspace-topbar-height: env(titlebar-area-height, 52px);
   --workspace-controls-top: env(titlebar-area-y, 0px);
