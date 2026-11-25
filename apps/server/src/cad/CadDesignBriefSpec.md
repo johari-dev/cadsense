@@ -136,7 +136,7 @@ The state comes from `designBriefState` in `@cadsense/shared/designBrief`, which
 
 Students tell the agent lasting facts in chat ("that belt is just a placeholder", "the hood does not move"), and those facts end with the chat. The evaluation found that a sentence naming a stand-in is the brief content that changes reviews, so the agent offers to save it. The agent proposes and the student decides. Agents never write the brief file themselves, because later reviews treat the brief as the user's own words.
 
-**The rule.** Add one rule to `CAD_REVIEW_INSTRUCTIONS`. When the user states a fact that answers one of the template's questions (what the mechanism is, what moves, what is missing or a stand-in), or says something that contradicts a line in the brief, call `cad_brief_propose` once at the end of the reply. Never propose from the geometry alone, and never during a review's steps. This replaces the earlier plan to offer a drafted brief in chat.
+**The rule.** `CAD_BRIEF_PROPOSAL_RULE` follows the shared review guidance in app sessions (`cadReviewInstructions`). It stays out of `CAD_REVIEW_INSTRUCTIONS`, because `cadsense mcp` sends that text to reviews outside the app, which have no chat for the card and are not offered the tool. When the user states a fact that answers one of the template's questions (what the mechanism is, what moves, what is missing or a stand-in), or says something that contradicts a line in the brief, call `cad_brief_propose` once at the end of the reply. Never propose from the geometry alone, and never during a review's steps. This replaces the earlier plan to offer a drafted brief in chat.
 
 **The tool.** `cad_brief_propose({ add, remove })`:
 
@@ -148,6 +148,10 @@ Students tell the agent lasting facts in chat ("that belt is just a placeholder"
 - The tool returns at once ("proposed; the student decides"). The turn does not wait. If the student approves, the brief changes and the next turn carries it through the update block (see "Freshness"). The agent learns nothing on dismissal, which is the point: no arguing.
 
 **Applying it.** Approval runs on the server, not as an editor write. It reads the brief as it is now, appends the added lines below the template comment, deletes the removed lines, and writes. With no brief it creates one from the template first (create-only, as the entry points do). A removed line that the student already deleted counts as done. An open editor on the brief reloads after the write.
+
+**Where the state lives.** A proposal is a `cad.brief.proposed` thread activity and a decision is a `cad.brief.proposal-resolved` activity filed under the same turn. The server reads both kinds straight from the activity table (`readCadBriefActivities`), not from a thread read, which returns only the newest 500 activities while one review turn writes about 100. So a proposal stays decidable, one stays open at a time, and a dismissal is remembered however long the chat runs.
+
+**The card and the editor.** If the student has the brief open with an edit the editor has not saved yet (it saves 500 ms after typing stops), the card waits for that save before it asks the server, for up to 3 seconds. Otherwise the editor's pending save would write over the saved proposal.
 
 **Brief or learning.** The brief holds what the mechanism is, what moves, and what is missing or a stand-in. Review learnings (from dismissals) hold how to review. The tool takes only the first kind. "Do not flag fastener holes" stays a learning.
 
@@ -241,6 +245,8 @@ Write these as tests before the code:
 - Approving with no brief replaces a brief created in the meantime.
 - A second proposal opens while one is pending, or a dismissed line comes back in the same chat.
 - An approved change does not reach the next turn.
+- A proposal older than the newest 500 activities cannot be saved, lets a second one open, or forgets a dismissal.
+- Reviews outside the app are told to call `cad_brief_propose`, which they do not have.
 - The agent proposes from geometry alone, or proposes a review rule that belongs in learnings. (Evaluation, not unit tests.)
 
 The proposal arm runs scripted chats on the Ultimate Ascent transfer. In some, the student states a stand-in or what moves; in others the student says nothing lasting. Measure how often the agent proposes when it should and when it should not, whether each line keeps the student's meaning, and whether an approved line changes the next review as a hand-written one did.
@@ -281,5 +287,14 @@ November 2-3, 2026, on the Ultimate Ascent transfer, with the prototype reader a
 ### Proposals
 
 November 25, 2026, 22 reviews (Opus 5.5 and GPT-6-Sol) through the same harness. Saying nothing lasting led to no proposal in 6 of 6 runs. A stated stand-in led to a faithful one-line proposal quoting the student in 10 of 10, with or without a brief, always after the review's comments were published. A stated change to a fact in the brief ("We switched it to 3 inch rollers") broke the line-level design: the stale sentence shares a line with three true ones, all 3 Opus runs first tried to remove just that sentence and were refused, and 5 of 6 runs then removed the whole first paragraph. Two would have deleted true claims, three restated the paragraph under a quote that does not contain it, and one added the new size beside the old. That led to `replace` and sentence-level `remove`. A rerun of the contradiction case (3 runs per model) proposed exactly one sentence replacement in 6 of 6, leaving the rest of the paragraph alone, and the stand-in case still gave one faithful line in 2 of 2.
+
+### Live two-turn chats
+
+November 25, 2026, through `cad-app-review-e2e.ts` with `--then-prompt-file`, with every model request logged. Four chats, one per provider and case:
+
+- **Brief edited between turns** (`--then-brief`). The edit added "The side plates are 3/16 inch polycarbonate, not aluminum." The second message asked what the side plates are made of, with tools forbidden. Opus 5.5 and GPT-6-Sol both answered 3/16 inch polycarbonate with no tool calls.
+- **Proposal saved between turns** (`--save-proposal`). Both models proposed the stand-in in turn one. The second turn's request carried the saved brief.
+
+In all four, the first turn's requests had no update block, and the second turn's request had it exactly once, as its own text item before the user's text. The stored chat messages held only the user's words. A browser run in the app showed the same for a replacement, including a save clicked in the same instant as a keystroke in the open brief: the card waited 614 ms and the file kept both changes.
 
 Untested here: the "what moves" question (this model has no stage-mounted motor), the unrelated-defect and stale-sentence decline cases, and edits mid-chat.
