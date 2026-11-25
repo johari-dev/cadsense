@@ -9,6 +9,7 @@ import type { Project } from "~/types";
 
 import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useDesignBrief } from "./useDesignBrief";
 
 /*
@@ -23,8 +24,12 @@ const SETTINGS_DESCRIPTION = {
   missing:
     "Tell reviews what this mechanism does, what moves, and what is a stand-in. Reviews read it as your intent.",
   template: "Only the template's questions so far. Reviews skip it until you answer one.",
-  filled: "Reviews read it as your intent before they look at the model.",
+  filled:
+    "Reviews read it as your intent before they look at the model. Edits apply to chats you start after saving.",
 } as const;
+
+// Agents read the brief when a chat's session starts (CadDesignBriefSpec.md, "Freshness").
+const NEW_CHATS_NOTE = "Edits apply to new chats, not this one.";
 
 /** The project settings row. Opens the brief in a new thread, since settings have no panel. */
 export function DesignBriefSettings({ project }: { readonly project: Project }) {
@@ -96,15 +101,22 @@ export function DesignBriefTitleButton({
   const brief = useDesignBrief(project);
   if (brief.state !== "filled") return null;
   return (
-    <Button
-      variant="ghost"
-      size="xs"
-      className="ml-auto shrink-0"
-      aria-label={`Open design brief (${brief.relativePath})`}
-      onClick={() => void brief.open(threadRef)}
-    >
-      <FileIcon />
-      Brief
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ml-auto shrink-0"
+            aria-label={`Open design brief (${brief.relativePath})`}
+            onClick={() => void brief.open(threadRef)}
+          />
+        }
+      >
+        <FileIcon />
+        Brief
+      </TooltipTrigger>
+      <TooltipPopup>Open the design brief. {NEW_CHATS_NOTE}</TooltipPopup>
+    </Tooltip>
   );
 }

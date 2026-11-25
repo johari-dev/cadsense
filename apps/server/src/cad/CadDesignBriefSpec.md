@@ -8,7 +8,7 @@ A design brief tells review agents what a mechanism is meant to do, so they stop
 
 1. **Onshape users cannot create a brief.** Onshape projects live in `managed-workspaces/project-<sha256>` (`../workspace/ManagedWorkspaceAllocator.ts`). Project settings hide "Open in Explorer" for Onshape projects (`apps/web/src/components/settings/ProjectSettingsPanel.tsx:291`). The file panel has no new-file action. Nothing in `apps/web` mentions the brief.
 2. **The suggested contents ask for what students do not write.** `CadDesignBrief.md` suggests six headings: motion, loads and materials, rulebook limits, repair targets, unfinished work, and purchased parts. The four recorded student prompts say what the mechanism is, what moves, what is missing, and what they plan (`CadReviewEvaluation.md:25`, `:27`, `:597`, `:601`). None gives a load, a limit, a repair target, or a parts list. A template with those headings would reach the agent as empty sections.
-3. **Edits do not reach a running chat.** Claude fixes its system prompt at session start (`../provider/Layers/ClaudeAdapter.ts:4460`). Codex sends the brief only on `thread/start` and `thread/resume` (`../provider/Layers/CodexSessionRuntime.ts:2602`). Its per-turn re-read (`CodexSessionRuntime.ts:2787-2809`) goes into `collaborationMode`, which Codex 0.166 replaces, so the model never sees it. `CadDesignBrief.md:33` and the comment at `ClaudeAdapter.ts:4461` still say Codex reads the brief on every turn.
+3. **Edits do not reach a running chat.** Claude fixes its system prompt at session start (`../provider/Layers/ClaudeAdapter.ts:4460`). Codex sends the brief only on `thread/start` and `thread/resume` (`../provider/Layers/CodexSessionRuntime.ts:2602`). Its per-turn re-read (`CodexSessionRuntime.ts:2787-2809`) goes into `collaborationMode`, which Codex 0.166 replaces, so the model never sees it.
 4. **Learnings never reach the chat that created them.** Both providers deliver learnings only when the session starts. Codex re-reads them on every turn (`CodexSessionRuntime.ts:2787-2791`), but it puts them in the same `collaborationMode` text that Codex drops. So a dismissal does not reach the chat it came from.
 
 ## Terms
@@ -125,7 +125,6 @@ Code changes:
 - `readCadDesignBrief` in `CadDesignBrief.ts` removes comments and reports whether it cut the text. It stays filesystem-only, so `cad_context` (`CadViewing.ts:332`) keeps the dependencies it has now. Claude (`ClaudeAdapter.ts:4460`) and Codex (`../provider/Layers/CodexAdapter.ts:1725`) call it at session start and on each new turn.
 - One helper, called from both adapters' `sendTurn` (`ClaudeAdapter.ts:4757`, `CodexSessionRuntime.ts:2754`), takes the brief, the learnings, and the last delivered revision, and returns the update block or nothing.
 - Remove the CAD learnings and brief from the per-turn `collaborationMode` in `CodexSessionRuntime.ts:2787-2809`, because Codex drops that text.
-- Fix `CadDesignBrief.md:33` and the comment at `ClaudeAdapter.ts:4461`.
 - `cad_context` adds `truncated` to `designBrief` (`packages/contracts/src/cadTools.ts:193`), so a user who asks "did you get my brief?" learns whether it was cut.
 
 ## Creating and editing

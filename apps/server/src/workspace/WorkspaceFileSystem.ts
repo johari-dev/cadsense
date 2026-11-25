@@ -115,7 +115,8 @@ export class WorkspaceFileSystem extends Context.Service<
      * Write a file relative to the workspace root.
      *
      * Creates parent directories as needed and rejects paths that escape the
-     * workspace root.
+     * workspace root. With `createOnly`, an existing file is left untouched and the
+     * result says `created: false`; the existence check and the write are one step.
      */
     readonly writeFile: (
       input: ProjectWriteFileInput,
@@ -280,21 +281,34 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    yield* fileSystem.writeFileString(target.absolutePath, input.contents).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkspaceFileSystemOperationError({
-            workspaceRoot: input.cwd,
-            relativePath: input.relativePath,
-            resolvedPath: target.absolutePath,
-            operationPath: target.absolutePath,
-            operation: "write-file",
-            cause,
-          }),
-      ),
-    );
-    yield* workspaceEntries.refresh(input.cwd);
-    return { relativePath: target.relativePath };
+    const created = yield* fileSystem
+      .writeFileString(
+        target.absolutePath,
+        input.contents,
+        input.createOnly ? { flag: "wx" } : undefined,
+      )
+      .pipe(
+        Effect.as(true),
+        Effect.catchIf(
+          (cause) => input.createOnly === true && cause.reason._tag === "AlreadyExists",
+          () => Effect.succeed(false),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemOperationError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: target.absolutePath,
+              operationPath: target.absolutePath,
+              operation: "write-file",
+              cause,
+            }),
+        ),
+      );
+    if (created) yield* workspaceEntries.refresh(input.cwd);
+    return input.createOnly
+      ? { relativePath: target.relativePath, created }
+      : { relativePath: target.relativePath };
   });
 
   return WorkspaceFileSystem.of({ readFile, writeFile });

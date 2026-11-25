@@ -45,24 +45,34 @@ export function useDesignBrief(project: Project): DesignBrief {
     : projectFileSettled && brief.error !== null
       ? designBriefState(null)
       : null;
+  const refreshBrief = brief.refresh;
   const writeFile = useAtomCommand(projectEnvironment.writeFile, "Create design brief");
 
   const open = useCallback(
     async (threadRef: ScopedThreadRef) => {
       if (state === "missing") {
+        // "Missing" only means the last read failed, which a dropped connection also causes, so
+        // the server writes the template only if no file exists and never replaces a brief.
         const contents = CADSENSE_DESIGN_BRIEF_TEMPLATE;
-        const result = await writeFile({ environmentId, input: { cwd, relativePath, contents } });
+        const result = await writeFile({
+          environmentId,
+          input: { cwd, relativePath, contents, createOnly: true },
+        });
         if (result._tag === "Failure") return false;
-        // Same handoff the editor uses after a save, so the panel opens on the new file.
-        setProjectFileQueryData(environmentId, cwd, relativePath, contents);
-        confirmProjectFileQueryData(environmentId, cwd, relativePath, contents);
+        if (result.value.created === false) {
+          refreshBrief();
+        } else {
+          // Same handoff the editor uses after a save, so the panel opens on the new file.
+          setProjectFileQueryData(environmentId, cwd, relativePath, contents);
+          confirmProjectFileQueryData(environmentId, cwd, relativePath, contents);
+        }
       }
       useRightPanelStore.getState().openFile(threadRef, relativePath, undefined, {
         hideExplorer: true,
       });
       return true;
     },
-    [cwd, environmentId, relativePath, state, writeFile],
+    [cwd, environmentId, refreshBrief, relativePath, state, writeFile],
   );
 
   return { state, relativePath, open };

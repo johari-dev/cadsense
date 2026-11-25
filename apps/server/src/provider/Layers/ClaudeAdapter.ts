@@ -4485,7 +4485,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           })
           .pipe(Effect.provideService(Scope.Scope, scope));
         // The system prompt is fixed for the session, so learnings and design brief edits made
-        // later reach Claude when its next session starts. Codex re-reads both on every turn.
+        // later reach Claude when its next session starts. Codex works the same way: its thread
+        // instructions are also fixed when the thread opens.
         // A failed learnings read only costs this session its learnings.
         const learnings = yield* cadQuery.value
           .getCadReviewLearnings(project.value.id)
