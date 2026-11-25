@@ -43,10 +43,16 @@ export interface BriefProposalContext {
   readonly dismissed: ReadonlySet<string>;
 }
 
+/** How many times `text` occurs inside the brief's lines; a match never spans two lines. */
+const occurrences = (lines: ReadonlyArray<string>, text: string) =>
+  lines.reduce((count, line) => count + line.split(text).length - 1, 0);
+
 /**
- * Why a proposal cannot be shown, written for the agent, or null when it can. An addition must
- * quote one of the user's messages in this chat, so the agent cannot present its own reading of
- * the model as the student's intent.
+ * Why a proposal cannot be shown, written for the agent, or null when it can. Every addition and
+ * replacement must quote one of the user's messages in this chat, so the agent cannot present its
+ * own reading of the model as the student's intent. Removed and replaced text must occur exactly
+ * once in the brief, a whole line or a sentence within one, so a stale sentence changes without
+ * the agent restating the true ones beside it.
  */
 export const checkBriefProposal = (
   input: CadBriefProposeInput,
@@ -54,46 +60,91 @@ export const checkBriefProposal = (
 ): string | null => {
   const add = input.add ?? [];
   const remove = input.remove ?? [];
+  const replace = input.replace ?? [];
+  const total = add.length + remove.length + replace.length;
   if (context.open)
     return "This chat already has an open brief proposal. Wait for the student to save or dismiss it.";
-  if (add.length + remove.length === 0) return "The proposal has nothing to add or remove.";
-  if (add.length + remove.length > CAD_BRIEF_PROPOSAL_MAX_LINES)
-    return `Propose at most ${CAD_BRIEF_PROPOSAL_MAX_LINES} lines at a time.`;
+  if (total === 0) return "The proposal has nothing to add, remove, or replace.";
+  if (total > CAD_BRIEF_PROPOSAL_MAX_LINES)
+    return `Propose at most ${CAD_BRIEF_PROPOSAL_MAX_LINES} changes at a time.`;
   const messages = context.userMessages.map(foldBriefText);
+  const quoted = (quote: string) => {
+    const folded = foldBriefText(quote);
+    return folded.length > 0 && messages.some((message) => message.includes(folded));
+  };
   const briefLines = new Set(context.briefLines.map(foldBriefText));
+  const existing = (text: string) => {
+    const count = occurrences(context.briefLines, text);
+    return count === 0
+      ? `"${text}" is not in the current brief. Copy a whole line or one sentence of it exactly as cad_context's brief shows it.`
+      : count > 1
+        ? `"${text}" appears more than once in the brief. Include more of the sentence so it matches one place.`
+        : null;
+  };
   for (const line of add) {
-    const quote = foldBriefText(line.quote);
-    if (quote.length === 0 || !messages.some((message) => message.includes(quote)))
+    if (!quoted(line.quote))
       return `The quote for "${line.text}" is not in any of the user's messages in this chat. Quote the user's own words, or do not propose the line.`;
     if (briefLines.has(foldBriefText(line.text))) return `"${line.text}" is already in the brief.`;
   }
-  for (const line of remove)
-    if (!context.briefLines.includes(line.text))
-      return `"${line.text}" is not a line of the current brief. Copy the line exactly as cad_context's brief shows it.`;
-  for (const line of [...add, ...remove])
-    if (context.dismissed.has(foldBriefText(line.text)))
-      return `The student dismissed "${line.text}" in this chat. Do not propose it again.`;
+  for (const line of remove) {
+    const problem = existing(line.text);
+    if (problem) return problem;
+  }
+  for (const change of replace) {
+    const problem = existing(change.from);
+    if (problem) return problem;
+    if (!quoted(change.quote))
+      return `The quote for changing "${change.from}" is not in any of the user's messages in this chat. Quote the user's own words, or do not propose the change.`;
+  }
+  for (const text of [
+    ...add.map((line) => line.text),
+    ...remove.map((line) => line.text),
+    ...replace.map((change) => change.to),
+  ])
+    if (context.dismissed.has(foldBriefText(text)))
+      return `The student dismissed "${text}" in this chat. Do not propose it again.`;
   return null;
 };
 
 /**
+ * Replaces the first occurrence of `from` in a line with `to`. An empty `to` removes it along with
+ * the space that separated it from its neighbors, and a line left empty is dropped (null).
+ */
+const editLine = (line: string, from: string, to: string): string | null => {
+  const at = line.indexOf(from);
+  const before = line.slice(0, at);
+  const after = line.slice(at + from.length);
+  if (to.length > 0) return `${before}${to}${after}`;
+  const kept = `${before.trimEnd()}${before.trim() && after.trim() ? " " : ""}${after.trimStart()}`;
+  return kept.trim().length === 0 ? null : kept;
+};
+
+/**
  * The brief after saving a proposal, applied to the file as it is now so the student's own later
- * edits stay. Removed lines go only where a whole line outside a comment matches exactly; one that
- * is already gone counts as done. Added lines go at the end. With no file, it starts from the
- * template, as the app's entry points do.
+ * edits stay. Removals and replacements change their text where it first occurs outside a comment;
+ * one whose text is already gone is skipped. Added lines go at the end. With no file, it starts
+ * from the template, as the app's entry points do.
  */
 export const applyBriefProposal = (current: string | null, card: CadBriefProposalCard) => {
-  const removed = new Set(card.remove.map((line) => line.text));
+  const edits = [
+    ...card.remove.map((line) => ({ from: line.text, to: "" })),
+    ...card.replace.map((change) => ({ from: change.from, to: change.to })),
+  ];
+  const lines: Array<string | null> = (current ?? CADSENSE_DESIGN_BRIEF_TEMPLATE).split("\n");
+  const editable: Array<boolean> = [];
   let inComment = false;
-  const kept = (current ?? CADSENSE_DESIGN_BRIEF_TEMPLATE).split("\n").filter((line) => {
-    const removable = !inComment && !line.includes("<!--") && removed.has(line.trim());
+  for (const line of lines as Array<string>) {
+    editable.push(!inComment && !line.includes("<!--"));
     const open = line.lastIndexOf("<!--");
     const close = line.lastIndexOf("-->");
     if (open > close) inComment = true;
     else if (close > open) inComment = false;
-    return !removable;
-  });
-  const text = kept.join("\n");
+  }
+  for (const edit of edits) {
+    const index = lines.findIndex((line, i) => editable[i] && line?.includes(edit.from));
+    if (index >= 0) lines[index] = editLine(lines[index]!, edit.from, edit.to);
+  }
+  const text = lines.filter((line) => line !== null).join("\n");
   if (card.add.length === 0) return text;
   return `${text.endsWith("\n") || text.length === 0 ? text : `${text}\n`}${card.add
     .map((line) => line.text)
@@ -121,7 +172,12 @@ export const briefProposalsOf = (thread: Pick<OrchestrationThread, "activities">
   const dismissed = new Set<string>();
   for (const [id, card] of cards)
     if (outcomes.get(id) === "dismissed")
-      for (const line of [...card.add, ...card.remove]) dismissed.add(foldBriefText(line.text));
+      for (const text of [
+        ...card.add.map((line) => line.text),
+        ...card.remove.map((line) => line.text),
+        ...card.replace.map((change) => change.to),
+      ])
+        dismissed.add(foldBriefText(text));
   return {
     cards,
     outcomes,

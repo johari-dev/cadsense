@@ -4,7 +4,7 @@ import type {
   CadBriefProposalOutcome,
   ScopedThreadRef,
 } from "@cadsense/contracts";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import {
   confirmProjectFileQueryData,
@@ -43,7 +43,7 @@ export function DesignBriefProposalCard({
   });
   const [pending, setPending] = useState<"save" | "dismiss" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const changes = card.add.length + card.remove.length;
+  const changes = card.add.length + card.remove.length + card.replace.length;
 
   const decide = async (decision: "save" | "dismiss") => {
     if (pending) return;
@@ -105,6 +105,14 @@ export function DesignBriefProposalCard({
             You said <q className="text-foreground italic">{line.quote}</q>
           </ProposalLine>
         ))}
+        {card.replace.map((change, index) => (
+          <Fragment key={`replace-${index}`}>
+            <ProposalLine sign="-" text={change.from} />
+            <ProposalLine sign="+" text={change.to}>
+              You said <q className="text-foreground italic">{change.quote}</q>
+            </ProposalLine>
+          </Fragment>
+        ))}
         {card.remove.map((line, index) => (
           <ProposalLine key={`remove-${index}`} sign="-" text={line.text}>
             {line.reason}
@@ -136,7 +144,8 @@ function ProposalLine({
 }: {
   readonly sign: "+" | "-";
   readonly text: string;
-  readonly children: React.ReactNode;
+  /** Where the line comes from: the student's quote, or why it goes. */
+  readonly children?: React.ReactNode;
 }) {
   const added = sign === "+";
   return (
@@ -155,7 +164,9 @@ function ProposalLine({
       <span className={added ? "text-foreground" : "text-muted-foreground line-through"}>
         {text}
       </span>
-      <span className="col-start-2 text-muted-foreground text-xs">{children}</span>
+      {children ? (
+        <span className="col-start-2 text-muted-foreground text-xs">{children}</span>
+      ) : null}
     </li>
   );
 }

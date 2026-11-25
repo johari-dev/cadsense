@@ -732,6 +732,33 @@ it.effect(
       assert.deepEqual(dismissed, { outcome: "dismissed", path: "DESIGN.md", contents: null });
       assert.strictEqual(yield* fs.readFileString(briefPath), expected);
       assert.match(yield* refused(second), /dismissed/i);
+      // A stale sentence inside a line changes without the agent restating the rest of the line.
+      yield* fs.writeFileString(
+        briefPath,
+        "The shooter is for the 2027 game. It uses 2 inch rollers and a Vortex.\n",
+      );
+      yield* propose({
+        replace: [
+          {
+            from: "It uses 2 inch rollers and a Vortex.",
+            to: "It uses 3 inch rollers and a Vortex.",
+            quote: "the hood adjusts now",
+          },
+        ],
+      });
+      const third = (yield* Effect.forEach(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.replace.length > 0)!;
+      yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: third.proposalId,
+        decision: "save",
+      });
+      assert.strictEqual(
+        yield* fs.readFileString(briefPath),
+        "The shooter is for the 2027 game. It uses 3 inch rollers and a Vortex.\n",
+      );
       assert.strictEqual(
         (yield* h.service
           .resolveBriefProposal({

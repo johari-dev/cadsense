@@ -42,7 +42,7 @@ describe("checkBriefProposal", () => {
         { remove: [{ text: "The hood is fixed.", reason: "The user said it adjusts." }] },
         context,
       ),
-    ).toMatch(/not a line/i);
+    ).toMatch(/not in the current brief/i);
     expect(
       checkBriefProposal(
         {
@@ -81,15 +81,129 @@ describe("checkBriefProposal", () => {
   });
 });
 
+// Ways sentence edits can fail (proposal eval, "Contradiction"): a stale sentence that shares a
+// line with true ones can only be removed with the whole line; a replacement or removal names text
+// the brief lacks, or text that appears twice so the wrong copy changes; a replacement the student
+// never asked for is accepted; replacements slip past the cap or come back after a dismissal.
+describe("checkBriefProposal with sentences", () => {
+  const paragraph =
+    "Transfer for our 2013 robot. It uses 2 inch rollers and a Vortex. The disc comes in at an angle.";
+  const context = {
+    userMessages: ["Can you review my transfer? We switched it to 3 inch rollers last week."],
+    briefLines: [paragraph, "Rollers turn together. It uses 2 inch rollers and a Vortex."],
+    open: false,
+    dismissed: new Set<string>(),
+  };
+  const replace = (from: string, to: string, quote = "we switched it to 3 inch rollers") => ({
+    replace: [{ from, to, quote }],
+  });
+
+  it("accepts a sentence inside a line for removal and replacement when it appears once", () => {
+    const once = { ...context, briefLines: [paragraph] };
+    expect(
+      checkBriefProposal(
+        replace("It uses 2 inch rollers and a Vortex.", "It uses 3 inch rollers and a Vortex."),
+        once,
+      ),
+    ).toBeNull();
+    expect(
+      checkBriefProposal(
+        { remove: [{ text: "The disc comes in at an angle.", reason: "r" }] },
+        once,
+      ),
+    ).toBeNull();
+  });
+
+  it("refuses text the brief lacks and text that appears more than once", () => {
+    expect(
+      checkBriefProposal(replace("It uses 2 inch wheels.", "It uses 3 inch wheels."), context),
+    ).toMatch(/not in the current brief/i);
+    expect(
+      checkBriefProposal(
+        replace("It uses 2 inch rollers and a Vortex.", "It uses 3 inch rollers and a Vortex."),
+        context,
+      ),
+    ).toMatch(/more than once/i);
+  });
+
+  it("refuses a replacement whose quote the student never wrote", () => {
+    expect(
+      checkBriefProposal(
+        replace(
+          "The disc comes in at an angle.",
+          "The disc comes in flat.",
+          "the disc comes in flat",
+        ),
+        context,
+      ),
+    ).toMatch(/quote/i);
+  });
+
+  it("counts replacements toward the cap and refuses a dismissed one", () => {
+    const many = {
+      replace: Array.from({ length: 6 }, () => ({
+        from: "The disc comes in at an angle.",
+        to: "x",
+        quote: "3 inch rollers",
+      })),
+    };
+    expect(checkBriefProposal(many, context)).toMatch(/at most 5/i);
+    expect(
+      checkBriefProposal(replace("The disc comes in at an angle.", "It uses 3 inch rollers."), {
+        ...context,
+        dismissed: new Set(["it uses 3 inch rollers"]),
+      }),
+    ).toMatch(/dismissed/i);
+  });
+});
+
 // Ways applying can fail: it drops text the student wrote after the proposal; it removes a line
 // inside the template's comment or a line that only contains the removed text; it fails when the
 // removed line is already gone; with no brief it writes the lines without the template.
 describe("applyBriefProposal", () => {
-  const card = (add: ReadonlyArray<string>, remove: ReadonlyArray<string>) => ({
+  const card = (
+    add: ReadonlyArray<string>,
+    remove: ReadonlyArray<string>,
+    replace: ReadonlyArray<readonly [string, string]> = [],
+  ) => ({
     proposalId: CadBriefProposalId.make("p1"),
     path: "DESIGN.md",
     add: add.map((text) => ({ text, quote: "q" })),
     remove: remove.map((text) => ({ text, reason: "r" })),
+    replace: replace.map(([from, to]) => ({ from, to, quote: "q" })),
+  });
+
+  it("changes only the named sentence inside a line and keeps the rest of the line", () => {
+    const current =
+      "# Transfer\n\nTransfer for our 2013 robot. It uses 2 inch rollers and a Vortex. The disc comes in at an angle.\n";
+    expect(
+      applyBriefProposal(
+        current,
+        card(
+          [],
+          [],
+          [["It uses 2 inch rollers and a Vortex.", "It uses 3 inch rollers and a Vortex."]],
+        ),
+      ),
+    ).toBe(
+      "# Transfer\n\nTransfer for our 2013 robot. It uses 3 inch rollers and a Vortex. The disc comes in at an angle.\n",
+    );
+    expect(applyBriefProposal(current, card([], ["It uses 2 inch rollers and a Vortex."]))).toBe(
+      "# Transfer\n\nTransfer for our 2013 robot. The disc comes in at an angle.\n",
+    );
+    expect(applyBriefProposal(current, card([], ["The disc comes in at an angle."]))).toBe(
+      "# Transfer\n\nTransfer for our 2013 robot. It uses 2 inch rollers and a Vortex.\n",
+    );
+  });
+
+  it("skips a replacement whose sentence the student already changed", () => {
+    const current = "It uses 4 inch rollers now.\n";
+    expect(
+      applyBriefProposal(
+        current,
+        card([], [], [["It uses 2 inch rollers.", "It uses 3 inch rollers."]]),
+      ),
+    ).toBe(current);
   });
 
   it("appends to the brief as it is now and removes only the exact line", () => {

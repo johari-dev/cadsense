@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -21,16 +22,27 @@ export const CadBriefAddition = Schema.Struct({
 export type CadBriefAddition = typeof CadBriefAddition.Type;
 
 export const CadBriefRemoval = Schema.Struct({
-  /** A line of the current brief, exactly as it reads. */
+  /** Text of the current brief, exactly as it reads: a whole line or a sentence within one. */
   text: BriefLine,
   /** What the user said, or what changed in the model, that makes the line wrong. */
   reason: BriefLine,
 });
 export type CadBriefRemoval = typeof CadBriefRemoval.Type;
 
+export const CadBriefReplacement = Schema.Struct({
+  /** Text of the current brief, exactly as it reads: usually one sentence of a longer line. */
+  from: BriefLine,
+  /** What it becomes, changing only what the user said changed. */
+  to: BriefLine,
+  /** The user's own words that say it changed, copied from one of their messages in this chat. */
+  quote: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+});
+export type CadBriefReplacement = typeof CadBriefReplacement.Type;
+
 export const CadBriefProposeInput = Schema.Struct({
   add: Schema.optionalKey(Schema.Array(CadBriefAddition)),
   remove: Schema.optionalKey(Schema.Array(CadBriefRemoval)),
+  replace: Schema.optionalKey(Schema.Array(CadBriefReplacement)),
 });
 export type CadBriefProposeInput = typeof CadBriefProposeInput.Type;
 
@@ -44,6 +56,8 @@ export const CadBriefProposalCard = Schema.Struct({
   path: Schema.String,
   add: Schema.Array(CadBriefAddition),
   remove: Schema.Array(CadBriefRemoval),
+  // Proposals recorded before replacements existed have none.
+  replace: Schema.Array(CadBriefReplacement).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CadBriefProposalCard = typeof CadBriefProposalCard.Type;
 

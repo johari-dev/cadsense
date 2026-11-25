@@ -877,6 +877,7 @@ export const make = Effect.gen(function* () {
                     path: target.relativePath,
                     add: proposal.add ?? [],
                     remove: proposal.remove ?? [],
+                    replace: proposal.replace ?? [],
                   },
                   turnId: turnId ?? null,
                   createdAt,
