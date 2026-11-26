@@ -173,6 +173,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarFoldMotion } from "./sidebar/SidebarFoldMotion";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
@@ -210,6 +211,24 @@ const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
  */
 const SIDEBAR_PROJECT_ICON_CLASS =
   "size-7 rounded-md border border-sidebar-border bg-sidebar-control-surface p-1 [&[src='/onshape.svg']]:opacity-70 [&[src='/onshape.svg']]:grayscale";
+
+/**
+ * A project's thumbnail, shared by the expanded row and the icon rail. The wrapper keeps the
+ * expanded row's chevron color off the folder fallback.
+ */
+function SidebarProjectTile({ project }: { readonly project: SidebarProjectSnapshot }) {
+  return (
+    <span aria-hidden className="inline-flex shrink-0">
+      <ProjectFavicon
+        cadSnapshotId={project.cad?.roots.find((root) => root.current)?.current?.snapshotId}
+        className={SIDEBAR_PROJECT_ICON_CLASS}
+        environmentId={project.environmentId}
+        cwd={project.workspaceRoot}
+        onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
+      />
+    </span>
+  );
+}
 
 /** The image and alt text for each logo a project row's subtitle can show. */
 const PROJECT_SOURCE_LOGOS = {
@@ -1884,7 +1903,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       startThreadRename,
     ],
   );
-  const currentCadRoots = project.cad?.roots.filter((root) => root.current) ?? [];
   // The subtitle shows the source (the Onshape logo, or a file format) and kind; the model's own name (an Onshape element such
   // as "Part Studio 1", or the local file's path) moves to the subtitle's tooltip.
   const source = describeProjectSource(project);
@@ -1906,6 +1924,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     <>
       <div className="group/project-header relative">
         <SidebarMenuButton
+          // The whole row slides on a fold (SidebarFoldMotion); the button clips a lone tile.
+          data-sidebar-fold={project.projectKey}
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           className={`h-auto min-h-12 pr-2 group-hover/project-header:bg-sidebar-row-hover group-hover/project-header:text-sidebar-foreground ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : ""
@@ -1917,13 +1937,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           onKeyDown={handleProjectButtonKeyDown}
           onContextMenu={handleProjectButtonContextMenu}
         >
-          <ProjectFavicon
-            cadSnapshotId={currentCadRoots[0]?.current?.snapshotId}
-            className={SIDEBAR_PROJECT_ICON_CLASS}
-            environmentId={project.environmentId}
-            cwd={project.workspaceRoot}
-            onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
-          />
+          <SidebarProjectTile project={project} />
           {/* The hover actions sit over the trailing status and count, left of the chevron; the
               name gives them room only while they show, so it uses the full row otherwise. */}
           <span className="flex min-w-0 flex-1 items-center gap-2 group-focus-within/project-header:me-12 group-hover/project-header:me-12 max-sm:me-12">
@@ -2480,7 +2494,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       ) : null}
       <LocalSecondaryStatus />
       <SidebarGroup className="px-2 py-2">
-        <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
+        {/* Full width from the first frame of the open animation, so the new-thread button
+            slides to its final spot instead of the half-open sidebar's. */}
+        <div className="mb-1 flex items-center justify-between pl-2 pr-1.5 md:w-[calc(var(--sidebar-width)-1rem-1px)]">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Models</span>
           <div className="flex items-center gap-0.5">
             {newThreadTarget ? (
@@ -2491,6 +2507,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                       size="icon-xs"
                       variant="ghost-muted"
                       aria-label={newThreadTarget.label}
+                      data-sidebar-fold="new-thread"
                       className="size-7 [--control-icon-color:currentColor] text-icon-muted sm:size-7"
                       onClick={newThreadTarget.start}
                     />
@@ -2621,10 +2638,13 @@ function SidebarRailButton({
   label,
   onClick,
   children,
+  fold,
 }: {
   readonly label: string;
   readonly onClick: () => void;
   readonly children: React.ReactNode;
+  /** Key that slides this button when the sidebar folds (SidebarFoldMotion). */
+  readonly fold?: string;
 }) {
   return (
     <Tooltip>
@@ -2634,6 +2654,7 @@ function SidebarRailButton({
             type="button"
             aria-label={label}
             className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            data-sidebar-fold={fold}
             onClick={onClick}
           />
         }
@@ -2671,19 +2692,24 @@ function SidebarIconRail({
     // still animating down from full width, and centering in that width threw every icon to
     // the middle of the old sidebar before it slid back.
     <div
-      className="hidden min-h-0 w-[calc(var(--sidebar-width-icon)-1px)] flex-1 flex-col items-center gap-1 pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
+      className="hidden min-h-0 w-[calc(var(--sidebar-width-icon)-1px)] flex-1 flex-col items-center pt-[var(--workspace-topbar-height)] pb-2 group-data-[collapsible=icon]:flex"
       data-sidebar-icon-rail=""
     >
-      {threadProject ? (
-        <SidebarRailButton
-          label={`New thread in ${threadProject.displayName}`}
-          onClick={() => onCreateThread(threadProject)}
-        >
-          <SquarePenIcon className="size-4" />
-        </SidebarRailButton>
-      ) : null}
-      <div aria-hidden className="my-1 h-px w-5 shrink-0 bg-sidebar-border" />
-      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+      {/* As tall as the expanded Models toolbar, so the new-thread button and the first model
+          keep their heights across the fold. Later models close up under it. */}
+      <div className="relative flex h-11 w-full shrink-0 items-center justify-center">
+        {threadProject ? (
+          <SidebarRailButton
+            label={`New thread in ${threadProject.displayName}`}
+            onClick={() => onCreateThread(threadProject)}
+            fold="new-thread"
+          >
+            <SquarePenIcon className="size-4" />
+          </SidebarRailButton>
+        ) : null}
+        <div aria-hidden className="absolute bottom-0 h-px w-5 bg-sidebar-border" />
+      </div>
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto pt-1">
         {projects.map((project) => {
           const isActiveProject = project.projectKey === activeProjectKey;
           return (
@@ -2694,6 +2720,8 @@ function SidebarIconRail({
                     type="button"
                     aria-label={`Show ${project.displayName} threads`}
                     aria-current={isActiveProject ? "true" : undefined}
+                    // Slides as a whole button, not just its tile, so the active fill moves with it.
+                    data-sidebar-fold={project.projectKey}
                     // The same 32px square as every other rail button; the active project
                     // differs only by its fill.
                     className={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
@@ -2703,15 +2731,7 @@ function SidebarIconRail({
                   />
                 }
               >
-                <ProjectFavicon
-                  cadSnapshotId={
-                    project.cad?.roots.find((root) => root.current)?.current?.snapshotId
-                  }
-                  className={SIDEBAR_PROJECT_ICON_CLASS}
-                  environmentId={project.environmentId}
-                  cwd={project.workspaceRoot}
-                  onshapeSource={project.cad?.enabled === false ? undefined : project.onshapeSource}
-                />
+                <SidebarProjectTile project={project} />
               </TooltipTrigger>
               <TooltipPopup side="right">{project.displayName}</TooltipPopup>
             </Tooltip>
@@ -2741,7 +2761,7 @@ export default function ThreadSidebar() {
   const updateSettings = useUpdateClientSettings();
   const handleNewThread = useNewThreadHandler();
   const { archiveThread, deleteThread, offerArchiveUndo } = useThreadActions();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, state: sidebarState } = useSidebar();
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -3323,7 +3343,7 @@ export default function ThreadSidebar() {
   );
 
   return (
-    <>
+    <SidebarFoldMotion collapsed={!isMobile && sidebarState === "collapsed"}>
       {prewarmedSidebarThreadRefs.map((threadRef) => (
         <SidebarThreadDetailPrewarmer key={scopedThreadKey(threadRef)} threadRef={threadRef} />
       ))}
@@ -3379,6 +3399,6 @@ export default function ThreadSidebar() {
         activeProjectKey={activeRouteProjectKey}
         onCreateThread={createThreadInProject}
       />
-    </>
+    </SidebarFoldMotion>
   );
 }
