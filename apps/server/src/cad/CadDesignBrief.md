@@ -13,28 +13,29 @@ A design brief is a markdown file the designer keeps in the project workspace. A
 }
 ```
 
-Paths outside the workspace and absolute paths are ignored with a server warning. A missing or empty file means no brief. Content is trimmed and cut at 16 KiB with a truncation note, so keep the brief short and put long analyses elsewhere in the workspace where the agent can read them on request.
+Paths outside the workspace and absolute paths are ignored with a server warning. The reader removes `<!-- ... -->` comments, then trims; a missing file, or one empty after that, means no brief. Content is cut at 16 KiB with a truncation note, so keep the brief short and put long analyses elsewhere in the workspace where the agent can read them on request.
 
-## Suggested structure
+## Template and entry points
 
-Contents are free-form. These headings cover what reviews most often get wrong without them:
+New briefs start from `CADSENSE_DESIGN_BRIEF_TEMPLATE` in `packages/contracts/src/cadsenseProjectFile.ts`: three questions inside one HTML comment (what the mechanism is, what moves, what is missing or a stand-in). Students write their answers below the comment, so only their sentences reach the agent and an untouched template counts as no brief. [CadDesignBriefSpec.md](CadDesignBriefSpec.md) explains why the template asks nothing else.
 
-- **Intended motion.** What moves, what it is attached to, and what moves with it. "The elevator motor rides on the moving stage" stops a motor that travels from being flagged as a loose mount.
-- **Load cases and materials.** Expected loads, impacts, and the material or print settings of each structural part, so strength claims have something to check against.
-- **Rulebook or size and weight limits.** Frame perimeter, extension, height, and weight targets, with the margin the team wants to keep.
-- **Repair and assembly targets.** Which parts must be swappable at an event, how fast, and which tools are available.
-- **Known unfinished work.** Fasteners, wiring, or lightening not yet modeled, so the review treats them as dependencies rather than findings.
-- **Purchased parts.** Off-the-shelf parts that should not be redesigned, and any that have already been modified.
+The web app opens the brief from project settings, from a card on the new-thread screen while the brief is unanswered, and from a "Brief" button in the CAD panel's title row once it has an answer (`apps/web/src/components/designBrief/`). `designBriefState` in `@cadsense/shared/designBrief` decides missing, template, or filled with the same comment stripping as the reader. Creating the brief is a create-only write, so the server never replaces an existing brief with the template.
 
 ## How it reaches the agent
 
 `CadDesignBrief.ts` reads the file. `cadReviewInstructions` appends it after the shared review guidance and before any review learnings, under "Project design brief (path), written by the designer", and the guidance tells the agent to prefer the brief over inference and to ask when the brief and the model disagree.
 
-Codex reads the brief on every turn, so an edit applies to the next message. Claude reads it when its session starts, because the SDK fixes the system prompt for the life of the process; edits reach a Claude chat after the session restarts. `cad_context` reports `designBrief: { path, bytes }` for the file as it is on disk, or `null`, so a user can confirm the brief was picked up.
+Both providers read the brief when a chat's session starts: Claude through the system prompt, and Codex through the thread's `developerInstructions` on `thread/start` and `thread/resume`. Before each new turn they read it again with the learnings. When either changed, `cadGuidanceUpdate` builds a block with the changed parts, and the adapter sends it as its own text item before the user's text, once. A Claude steer into a running turn carries no block; the change waits for the next turn. The spec's "Freshness" section has the details. `cad_context` reports `designBrief: { path, bytes }` for the file as it is on disk, or `null`, so a user can confirm the brief was picked up.
+
+## Agent proposals
+
+Agents never write the brief. When the user says something lasting about the mechanism in a chat, the agent calls `cad_brief_propose` with lines to add and sentences to replace, each with the user's own words it came from, and text to remove, each with a reason. `CadBriefProposal.ts` holds the rules: every addition and replacement must quote a user message in that chat, replaced or removed text must occur exactly once in the brief (a whole line or one sentence of it), at most 5 changes, one undecided card per chat (a new proposal folds the open card's changes in and replaces it), and no line the student already dismissed there. `CadViewing.ts` runs the tool and appends a `cad.brief.proposed` activity (it reads proposal state from the activity table through `readCadBriefActivities`, because a thread read returns only the newest 500 activities), which the chat shows as a card (`apps/web/src/components/designBrief/DesignBriefProposalCard.tsx`). Saving or dismissing goes through `cad.briefProposal.resolve`: the server applies the proposal to the brief as it is at that moment, records `cad.brief.proposal-resolved`, and keeps the first decision if the student clicks twice. The next turn carries the change like any other edit. `cadsense mcp` does not offer the tool, since it has no chat to show the card in.
 
 ## Verification
 
-- `CadDesignBrief.test.ts` covers the default path, the configured path, missing and empty files, paths escaping the workspace, truncation, malformed `cadsense.json`, and an unreadable brief.
-- `../provider/CadReviewInstructions.test.ts` covers instruction assembly with and without a brief, and the Codex transport test in `../provider/Layers/CodexCadTools.test.ts` checks the brief reaches developer instructions on the wire only when CAD tools are registered.
-- `CadViewing.test.ts` checks the Claude system prompt append and the `cad_context` report from a real workspace.
+- `CadDesignBrief.test.ts` covers the default path, the configured path, missing and empty files, the untouched and partly filled template, paths escaping the workspace, truncation, malformed `cadsense.json`, and an unreadable brief.
+- `../provider/CadReviewInstructions.test.ts` covers instruction assembly with and without a brief, and the update block for changed guidance. The Codex transport tests in `../provider/Layers/CodexCadTools.test.ts` check the brief reaches developer instructions only when CAD tools are registered, and that an edit reaches the next `turn/start` once.
+- `CadBriefProposal.test.ts` covers the proposal rules and applying a proposal. `CadViewing.test.ts` runs a proposal through real orchestration: quotes from the assistant or another chat are refused, a subagent cannot propose, a new proposal folds in an undecided one, a save keeps the student's later edits and applies once, a dismissed line cannot come back, and all of that still holds after 520 newer activities. `../provider/CadReviewInstructions.test.ts` checks the shared guidance names no tool that reviews outside the app lack.
+- `scripts/cad-app-review-e2e.ts --then-prompt-file` runs a second turn in the same chat after `--save-proposal` or `--then-brief`, for checking with real models that a brief change reaches a running chat.
+- `CadViewing.test.ts` checks the Claude system prompt append, the `cad_context` report from a real workspace, and that an edit reaches the next new Claude turn but not a steer.
 - [The review evaluation](CadReviewEvaluation.md) describes running the behavioral check with and without a brief.

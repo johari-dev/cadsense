@@ -211,6 +211,70 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
 
+    // Create-only writes back the design brief's "Write brief" button. Ways it can fail: it
+    // overwrites a file that exists, it refuses a file that does not, or it reports the wrong one.
+    it.effect("create-only writes leave an existing file untouched", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "DESIGN.md", "The belt is a stand-in.\n");
+
+        const result = yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "DESIGN.md",
+          contents: "<!-- template -->\n",
+          createOnly: true,
+        });
+        const saved = yield* fileSystem
+          .readFileString(path.join(cwd, "DESIGN.md"))
+          .pipe(Effect.orDie);
+
+        expect(result).toEqual({ relativePath: "DESIGN.md", created: false });
+        expect(saved).toBe("The belt is a stand-in.\n");
+      }),
+    );
+
+    it.effect("create-only writes create a missing file", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        const result = yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "docs/DESIGN.md",
+          contents: "<!-- template -->\n",
+          createOnly: true,
+        });
+        const saved = yield* fileSystem
+          .readFileString(path.join(cwd, "docs/DESIGN.md"))
+          .pipe(Effect.orDie);
+
+        expect(result).toEqual({ relativePath: "docs/DESIGN.md", created: true });
+        expect(saved).toBe("<!-- template -->\n");
+      }),
+    );
+
+    it.effect("plain writes still replace an existing file", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "DESIGN.md", "old\n");
+
+        yield* workspaceFileSystem.writeFile({ cwd, relativePath: "DESIGN.md", contents: "new\n" });
+        const saved = yield* fileSystem
+          .readFileString(path.join(cwd, "DESIGN.md"))
+          .pipe(Effect.orDie);
+
+        expect(saved).toBe("new\n");
+      }),
+    );
+
     it.effect("invalidates workspace entry search cache after writes", () =>
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;

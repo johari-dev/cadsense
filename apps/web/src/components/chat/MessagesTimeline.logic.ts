@@ -15,6 +15,8 @@ import {
   type CadCaptureCard,
   type CadCommentsPublishedCard,
   type CadPartDrawingCard,
+  type CadBriefProposalCard,
+  type CadBriefProposalOutcome,
   type CadFeatureScriptPreviewCard,
   type OrchestrationLatestTurn,
   type TurnId,
@@ -210,6 +212,14 @@ export type MessagesTimelineRow =
       card: CadPartDrawingCard;
     }
   | {
+      /** An agent's design brief proposal; stays visible when the turn folds. */
+      kind: "brief-proposal";
+      id: string;
+      createdAt: string;
+      card: CadBriefProposalCard;
+      outcome: CadBriefProposalOutcome | null;
+    }
+  | {
       /** One agent FeatureScript preview. A turn's last one stays visible when the turn folds. */
       kind: "featurescript-preview";
       id: string;
@@ -322,6 +332,7 @@ const toolActionLabels: Readonly<Record<string, string>> = {
   cad_update_view: "Adjusting CAD view",
   cad_capture: "Looking at CAD",
   cad_featurescript_preview: "Previewing FeatureScript",
+  cad_brief_propose: "Proposing brief changes",
   cad_comments_list: "Reading CAD comments",
   cad_comment_locate: "Placing comment markers",
   cad_comment_inspect: "Checking comment markers",
@@ -689,6 +700,10 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.cadDrawing !== undefined) {
         continue;
       }
+      // A brief proposal waits for the student's decision, so folding must not hide it.
+      if (entry.kind === "work" && entry.entry.briefProposal !== undefined) {
+        continue;
+      }
       // The turn's final preview is where the agent's script ended up.
       if (entry.id === lastPreviewEntryId) {
         continue;
@@ -1001,6 +1016,17 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "work" && timelineEntry.entry.briefProposal !== undefined) {
+      nextRows.push({
+        kind: "brief-proposal",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        card: timelineEntry.entry.briefProposal.card,
+        outcome: timelineEntry.entry.briefProposal.outcome,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "work" && timelineEntry.entry.cadDrawing !== undefined) {
       nextRows.push({
         kind: "cad-drawing",
@@ -1044,6 +1070,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.kind !== "work" ||
           nextEntry.entry.cadComments !== undefined ||
           nextEntry.entry.cadDrawing !== undefined ||
+          nextEntry.entry.briefProposal !== undefined ||
           nextEntry.entry.featureScriptPreview !== undefined ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)
@@ -1168,6 +1195,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "cad-drawing":
     case "featurescript-preview":
       return a.id === (b as typeof a).id;
+
+    case "brief-proposal":
+      return a.id === (b as typeof a).id && a.outcome === (b as typeof a).outcome;
 
     case "working":
       return (

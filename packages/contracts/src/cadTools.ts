@@ -1,4 +1,5 @@
 import { CadFindPartsInput } from "./cadFindParts.ts";
+import { CadBriefProposeInput } from "./cadBriefProposal.ts";
 import { CadPartDrawingInput } from "./cadDrawing.ts";
 import {
   CadCommentCategory,
@@ -428,4 +429,5 @@ export const CAD_TOOL_INPUTS = {
   cad_capture: CadCaptureInput,
   cad_part_drawing: CadPartDrawingInput,
   cad_featurescript_preview: CadFeatureScriptPreviewInput,
+  cad_brief_propose: CadBriefProposeInput,
 } as const;

@@ -69,6 +69,20 @@ export function getOptimisticProjectFileQueryData(
   return appAtomRegistry.get(optimisticFileAtom(environmentId, cwd, relativePath))?.data ?? null;
 }
 
+/**
+ * Whether the file holds an edit the editor has not saved yet (it saves 500 ms after typing
+ * stops). A server-side change to the file must wait for this to clear, or the editor's pending
+ * save would write over it.
+ */
+export function hasUnsavedProjectFileEdit(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string,
+): boolean {
+  const optimisticFile = appAtomRegistry.get(optimisticFileAtom(environmentId, cwd, relativePath));
+  return optimisticFile != null && optimisticFile.confirmedAgainst === undefined;
+}
+
 export function confirmProjectFileQueryData(
   environmentId: EnvironmentId,
   cwd: string,

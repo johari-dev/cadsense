@@ -3,6 +3,7 @@ import {
   CADSENSE_PROJECT_FILE_NAME,
 } from "@cadsense/contracts";
 import { parseCadsenseProjectFile } from "@cadsense/shared/cadsenseProjectFile";
+import { stripDesignBriefComments } from "@cadsense/shared/designBrief";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -21,9 +22,12 @@ export interface CadDesignBrief {
   readonly content: string;
 }
 
-/** Trim the brief and cap it at the byte limit, telling the agent when content was cut. */
+/**
+ * Strip HTML comments, trim, and cap the brief at the byte limit, telling the agent when content
+ * was cut. The template's questions live in a comment, so only the student's sentences survive.
+ */
 function capDesignBrief(raw: Uint8Array): string {
-  const text = new TextDecoder().decode(raw).trim();
+  const text = stripDesignBriefComments(new TextDecoder().decode(raw));
   const encoded = new TextEncoder().encode(text);
   if (encoded.byteLength <= CAD_DESIGN_BRIEF_MAX_BYTES) return text;
   // Streaming decode drops a UTF-8 sequence split by the cut instead of emitting U+FFFD.
@@ -34,12 +38,11 @@ function capDesignBrief(raw: Uint8Array): string {
 }
 
 /**
- * Read the project's design brief: `designBrief` from cadsense.json, else DESIGN.md at the
- * workspace root. A missing or empty file means no brief. Every other problem (a path outside the
- * workspace, an unreadable file) is logged and also yields null, so a turn never fails because of
- * the brief. Called on each Codex turn, at Claude session start, and by cad_context.
+ * Where the project's design brief lives: `designBrief` from cadsense.json, else DESIGN.md at the
+ * workspace root. Null, with a warning, when the configured path leaves the workspace. Also used
+ * to save an agent proposal the student approved, so both read and write the same file.
  */
-export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
+export const resolveCadDesignBriefPath = Effect.fn("resolveCadDesignBriefPath")(function* (
   workspaceRoot: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -66,10 +69,24 @@ export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
       ),
       Effect.orElseSucceed(() => null),
     );
+  return resolved && { ...resolved, configured: configuredPath !== undefined };
+});
+
+/**
+ * Read the project's design brief from resolveCadDesignBriefPath. A missing or empty file means no
+ * brief. Every other problem (a path outside the workspace, an unreadable file) is logged and also
+ * yields null, so a turn never fails because of the brief. Called at session start, before each
+ * new turn, and by cad_context.
+ */
+export const readCadDesignBrief = Effect.fn("readCadDesignBrief")(function* (
+  workspaceRoot: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const resolved = yield* resolveCadDesignBriefPath(workspaceRoot);
   if (!resolved) return null;
   const raw = yield* fileSystem.readFile(resolved.absolutePath).pipe(
     Effect.tapError((cause) =>
-      cause.reason._tag === "NotFound" && configuredPath === undefined
+      cause.reason._tag === "NotFound" && !resolved.configured
         ? Effect.void
         : Effect.logWarning("Could not read the project design brief.", {
             path: resolved.relativePath,

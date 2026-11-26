@@ -1735,15 +1735,22 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           )
             return undefined;
           const projectId = project.value.id;
+          let lastLearnings: ReadonlyArray<{ readonly text: string }> = [];
           return {
             tools: yield* makeCadProviderTools(input.threadId).pipe(
               Effect.provideService(CadViewing, cadViewing.value),
               Effect.provideService(Scope.Scope, sessionScope),
             ),
-            // A failed read only costs this turn its learnings; the review still runs.
-            reviewLearnings: cadQuery.value
-              .getCadReviewLearnings(projectId)
-              .pipe(Effect.orElseSucceed(() => [])),
+            // A failed read keeps the last learnings read, so the runtime never sends a running
+            // thread "learnings removed" for a read that failed. The review still runs.
+            reviewLearnings: cadQuery.value.getCadReviewLearnings(projectId).pipe(
+              Effect.tap((learnings) =>
+                Effect.sync(() => {
+                  lastLearnings = learnings;
+                }),
+              ),
+              Effect.orElseSucceed(() => lastLearnings),
+            ),
           };
         }).pipe(Effect.orElseSucceed(() => undefined));
         const runtime = yield* createRuntime({

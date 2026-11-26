@@ -25,17 +25,31 @@
  * copied to <out>/folder, a fresh data directory gets a local CAD project for it, and the review
  * starts once the import finishes.
  *
+ * --workspace <new dir> (with --home) points the copied project at its own empty workspace, so
+ * parallel runs never share one, and a directory outside any git repo keeps repo CLAUDE.md and
+ * AGENTS.md files away from the agent. --brief <file> copies a design brief into the workspace as
+ * DESIGN.md (and into <out>/brief.md); it needs --workspace or --folder.
+ *
+ * --then-prompt-file <file> sends a second message in the same chat once the first turn ends. Before
+ * it, --save-proposal saves the design brief proposal the first turn made (it fails when there is
+ * none; <out>/brief-after-save.md holds the result), or --then-brief <file> replaces DESIGN.md the
+ * way an edit in the app would. Either checks that a brief change reaches a running chat:
+ * summary.json lists both turns and final-message.md is the second reply.
+ *
  * --codex-home sets the Codex instance's CODEX_HOME, for a model provider configured there. The web
  * app must be built first (`pnpm --filter @cadsense/web build`) because Chromium loads its render
  * page.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeUtil from "node:util";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CAD_BRIEF_PROPOSED_ACTIVITY,
+  CadBriefProposalCard,
   CommandId,
   hasCadSource,
   MessageId,
@@ -57,6 +71,7 @@ import { HttpServer } from "effect/unstable/http";
 
 import { makeCadMcpRenderHost } from "../src/cadMcp/CadMcpRenderHost.ts";
 import { writeCadMcpReport } from "../src/cadMcp/CadMcpReport.ts";
+import { CadViewing } from "../src/cad/CadViewing.ts";
 import { resolveServerConfig } from "../src/cli/config.ts";
 import { LocalCadProjects } from "../src/localCad/LocalCadProjects.ts";
 import * as ServerConfig from "../src/config.ts";
@@ -78,6 +93,11 @@ const { values } = NodeUtil.parseArgs({
     out: { type: "string" },
     "codex-home": { type: "string" },
     "timeout-minutes": { type: "string" },
+    workspace: { type: "string" },
+    brief: { type: "string" },
+    "then-prompt-file": { type: "string" },
+    "save-proposal": { type: "boolean" },
+    "then-brief": { type: "string" },
   },
 });
 const provider = values.provider;
@@ -89,8 +109,14 @@ if (
   !values.out
 )
   throw new Error(
-    "Usage: --home <data dir> | --folder <dir> --file <path in it>, --provider codex|claudeAgent --model <id> --prompt-file <file> --out <dir> [--effort <level>] [--codex-home <dir>] [--timeout-minutes <n>]",
+    "Usage: --home <data dir> [--workspace <new dir>] | --folder <dir> --file <path in it>, --provider codex|claudeAgent --model <id> --prompt-file <file> --out <dir> [--brief <file>] [--then-prompt-file <file> [--save-proposal | --then-brief <file>]] [--effort <level>] [--codex-home <dir>] [--timeout-minutes <n>]",
   );
+if (values.workspace && !values.home) throw new Error("--workspace needs --home.");
+if (values.brief && !values.workspace && !values.folder)
+  throw new Error("--brief needs --workspace or --folder.");
+if ((values["save-proposal"] || values["then-brief"]) && !values["then-prompt-file"])
+  throw new Error("--save-proposal and --then-brief need --then-prompt-file.");
+if (values["then-brief"] && !values.brief) throw new Error("--then-brief needs --brief.");
 
 const out = NodePath.resolve(values.out);
 if (NodeFS.existsSync(out)) throw new Error(`${out} already exists. Use a fresh --out directory.`);
@@ -103,6 +129,27 @@ if (values.home) {
 } else {
   NodeFS.mkdirSync(home);
   NodeFS.cpSync(NodePath.resolve(values.folder!), folder!, { recursive: true });
+}
+const workspace = values.workspace ? NodePath.resolve(values.workspace) : folder;
+if (values.workspace) {
+  if (NodeFS.existsSync(workspace!)) throw new Error(`${workspace} already exists.`);
+  NodeFS.mkdirSync(workspace!, { recursive: true });
+  // The copied database still names the source's workspace; repoint its one project here.
+  const db = new NodeSqlite.DatabaseSync(NodePath.join(home, "userdata", "state.sqlite"));
+  const roots = db.prepare("select workspace_root from projection_projects").all();
+  const from = roots[0]?.workspace_root;
+  if (roots.length !== 1 || typeof from !== "string")
+    throw new Error(`--workspace expects one project in the home, found ${roots.length}.`);
+  db.prepare("update projection_projects set workspace_root = ?").run(workspace!);
+  db.prepare("update orchestration_events set payload_json = replace(payload_json, ?, ?)").run(
+    from,
+    workspace!,
+  );
+  db.close();
+}
+if (values.brief) {
+  NodeFS.copyFileSync(NodePath.resolve(values.brief), NodePath.join(workspace!, "DESIGN.md"));
+  NodeFS.copyFileSync(NodePath.resolve(values.brief), NodePath.join(out, "brief.md"));
 }
 /** settings.json as this script edits it: the Codex provider entry. Every other key is kept as is. */
 interface SettingsFile {
@@ -130,6 +177,7 @@ const writeLog = (...args: unknown[]) =>
   NodeFS.writeSync(logFile, `${NodeUtil.stripVTControlCharacters(NodeUtil.format(...args))}\n`);
 console.log = console.info = console.debug = console.warn = console.error = writeLog;
 
+const decodeBriefProposal = Schema.decodeUnknownEffect(CadBriefProposalCard);
 const decodeContextUsage = Schema.decodeUnknownOption(
   Schema.Struct({
     usedTokens: Schema.Number,
@@ -190,35 +238,65 @@ const run = Effect.gen(function* () {
     interactionMode: "default",
     createdAt: yield* now,
   });
-  const startedAt = yield* Clock.currentTimeMillis;
-  yield* engine.dispatch({
-    type: "thread.turn.start",
-    commandId: CommandId.make(yield* uuid),
-    threadId,
-    message: {
-      messageId: MessageId.make(yield* uuid),
-      role: "user",
-      text: prompt,
-      attachments: [],
-    },
-    modelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    createdAt: yield* now,
-  });
-
-  // The turn has ended once the latest turn has started and left "running".
-  let state = "timeout";
-  while ((yield* Clock.currentTimeMillis) - startedAt < timeoutMs) {
-    yield* Effect.sleep("3 seconds");
-    const shell = Option.getOrUndefined(yield* query.getThreadShellById(threadId));
-    const turn = shell?.latestTurn;
-    if (turn?.startedAt && turn.state !== "running") {
-      state = turn.state;
-      break;
+  /** Sends one message and waits for its turn to end: its final state, or "timeout". */
+  const runTurn = Effect.fn(function* (text: string) {
+    const turnStartedAt = yield* Clock.currentTimeMillis;
+    const previousTurnId = Option.getOrUndefined(yield* query.getThreadShellById(threadId))
+      ?.latestTurn?.turnId;
+    yield* engine.dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make(yield* uuid),
+      threadId,
+      message: { messageId: MessageId.make(yield* uuid), role: "user", text, attachments: [] },
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: yield* now,
+    });
+    // The turn has ended once a new latest turn has started and left "running".
+    let turnState = "timeout";
+    while ((yield* Clock.currentTimeMillis) - turnStartedAt < timeoutMs) {
+      yield* Effect.sleep("3 seconds");
+      const turn = Option.getOrUndefined(yield* query.getThreadShellById(threadId))?.latestTurn;
+      if (turn?.startedAt && turn.turnId !== previousTurnId && turn.state !== "running") {
+        turnState = turn.state;
+        break;
+      }
     }
+    return {
+      state: turnState,
+      durationSeconds: Math.round(((yield* Clock.currentTimeMillis) - turnStartedAt) / 1000),
+    };
+  });
+  const turns = [yield* runTurn(prompt)];
+  let savedProposal: CadBriefProposalCard | null = null;
+  if (values["then-prompt-file"] && turns[0]!.state === "completed") {
+    if (values["save-proposal"]) {
+      const proposed = Option.getOrUndefined(
+        yield* query.getThreadDetailById(threadId),
+      )?.activities.findLast((activity) => activity.kind === CAD_BRIEF_PROPOSED_ACTIVITY);
+      if (!proposed) return yield* Effect.die("--save-proposal: the first turn proposed nothing.");
+      savedProposal = yield* decodeBriefProposal(proposed.payload);
+      const saved = yield* (yield* CadViewing).resolveBriefProposal({
+        threadId,
+        proposalId: savedProposal.proposalId,
+        decision: "save",
+      });
+      NodeFS.writeFileSync(NodePath.join(out, "brief-after-save.md"), saved.contents ?? "");
+    }
+    if (values["then-brief"])
+      NodeFS.copyFileSync(
+        NodePath.resolve(values["then-brief"]),
+        NodePath.join(workspace!, "DESIGN.md"),
+      );
+    turns.push(
+      yield* runTurn(
+        NodeFS.readFileSync(NodePath.resolve(values["then-prompt-file"]), "utf8").trim(),
+      ),
+    );
   }
-  const durationSeconds = Math.round(((yield* Clock.currentTimeMillis) - startedAt) / 1000);
+  const state = turns.at(-1)!.state;
+  const durationSeconds = turns.reduce((sum, turn) => sum + turn.durationSeconds, 0);
 
   const thread: OrchestrationThread | undefined = Option.getOrUndefined(
     yield* query.getThreadDetailById(threadId),
@@ -257,8 +335,13 @@ const run = Effect.gen(function* () {
     provider,
     model: values.model,
     effort: values.effort ?? "default",
+    designBrief: values.brief
+      ? { file: NodePath.basename(values.brief), bytes: NodeFS.statSync(values.brief).size }
+      : null,
     turnState: state,
     durationSeconds,
+    turns,
+    savedProposal,
     assistantMessages: assistant.length,
     toolCalls: tools,
     // Offered by the CAD tools, minus those Codex dropped for a Stop or a turn the user sent.

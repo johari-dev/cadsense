@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./designBrief": {
+      "types": "./src/designBrief.ts",
+      "import": "./src/designBrief.ts"
+    },
     "./cadTransfer": {
       "types": "./src/cadTransfer.ts",
       "import": "./src/cadTransfer.ts"

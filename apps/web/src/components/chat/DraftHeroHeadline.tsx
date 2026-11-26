@@ -11,6 +11,7 @@ import {
 import { useCallback, useMemo } from "react";
 
 import { Button } from "../ui/button";
+import { DesignBriefCard } from "../designBrief/DesignBriefEntry";
 import { singleCadModelName } from "~/cad/cadModelName";
 import { useModelThumbnail } from "~/cad/modelThumbnails";
 import type { Project } from "~/types";
@@ -179,6 +180,7 @@ export function DraftHeroHeadline({
       ) : (
         <div className="mt-4">{projectSelector}</div>
       )}
+      {activeProject?.cad?.enabled ? <DesignBriefCard project={activeProject} /> : null}
     </div>
   );
 }

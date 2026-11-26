@@ -3,6 +3,11 @@ import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { isBackgroundTaskActivity } from "@cadsense/client-runtime/state/subagentRuntime";
 import {
+  CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+  CAD_BRIEF_PROPOSED_ACTIVITY,
+  CadBriefProposalCard,
+  CadBriefProposalResolved,
+  type CadBriefProposalOutcome,
   CAD_COMMENTS_PUBLISHED_ACTIVITY,
   CAD_PART_DRAWING_ACTIVITY,
   CadPartDrawingCard,
@@ -34,6 +39,8 @@ const decodeToolCallFacts = Schema.decodeUnknownOption(ToolCallFacts);
 const decodeCadCommentsPublished = Schema.decodeUnknownOption(CadCommentsPublishedCard);
 const decodeCadPartDrawing = Schema.decodeUnknownOption(CadPartDrawingCard);
 const decodeFeatureScriptPreview = Schema.decodeUnknownOption(CadFeatureScriptPreviewCard);
+const decodeBriefProposal = Schema.decodeUnknownOption(CadBriefProposalCard);
+const decodeBriefProposalResolved = Schema.decodeUnknownOption(CadBriefProposalResolved);
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -61,6 +68,8 @@ export interface WorkLogEntry {
   cadDrawing?: CadPartDrawingCard;
   /** One `cad_featurescript_preview` call's result, shown as a card. */
   featureScriptPreview?: CadFeatureScriptPreviewCard;
+  /** A `cad_brief_propose` proposal and the student's decision, null while it is open. */
+  briefProposal?: { card: CadBriefProposalCard; outcome: CadBriefProposalOutcome | null };
   id: string;
   createdAt: string;
   turnId?: TurnId | null;
@@ -873,8 +882,17 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  // A brief decision shows on its proposal's card, not as a row of its own.
+  const briefOutcomes = new Map<string, CadBriefProposalOutcome>();
+  for (const activity of ordered) {
+    if (activity.kind !== CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY) continue;
+    const resolved = decodeBriefProposalResolved(activity.payload);
+    if (Option.isSome(resolved) && !briefOutcomes.has(resolved.value.proposalId))
+      briefOutcomes.set(resolved.value.proposalId, resolved.value.outcome);
+  }
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
+    if (activity.kind === CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY) continue;
     // A start shows a call while it runs (Codex sends nothing else until completion), so it is
     // kept only when its call id lets the completion merge into the same row.
     if (activity.kind === "tool.started" && extractToolCallId(asRecord(activity.payload)) === null)
@@ -890,7 +908,16 @@ export function deriveWorkLogEntries(
     if (isNoContentRuntimeWarning(activity)) continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    const entry = toDerivedWorkLogEntry(activity);
+    if (activity.kind === CAD_BRIEF_PROPOSED_ACTIVITY) {
+      const card = decodeBriefProposal(activity.payload);
+      if (Option.isSome(card))
+        entry.briefProposal = {
+          card: card.value,
+          outcome: briefOutcomes.get(card.value.proposalId) ?? null,
+        };
+    }
+    entries.push(entry);
   }
   return collapseDerivedWorkLogEntries(entries);
 }

@@ -26,32 +26,80 @@ export const CAD_REVIEW_INSTRUCTIONS = [
   "Before publishing, check that each finding follows from the design's intended use, distinguishes observation from assumption, matches its location, and helps the designer make a decision. Rewrite findings that fail; drop only the ones you cannot support. There is no target comment count. Finish with a brief explanation of the main concern and next decisions, without repeating every comment or adding unsupported reassurance. Expand only when the user needs more detail.",
 ].join("\n\n");
 
+/**
+ * When to propose a design brief change. Sessions in the app get it after the shared guidance.
+ * `cadsense mcp` reviews do not: they have no chat to show the card in, so they are not offered
+ * cad_brief_propose (CAD_PANEL_TOOLS) and must not be told to call it.
+ */
+export const CAD_BRIEF_PROPOSAL_RULE =
+  "When the user says something lasting about the mechanism in this chat (what it is, what moves, or what is missing or a stand-in), or something that contradicts a sentence of the project design brief, end your reply by calling cad_brief_propose with their own words. To correct a sentence, replace just that sentence. Never propose what you only saw in the model, and never during a review's steps.";
+
 export const CAD_REVIEW_LEARNINGS_HEADING =
   "Review learnings from this project's past dismissals (apply them; do not repeat dismissed findings):";
 
-/**
- * Review guidance for one project session or turn: the shared instructions, then the project
- * design brief when the workspace has one, then one line per learning the user left when
- * dismissing earlier findings. Empty sections are omitted, so with neither it is the shared
- * text alone.
- */
-export const cadReviewInstructions = (context: {
+/** The project-specific part of the review guidance: the design brief and review learnings. */
+export interface CadGuidance {
   readonly learnings: ReadonlyArray<{ readonly text: string }>;
   readonly designBrief?: CadDesignBrief | null;
-}): string => {
-  const { learnings, designBrief } = context;
-  return [
+}
+
+const briefSection = (designBrief: CadDesignBrief) =>
+  `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`;
+
+const learningLines = (learnings: CadGuidance["learnings"]) =>
+  learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`);
+
+const learningsSection = (learnings: CadGuidance["learnings"]) =>
+  learnings.length > 0
+    ? [CAD_REVIEW_LEARNINGS_HEADING, ...learningLines(learnings)].join("\n")
+    : null;
+
+/**
+ * Review guidance for one project session in the app: the shared instructions, the brief proposal
+ * rule, the project design brief when the workspace has one, then one line per learning the user
+ * left when dismissing earlier findings. Empty sections are omitted.
+ */
+export const cadReviewInstructions = ({ learnings, designBrief }: CadGuidance): string =>
+  [
     CAD_REVIEW_INSTRUCTIONS,
-    designBrief
-      ? `Project design brief (${designBrief.path}), written by the designer. Treat it as the user's stated intent and constraints:\n\n${designBrief.content}`
-      : null,
-    learnings.length > 0
-      ? [
-          CAD_REVIEW_LEARNINGS_HEADING,
-          ...learnings.map((learning) => `- ${learning.text.replaceAll(/\s+/g, " ").trim()}`),
-        ].join("\n")
-      : null,
+    CAD_BRIEF_PROPOSAL_RULE,
+    designBrief ? briefSection(designBrief) : null,
+    learningsSection(learnings),
   ]
     .filter((section) => section !== null)
     .join("\n\n");
+
+/**
+ * The text a running chat needs when its guidance changed since `delivered`: each changed source
+ * in full (the whole brief, the whole current learnings list), or a note that it was removed.
+ * Null when nothing the agent reads changed. Providers prepend it to the next new turn's input,
+ * since the session's instructions are fixed when it starts (CadDesignBriefSpec.md, "Freshness").
+ */
+export const cadGuidanceUpdate = (delivered: CadGuidance, current: CadGuidance): string | null => {
+  const sections: Array<string> = [];
+  const deliveredBrief = delivered.designBrief ?? null;
+  const currentBrief = current.designBrief ?? null;
+  if (
+    deliveredBrief?.path !== currentBrief?.path ||
+    deliveredBrief?.content !== currentBrief?.content
+  ) {
+    sections.push(
+      currentBrief
+        ? briefSection(currentBrief)
+        : "The project no longer has a design brief. Disregard the one given earlier.",
+    );
+  }
+  if (
+    learningLines(delivered.learnings).join("\n") !== learningLines(current.learnings).join("\n")
+  ) {
+    sections.push(
+      learningsSection(current.learnings) ??
+        "The project now has no review learnings. Disregard the ones given earlier.",
+    );
+  }
+  if (sections.length === 0) return null;
+  return [
+    "CAD guidance changed since this chat started. It replaces the matching section of your instructions:",
+    ...sections,
+  ].join("\n\n");
 };

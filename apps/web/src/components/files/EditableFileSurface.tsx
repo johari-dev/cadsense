@@ -97,6 +97,9 @@ export function EditableFileSurface(props: {
       className={cn(
         "min-h-0 flex-1 resize-none border-0 bg-code-background p-4 font-mono text-code-foreground outline-none",
         props.wordWrap ? "whitespace-pre-wrap" : "whitespace-pre overflow-x-auto",
+        // The code font draws "<!--" and "-->" as arrows. In Markdown those mark comments, such as
+        // the design brief's questions, and must read as markers a student will not delete.
+        /\.(md|markdown)$/i.test(props.relativePath) && "[font-variant-ligatures:none]",
       )}
       spellCheck={false}
       value={contents}

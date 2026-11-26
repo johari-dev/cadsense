@@ -1,13 +1,19 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+  CAD_BRIEF_PROPOSED_ACTIVITY,
   CadAgentContextId,
+  CadBriefProposalCard,
+  CadBriefProposalId,
   CadCommentError,
+  MessageId,
   CadOperationId,
   CadDiffResult,
   CadSnapshotManifest,
   CadFindPartsEntry,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   OnshapeProjectSource,
   ProjectId,
   ProviderInstanceId,
@@ -41,6 +47,7 @@ import { LocalCadImport } from "../localCad/LocalCadImport.ts";
 import { CadComments } from "./CadComments.ts";
 import { CadAgentChecksResult, makeCadProviderTools } from "../provider/CadProviderTools.ts";
 import { BACKSTOP_NOTE } from "../provider/CadCheckBackstop.ts";
+import { CAD_REVIEW_LEARNINGS_HEADING } from "../provider/CadReviewInstructions.ts";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import type { Options as ClaudeOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -57,7 +64,11 @@ import * as ClaudeCadCapabilities from "../provider/ClaudeCadCapabilities.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import { CadRenderBroker, type CadRenderRequest } from "./CadRenderBroker.ts";
 import { CadCaptureArtifacts, make as makeArtifacts } from "./CadCaptureArtifacts.ts";
-import { readLatestCadCapture, readCadUserView } from "./CadSessionPersistence.ts";
+import {
+  readCadBriefActivities,
+  readLatestCadCapture,
+  readCadUserView,
+} from "./CadSessionPersistence.ts";
 import { make as makePresentation } from "./CadPresentation.ts";
 import { make as makePanel } from "./CadPanel.ts";
 import { CadPanel } from "./CadPanel.ts";
@@ -68,6 +79,7 @@ import { ManagedWorkspaceAllocator } from "../workspace/ManagedWorkspaceAllocato
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import { make as makeRenderBroker } from "./CadRenderBroker.ts";
 import { releaseCompletedCadRuns } from "./CadRenderLifecycle.ts";
 import {
@@ -450,6 +462,406 @@ it.effect("reads the project design brief for Claude instructions and cad_contex
     ),
   ),
 );
+// A running Claude chat must see DESIGN.md edits. Ways it can fail: the edit never reaches the
+// model (system prompt only), it repeats on every turn, a steer into a running turn carries it
+// (and loses it for the next turn), or it displaces the user's text.
+it.live("prepends design brief edits to the next new Claude turn, once", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "cadsense-cad-fresh-" });
+    const writeBrief = (text: string) => fs.writeFileString(`${workspaceRoot}/DESIGN.md`, text);
+    yield* writeBrief("Brief A: the shooter hood is fixed.");
+    const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("cad-test"),
+          threadId,
+          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          providerSessionId: "claude-fresh-session",
+          endpoint: "http://localhost/mcp",
+          authorizationHeader: "Bearer test-only",
+        }),
+      ),
+      () => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+    );
+    const prompts: Array<ReadonlyArray<{ readonly type: string; readonly text?: string }>> = [];
+    const pending: Array<SDKMessage> = [];
+    let stopped = false;
+    let wake = () => {};
+    const adapter = yield* makeClaudeAdapter(claudeSettings, {
+      modelCatalog: Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
+      createQuery: ({ prompt }) => {
+        void (async () => {
+          for await (const message of prompt) {
+            const content = message.message.content;
+            prompts.push(typeof content === "string" ? [{ type: "text", text: content }] : content);
+          }
+        })();
+        return {
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          setMaxThinkingTokens: async () => {},
+          close: () => {
+            stopped = true;
+            wake();
+          },
+          [Symbol.asyncIterator]: () => ({
+            next: async (): Promise<IteratorResult<SDKMessage>> => {
+              for (;;) {
+                const value = pending.shift();
+                if (value) return { done: false, value };
+                if (stopped) return { done: true, value: undefined };
+                await new Promise<void>((resolve) => (wake = resolve));
+              }
+            },
+          }),
+        };
+      },
+    }).pipe(Effect.provideService(CadViewing, h.service));
+    // The adapter consumes prompts and results on its own fibers; wait up to 2 s for each step.
+    const until = (condition: Effect.Effect<boolean>) =>
+      condition.pipe(
+        Effect.flatMap((met) => (met ? Effect.void : Effect.fail("not yet" as const))),
+        Effect.retry({ schedule: Schedule.spaced("5 millis"), times: 400 }),
+        Effect.orDie,
+      );
+    const send = (input: string) =>
+      adapter
+        .sendTurn({ threadId, input, interactionMode: "default" })
+        .pipe(
+          Effect.tap(() =>
+            until(Effect.sync(() => prompts.some((items) => items.at(-1)?.text === input))),
+          ),
+        );
+    const texts = (input: string) =>
+      prompts.find((items) => items.at(-1)?.text === input)!.map((item) => item.text ?? "");
+    // Ends the running turn the way the CLI does, then waits for the adapter to close it.
+    const completeTurn = Effect.gen(function* () {
+      pending.push({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        num_turns: 1,
+        session_id: "sdk-fresh",
+        uuid: `result-${prompts.length}`,
+      } as unknown as SDKMessage);
+      wake();
+      yield* until(
+        Effect.map(adapter.listSessions(), ([session]) => session?.activeTurnId === undefined),
+      );
+    });
+
+    yield* adapter.startSession({ threadId, runtimeMode: "full-access", cwd: workspaceRoot });
+    yield* send("turn 1");
+    assert.deepEqual(texts("turn 1"), ["turn 1"]);
+    yield* completeTurn;
+
+    yield* writeBrief("Brief B: the 84T belt is a stand-in.");
+    const second = yield* send("turn 2");
+    const withB = texts("turn 2");
+    assert.strictEqual(withB.length, 2);
+    assert.include(withB[0], "CAD guidance changed");
+    assert.include(withB[0], "Brief B: the 84T belt is a stand-in.");
+    assert.notInclude(withB[0], CAD_REVIEW_LEARNINGS_HEADING);
+
+    // Turn 2 is still running, so this send is a steer into it and carries nothing.
+    yield* writeBrief("Brief C: the intake is not modeled yet.");
+    const steer = yield* send("steer into turn 2");
+    assert.strictEqual(steer.turnId, second.turnId);
+    assert.deepEqual(texts("steer into turn 2"), ["steer into turn 2"]);
+    yield* completeTurn;
+
+    yield* send("turn 3");
+    assert.include(texts("turn 3")[0], "Brief C: the intake is not modeled yet.");
+    assert.strictEqual(texts("turn 3")[1], "turn 3");
+    yield* completeTurn;
+
+    yield* send("turn 4");
+    assert.deepEqual(texts("turn 4"), ["turn 4"]);
+    yield* adapter.stopSession(threadId);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(
+        dependencies,
+        ServerSettingsService.layerTest(),
+        ClaudeCadCapabilities.layer.pipe(Layer.provide(NodeServices.layer)),
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+  ),
+);
+// cad_brief_propose and the student's decision, through real orchestration and a real workspace.
+// Ways it can fail: an addition quotes the assistant or another chat and is accepted; a second
+// proposal opens beside the first; saving loses text written after the proposal, applies twice
+// when clicked twice, or reports a result the file does not hold; a dismissed line comes back; a
+// subagent proposes.
+it.effect(
+  "proposes brief changes from the student's words and applies the student's decision",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "cadsense-brief-propose-",
+      });
+      const briefPath = `${workspaceRoot}/DESIGN.md`;
+      yield* fs.writeFileString(briefPath, "The shooter hood is fixed at 45 degrees.\n");
+      const h = yield* harness(false, false, false, undefined, undefined, workspaceRoot);
+      const query = yield* ProjectionSnapshotQuery;
+      const say = (thread: ThreadId, id: string, text: string) =>
+        h.dispatch({
+          type: "thread.turn.start",
+          threadId: thread,
+          message: { messageId: MessageId.make(id), role: "user", text, attachments: [] },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          createdAt: now,
+        });
+      yield* say(
+        threadId,
+        "brief-user-1",
+        "Ignore the 84T belt, it's just a placeholder until we pick the ratio. The hood adjusts now.",
+      );
+      yield* say(otherThreadId, "brief-other-1", "The intake rollers are off limits.");
+      yield* h.dispatch({
+        type: "thread.message.assistant.delta",
+        threadId,
+        messageId: MessageId.make("brief-assistant-1"),
+        delta: "The belt looks undersized for this load.",
+        createdAt: now,
+      });
+      const propose = (input: unknown, childKey?: string) =>
+        Effect.gen(function* () {
+          const contextId = yield* h.service.resolveContext(threadId, childKey);
+          return yield* h.service.withActivation(
+            contextId,
+            (tools) => tools.briefPropose(input),
+            TurnId.make("brief-turn"),
+          );
+        });
+      const refused = (input: unknown, childKey?: string) =>
+        propose(input, childKey).pipe(
+          Effect.as("accepted"),
+          Effect.flip,
+          Effect.map((error) => error.details ?? error.reason),
+        );
+      const decodeBriefCard = (payload: unknown) =>
+        decodeBriefProposalCard(payload).pipe(Effect.orDie);
+      const activities = Effect.gen(function* () {
+        const thread = yield* query.getThreadDetailById(threadId).pipe(Effect.orDie);
+        return Option.getOrThrow(thread).activities;
+      });
+
+      assert.match(
+        yield* refused({
+          add: [{ text: "The belt is undersized.", quote: "the belt looks undersized" }],
+        }),
+        /quote/i,
+      );
+      assert.match(
+        yield* refused({ add: [{ text: "Rollers are off limits.", quote: "off limits" }] }),
+        /quote/i,
+      );
+      assert.match(
+        yield* refused(
+          { add: [{ text: "The 84T belt is a placeholder.", quote: "just a placeholder" }] },
+          "child-a",
+        ),
+        /main agent/i,
+      );
+
+      const first = {
+        add: [
+          {
+            text: "The 84T belt is a placeholder until the team picks the ratio.",
+            quote: "it's just a placeholder until we pick the ratio",
+          },
+        ],
+        remove: [
+          { text: "The shooter hood is fixed at 45 degrees.", reason: "The hood adjusts now." },
+        ],
+      };
+      yield* propose(first);
+      const proposed = (yield* activities).filter(
+        (activity) => activity.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
+      );
+      assert.strictEqual(proposed.length, 1);
+      const opened = yield* decodeBriefCard(proposed[0]!.payload);
+      assert.deepEqual(opened.add, first.add);
+      assert.strictEqual(opened.path, "DESIGN.md");
+      // The student ignores the card and says something else lasting: the new proposal takes the
+      // open one's changes along, so nothing is lost and one card waits at the bottom of the chat.
+      const extra = { text: "The 84T belt is a stand-in.", quote: "just a placeholder" };
+      yield* propose({ add: [extra] });
+      const card = (yield* Effect.forEach(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.proposalId !== opened.proposalId)!;
+      assert.deepEqual(card.add, [...first.add, extra]);
+      assert.deepEqual(card.remove, first.remove);
+      const superseded = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: opened.proposalId,
+        decision: "save",
+      });
+      assert.deepEqual(superseded, { outcome: "superseded", path: "DESIGN.md", contents: null });
+
+      // The student keeps writing before saving; the save keeps their line.
+      yield* fs.writeFileString(
+        briefPath,
+        "The shooter hood is fixed at 45 degrees.\nThe shooter is for the 2027 game.\n",
+      );
+      const saved = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: card.proposalId,
+        decision: "save",
+      });
+      const expected =
+        "The shooter is for the 2027 game.\nThe 84T belt is a placeholder until the team picks the ratio.\nThe 84T belt is a stand-in.\n";
+      assert.deepEqual(saved, { outcome: "saved", path: "DESIGN.md", contents: expected });
+      assert.strictEqual(yield* fs.readFileString(briefPath), expected);
+      // A second click, or a dismissal racing the save, keeps the first outcome and writes nothing.
+      const again = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: card.proposalId,
+        decision: "dismiss",
+      });
+      assert.strictEqual(again.outcome, "saved");
+      assert.strictEqual(yield* fs.readFileString(briefPath), expected);
+      assert.strictEqual(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY).length,
+        2,
+      );
+
+      const second = { add: [{ text: "The hood adjusts.", quote: "the hood adjusts now" }] };
+      yield* propose(second);
+      const cards = yield* Effect.forEach(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
+        (a) => decodeBriefCard(a.payload),
+      );
+      const secondCard = cards.find(
+        (c) => c.add.length === 1 && c.add[0]!.text === "The hood adjusts.",
+      )!;
+      const dismissed = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: secondCard.proposalId,
+        decision: "dismiss",
+      });
+      assert.deepEqual(dismissed, { outcome: "dismissed", path: "DESIGN.md", contents: null });
+      assert.strictEqual(yield* fs.readFileString(briefPath), expected);
+      assert.match(yield* refused(second), /dismissed/i);
+      // A stale sentence inside a line changes without the agent restating the rest of the line.
+      yield* fs.writeFileString(
+        briefPath,
+        "The shooter is for the 2027 game. It uses 2 inch rollers and a Vortex.\n",
+      );
+      yield* propose({
+        replace: [
+          {
+            from: "It uses 2 inch rollers and a Vortex.",
+            to: "It uses 3 inch rollers and a Vortex.",
+            quote: "the hood adjusts now",
+          },
+        ],
+      });
+      const third = (yield* Effect.forEach(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.replace.length > 0)!;
+      yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: third.proposalId,
+        decision: "save",
+      });
+      assert.strictEqual(
+        yield* fs.readFileString(briefPath),
+        "The shooter is for the 2027 game. It uses 3 inch rollers and a Vortex.\n",
+      );
+      // A thread read returns its newest 500 activities, and one review turn writes about 100.
+      // Ways that can break proposals: a dismissed line comes back, a second proposal opens beside
+      // an undecided one, or saving an older card fails because its proposal is out of the read.
+      const bury = (label: string) =>
+        Effect.forEach(
+          Array.from({ length: 520 }, (_, index) => index),
+          (index) =>
+            h.dispatch({
+              type: "thread.activity.append",
+              threadId,
+              activity: {
+                id: EventId.make(`bury-${label}-${index}`),
+                tone: "info",
+                kind: "tool.completed",
+                summary: "Filler",
+                payload: {},
+                turnId: null,
+                createdAt: now,
+              },
+              createdAt: now,
+            }),
+          { discard: true },
+        );
+      yield* bury("dismissed");
+      assert.match(yield* refused(second), /dismissed/i);
+      yield* propose({
+        add: [{ text: "The belt ratio is undecided.", quote: "until we pick the ratio" }],
+      });
+      // Read from the table: the filler rows are newer than this proposal on the test clock, so
+      // the capped thread read no longer returns it.
+      const buried = (yield* Effect.forEach(
+        (yield* readCadBriefActivities(threadId).pipe(Effect.orDie)).filter(
+          (a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
+        ),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.add[0]?.text === "The belt ratio is undecided.")!;
+      yield* bury("open");
+      // The buried card is still found as the open one, so a new proposal carries its line.
+      yield* propose({
+        add: [{ text: "The belt is a placeholder.", quote: "just a placeholder" }],
+      });
+      const folded = (yield* Effect.forEach(
+        (yield* readCadBriefActivities(threadId).pipe(Effect.orDie)).filter(
+          (a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
+        ),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.add.some((line) => line.text === "The belt is a placeholder."))!;
+      assert.deepEqual(
+        folded.add.map((line) => line.text),
+        ["The belt ratio is undecided.", "The belt is a placeholder."],
+      );
+      // The buried card stepped aside, so clicking Save on it writes nothing.
+      assert.strictEqual(
+        (yield* h.service.resolveBriefProposal({
+          threadId,
+          proposalId: buried.proposalId,
+          decision: "save",
+        })).outcome,
+        "superseded",
+      );
+      assert.notInclude(yield* fs.readFileString(briefPath), "The belt ratio is undecided.");
+      const late = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: folded.proposalId,
+        decision: "save",
+      });
+      assert.strictEqual(late.outcome, "saved");
+      assert.include(yield* fs.readFileString(briefPath), "The belt ratio is undecided.");
+      assert.include(yield* fs.readFileString(briefPath), "The belt is a placeholder.");
+      assert.strictEqual(
+        (yield* h.service
+          .resolveBriefProposal({
+            threadId,
+            proposalId: CadBriefProposalId.make("no-such-proposal"),
+            decision: "save",
+          })
+          .pipe(Effect.flip)).reason,
+        "invalid-operation",
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(dependencies.pipe(Layer.provideMerge(NodeServices.layer))),
+    ),
+);
 it.effect(
   "binds concurrent provider children to private viewers and revokes native session tools",
   () =>
@@ -490,6 +902,7 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(dependencies)),
 );
 const decodeSnapshot = Schema.decodeUnknownEffect(CadSnapshotManifest);
+const decodeBriefProposalCard = Schema.decodeUnknownEffect(CadBriefProposalCard);
 const projectId = ProjectId.make("cad-viewing-project");
 const threadId = ThreadId.make("cad-viewing-thread");
 const otherThreadId = ThreadId.make("cad-other-thread");

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
+import { CAD_TOOL_INPUTS } from "@cadsense/contracts";
+import { CAD_PANEL_TOOLS } from "./CadProviderTools.ts";
 import {
+  CAD_BRIEF_PROPOSAL_RULE,
   CAD_REVIEW_INSTRUCTIONS,
   CAD_REVIEW_LEARNINGS_HEADING,
+  cadGuidanceUpdate,
   cadReviewInstructions,
 } from "./CadReviewInstructions.ts";
 import { buildCodexDeveloperInstructions } from "./CodexDeveloperInstructions.ts";
@@ -14,11 +18,19 @@ const brief = {
 const runtime = { model: "gpt-5.6-terra", reasoningEffort: "medium" };
 
 describe("cadReviewInstructions", () => {
-  it("is the shared guidance alone without learnings or a design brief", () => {
-    expect(cadReviewInstructions({ learnings: [] })).toBe(CAD_REVIEW_INSTRUCTIONS);
-    expect(cadReviewInstructions({ learnings: [], designBrief: null })).toBe(
-      CAD_REVIEW_INSTRUCTIONS,
-    );
+  const session = `${CAD_REVIEW_INSTRUCTIONS}\n\n${CAD_BRIEF_PROPOSAL_RULE}`;
+  it("is the shared guidance and the app's proposal rule without learnings or a design brief", () => {
+    expect(cadReviewInstructions({ learnings: [] })).toBe(session);
+    expect(cadReviewInstructions({ learnings: [], designBrief: null })).toBe(session);
+  });
+  // `cadsense mcp` sends CAD_REVIEW_INSTRUCTIONS to reviews outside the app and hides the panel
+  // tools from them. The shared text must never tell those agents to call a tool they lack.
+  it("names no tool in the shared guidance that reviews outside the app cannot call", () => {
+    const named = [...new Set(CAD_REVIEW_INSTRUCTIONS.match(/\bcad_[a-z_]+\b/g) ?? [])];
+    expect(named.length).toBeGreaterThan(3);
+    expect(named.filter((tool) => !Object.hasOwn(CAD_TOOL_INPUTS, tool))).toEqual([]);
+    expect(named.filter((tool) => CAD_PANEL_TOOLS.has(tool))).toEqual([]);
+    expect(CAD_BRIEF_PROPOSAL_RULE).toContain("cad_brief_propose");
   });
   it("appends one line per learning in order after the shared guidance", () => {
     const text = cadReviewInstructions({
@@ -27,9 +39,7 @@ describe("cadReviewInstructions", () => {
         { text: "The motor is a placeholder;\n  do not review its mount." },
       ],
     });
-    expect(text.startsWith(`${CAD_REVIEW_INSTRUCTIONS}\n\n${CAD_REVIEW_LEARNINGS_HEADING}\n`)).toBe(
-      true,
-    );
+    expect(text.startsWith(`${session}\n\n${CAD_REVIEW_LEARNINGS_HEADING}\n`)).toBe(true);
     expect(text.split("\n").slice(-2)).toEqual([
       "- Vent holes are intentional.",
       "- The motor is a placeholder; do not review its mount.",
@@ -70,5 +80,52 @@ describe("design brief in Codex developer instructions", () => {
     const withoutCad = buildCodexDeveloperInstructions("default", runtime, true, false, [], brief);
     expect(withoutCad).not.toContain("Project design brief");
     expect(withoutCad).not.toContain(brief.content);
+  });
+});
+
+// The update block a running chat gets when the brief or learnings change after its session
+// started. Ways it can fail: it fires with nothing changed, it resends a source that did not
+// change, it drops the new content, or a removal reads as "nothing changed".
+describe("cadGuidanceUpdate", () => {
+  const learning = { text: "Vent holes are intentional." };
+  const delivered = { learnings: [learning], designBrief: brief };
+
+  it("is null when nothing changed, including whitespace inside a learning", () => {
+    expect(cadGuidanceUpdate(delivered, delivered)).toBeNull();
+    expect(
+      cadGuidanceUpdate(delivered, {
+        learnings: [{ text: "Vent holes  are\nintentional. " }],
+        designBrief: { ...brief, bytes: 99 },
+      }),
+    ).toBeNull();
+  });
+
+  it("sends an edited brief whole and leaves the unchanged learnings out", () => {
+    const edited = { ...brief, content: "The 84T belt is a stand-in." };
+    const update = cadGuidanceUpdate(delivered, { learnings: [learning], designBrief: edited });
+    expect(update).toContain("CAD guidance changed");
+    expect(update).toContain("Project design brief (DESIGN.md)");
+    expect(update).toContain("The 84T belt is a stand-in.");
+    expect(update).not.toContain(brief.content);
+    expect(update).not.toContain(CAD_REVIEW_LEARNINGS_HEADING);
+  });
+
+  it("sends the current learnings and leaves the unchanged brief out", () => {
+    const added = { text: "The belly pan is a placeholder." };
+    const update = cadGuidanceUpdate(delivered, {
+      learnings: [learning, added],
+      designBrief: brief,
+    });
+    expect(update).toContain(CAD_REVIEW_LEARNINGS_HEADING);
+    expect(update).toContain("- Vent holes are intentional.");
+    expect(update).toContain("- The belly pan is a placeholder.");
+    expect(update).not.toContain(brief.content);
+  });
+
+  it("says so when the brief or every learning is removed", () => {
+    const update = cadGuidanceUpdate(delivered, { learnings: [], designBrief: null });
+    expect(update).toContain("no longer has a design brief");
+    expect(update).toContain("no review learnings");
+    expect(update).not.toContain(brief.content);
   });
 });

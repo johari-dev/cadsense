@@ -266,11 +266,15 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  /** Write only if no file exists at the path. An existing file is left as it is. */
+  createOnly: Schema.optional(Schema.Boolean),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
 export const ProjectWriteFileResult = Schema.Struct({
   relativePath: TrimmedNonEmptyString,
+  /** For create-only writes: false when a file already existed and was left untouched. */
+  created: Schema.optional(Schema.Boolean),
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 

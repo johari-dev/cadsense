@@ -40,10 +40,19 @@ describe("rightPanelStore", () => {
     expect(panel()).toMatchObject({
       isOpen: true,
       section: "files",
-      file: { relativePath: "src/a.ts", revealLine: 12, revealRequestId: 2 },
+      file: { relativePath: "src/a.ts", revealLine: 12, revealRequestId: 2, hideExplorer: false },
     });
     useRightPanelStore.getState().closeFile(threadRef);
     expect(panel()).toMatchObject({ section: "files", file: null });
+  });
+
+  it("opens a file without the explorer only when asked, per open", () => {
+    useRightPanelStore
+      .getState()
+      .openFile(threadRef, "DESIGN.md", undefined, { hideExplorer: true });
+    expect(panel().file).toMatchObject({ relativePath: "DESIGN.md", hideExplorer: true });
+    useRightPanelStore.getState().openFile(threadRef, "src/a.ts");
+    expect(panel().file).toMatchObject({ relativePath: "src/a.ts", hideExplorer: false });
   });
 
   it("forgets the browser once its pages are gone", () => {

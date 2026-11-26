@@ -38,4 +38,8 @@ export const cadPanelEnvironment = {
     label: "cad-panel:save",
     tag: WS_METHODS.cadPanelSave,
   }),
+  resolveBriefProposal: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "cad-brief-proposal:resolve",
+    tag: WS_METHODS.cadBriefProposalResolve,
+  }),
 };
