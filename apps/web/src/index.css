@@ -95,6 +95,8 @@
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
   --animate-status-pulse: status-pulse 2s infinite;
+  /* A 0.4s shake, then a 2s hold. Transform only, so it never repaints the dot. */
+  --animate-status-shake: status-shake 2.4s infinite;
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
   --color-warning-foreground: var(--warning-foreground);
@@ -186,6 +188,30 @@
     }
     100% {
       opacity: 1;
+    }
+  }
+  @keyframes status-shake {
+    0% {
+      transform: translateX(0);
+    }
+    3% {
+      transform: translateX(-1.5px);
+    }
+    6% {
+      transform: translateX(1.5px);
+    }
+    9% {
+      transform: translateX(-1.5px);
+    }
+    12% {
+      transform: translateX(1.5px);
+    }
+    15% {
+      transform: translateX(-0.75px);
+    }
+    18%,
+    100% {
+      transform: translateX(0);
     }
   }
   @keyframes status-pulse {
