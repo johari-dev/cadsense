@@ -141,9 +141,10 @@ function SidebarControl() {
  * `pt-[var(--workspace-topbar-height)]`) could not drag the window. No bottom border: pages
  * without a bordered header (empty state, settings) would show it as a stray stub. It carries
  * `surface-grain` like every surface that covers the body, or it reads as a flat dark patch.
- * It keeps the sidebar tint, and the titlebar row beside it fades that tint out (workspaceTitlebar.ts).
+ * On macOS (`fade`) it keeps the sidebar tint, and the titlebar row beside it fades that tint
+ * out (`rail-titlebar-fade` in index.css). Elsewhere it takes the page background.
  */
-function SidebarRailTitlebarCap() {
+function SidebarRailTitlebarCap({ fade }: { readonly fade: boolean }) {
   const { isMobile, state } = useSidebar();
   if (isMobile || state !== "collapsed") return null;
 
@@ -151,7 +152,8 @@ function SidebarRailTitlebarCap() {
     <div
       aria-hidden
       className={cn(
-        "fixed top-0 left-0 z-20 h-[var(--workspace-topbar-height)] w-(--sidebar-width-icon) bg-sidebar surface-grain",
+        "fixed top-0 left-0 z-20 h-[var(--workspace-topbar-height)] w-(--sidebar-width-icon) surface-grain",
+        fade ? "bg-sidebar" : "bg-background",
         isElectron && "drag-region",
       )}
       data-sidebar-rail-titlebar=""
@@ -164,7 +166,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const isSettingsOpen = useLocation({
     select: (location) => parseSettingsSearch(location.search).settings !== undefined,
   });
-  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
+  const isMac = isMacPlatform(navigator.platform);
+  const isMacosDesktop = isElectron && isMac;
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
   // and a clamped drag ends with an unchanged width, which skips the re-render
@@ -256,6 +259,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       open={sidebarOpen}
       onOpenChange={handleSidebarOpenChange}
       collapsedLayout="icon"
+      // macOS only: the folded rail's tint fades across the title bar (index.css).
+      data-rail-titlebar-fade={isMac ? "" : undefined}
       style={sidebarProviderStyle}
     >
       <Sidebar
@@ -284,7 +289,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       {children}
       {/* Before the toggle: Electron on Windows builds the drag area in DOM order and ignores
           z-index, so the toggle's no-drag must come after this drag strip to stay clickable. */}
-      <SidebarRailTitlebarCap />
+      <SidebarRailTitlebarCap fade={isMac} />
       <SidebarControl />
     </SidebarProvider>
   );

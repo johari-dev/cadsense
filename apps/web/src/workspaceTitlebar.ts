@@ -4,8 +4,8 @@
 // clears the traffic lights and reaches past it, so each row keeps its own padding (the
 // first max() argument) unless `--workspace-titlebar-rail-content-left` needs more.
 //
-// Beside the rail, the row also fades the rail's titlebar tint in from its left edge
-// (`rail-titlebar-fade` in index.css).
+// Beside the rail, on macOS, the row also fades the rail's titlebar tint in from its left
+// edge (`rail-titlebar-fade` in index.css).
 
 export const PAGE_HEADER_TITLEBAR_INSET_CLASS =
   "[[data-sidebar-state=collapsed]_&]:pl-[var(--workspace-titlebar-content-left)] [[data-sidebar-state=rail]_&]:pl-[max(calc(env(safe-area-inset-left)+1.25rem),var(--workspace-titlebar-rail-content-left))] rail-titlebar-fade";
