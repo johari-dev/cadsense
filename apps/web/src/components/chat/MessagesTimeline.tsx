@@ -37,6 +37,7 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
+import { preserveReadingPosition } from "~/lib/preserveReadingPosition";
 import {
   deriveTimelineEntries,
   workEntryDisplayIndicatesToolFailure,
@@ -305,10 +306,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const followingEnd = liveFollowEnabled && anchorMessageId === null;
   const followingEndRef = useRef(followingEnd);
+  // Reading history: the user scrolled away from the end and no new turn is being anchored.
+  const readingHistory = !liveFollowEnabled && anchorMessageId === null;
+  const readingHistoryRef = useRef(readingHistory);
   // Holds the timeline's place while the chat column changes width (see observeTimelineReflow).
   const reflowRef = useRef<TimelineReflow | null>(null);
   useLayoutEffect(() => {
     followingEndRef.current = followingEnd;
+    readingHistoryRef.current = readingHistory;
     keepTimelineEndVisibleAfterOverlayGrowth({
       timeline: listRef.current,
       previousOverlayHeight: previousContentInsetEndAdjustmentRef.current,
@@ -316,7 +321,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       followingEnd,
     });
     previousContentInsetEndAdjustmentRef.current = contentInsetEndAdjustment;
-  }, [contentInsetEndAdjustment, followingEnd, listRef]);
+  }, [contentInsetEndAdjustment, followingEnd, listRef, readingHistory]);
 
   useEffect(() => {
     return () => {
@@ -474,13 +479,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   useLayoutEffect(() => {
     if (!timelineViewportElement) return;
+    const scroller = listRef.current?.getScrollableNode() ?? null;
     const reflow = observeTimelineReflow(timelineViewportElement, {
+      content: scroller?.firstElementChild ?? null,
       followingEnd: () => followingEndRef.current,
       // Scroll the element directly: the list's scrollToEnd waits for rows to stop resizing,
       // which never happens mid-resize, so it would land frames late. Line up the painted last
       // row rather than trusting scrollHeight, which can be stale or padded for a frame.
       pinToEnd: () => {
-        const scroller = listRef.current?.getScrollableNode();
         if (!scroller) return;
         const lastRowId = lastRowIdRef.current;
         const offset = lastRowId ? measureTimelineEndOffset(scroller, lastRowId) : null;
@@ -489,7 +495,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       },
     });
     reflowRef.current = reflow;
+    // Following the end is the reflow's job; reading history keeps the line being read in view.
+    const stopPreservingReadingPosition = scroller
+      ? preserveReadingPosition(scroller, () => readingHistoryRef.current)
+      : undefined;
     return () => {
+      stopPreservingReadingPosition?.();
       reflow.dispose();
       reflowRef.current = null;
     };

@@ -28,7 +28,7 @@ catalog:
   "@effect/sql-sqlite-bun": 4.0.0-beta.103
   "@effect/tsgo": 0.13.2
   "@effect/vitest": 4.0.0-beta.103
-  "@legendapp/list": 3.3.5
+  "@legendapp/list": 3.9.0
   "@types/node": 24.12.4
   "@typescript/native-preview": 7.0.0-dev.20260604.1
   effect: 4.0.0-beta.103
@@ -46,7 +46,7 @@ minimumReleaseAgeExclude:
   - "@effect/sql-sqlite-bun@4.0.0-beta.103"
   - "@effect/vitest@4.0.0-beta.103"
   - effect@4.0.0-beta.103
-  - "@legendapp/list@3.3.5"
+  - "@legendapp/list@3.9.0"
 
 overrides:
   # The SDK always receives the user's Claude executable, so its bundled binaries are unused.
@@ -82,6 +82,9 @@ packageExtensions:
       vite: "catalog:"
 
 patchedDependencies:
+  # scrollToEnd measures the header and footer first, so opening a chat lands at its
+  # current end. getState() reads distanceFromEnd only when asked, which saves a forced layout.
+  "@legendapp/list@3.9.0": patches/@legendapp__list@3.9.0.patch
   "@effect/vitest@4.0.0-beta.103": patches/@effect__vitest@4.0.0-beta.103.patch
   "@ff-labs/fff-node@0.9.4": patches/@ff-labs__fff-node@0.9.4.patch
   effect@4.0.0-beta.103: patches/effect@4.0.0-beta.103.patch

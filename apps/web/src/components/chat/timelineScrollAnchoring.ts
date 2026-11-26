@@ -57,10 +57,18 @@ export interface TimelineReflow {
  * was following the end is pinned to it in the same frame as each change and every frame
  * after, and `isSettling()` tells the scroll handler to ignore at-end changes the reflow
  * causes.
+ *
+ * `content` is the list's content element. The list applies its new height a frame after the
+ * rows re-wrap, and the browser clamps the scroll position to it after that frame's pin ran,
+ * which would paint the end a line off. Re-pinning when it resizes lands before that paint.
  */
 export function observeTimelineReflow(
   element: Element,
-  options: { readonly followingEnd: () => boolean; readonly pinToEnd: () => void },
+  options: {
+    readonly content: Element | null;
+    readonly followingEnd: () => boolean;
+    readonly pinToEnd: () => void;
+  },
 ): TimelineReflow {
   let width = element.getBoundingClientRect().width;
   let settling: { readonly followingEnd: boolean; readonly until: number } | null = null;
@@ -75,9 +83,15 @@ export function observeTimelineReflow(
     if (settling.followingEnd) options.pinToEnd();
     frame = requestAnimationFrame(pin);
   };
-  const observer = new ResizeObserver(([entry]) => {
-    if (!entry || entry.contentRect.width === width) return;
-    width = entry.contentRect.width;
+  const observer = new ResizeObserver((entries) => {
+    const resized = entries.find((entry) => entry.target === element);
+    if (!resized || resized.contentRect.width === width) {
+      // Only the list's content changed height. Content grows and shrinks all the time while
+      // streaming; only a settling width change re-pins.
+      if (settling?.followingEnd) options.pinToEnd();
+      return;
+    }
+    width = resized.contentRect.width;
     settling = {
       // Each frame of an animated resize extends the window; the first frame's decision holds.
       followingEnd: settling?.followingEnd ?? options.followingEnd(),
@@ -87,6 +101,7 @@ export function observeTimelineReflow(
     pin();
   });
   observer.observe(element);
+  if (options.content) observer.observe(options.content);
   return {
     isSettling: () => settling !== null,
     pinningEnd: () => settling?.followingEnd === true,
