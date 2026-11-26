@@ -1567,7 +1567,7 @@ function ComposerPromptEditorInner({
   }, []);
 
   return (
-    <div className="relative [font-size:1rem] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(1rem,16px)]">
+    <div className="relative [font-size:0.875rem] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(1rem,16px)]">
       <PlainTextPlugin
         contentEditable={
           <ContentEditable

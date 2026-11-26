@@ -2720,10 +2720,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             <div
               ref={setComposerMenuAnchor}
               className={cn(
-                // Text lines up with the footer's attach glyph: 14px inset plus the
-                // glyph's 6.5px inside a 28px button, at the default interface size.
-                // 12px above the first line of text.
-                "relative px-5.5 pt-3.25 pb-1.5",
+                // 1rem beside the text, and 1rem above it on sm+.
+                "relative px-4 pt-3.5 pb-2 sm:pt-4",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
               )}
@@ -3143,8 +3141,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
-                  // 14px from the sides and 10px from the bottom at the default interface size.
-                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3.75 pb-2.75",
+                  // 0.75rem from the sides and bottom on sm+.
+                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-2 pb-2 sm:px-3 sm:pb-3",
                   pendingUserInputs.length > 0 && "pt-2",
                   showMobilePendingAnswerActions && "hidden sm:flex",
                 )}
