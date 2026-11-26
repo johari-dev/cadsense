@@ -13,8 +13,8 @@ catalogs:
       specifier: 0.13.2
       version: 0.13.2
     '@legendapp/list':
-      specifier: 3.3.5
-      version: 3.3.5
+      specifier: 3.9.0
+      version: 3.9.0
     '@typescript/native-preview':
       specifier: 7.0.0-dev.20260604.1
       version: 7.0.0-dev.20260604.1
@@ -51,6 +51,7 @@ packageExtensionsChecksum: sha256-FV3+2NW/9MFbunJaPsMxvO0LAzyfccoPtPiKoIXAwUU=
 patchedDependencies:
   '@effect/vitest@4.0.0-beta.103': a16b1e870d8c29e4a98b17cc4c638a4ff471753d8ca3487f78a22b759caf951b
   '@ff-labs/fff-node@0.9.4': ab9ff544009e1891cfe3930105862d3699007f38922a79f3c98d90018deca368
+  '@legendapp/list@3.9.0': b8b9932184dc7e27136b452267d5c6011ecfd37575c563e8f2de5872121adc0f
   effect@4.0.0-beta.103: af36b7948b6f9c56623074662b51dade5699880c1a7c71245de73e13c3185fb6
   three@0.185.1: 9112d47083b18c2b163c3cb82f2ebb2db23d88dadfde35f63a7eb9b080d42e8b
 
@@ -273,7 +274,7 @@ importers:
         version: 0.9.0
       '@legendapp/list':
         specifier: 'catalog:'
-        version: 3.3.5(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+        version: 3.9.0(patch_hash=b8b9932184dc7e27136b452267d5c6011ecfd37575c563e8f2de5872121adc0f)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@lexical/react':
         specifier: ^0.41.0
         version: 0.41.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(yjs@13.6.31)
@@ -1519,8 +1520,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@legendapp/list@3.3.5':
-    resolution: {integrity: sha512-XTsLYtpg41SVb5uLBYA+YcDSA3w0tgoPq/W8ZggQ2tx+3lrC/rf+ehTP9KYHea9oFaZIuePAgzACs5/auVMJlQ==}
+  '@legendapp/list@3.9.0':
+    resolution: {integrity: sha512-gMLdgX0TzCtD1VGlrPZ423Npq7CtkQK8oWNRWvtO0AYkAFt5MP+knzaxnojbifHW82817QVc5lmit9JU2xKsaQ==}
     peerDependencies:
       react: '*'
       react-dom: '*'
@@ -7185,7 +7186,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@legendapp/list@3.3.5(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
+  '@legendapp/list@3.9.0(patch_hash=b8b9932184dc7e27136b452267d5c6011ecfd37575c563e8f2de5872121adc0f)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:
       react: 19.2.6
       use-sync-external-store: 1.6.0(react@19.2.6)
