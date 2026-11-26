@@ -87,8 +87,21 @@ export interface ThreadStatusPill {
     | "Plan Ready";
   colorClass: string;
   dotClass: string;
-  pulse: boolean;
+  /** Pulse while the agent works, shake while it waits on the user, still otherwise. */
+  motion: "pulse" | "shake" | null;
 }
+
+const WORKING_COLORS = {
+  colorClass: "text-sky-600 dark:text-sky-300/80",
+  dotClass: "bg-sky-500 dark:bg-sky-300/80",
+};
+
+// One color for every "the agent needs you" state that isn't an approval: a question mid-turn
+// and a finished plan waiting for review read the same at a glance.
+const NEEDS_YOU_COLORS = {
+  colorClass: "text-purple-600 dark:text-purple-400",
+  dotClass: "bg-purple-500 dark:bg-purple-400",
+};
 
 // Rollup order mirrors the per-thread resolver exactly: attention states,
 // then active work, then the actionable plan prompt, then passive
@@ -336,46 +349,16 @@ export function resolveSidebarThreadTitle(title: string, projectName: string): s
 }
 
 /**
- * What a thread row's second line says, or null for a one-line row. Only chats that need a
- * look get the extra height: a running chat shows its current plan step, and a chat with open
- * CAD comments shows how many, how many block, and how many the model has since outdated.
- */
-export type SidebarThreadRowDetail =
-  | {
-      readonly kind: "progress";
-      readonly step: string;
-      readonly completedSteps: number;
-      readonly totalSteps: number;
-    }
-  | ({ readonly kind: "comments" } & NonNullable<SidebarThreadSummary["cadComments"]>);
-
-export function resolveSidebarThreadRowDetail(
-  thread: Pick<SidebarThreadSummary, "planProgress" | "cadComments">,
-): SidebarThreadRowDetail | null {
-  // planProgress is cleared when the turn settles, so its presence means the chat is running.
-  if (thread.planProgress) return { kind: "progress", ...thread.planProgress };
-  if (thread.cadComments && thread.cadComments.open > 0) {
-    return { kind: "comments", ...thread.cadComments };
-  }
-  return null;
-}
-
-/**
  * A thread row under its project: a 36px hitbox as wide as the project header, with the title
- * inset (ps-11.5) to line up with the project name past its thumbnail. A row with a second
- * line (see resolveSidebarThreadRowDetail) becomes a two-column grid: title and age on top, and
- * the detail line spanning the full width below.
+ * inset (ps-11.5) to line up with the project name past its thumbnail. Every row is one line;
+ * its status dot sits in the gutter left of the title, under the thumbnail.
  */
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
-  hasDetail?: boolean;
 }): string {
-  const baseClassName = cn(
-    "h-9 w-full translate-x-0 cursor-pointer justify-start gap-2 rounded-md ps-11.5 pe-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
-    input.hasDetail &&
-      "grid h-auto min-h-9 grid-cols-[minmax(0,1fr)_auto] content-center gap-x-2 gap-y-0.5 py-1.5",
-  );
+  const baseClassName =
+    "h-9 w-full translate-x-0 cursor-pointer justify-start gap-2 rounded-md ps-11.5 pe-2 text-left text-sm select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
   if (input.isSelected && input.isActive) {
     return cn(
@@ -415,34 +398,31 @@ export function resolveThreadStatusPill(input: {
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
-      pulse: false,
+      motion: "shake",
     };
   }
 
   if (thread.hasPendingUserInput) {
     return {
       label: "Awaiting Input",
-      colorClass: "text-indigo-600 dark:text-indigo-300/90",
-      dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
-      pulse: false,
+      ...NEEDS_YOU_COLORS,
+      motion: "shake",
     };
   }
 
   if (thread.session?.status === "running") {
     return {
       label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
+      ...WORKING_COLORS,
+      motion: "pulse",
     };
   }
 
   if (thread.session?.status === "starting") {
     return {
       label: "Connecting",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
+      ...WORKING_COLORS,
+      motion: "pulse",
     };
   }
 
@@ -456,9 +436,8 @@ export function resolveThreadStatusPill(input: {
   if (hasPlanReadyPrompt) {
     return {
       label: "Plan Ready",
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      dotClass: "bg-violet-500 dark:bg-violet-300/90",
-      pulse: false,
+      ...NEEDS_YOU_COLORS,
+      motion: "shake",
     };
   }
 
@@ -469,18 +448,16 @@ export function resolveThreadStatusPill(input: {
   if (thread.backgroundLiveness === "working") {
     return {
       label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
+      ...WORKING_COLORS,
+      motion: "pulse",
     };
   }
 
   if (thread.backgroundLiveness === "monitoring") {
     return {
       label: "Monitoring",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: false,
+      ...WORKING_COLORS,
+      motion: null,
     };
   }
 
@@ -489,7 +466,7 @@ export function resolveThreadStatusPill(input: {
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
-      pulse: false,
+      motion: null,
     };
   }
 

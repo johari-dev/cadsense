@@ -10,10 +10,9 @@ import {
   SpinnerIcon as LoaderIcon,
   GearSixIcon as SettingsIcon,
   NotePencilIcon as SquarePenIcon,
-  WarningCircleIcon,
   WarningIcon as TriangleAlertIcon,
 } from "~/lib/icons";
-import { ThreadStatusLabel } from "./ThreadStatusIndicators";
+import { ThreadStatusDot, ThreadStatusLabel } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { onshapeProjectUrl } from "../lib/onshapeProjects";
 import { projectRemovalConfirmation, threadDeleteConfirmation } from "./confirmations";
@@ -105,7 +104,7 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { formatRelativeTime, formatRelativeTimeLabel } from "../timestampFormat";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -161,10 +160,8 @@ import {
   resolveProjectStatusIndicator,
   describeProjectSource,
   type ProjectSourceDescription,
-  resolveSidebarThreadRowDetail,
   resolveSidebarThreadTitle,
   resolveThreadRowClassName,
-  type SidebarThreadRowDetail,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
@@ -236,13 +233,6 @@ const PROJECT_SOURCE_LOGOS = {
   solidworks: { src: "/solidworks.svg", alt: "SolidWorks" },
 } satisfies Record<NonNullable<ProjectSourceDescription["logo"]>, { src: string; alt: string }>;
 
-/** The thread row's timestamp: the relative value without its "ago" suffix. */
-function formatCompactRelativeTime(isoDate: string): string {
-  const relative = formatRelativeTime(isoDate);
-  if (!relative) return "";
-  return relative.suffix === null ? "now" : relative.value;
-}
-
 function SidebarThreadDetailPrewarmer({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
   useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
   return null;
@@ -312,69 +302,39 @@ interface SidebarThreadRowProps {
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
 }
 
-/**
- * A thread row's second line: the running plan step in the row's status color, or the chat's
- * open CAD comments with blocking and outdated counts called out.
- */
-function SidebarThreadRowDetailLine({
-  detail,
-  statusColorClass,
-}: {
-  detail: SidebarThreadRowDetail;
-  statusColorClass: string | undefined;
-}) {
-  if (detail.kind === "progress") {
-    return (
-      <span
-        className={`flex min-w-0 items-center gap-1 text-xs ${statusColorClass ?? "text-tertiary-foreground"}`}
-      >
-        <span className="truncate">{detail.step}</span>
-        {detail.totalSteps > 0 ? (
-          <span className="shrink-0 tabular-nums">
-            · {detail.completedSteps}/{detail.totalSteps}
-          </span>
-        ) : null}
-      </span>
-    );
-  }
-  // The line fits about 20 characters at the narrowest sidebar, so outdated findings show as the
-  // comments card's amber warning icon and a count; the tooltip spells everything out.
-  const summary = [
-    `${detail.open} open ${detail.open === 1 ? "finding" : "findings"}`,
-    detail.blockers > 0 ? `${detail.blockers} blocking` : null,
-    detail.outdated > 0 ? `${detail.outdated} outdated by a newer model revision` : null,
+type SidebarThreadCadComments = NonNullable<SidebarThreadSummary["cadComments"]>;
+
+/** Spells out a chat's open CAD comments, for the row's title tooltip and the chip's label. */
+function describeCadComments(comments: SidebarThreadCadComments): string {
+  return [
+    `${comments.open} open ${comments.open === 1 ? "finding" : "findings"}`,
+    comments.blockers > 0 ? `${comments.blockers} blocking` : null,
+    comments.outdated > 0 ? `${comments.outdated} outdated by a newer model revision` : null,
   ]
     .filter(Boolean)
     .join(", ");
+}
+
+/**
+ * A chat's open CAD comments as a count at the row's trailing edge: red when any block, with an
+ * amber pip when a newer model revision outdated some. The title tooltip spells them out.
+ */
+function SidebarThreadCommentsChip({ comments }: { comments: SidebarThreadCadComments }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            aria-label={summary}
-            className="flex min-w-0 items-center gap-1 text-xs text-tertiary-foreground tabular-nums"
-          />
-        }
-      >
-        <ChatCircleIcon className="size-3 shrink-0" />
-        <span className="truncate">
-          {detail.open} open
-          {detail.blockers > 0 ? (
-            <>
-              {" · "}
-              <span className="text-destructive-foreground">{detail.blockers} blocking</span>
-            </>
-          ) : null}
-        </span>
-        {detail.outdated > 0 ? (
-          <span className="flex shrink-0 items-center gap-0.5 text-warning">
-            <WarningCircleIcon className="size-3" />
-            {detail.outdated}
-          </span>
+    <span
+      aria-label={describeCadComments(comments)}
+      className={`inline-flex items-center gap-0.5 text-[11px] tabular-nums ${
+        comments.blockers > 0 ? "text-destructive-foreground" : "text-tertiary-foreground"
+      }`}
+    >
+      <span className="relative inline-flex">
+        <ChatCircleIcon className="size-3" />
+        {comments.outdated > 0 ? (
+          <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-warning" />
         ) : null}
-      </TooltipTrigger>
-      <TooltipPopup side="right">{summary}</TooltipPopup>
-    </Tooltip>
+      </span>
+      {comments.open}
+    </span>
   );
 }
 
@@ -414,10 +374,16 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       lastVisitedAt,
     },
   });
-  const rowDetail = resolveSidebarThreadRowDetail(thread);
-  const threadMetaClassName = !isThreadRunning
-    ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
-    : "pointer-events-none";
+  const openComments =
+    thread.cadComments && thread.cadComments.open > 0 ? thread.cadComments : null;
+  // The trailing slot holds a jump hint or the comment count, and gives way to the archive
+  // button on hover. A running chat can't be archived, so its trailing slot stays put.
+  const hasTrailing = jumpLabel !== null || openComments !== null;
+  const showsArchive = !isThreadRunning;
+  // A flex box, so the chip centers on the row instead of sitting on the text baseline.
+  const threadMetaClassName = showsArchive
+    ? "pointer-events-none flex shrink-0 items-center transition-opacity duration-150 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
+    : "pointer-events-none flex shrink-0 items-center";
   const handleRowClick = useCallback(
     (event: React.MouseEvent) => {
       handleThreadClick(event, threadRef, orderedProjectThreadKeys);
@@ -565,109 +531,118 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         size="sm"
         isActive={isActive}
         data-testid={`thread-row-${thread.id}`}
-        className={`${resolveThreadRowClassName({
-          isActive,
-          isSelected,
-          hasDetail: rowDetail !== null,
-        })} relative isolate`}
+        className={`${resolveThreadRowClassName({ isActive, isSelected })} relative isolate ${
+          // Phones always show the archive button, so the title and trailing slot stop short of it.
+          showsArchive ? "max-sm:pe-8" : ""
+        }`}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
-          {renamingThreadKey === threadKey ? (
-            <input
-              ref={handleRenameInputRef}
-              className="min-w-0 flex-1 truncate rounded border border-ring bg-transparent px-0.5 text-sm outline-none"
-              value={renamingTitle}
-              onChange={handleRenameInputChange}
-              onKeyDown={handleRenameInputKeyDown}
-              onBlur={handleRenameInputBlur}
-              onClick={handleRenameInputClick}
-              onDoubleClick={handleRenameInputClick}
-            />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    className="min-w-0 flex-1 truncate text-[13px]"
-                    data-testid={`thread-title-${thread.id}`}
-                  >
-                    {resolveSidebarThreadTitle(thread.title, projectName)}
-                  </span>
-                }
-              />
-              <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
-                {thread.title}
-                <span className="mt-0.5 block text-muted-foreground">
-                  Active {formatRelativeTimeLabel(lastActivityAt)}
+        {/* The status dot sits in the gutter under the project thumbnail, so titles never shift. */}
+        {threadStatus ? (
+          <span
+            aria-label={threadStatus.label}
+            className="pointer-events-none absolute inset-y-0 start-0 flex w-11 items-center justify-center"
+          >
+            <ThreadStatusDot status={threadStatus} className="size-2" />
+          </span>
+        ) : null}
+        {renamingThreadKey === threadKey ? (
+          <input
+            ref={handleRenameInputRef}
+            className="min-w-0 flex-1 truncate rounded border border-ring bg-transparent px-0.5 text-sm outline-none"
+            value={renamingTitle}
+            onChange={handleRenameInputChange}
+            onKeyDown={handleRenameInputKeyDown}
+            onBlur={handleRenameInputBlur}
+            onClick={handleRenameInputClick}
+            onDoubleClick={handleRenameInputClick}
+          />
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className={`min-w-0 flex-1 truncate text-left text-[13px] ${
+                    // With nothing trailing, the hover archive button sits over the title's end,
+                    // so the title fades out beneath it instead of reflowing. Phones keep the
+                    // button clear of the title (max-sm:pe-8), so nothing fades there.
+                    showsArchive && !hasTrailing
+                      ? "sm:group-hover/menu-sub-item:[mask-image:linear-gradient(to_left,transparent_1.25rem,black_2.75rem)] sm:group-focus-within/menu-sub-item:[mask-image:linear-gradient(to_left,transparent_1.25rem,black_2.75rem)]"
+                      : ""
+                  }`}
+                  data-testid={`thread-title-${thread.id}`}
+                >
+                  {resolveSidebarThreadTitle(thread.title, projectName)}
                 </span>
-              </TooltipPopup>
-            </Tooltip>
-          )}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {/* A fixed column for the row's age, so every title has the same width whether
-              or not the row is selected. Hover controls take the column's place. */}
-          <div className="flex w-6 justify-end max-sm:w-20">
-            {!isThreadRunning ? (
+              }
+            />
+            <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+              {thread.title}
+              {threadStatus ? (
+                <span className={`mt-0.5 block ${threadStatus.colorClass}`}>
+                  {threadStatus.label}
+                  {/* planProgress only rides along with a running turn; it clears when it settles. */}
+                  {threadStatus.label === "Working" && thread.planProgress
+                    ? ` · ${thread.planProgress.completedSteps}/${thread.planProgress.totalSteps} ${thread.planProgress.step}`
+                    : null}
+                </span>
+              ) : null}
+              {openComments ? (
+                <span className="mt-0.5 block text-muted-foreground">
+                  {describeCadComments(openComments)}
+                </span>
+              ) : null}
+              <span className="mt-0.5 block text-muted-foreground">
+                Active {formatRelativeTimeLabel(lastActivityAt)}
+              </span>
+            </TooltipPopup>
+          </Tooltip>
+        )}
+        {hasTrailing ? (
+          <span className={threadMetaClassName}>
+            {jumpLabel ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                      <button
-                        type="button"
-                        data-thread-selection-safe
-                        data-testid={`thread-archive-${thread.id}`}
-                        aria-label={`Archive ${thread.title}`}
-                        className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                        onPointerDown={stopPropagationOnPointerDown}
-                        onClick={handleArchiveImmediateClick}
-                      >
-                        <ArchiveIcon className="size-3.5" />
-                      </button>
-                    </div>
+                    <span
+                      aria-label={jumpLabel}
+                      className="inline-flex h-5 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
+                    />
                   }
-                />
-                <TooltipPopup side="top">Archive</TooltipPopup>
+                >
+                  {jumpLabel}
+                </TooltipTrigger>
+                <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
               </Tooltip>
+            ) : openComments ? (
+              <SidebarThreadCommentsChip comments={openComments} />
             ) : null}
-            <span className={threadMetaClassName}>
-              <span className="inline-flex items-center gap-1">
-                {jumpLabel ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          aria-label={jumpLabel}
-                          className="inline-flex h-5 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
-                        />
-                      }
-                    >
-                      {jumpLabel}
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
-                  </Tooltip>
-                ) : (
-                  <span className="text-xs text-tertiary-foreground tabular-nums">
-                    {formatCompactRelativeTime(lastActivityAt)}
-                  </span>
-                )}
-              </span>
-            </span>
-          </div>
-        </div>
-        {/* Spans both grid columns, so it runs under the age column too. */}
-        {rowDetail ? (
-          <div className="col-span-2 min-w-0">
-            <SidebarThreadRowDetailLine
-              detail={rowDetail}
-              statusColorClass={threadStatus?.colorClass}
+          </span>
+        ) : null}
+        {showsArchive ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                  <button
+                    type="button"
+                    data-thread-selection-safe
+                    data-testid={`thread-archive-${thread.id}`}
+                    aria-label={`Archive ${thread.title}`}
+                    className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                    onPointerDown={stopPropagationOnPointerDown}
+                    onClick={handleArchiveImmediateClick}
+                  >
+                    <ArchiveIcon className="size-3.5" />
+                  </button>
+                </div>
+              }
             />
-          </div>
+            <TooltipPopup side="top">Archive</TooltipPopup>
+          </Tooltip>
         ) : null}
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
@@ -816,7 +791,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             }}
           >
             <span className="flex min-w-0 flex-1 items-center gap-2">
-              {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
+              {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} />}
               <span>Show more</span>
             </span>
           </SidebarMenuSubButton>
@@ -1980,11 +1955,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   />
                 }
               >
-                <span
-                  className={`size-[7px] rounded-full ${projectStatus.dotClass} ${
-                    projectStatus.pulse ? "animate-status-pulse" : ""
-                  }`}
-                />
+                <ThreadStatusDot status={projectStatus} className="size-[7px]" />
               </TooltipTrigger>
               <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
             </Tooltip>
