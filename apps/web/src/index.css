@@ -1454,18 +1454,29 @@
   --app-scrollbar-thumb-hover: var(--app-theme-muted-foreground);
 }
 
-/* The composer is a raised field on the canvas: the palette's raised surface for the fill and
-   its input hairline for the outline, so it reads as its own field in the hero and in threads
-   alike. The placeholder stays on the theme's placeholder tier. */
+/* The composer is the overlay surface as glass with an input hairline mixed 30% into the
+   canvas (about #1d1d1e). Its glass is lighter than the app's 80%: at 45% the blurred
+   transcript shows through, and over the bare canvas it renders about #181819. Attached
+   drawers, banners, and the shoulder tab share the same fill. */
+:root .chat-composer-glass-shell,
+:root
+  :is(
+    .chat-composer-banner-stack-cap,
+    .chat-composer-drawer-surface,
+    .chat-composer-top-drawer,
+    .chat-composer-shoulder-tab
+  ) {
+  --glass-opacity: 45%;
+  --chat-composer-outline: color-mix(in srgb, var(--app-theme-input) 30%, var(--app-theme-canvas));
+}
 :root .chat-composer-glass-shell {
-  --chat-composer-glass-surface: var(--app-theme-surface-raised);
-  --chat-composer-outline: var(--app-theme-input);
+  --chat-composer-glass-surface: var(--app-theme-surface-overlay);
   --chat-composer-highlight: color-mix(in srgb, var(--app-theme-input) 12%, transparent);
 }
 
 :root
   :is(.chat-composer-banner-stack-cap, .chat-composer-drawer-surface, .chat-composer-top-drawer) {
-  --chat-composer-attached-surface: var(--app-theme-surface-raised);
+  --chat-composer-attached-surface: var(--app-theme-surface-overlay);
 }
 
 :root
@@ -2103,24 +2114,16 @@ code {
   }
 }
 
-/* Composer shell and menu proportions. Corners stay slight to match the rest of the UI: the
-   composer and everything attached to it use --chat-composer-radius, and the picker panel
-   uses the theme's --radius. */
+/* Composer shell and menu proportions: one 48rem width for the hero and
+   the docked composer, and a 1rem corner on the composer and everything attached to it. The
+   picker panel uses the theme's --radius. The shell's ::before paints the glass fill and the
+   host's 1px ::after paints the outline, which stays the same on focus. */
 :root {
-  --chat-composer-radius: 1.2rem;
+  --chat-composer-radius: 1rem;
+  --chat-composer-max-width: 48rem;
 }
 :root .chat-composer-glass-shell {
-  background: var(--chat-composer-glass-surface);
-  backdrop-filter: blur(24px);
   border-radius: var(--chat-composer-radius);
-  /* The outline itself is the host's 1px ::after border (--chat-composer-outline). */
-  box-shadow: 0 6px 24px -10px rgb(0 0 0 / 30%);
-}
-/* Focus stays quiet: the thread composer is focused on load, so a ring would show at rest on
-   every thread. The outline only brightens, from the input hairline toward the text color;
-   keyboard focus on the footer controls still shows their own focus rings. */
-:root .chat-composer-glass-shell:focus-within {
-  --chat-composer-outline: color-mix(in srgb, var(--app-theme-text) 22%, var(--app-theme-input));
 }
 [data-chat-composer-footer] {
   border-top: 0;
@@ -2187,19 +2190,4 @@ code {
 }
 [data-app-sidebar] [aria-current="page"] svg {
   color: var(--primary);
-}
-
-/* Continuous ("squircle") composer corners where the browser supports corner-shape. Plain
-   rounded corners everywhere else. corner-shape does not inherit, so the host's ::after
-   outline is listed too: it inherits only the radius, and a round outline drifts off the
-   squircle fill at every corner. */
-@supports (corner-shape: squircle) {
-  .chat-composer-glass-shell,
-  .chat-composer-glass-shell::before,
-  .chat-composer-glass-host,
-  .chat-composer-glass-host::after,
-  [data-chat-composer-main-surface="true"],
-  [data-chat-composer-surface="true"] {
-    corner-shape: squircle;
-  }
 }

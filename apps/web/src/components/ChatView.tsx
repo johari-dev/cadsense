@@ -4079,26 +4079,15 @@ function ChatViewContent(props: ChatViewProps) {
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-4"
               }
             >
-              {/* Docked, the composer sits on a solid backing from its top edge down to the window
-                  edge so the transcript never shows through below or beside it. The overlay's
-                  1rem top band above it stays open, with no fade. */}
-              {isDraftHeroState ? null : (
-                <div aria-hidden className="absolute inset-x-0 top-4 bottom-0 bg-background" />
-              )}
+              {/* Docked, the transcript scrolls under the composer, which blurs it through its
+                  glass fill (.chat-composer-glass-shell::before). */}
               <div
                 ref={attachDraftHeroTransitionGroupRef}
                 className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)]"
               >
-                {/* The composer's width, which its attached drawers (banners, the sync pill) inset
-                    from so they line up with it in either layout. */}
-                <div
-                  className={cn(
-                    "group/composer-stack pointer-events-auto relative z-10",
-                    isDraftHeroState
-                      ? "[--chat-composer-max-width:36.125rem]"
-                      : "[--chat-composer-max-width:42.5rem]",
-                  )}
-                >
+                {/* The composer stack. Its width is --chat-composer-max-width (index.css), the same
+                    in both layouts, and its attached drawers (banners, the sync pill) inset from it. */}
+                <div className="group/composer-stack pointer-events-auto relative z-10">
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div className="pb-8 group-has-[.chat-composer-shoulder-tab]/composer-stack:pb-4">

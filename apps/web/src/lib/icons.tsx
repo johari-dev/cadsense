@@ -300,8 +300,9 @@ export const ThumbsDownIcon = materialIcon(thumbDownSvg, { fill: thumbDownFillSv
 export const ThumbsUpIcon = materialIcon(thumbUpSvg, { fill: thumbUpFillSvg });
 /**
  * The composer's send and stop glyphs keep the earlier Tabler outline style (24-unit grid, a
- * 2-unit round stroke) instead of the Material set: Tabler's corner-down-left arrow, and a
- * 15-unit rounded square that reads a touch larger than the open arrow it replaces.
+ * 2-unit round stroke) instead of the Material set: Tabler's corner-down-left arrow, scaled
+ * 4/3 about the grid center so it spans 17 units like the Material paperclip beside it, and a
+ * 15-unit rounded square (17 with its stroke) that fills the same slot when it replaces it.
  */
 function strokeIcon(paths: readonly string[]): Icon {
   return function AppIcon({ weight: _weight, size = "1em", ...props }: IconProps) {
@@ -325,7 +326,9 @@ function strokeIcon(paths: readonly string[]): Icon {
     );
   };
 }
-export const ArrowElbowDownLeftIcon = strokeIcon(["M18 6v6a3 3 0 0 1 -3 3h-10l4 -4m0 8l-4 -4"]);
+export const ArrowElbowDownLeftIcon = strokeIcon([
+  "M20.67 3.33v8a4 4 0 0 1 -4 4h-13.34l5.34 -5.34m0 10.67l-5.34 -5.33",
+]);
 export const StopIcon = strokeIcon([
   "M4.5 6.5a2 2 0 0 1 2 -2h11a2 2 0 0 1 2 2v11a2 2 0 0 1 -2 2h-11a2 2 0 0 1 -2 -2z",
 ]);
