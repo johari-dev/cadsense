@@ -9,6 +9,8 @@
  *   - reading history: the line being read (mid-paragraph) must move at most a line, every frame
  *
  * A fourth scenario switches to another chat and back, which must land at the end without a jump.
+ * The last checks the scroll length is right as soon as the chat opens and as soon as a resize
+ * settles, before the rows off screen have been scrolled past.
  *
  * A sampler in the page records the scroll geometry after every painted frame, so a one-frame
  * jump or a blank frame shows up in the numbers even when the end state looks right.
@@ -376,6 +378,8 @@ interface Frame {
   readonly t: number;
   readonly width: number;
   readonly scrollTop: number;
+  readonly scrollHeight: number;
+  readonly clientHeight: number;
   readonly visibleRows: number;
   readonly endGap: number | null;
   readonly anchorTop: number | null;
@@ -463,6 +467,7 @@ await runE2e(out, async (run) => {
   const step = run.screenshotSteps(page);
   NodeFS.mkdirSync(NodePath.join(out, "frames"), { recursive: true });
 
+  let openedScrollLength = 0;
   await step("opened-chat", async (page) => {
     await page.goto(app.url, { waitUntil: "networkidle" });
     await page
@@ -472,8 +477,11 @@ await runE2e(out, async (run) => {
     await page.getByText(THREAD_TITLE, { exact: true }).first().click({ timeout: 30_000 });
     await page.locator(`[data-message-id="assistant-${TURNS}"]`).waitFor({ timeout: 30_000 });
     await page.evaluate(SAMPLER);
-    await frames(page, 30);
-    return sample(page);
+    // Long enough for the rows off screen to be measured in idle time.
+    await frames(page, 90);
+    const opened = await sample(page);
+    openedScrollLength = opened.scrollHeight;
+    return opened;
   });
 
   const atEnd = async () => {
@@ -628,6 +636,49 @@ await runE2e(out, async (run) => {
         return result;
       });
     }
+  }
+
+  // The scroll length must be right without scrolling first: as soon as a chat opens and as soon
+  // as a resize settles, while most rows are still off screen.
+  const scrollLength = async () => (await sample(page)).scrollHeight;
+  /** Scrolls from the top to the end in small steps, so the list draws every row once. */
+  const scrollThrough = async () => {
+    await page.mouse.move(700, 400);
+    for (let i = 0; i < 40; i++) await page.mouse.wheel(0, -4000);
+    await frames(page, 10);
+    for (let i = 0; i < 100; i++) {
+      await page.mouse.wheel(0, 500);
+      await frames(page, 6);
+      const frame = await sample(page);
+      if (frame.scrollTop + frame.clientHeight >= frame.scrollHeight - 1) break;
+    }
+    await frames(page, 30);
+    return scrollLength();
+  };
+  if (flags.only === undefined || flags.only === "scroll-length") {
+    await step("scroll-length", async () => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await frames(page, 60);
+      const drawnAt1440 = await scrollThrough();
+      await page.setViewportSize({ width: 820, height: 900 });
+      await frames(page, 90);
+      const resizedTo820 = await scrollLength();
+      const drawnAt820 = await scrollThrough();
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await frames(page, 30);
+      const result = { openedAt1440: openedScrollLength, drawnAt1440, resizedTo820, drawnAt820 };
+      run.check(
+        "scroll-length: right as soon as a chat opens",
+        Math.abs(openedScrollLength - drawnAt1440) <= 2,
+        result,
+      );
+      run.check(
+        "scroll-length: right as soon as a resize settles",
+        Math.abs(resizedTo820 - drawnAt820) <= 2,
+        result,
+      );
+      return result;
+    });
   }
 
   for (const result of results) {
