@@ -91,7 +91,8 @@ export function DesignBriefProposalCard({
   const openBrief = () =>
     useRightPanelStore.getState().openFile(threadRef, card.path, undefined, { hideExplorer: true });
 
-  if (shown === "dismissed") return null;
+  // A superseded card's changes live on in the newer card further down the chat.
+  if (shown === "dismissed" || shown === "superseded") return null;
   if (shown === "saved")
     return (
       <div

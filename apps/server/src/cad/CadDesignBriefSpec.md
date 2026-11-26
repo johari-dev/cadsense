@@ -144,7 +144,7 @@ Students tell the agent lasting facts in chat ("that belt is just a placeholder"
 - `replace` is a list of `{ from, to, quote }`, for a fact the user changed. `from` is brief text, usually one sentence of a longer line, that occurs exactly once outside the template comment; `to` changes only what the user said changed; `quote` passes the same check as an addition. Briefs are paragraphs, so this changes a stale sentence without the agent restating the true sentences beside it.
 - `remove` is a list of `{ text, reason }`. `text` is a whole line or a sentence within one, occurring exactly once. `reason` says what the user said or what changed in the model.
 - Only the main agent proposes; a subagent's call fails and tells it to report what the user said.
-- At most 5 changes in all. One proposal is open per chat at a time; a second call while one is open fails and tells the agent to wait. A line the student dismissed in this chat fails if proposed again.
+- At most 5 changes on a card. A chat shows one undecided card at a time. Students often ignore a card and keep talking, so a new call while a card is open folds that card's changes into the new card (`mergeBriefProposals`) and marks the old one `superseded`, which hides it; a newer change to the same sentence wins. A line the student dismissed in this chat fails if proposed again.
 - The tool returns at once ("proposed; the student decides"). The turn does not wait. If the student approves, the brief changes and the next turn carries it through the update block (see "Freshness"). The agent learns nothing on dismissal, which is the point: no arguing.
 
 **Applying it.** Approval runs on the server, not as an editor write. It reads the brief as it is now, appends the added lines below the template comment, deletes the removed lines, and writes. With no brief it creates one from the template first (create-only, as the entry points do). A removed line that the student already deleted counts as done. An open editor on the brief reloads after the write.
@@ -243,9 +243,9 @@ Write these as tests before the code:
 - A removal names a line the brief does not have, and the server deletes something else.
 - Approving overwrites edits the student made after the proposal, or an open editor saves over the approved write.
 - Approving with no brief replaces a brief created in the meantime.
-- A second proposal opens while one is pending, or a dismissed line comes back in the same chat.
+- Two undecided cards show at once, a fact said while a card waits is lost, or a dismissed line comes back in the same chat.
 - An approved change does not reach the next turn.
-- A proposal older than the newest 500 activities cannot be saved, lets a second one open, or forgets a dismissal.
+- A proposal older than the newest 500 activities cannot be saved or folded, or forgets a dismissal.
 - Reviews outside the app are told to call `cad_brief_propose`, which they do not have.
 - The agent proposes from geometry alone, or proposes a review rule that belongs in learnings. (Evaluation, not unit tests.)
 

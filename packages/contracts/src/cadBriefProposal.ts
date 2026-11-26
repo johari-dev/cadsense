@@ -61,7 +61,8 @@ export const CadBriefProposalCard = Schema.Struct({
 });
 export type CadBriefProposalCard = typeof CadBriefProposalCard.Type;
 
-export const CadBriefProposalOutcome = Schema.Literals(["saved", "dismissed"]);
+/** `superseded`: a newer proposal in the chat took this one's changes along before a decision. */
+export const CadBriefProposalOutcome = Schema.Literals(["saved", "dismissed", "superseded"]);
 export type CadBriefProposalOutcome = typeof CadBriefProposalOutcome.Type;
 
 /** The student's decision: the `cad.brief.proposal-resolved` activity payload. */

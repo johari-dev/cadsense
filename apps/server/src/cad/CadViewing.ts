@@ -16,6 +16,7 @@ import {
   CadDiffInput,
   CadRenderError,
   CAD_FEATURESCRIPT_PREVIEWED_ACTIVITY,
+  CAD_BRIEF_PROPOSAL_MAX_LINES,
   CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
   CAD_BRIEF_PROPOSED_ACTIVITY,
   CadBriefProposalId,
@@ -82,7 +83,12 @@ import {
   type ShopRoute,
 } from "@cadsense/shared/cadDrawing";
 import { readCadDesignBrief, resolveCadDesignBriefPath } from "./CadDesignBrief.ts";
-import { applyBriefProposal, briefProposalsOf, checkBriefProposal } from "./CadBriefProposal.ts";
+import {
+  applyBriefProposal,
+  briefProposalsOf,
+  checkBriefProposal,
+  mergeBriefProposals,
+} from "./CadBriefProposal.ts";
 import {
   loadCadBounds,
   loadCadMeshes,
@@ -866,10 +872,15 @@ export const make = Effect.gen(function* () {
                     .split("\n")
                     .map((line) => line.trim())
                     .filter((line) => line.length > 0) ?? [],
-                open: proposals.open,
                 dismissed: proposals.dismissed,
               });
               if (problem) return yield* invalid(problem);
+              const merged = mergeBriefProposals(proposals.open, proposal);
+              const total = merged.add.length + merged.remove.length + merged.replace.length;
+              if (total > CAD_BRIEF_PROPOSAL_MAX_LINES)
+                return yield* invalid(
+                  `With the student's undecided card this would be ${total} changes, over ${CAD_BRIEF_PROPOSAL_MAX_LINES}. Leave the brief for now.`,
+                );
               const id = yield* commandId;
               const createdAt = DateTime.formatIso(yield* DateTime.now);
               yield* dispatch({
@@ -884,18 +895,39 @@ export const make = Effect.gen(function* () {
                   payload: {
                     proposalId: CadBriefProposalId.make(id),
                     path: target.relativePath,
-                    add: proposal.add ?? [],
-                    remove: proposal.remove ?? [],
-                    replace: proposal.replace ?? [],
+                    ...merged,
                   },
                   turnId: turnId ?? null,
                   createdAt,
                 },
                 createdAt,
               });
+              // The new card carries the old one's changes, so the old card steps aside. Appended
+              // after the new card, so a failure here leaves both visible rather than neither.
+              const superseded = proposals.open;
+              if (superseded) {
+                const resolvedId = yield* commandId;
+                yield* dispatch({
+                  type: "thread.activity.append",
+                  commandId: resolvedId,
+                  threadId: session.threadId,
+                  activity: {
+                    id: EventId.make(`cad-brief-resolved-${resolvedId}`),
+                    tone: "info",
+                    kind: CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY,
+                    summary: "Folded design brief changes into a newer proposal",
+                    payload: { proposalId: superseded.proposalId, outcome: "superseded" },
+                    turnId: proposals.turnIds.get(superseded.proposalId) ?? null,
+                    createdAt,
+                  },
+                  createdAt,
+                });
+              }
               return {
                 proposed: true,
-                note: "The student sees the proposal as a card under your reply and decides. Do not describe it or ask about it.",
+                note: superseded
+                  ? "The student had not decided your earlier proposal, so this card carries its changes too and replaces it. Do not describe it or ask about it."
+                  : "The student sees the proposal as a card under your reply and decides. Do not describe it or ask about it.",
               };
             }),
           );

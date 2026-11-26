@@ -37,8 +37,6 @@ export interface BriefProposalContext {
   readonly userMessages: ReadonlyArray<string>;
   /** Non-empty lines of the brief as agents read it (comments removed), trimmed. */
   readonly briefLines: ReadonlyArray<string>;
-  /** Whether this chat already has a proposal the student has not decided. */
-  readonly open: boolean;
   /** Folded text of lines from proposals the student dismissed in this chat. */
   readonly dismissed: ReadonlySet<string>;
 }
@@ -62,8 +60,6 @@ export const checkBriefProposal = (
   const remove = input.remove ?? [];
   const replace = input.replace ?? [];
   const total = add.length + remove.length + replace.length;
-  if (context.open)
-    return "This chat already has an open brief proposal. Wait for the student to save or dismiss it.";
   if (total === 0) return "The proposal has nothing to add, remove, or replace.";
   if (total > CAD_BRIEF_PROPOSAL_MAX_LINES)
     return `Propose at most ${CAD_BRIEF_PROPOSAL_MAX_LINES} changes at a time.`;
@@ -104,6 +100,30 @@ export const checkBriefProposal = (
     if (context.dismissed.has(foldBriefText(text)))
       return `The student dismissed "${text}" in this chat. Do not propose it again.`;
   return null;
+};
+
+/**
+ * The changes a new proposal shows when the chat already has an undecided one: the open card's
+ * changes first, then the new ones. A line both carry appears once, and a newer change to the same
+ * sentence replaces the older one. Students often ignore a card and keep talking, so a later fact
+ * must not be lost to an earlier card nobody decided.
+ */
+export const mergeBriefProposals = (
+  open: CadBriefProposalCard | null,
+  input: CadBriefProposeInput,
+): Required<CadBriefProposeInput> => {
+  const add = [...(open?.add ?? [])];
+  for (const line of input.add ?? [])
+    if (!add.some((kept) => foldBriefText(kept.text) === foldBriefText(line.text))) add.push(line);
+  const remove = [...(open?.remove ?? [])];
+  for (const line of input.remove ?? [])
+    if (!remove.some((kept) => kept.text === line.text)) remove.push(line);
+  const newer = input.replace ?? [];
+  const replace = [
+    ...(open?.replace ?? []).filter((change) => !newer.some((next) => next.from === change.from)),
+    ...newer,
+  ];
+  return { add, remove, replace };
 };
 
 /**
@@ -196,7 +216,8 @@ export const briefProposalsOf = (
     /** The turn each proposal was made in, so its decision is filed under the same turn. */
     turnIds,
     outcomes,
-    open: [...cards.keys()].some((id) => !outcomes.has(id)),
+    /** The card still waiting for the student. A new proposal folds into it, so there is one. */
+    open: [...cards.values()].findLast((card) => !outcomes.has(card.proposalId)) ?? null,
     dismissed,
   };
 };

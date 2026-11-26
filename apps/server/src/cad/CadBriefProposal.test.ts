@@ -1,19 +1,18 @@
 import { CADSENSE_DESIGN_BRIEF_TEMPLATE, CadBriefProposalId } from "@cadsense/contracts";
 import { stripDesignBriefComments } from "@cadsense/shared/designBrief";
 import { describe, expect, it } from "vite-plus/test";
-import { applyBriefProposal, checkBriefProposal } from "./CadBriefProposal.ts";
+import { applyBriefProposal, checkBriefProposal, mergeBriefProposals } from "./CadBriefProposal.ts";
 
 // Ways the rules can fail (CadDesignBriefSpec.md, "Ways proposals can fail"): an addition the
 // student never said is accepted; quoting is so strict that a real quote with different case,
 // spacing, apostrophes, or end punctuation is refused; a removal names a line the brief lacks; a
-// proposal grows past the cap, is empty, repeats a dismissed line, or opens beside another one.
+// proposal grows past the cap, is empty, or repeats a dismissed line.
 describe("checkBriefProposal", () => {
   const context = {
     userMessages: [
       "Review the shooter. Ignore the 84T belt, it’s just a placeholder until we pick the ratio.",
     ],
     briefLines: ["The shooter hood is fixed at 45 degrees."],
-    open: false,
     dismissed: new Set<string>(),
   };
   const add = (text: string, quote: string) => ({ add: [{ text, quote }] });
@@ -62,7 +61,7 @@ describe("checkBriefProposal", () => {
     expect(checkBriefProposal({ add: six }, context)).toMatch(/at most 5/i);
   });
 
-  it("refuses a line already in the brief, a dismissed line, and a second open proposal", () => {
+  it("refuses a line already in the brief and a dismissed line", () => {
     expect(
       checkBriefProposal(add("The shooter hood is fixed at 45 degrees.", "placeholder"), context),
     ).toMatch(/already/i);
@@ -72,12 +71,6 @@ describe("checkBriefProposal", () => {
         dismissed: new Set(["the 84t belt is a placeholder"]),
       }),
     ).toMatch(/dismissed/i);
-    expect(
-      checkBriefProposal(add("The 84T belt is a placeholder.", "just a placeholder"), {
-        ...context,
-        open: true,
-      }),
-    ).toMatch(/open/i);
   });
 });
 
@@ -91,7 +84,6 @@ describe("checkBriefProposal with sentences", () => {
   const context = {
     userMessages: ["Can you review my transfer? We switched it to 3 inch rollers last week."],
     briefLines: [paragraph, "Rollers turn together. It uses 2 inch rollers and a Vortex."],
-    open: false,
     dismissed: new Set<string>(),
   };
   const replace = (from: string, to: string, quote = "we switched it to 3 inch rollers") => ({
@@ -235,5 +227,64 @@ describe("applyBriefProposal", () => {
     const next = applyBriefProposal(null, card(["The 84T belt is a placeholder."], []));
     expect(next.startsWith(CADSENSE_DESIGN_BRIEF_TEMPLATE)).toBe(true);
     expect(stripDesignBriefComments(next)).toBe("The 84T belt is a placeholder.");
+  });
+});
+
+// A student often ignores a card and keeps talking. Ways folding a new proposal into the open one
+// can fail: an earlier line is lost, a line both proposals carry appears twice, an older change to
+// the same sentence wins over the newer one, or the merged card grows past the cap.
+describe("mergeBriefProposals", () => {
+  const open = {
+    proposalId: CadBriefProposalId.make("open"),
+    path: "DESIGN.md",
+    add: [{ text: "The belly pan is a placeholder.", quote: "its a placeholder" }],
+    remove: [],
+    replace: [{ from: "It uses 2 inch rollers.", to: "It uses 3 inch rollers.", quote: "3 inch" }],
+  };
+
+  it("keeps the open card's changes and adds the new ones after them", () => {
+    expect(
+      mergeBriefProposals(open, {
+        add: [{ text: "The side plates are polycarb.", quote: "polycarb" }],
+      }),
+    ).toEqual({
+      add: [open.add[0], { text: "The side plates are polycarb.", quote: "polycarb" }],
+      remove: [],
+      replace: open.replace,
+    });
+  });
+
+  it("drops a repeated line and lets the newer change to the same sentence win", () => {
+    const merged = mergeBriefProposals(open, {
+      add: [{ text: "the belly pan is a placeholder", quote: "placeholder" }],
+      replace: [
+        { from: "It uses 2 inch rollers.", to: "It uses 4 inch rollers.", quote: "4 inch" },
+      ],
+    });
+    expect(merged.add).toEqual(open.add);
+    expect(merged.replace).toEqual([
+      { from: "It uses 2 inch rollers.", to: "It uses 4 inch rollers.", quote: "4 inch" },
+    ]);
+  });
+
+  it("is the new proposal alone when no card is open", () => {
+    expect(mergeBriefProposals(null, { remove: [{ text: "Old.", reason: "r" }] })).toEqual({
+      add: [],
+      remove: [{ text: "Old.", reason: "r" }],
+      replace: [],
+    });
+  });
+
+  it("refuses a merged proposal over the cap through checkBriefProposal", () => {
+    const merged = mergeBriefProposals(open, {
+      add: ["a", "b", "c", "d"].map((text) => ({ text, quote: "placeholder" })),
+    });
+    expect(
+      checkBriefProposal(merged, {
+        userMessages: ["its a placeholder, 3 inch, placeholder"],
+        briefLines: ["It uses 2 inch rollers."],
+        dismissed: new Set(),
+      }),
+    ).toMatch(/at most 5/i);
   });
 });

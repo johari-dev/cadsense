@@ -107,7 +107,7 @@ const descriptions = {
   cad_brief_propose: [
     "Propose a change to the project's design brief; the student sees it as a card under your reply and saves or dismisses it. Call it at most once, at the end of a reply, and only when the user said something lasting about the mechanism in this chat: what it is, what moves, or what is missing or a stand-in, or something that contradicts a sentence of the brief.",
     "Input: {add?: [{text, quote}], replace?: [{from, to, quote}], remove?: [{text, reason}]}, at most 5 changes. Every add and replace quotes the user's own words from one of their messages in this chat, copied exactly; a quote that is not there is refused. Never propose what you only saw in the model. add.text is one plain sentence that says only what its quote says. When the user changes a fact the brief states, use replace: from is the stale text exactly as the brief has it, usually one sentence of a longer line, and to changes only what the user said changed. Never remove or restate a whole paragraph to change one sentence. remove.text is brief text the user said is no longer true, with a reason.",
-    "Rules about how to review, such as what not to flag, belong in review learnings, not the brief. One proposal is open per chat at a time. Do not describe the card or ask the student about it.",
+    "Rules about how to review, such as what not to flag, belong in review learnings, not the brief. If the student has not decided your earlier card, a new call folds its changes into the new card. Do not describe the card or ask the student about it.",
   ].join(" "),
 } satisfies Record<keyof typeof CAD_TOOL_INPUTS, string>;
 

@@ -687,13 +687,25 @@ it.effect(
         (activity) => activity.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
       );
       assert.strictEqual(proposed.length, 1);
-      const card = yield* decodeBriefCard(proposed[0]!.payload);
-      assert.deepEqual(card.add, first.add);
-      assert.strictEqual(card.path, "DESIGN.md");
-      assert.match(
-        yield* refused({ add: [{ text: "The hood adjusts.", quote: "the hood adjusts now" }] }),
-        /open/i,
-      );
+      const opened = yield* decodeBriefCard(proposed[0]!.payload);
+      assert.deepEqual(opened.add, first.add);
+      assert.strictEqual(opened.path, "DESIGN.md");
+      // The student ignores the card and says something else lasting: the new proposal takes the
+      // open one's changes along, so nothing is lost and one card waits at the bottom of the chat.
+      const extra = { text: "The 84T belt is a stand-in.", quote: "just a placeholder" };
+      yield* propose({ add: [extra] });
+      const card = (yield* Effect.forEach(
+        (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.proposalId !== opened.proposalId)!;
+      assert.deepEqual(card.add, [...first.add, extra]);
+      assert.deepEqual(card.remove, first.remove);
+      const superseded = yield* h.service.resolveBriefProposal({
+        threadId,
+        proposalId: opened.proposalId,
+        decision: "save",
+      });
+      assert.deepEqual(superseded, { outcome: "superseded", path: "DESIGN.md", contents: null });
 
       // The student keeps writing before saving; the save keeps their line.
       yield* fs.writeFileString(
@@ -706,7 +718,7 @@ it.effect(
         decision: "save",
       });
       const expected =
-        "The shooter is for the 2027 game.\nThe 84T belt is a placeholder until the team picks the ratio.\n";
+        "The shooter is for the 2027 game.\nThe 84T belt is a placeholder until the team picks the ratio.\nThe 84T belt is a stand-in.\n";
       assert.deepEqual(saved, { outcome: "saved", path: "DESIGN.md", contents: expected });
       assert.strictEqual(yield* fs.readFileString(briefPath), expected);
       // A second click, or a dismissal racing the save, keeps the first outcome and writes nothing.
@@ -719,7 +731,7 @@ it.effect(
       assert.strictEqual(yield* fs.readFileString(briefPath), expected);
       assert.strictEqual(
         (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSAL_RESOLVED_ACTIVITY).length,
-        1,
+        2,
       );
 
       const second = { add: [{ text: "The hood adjusts.", quote: "the hood adjusts now" }] };
@@ -728,7 +740,9 @@ it.effect(
         (yield* activities).filter((a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY),
         (a) => decodeBriefCard(a.payload),
       );
-      const secondCard = cards.find((c) => c.proposalId !== card.proposalId)!;
+      const secondCard = cards.find(
+        (c) => c.add.length === 1 && c.add[0]!.text === "The hood adjusts.",
+      )!;
       const dismissed = yield* h.service.resolveBriefProposal({
         threadId,
         proposalId: secondCard.proposalId,
@@ -801,19 +815,38 @@ it.effect(
         (a) => decodeBriefCard(a.payload),
       )).find((c) => c.add[0]?.text === "The belt ratio is undecided.")!;
       yield* bury("open");
-      assert.match(
-        yield* refused({
-          add: [{ text: "The belt is a placeholder.", quote: "just a placeholder" }],
-        }),
-        /open/i,
+      // The buried card is still found as the open one, so a new proposal carries its line.
+      yield* propose({
+        add: [{ text: "The belt is a placeholder.", quote: "just a placeholder" }],
+      });
+      const folded = (yield* Effect.forEach(
+        (yield* readCadBriefActivities(threadId).pipe(Effect.orDie)).filter(
+          (a) => a.kind === CAD_BRIEF_PROPOSED_ACTIVITY,
+        ),
+        (a) => decodeBriefCard(a.payload),
+      )).find((c) => c.add.some((line) => line.text === "The belt is a placeholder."))!;
+      assert.deepEqual(
+        folded.add.map((line) => line.text),
+        ["The belt ratio is undecided.", "The belt is a placeholder."],
       );
+      // The buried card stepped aside, so clicking Save on it writes nothing.
+      assert.strictEqual(
+        (yield* h.service.resolveBriefProposal({
+          threadId,
+          proposalId: buried.proposalId,
+          decision: "save",
+        })).outcome,
+        "superseded",
+      );
+      assert.notInclude(yield* fs.readFileString(briefPath), "The belt ratio is undecided.");
       const late = yield* h.service.resolveBriefProposal({
         threadId,
-        proposalId: buried.proposalId,
+        proposalId: folded.proposalId,
         decision: "save",
       });
       assert.strictEqual(late.outcome, "saved");
       assert.include(yield* fs.readFileString(briefPath), "The belt ratio is undecided.");
+      assert.include(yield* fs.readFileString(briefPath), "The belt is a placeholder.");
       assert.strictEqual(
         (yield* h.service
           .resolveBriefProposal({
