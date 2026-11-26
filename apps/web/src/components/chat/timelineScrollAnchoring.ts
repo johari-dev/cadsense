@@ -61,6 +61,8 @@ export interface TimelineReflow {
  * `content` is the list's content element. The list applies its new height a frame after the
  * rows re-wrap, and the browser clamps the scroll position to it after that frame's pin ran,
  * which would paint the end a line off. Re-pinning when it resizes lands before that paint.
+ *
+ * `onSettled` runs once a width change has settled.
  */
 export function observeTimelineReflow(
   element: Element,
@@ -68,6 +70,7 @@ export function observeTimelineReflow(
     readonly content: Element | null;
     readonly followingEnd: () => boolean;
     readonly pinToEnd: () => void;
+    readonly onSettled?: () => void;
   },
 ): TimelineReflow {
   let width = element.getBoundingClientRect().width;
@@ -78,6 +81,7 @@ export function observeTimelineReflow(
     if (!settling) return;
     if (performance.now() >= settling.until) {
       settling = null;
+      options.onSettled?.();
       return;
     }
     if (settling.followingEnd) options.pinToEnd();

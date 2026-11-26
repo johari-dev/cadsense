@@ -38,6 +38,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { preserveReadingPosition } from "~/lib/preserveReadingPosition";
+import { useTimelineRowMeasurement } from "./useTimelineRowMeasurement";
 import {
   deriveTimelineEntries,
   workEntryDisplayIndicatesToolFailure,
@@ -474,6 +475,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return () => cadActivityIndicator.observe(routeThreadKey, false, "chat");
   }, [routeThreadKey, cadActivityVisible]);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
+  // Keeps the scroll length exact: every row measured at the current width, not guessed.
+  const { pinnedKeys: measuringRowKeys, measureAll: measureAllRows } =
+    useTimelineRowMeasurement(rows);
+  // A new first row means a chat opened or older rows loaded above: rows the list has never drawn.
+  const firstRowId = rows[0]?.id;
+  useEffect(() => {
+    if (firstRowId !== undefined) measureAllRows();
+  }, [firstRowId, measureAllRows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
@@ -493,6 +502,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         if (offset === null) scroller.scrollTop = scroller.scrollHeight;
         else if (Math.abs(offset) >= 1) scroller.scrollTop += offset;
       },
+      // Rows off screen still have their heights from the old width.
+      onSettled: measureAllRows,
     });
     reflowRef.current = reflow;
     // Following the end is the reflow's job; reading history keeps the line being read in view.
@@ -504,7 +515,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       reflow.dispose();
       reflowRef.current = null;
     };
-  }, [listRef, timelineViewportElement]);
+  }, [listRef, measureAllRows, timelineViewportElement]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const handleAnchorReady = useCallback(
@@ -682,6 +693,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             renderItem={renderItem}
             estimatedItemSize={90}
             initialScrollAtEnd
+            {...(measuringRowKeys.length > 0 ? { alwaysRender: { keys: measuringRowKeys } } : {})}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={
