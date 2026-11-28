@@ -73,6 +73,16 @@ jobs:
         if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y imagemagick xvfb
 
+      # The app icon is an Icon Composer bundle, which only actool 26+ compiles.
+      # macos-15-intel ships Xcode 26 but does not select it by default.
+      - name: Select Xcode 26
+        if: matrix.platform == 'mac'
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$xcode" ]; then echo "No Xcode 26 on this runner" >&2; exit 1; fi
+          sudo xcode-select -s "$xcode"
+          xcrun actool --version
+
       - name: Build unsigned verification artifact
         shell: bash
         run: |
